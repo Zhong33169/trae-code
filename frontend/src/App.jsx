@@ -28,7 +28,11 @@ function App() {
               </NavLink>
             </nav>
             <div className="header-right">
-              <RoleSwitcher currentRole={currentRole} onSwitch={switchRole} />
+              <RoleSwitcher
+                currentRole={currentRole}
+                currentUser={currentUser}
+                onSwitch={switchRole}
+              />
             </div>
           </div>
         </header>

@@ -117,7 +117,7 @@ class GlassesOrder(models.Model):
                 f'线上状态「{self.get_status_display()}」与线下状态「{self.get_offline_status_display()}」不一致'
             )
 
-        if not self.has_prescription and self.status in [OrderStatus.PENDING_REVIEW, OrderStatus.PENDING_FINAL]:
+        if not self.has_prescription:
             anomalies.append(AnomalyType.MISSING_MATERIALS)
             remarks.append('缺少处方单')
 

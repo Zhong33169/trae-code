@@ -1,7 +1,13 @@
 import { useState, useCallback } from 'react'
 
-const DEFAULT_USER = 'wang_ling'
+const ROLE_DEFAULT_USERS = {
+  registrar: 'wang_ling',
+  supervisor: 'li_min',
+  reviewer: 'zhao_fang',
+}
+
 const DEFAULT_ROLE = 'registrar'
+const DEFAULT_USER = ROLE_DEFAULT_USERS[DEFAULT_ROLE]
 
 export function useAuth() {
   const [currentUser, setCurrentUser] = useState(
@@ -12,8 +18,11 @@ export function useAuth() {
   )
 
   const switchRole = useCallback((role) => {
+    const defaultUser = ROLE_DEFAULT_USERS[role] || DEFAULT_USER
     setCurrentRole(role)
+    setCurrentUser(defaultUser)
     localStorage.setItem('currentRole', role)
+    localStorage.setItem('currentUser', defaultUser)
   }, [])
 
   const switchUser = useCallback((user) => {
@@ -21,10 +30,15 @@ export function useAuth() {
     localStorage.setItem('currentUser', user)
   }, [])
 
+  const getDefaultUserForRole = useCallback((role) => {
+    return ROLE_DEFAULT_USERS[role] || DEFAULT_USER
+  }, [])
+
   return {
     currentUser,
     currentRole,
     switchRole,
     switchUser,
+    getDefaultUserForRole,
   }
 }

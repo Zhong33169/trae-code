@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 
-export default function Modal({ title, visible, onClose, onOk, okText = '确定', cancelText = '取消', children, width = 520 }) {
+export default function Modal({ title, visible, onClose, onOk, okText = '确定', okDisabled = false, cancelText = '取消', children, width = 520 }) {
   useEffect(() => {
     if (visible) {
       document.body.style.overflow = 'hidden'
@@ -26,7 +26,11 @@ export default function Modal({ title, visible, onClose, onOk, okText = '确定'
           <button className="btn btn-secondary" onClick={onClose}>
             {cancelText}
           </button>
-          <button className="btn btn-primary" onClick={onOk}>
+          <button
+            className={`btn btn-primary ${okDisabled ? 'btn-disabled' : ''}`}
+            onClick={onOk}
+            disabled={okDisabled}
+          >
             {okText}
           </button>
         </div>

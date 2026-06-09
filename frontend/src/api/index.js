@@ -26,6 +26,8 @@ async function request(url, options = {}) {
 }
 
 export const api = {
+  getCurrentUser: () => request('/me'),
+  getUsersByRole: (role) => request(`/users/by-role/${role}`),
   getQueueStats: () => request('/queue-stats'),
   getFilterOptions: () => request('/filter-options'),
   getUsers: () => request('/users'),
@@ -121,4 +123,7 @@ export const api = {
   },
 
   checkAnomalies: (orderId) => request(`/orders/${orderId}/anomalies/check`),
+
+  validateAction: (orderId, action) =>
+    request(`/orders/${orderId}/validate/${action}`),
 }

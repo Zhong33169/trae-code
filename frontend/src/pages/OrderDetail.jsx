@@ -36,6 +36,10 @@ export default function OrderDetail({ currentRole, currentUser }) {
     remark: '',
   })
 
+  const [validationResult, setValidationResult] = useState(null)
+  const [validatingAction, setValidatingAction] = useState(null)
+  const [showSubmitModal, setShowSubmitModal] = useState(false)
+
   const fetchOrder = useCallback(async () => {
     setLoading(true)
     try {
@@ -71,10 +75,39 @@ export default function OrderDetail({ currentRole, currentUser }) {
     setTimeout(() => setMessage(null), 3000)
   }
 
+  const validateAndShowSubmit = async () => {
+    setValidatingAction('submit')
+    try {
+      const result = await api.validateAction(id, 'submit')
+      setValidationResult(result)
+      setShowSubmitModal(true)
+    } catch (err) {
+      showMessage(err.message, 'error')
+    } finally {
+      setValidatingAction(null)
+    }
+  }
+
+  const validateAndShowReview = async () => {
+    const action = currentRole === 'reviewer' ? 'finalize' : 'review'
+    setValidatingAction(action)
+    try {
+      const result = await api.validateAction(id, action)
+      setValidationResult(result)
+      setShowReviewModal(true)
+    } catch (err) {
+      showMessage(err.message, 'error')
+    } finally {
+      setValidatingAction(null)
+    }
+  }
+
   const handleSubmit = async () => {
     try {
       await api.submitOrder(id)
       showMessage('提交审核成功', 'success')
+      setShowSubmitModal(false)
+      setValidationResult(null)
       fetchOrder()
     } catch (err) {
       showMessage(err.message, 'error')
@@ -83,14 +116,23 @@ export default function OrderDetail({ currentRole, currentUser }) {
 
   const handleReviewPass = async () => {
     try {
-      await api.reviewPass(id, {
-        result_remark: reviewResultRemark,
-        audit_remark: reviewAuditRemark,
-      })
-      showMessage('审核通过', 'success')
+      if (currentRole === 'reviewer') {
+        await api.finalPass(id, {
+          result_remark: reviewResultRemark,
+          audit_remark: reviewAuditRemark,
+        })
+        showMessage('复核归档成功', 'success')
+      } else {
+        await api.reviewPass(id, {
+          result_remark: reviewResultRemark,
+          audit_remark: reviewAuditRemark,
+        })
+        showMessage('审核通过', 'success')
+      }
       setShowReviewModal(false)
       setReviewResultRemark('')
       setReviewAuditRemark('')
+      setValidationResult(null)
       fetchOrder()
     } catch (err) {
       showMessage(err.message, 'error')
@@ -111,22 +153,6 @@ export default function OrderDetail({ currentRole, currentUser }) {
       setShowReturnModal(false)
       setReturnReason('')
       setReturnAuditRemark('')
-      fetchOrder()
-    } catch (err) {
-      showMessage(err.message, 'error')
-    }
-  }
-
-  const handleFinalPass = async () => {
-    try {
-      await api.finalPass(id, {
-        result_remark: reviewResultRemark,
-        audit_remark: reviewAuditRemark,
-      })
-      showMessage('复核归档成功', 'success')
-      setShowReviewModal(false)
-      setReviewResultRemark('')
-      setReviewAuditRemark('')
       fetchOrder()
     } catch (err) {
       showMessage(err.message, 'error')
@@ -220,20 +246,35 @@ export default function OrderDetail({ currentRole, currentUser }) {
     if (currentRole === 'registrar') {
       if (order.status === 'pending_registration' || order.status === 'returned') {
         actions.push({ label: '编辑', onClick: () => setShowEditModal(true), type: 'secondary' })
-        actions.push({ label: '提交审核', onClick: handleSubmit, type: 'primary' })
+        actions.push({
+          label: validatingAction === 'submit' ? '校验中...' : '提交审核',
+          onClick: validateAndShowSubmit,
+          type: 'primary',
+          disabled: validatingAction === 'submit',
+        })
       }
     }
 
     if (currentRole === 'supervisor') {
       if (order.status === 'pending_review') {
-        actions.push({ label: '审核通过', onClick: () => setShowReviewModal(true), type: 'primary' })
+        actions.push({
+          label: validatingAction === 'review' ? '校验中...' : '审核通过',
+          onClick: validateAndShowReview,
+          type: 'primary',
+          disabled: validatingAction === 'review',
+        })
         actions.push({ label: '审核退回', onClick: () => setShowReturnModal(true), type: 'danger' })
       }
     }
 
     if (currentRole === 'reviewer') {
       if (order.status === 'pending_final') {
-        actions.push({ label: '复核归档', onClick: () => setShowReviewModal(true), type: 'primary' })
+        actions.push({
+          label: validatingAction === 'finalize' ? '校验中...' : '复核归档',
+          onClick: validateAndShowReview,
+          type: 'primary',
+          disabled: validatingAction === 'finalize',
+        })
         actions.push({ label: '复核退回', onClick: () => setShowReturnModal(true), type: 'danger' })
       }
     }
@@ -289,8 +330,9 @@ export default function OrderDetail({ currentRole, currentUser }) {
           {actions.map((action, idx) => (
             <button
               key={idx}
-              className={`btn ${action.type === 'primary' ? 'btn-primary' : action.type === 'danger' ? 'btn-danger' : 'btn-secondary'}`}
+              className={`btn ${action.type === 'primary' ? 'btn-primary' : action.type === 'danger' ? 'btn-danger' : 'btn-secondary'} ${action.disabled ? 'btn-disabled' : ''}`}
               onClick={action.onClick}
+              disabled={action.disabled}
             >
               {action.label}
             </button>
@@ -559,13 +601,54 @@ export default function OrderDetail({ currentRole, currentUser }) {
       </div>
 
       <Modal
-        title={currentRole === 'supervisor' ? '审核通过' : currentRole === 'reviewer' ? '复核归档' : '确认提交'}
+        title={currentRole === 'supervisor' ? '审核通过' : '复核归档'}
         visible={showReviewModal}
-        onClose={() => setShowReviewModal(false)}
-        onOk={currentRole === 'reviewer' ? handleFinalPass : handleReviewPass}
-        okText="确认"
-        width={500}
+        onClose={() => {
+          setShowReviewModal(false)
+          setValidationResult(null)
+        }}
+        onOk={handleReviewPass}
+        okText={validationResult && !validationResult.passed ? '存在拦截，无法操作' : '确认'}
+        okDisabled={validationResult && !validationResult.passed}
+        width={550}
       >
+        {validationResult && (
+          <div className="validation-result">
+            {validationResult.blocking_errors && validationResult.blocking_errors.length > 0 && (
+              <div className="validation-block errors">
+                <div className="validation-title">🚫 拦截错误（必须处理）</div>
+                <ul>
+                  {validationResult.blocking_errors.map((err, idx) => (
+                    <li key={idx}>{err}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {validationResult.warnings && validationResult.warnings.length > 0 && (
+              <div className="validation-block warnings">
+                <div className="validation-title">⚠️ 警告提示</div>
+                <ul>
+                  {validationResult.warnings.map((warn, idx) => (
+                    <li key={idx}>{warn}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {validationResult.info && validationResult.info.length > 0 && (
+              <div className="validation-block info">
+                <div className="validation-title">ℹ️ 说明信息</div>
+                <ul>
+                  {validationResult.info.map((info, idx) => (
+                    <li key={idx}>{info}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {validationResult.passed && (
+              <div className="validation-pass">✅ 校验通过，可以继续操作</div>
+            )}
+          </div>
+        )}
         <div className="form-group">
           <label>结果说明</label>
           <textarea
@@ -584,6 +667,60 @@ export default function OrderDetail({ currentRole, currentUser }) {
             rows={2}
           />
         </div>
+      </Modal>
+
+      <Modal
+        title="确认提交审核"
+        visible={showSubmitModal}
+        onClose={() => {
+          setShowSubmitModal(false)
+          setValidationResult(null)
+        }}
+        onOk={handleSubmit}
+        okText={validationResult && !validationResult.passed ? '存在拦截，无法提交' : '确认提交'}
+        okDisabled={validationResult && !validationResult.passed}
+        width={550}
+      >
+        {validationResult && (
+          <div className="validation-result">
+            {validationResult.blocking_errors && validationResult.blocking_errors.length > 0 && (
+              <div className="validation-block errors">
+                <div className="validation-title">🚫 拦截错误（必须处理）</div>
+                <ul>
+                  {validationResult.blocking_errors.map((err, idx) => (
+                    <li key={idx}>{err}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {validationResult.warnings && validationResult.warnings.length > 0 && (
+              <div className="validation-block warnings">
+                <div className="validation-title">⚠️ 警告提示</div>
+                <ul>
+                  {validationResult.warnings.map((warn, idx) => (
+                    <li key={idx}>{warn}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {validationResult.info && validationResult.info.length > 0 && (
+              <div className="validation-block info">
+                <div className="validation-title">ℹ️ 说明信息</div>
+                <ul>
+                  {validationResult.info.map((info, idx) => (
+                    <li key={idx}>{info}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {validationResult.passed && (
+              <div className="validation-pass">✅ 校验通过，可以提交审核</div>
+            )}
+          </div>
+        )}
+        <p style={{ marginTop: 16, color: '#666' }}>
+          确认将此订单提交审核？提交后订单将进入「待审核」状态。
+        </p>
       </Modal>
 
       <Modal

@@ -209,3 +209,33 @@ class AttachmentCreateSchema(Schema):
 class ErrorSchema(Schema):
     detail: str
     code: str = 'error'
+
+
+class ValidationResultSchema(Schema):
+    passed: bool
+    blocking_errors: List[str]
+    warnings: List[str]
+    info: List[str]
+
+
+class CurrentUserSchema(Schema):
+    username: str
+    name: str
+    role: str
+    role_label: str
+
+    @staticmethod
+    def from_user(user):
+        from .models import Role
+        return CurrentUserSchema(
+            username=user.username,
+            name=user.name,
+            role=user.role,
+            role_label=dict(Role.choices).get(user.role, user.role),
+        )
+
+
+class RoleUsersSchema(Schema):
+    role: str
+    role_label: str
+    users: List[UserSchema]
