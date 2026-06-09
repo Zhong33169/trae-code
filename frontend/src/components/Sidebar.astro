@@ -1,0 +1,71 @@
+---
+import RoleSwitcher from '../islands/RoleSwitcher.tsx';
+
+interface Props {
+  currentPage: string;
+}
+
+const { currentPage } = Astro.props;
+---
+
+<aside class="sidebar">
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">工作台</div>
+    <ul class="sidebar-menu">
+      <li>
+        <a href="/" class={currentPage === 'dashboard' ? 'active' : ''}>
+          <span class="menu-icon">📊</span>
+          <span>数据概览</span>
+        </a>
+      </li>
+    </ul>
+  </div>
+
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">申请单管理</div>
+    <ul class="sidebar-menu">
+      <li>
+        <a href="/consultations" class={currentPage === 'consultations' ? 'active' : ''}>
+          <span class="menu-icon">📋</span>
+          <span>全部申请单</span>
+        </a>
+      </li>
+      <li>
+        <a href="/consultations?status=pending" class={currentPage === 'pending' ? 'active' : ''}>
+          <span class="menu-icon">⏳</span>
+          <span>待我处理</span>
+        </a>
+      </li>
+      <li>
+        <a href="/consultations?status=appeal" class={currentPage === 'appeal' ? 'active' : ''}>
+          <span class="menu-icon">📢</span>
+          <span>异常申诉</span>
+        </a>
+      </li>
+    </ul>
+  </div>
+
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">申请登记</div>
+    <ul class="sidebar-menu">
+      <li>
+        <a href="/create" class={currentPage === 'create' ? 'active' : ''}>
+          <span class="menu-icon">➕</span>
+          <span>新建申请单</span>
+        </a>
+      </li>
+    </ul>
+  </div>
+
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">归档管理</div>
+    <ul class="sidebar-menu">
+      <li>
+        <a href="/consultations?status=archived" class={currentPage === 'archived' ? 'active' : ''}>
+          <span class="menu-icon">📁</span>
+          <span>已归档</span>
+        </a>
+      </li>
+    </ul>
+  </div>
+</aside>

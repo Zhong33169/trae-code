@@ -1,0 +1,19 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import StatsCard from '../islands/StatsCard.tsx';
+import RecentList from '../islands/RecentList.tsx';
+---
+
+<BaseLayout currentPage="dashboard">
+  <div class="page-header">
+    <div class="page-title">数据概览</div>
+    <div class="page-subtitle">会诊申请单整体处理情况一目了然</div>
+  </div>
+
+  <StatsCard client:load />
+
+  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 24px;">
+    <RecentList client:load title="最近处理" type="recent" />
+    <RecentList client:load title="待办事项" type="todo" />
+  </div>
+</BaseLayout>

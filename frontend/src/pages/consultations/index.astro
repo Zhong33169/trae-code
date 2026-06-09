@@ -1,0 +1,13 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import ConsultationList from '../../islands/ConsultationList.tsx';
+---
+
+<BaseLayout currentPage="consultations">
+  <div class="page-header">
+    <div class="page-title">会诊申请单列表</div>
+    <div class="page-subtitle">查看和管理所有会诊申请单</div>
+  </div>
+
+  <ConsultationList client:load />
+</BaseLayout>

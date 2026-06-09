@@ -1,0 +1,10 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import ConsultationDetail from '../../islands/ConsultationDetail.tsx';
+
+const id = Astro.url.searchParams.get('id') || '';
+---
+
+<BaseLayout currentPage="consultations">
+  <ConsultationDetail client:load consultationId={id} />
+</BaseLayout>

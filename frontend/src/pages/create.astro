@@ -1,0 +1,13 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import CreateForm from '../islands/CreateForm.tsx';
+---
+
+<BaseLayout currentPage="create">
+  <div class="page-header">
+    <div class="page-title">新建会诊申请单</div>
+    <div class="page-subtitle">填写患者信息和会诊需求</div>
+  </div>
+
+  <CreateForm client:load />
+</BaseLayout>

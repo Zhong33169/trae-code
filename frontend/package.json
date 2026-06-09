@@ -1,0 +1,17 @@
+{
+  "name": "consultation-frontend",
+  "type": "module",
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "astro dev --port 3002",
+    "start": "astro dev --port 3002",
+    "build": "astro build",
+    "preview": "astro preview --port 3002"
+  },
+  "dependencies": {
+    "astro": "^4.15.0",
+    "@astrojs/react": "^3.6.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  }
+}

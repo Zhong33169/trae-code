@@ -1,0 +1,626 @@
+package models
+
+import (
+	"database/sql"
+	"time"
+
+	"github.com/google/uuid"
+)
+
+func SeedIfEmpty() error {
+	var count int
+	err := DB.QueryRow("SELECT COUNT(*) FROM users").Scan(&count)
+	if err != nil {
+		return err
+	}
+	if count > 0 {
+		return nil
+	}
+
+	tx, err := DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	users := []User{
+		{ID: "u001", Name: "张登记员", Role: RoleRegistrar, RoleName: "会诊申请登记员", Dept: "门诊登记处"},
+		{ID: "u002", Name: "李登记员", Role: RoleRegistrar, RoleName: "会诊申请登记员", Dept: "住院登记处"},
+		{ID: "u003", Name: "王主管", Role: RoleReviewer, RoleName: "会诊申请审核主管", Dept: "医务部审核组"},
+		{ID: "u004", Name: "赵主管", Role: RoleReviewer, RoleName: "会诊申请审核主管", Dept: "医务部审核组"},
+		{ID: "u005", Name: "陈主任", Role: RoleDirector, RoleName: "医务部复核负责人", Dept: "医务部"},
+		{ID: "u006", Name: "刘主任", Role: RoleDirector, RoleName: "医务部复核负责人", Dept: "医务部"},
+	}
+
+	for _, u := range users {
+		_, err := tx.Exec(
+			"INSERT INTO users (id, name, role, role_name, dept) VALUES (?, ?, ?, ?, ?)",
+			u.ID, u.Name, u.Role, u.RoleName, u.Dept,
+		)
+		if err != nil {
+			return err
+		}
+	}
+
+	now := time.Now()
+	consultations := []struct {
+		c          Consultation
+		history    []HistoryRecord
+	}{
+		{
+			c: Consultation{
+				ID:              "c001",
+				Title:           "心内科疑难病例会诊",
+				PatientName:     "王建国",
+				PatientID:       "P20240001",
+				Dept:            "心内科",
+				ChiefComplaint:  "反复胸痛3月，加重1周",
+				ConsultType:     "科间会诊",
+				ConsultDept:     "心外科",
+				Status:          StatusArchived,
+				StatusName:      "已归档",
+				Version:         3,
+				RegistrarID:     "u001",
+				RegistrarName:   "张登记员",
+				ReviewerID:      "u003",
+				ReviewerName:    "王主管",
+				DirectorID:      "u005",
+				DirectorName:    "陈主任",
+				LatestOpinion:   "复核通过，同意归档。病例资料完整，会诊指征明确。",
+				EvidenceList:    "病历记录,心电图,心脏彩超,冠脉CTA,实验室检查",
+				HasAppeal:       false,
+				Deadline:        now.AddDate(0, 0, 7),
+				CreatedAt:       now.AddDate(0, 0, -10),
+				UpdatedAt:       now.AddDate(0, 0, -2),
+			},
+			history: []HistoryRecord{
+				{
+					ID: "h001", ConsultationID: "c001",
+					OperatorID: "u001", OperatorName: "张登记员", OperatorRole: RoleRegistrar, OperatorRoleName: "会诊申请登记员",
+					Action: "create", ActionName: "创建申请单",
+					FromStatus: "", FromStatusName: "", ToStatus: StatusDraft, ToStatusName: "草稿",
+					Version: 1, CreatedAt: now.AddDate(0, 0, -10),
+				},
+				{
+					ID: "h002", ConsultationID: "c001",
+					OperatorID: "u001", OperatorName: "张登记员", OperatorRole: RoleRegistrar, OperatorRoleName: "会诊申请登记员",
+					Action: "submit", ActionName: "提交申请",
+					FromStatus: StatusDraft, FromStatusName: "草稿", ToStatus: StatusSubmitted, ToStatusName: "已提交",
+					Opinion: "资料齐全，提交审核。",
+					Version: 1, CreatedAt: now.AddDate(0, 0, -9),
+				},
+				{
+					ID: "h003", ConsultationID: "c001",
+					OperatorID: "u003", OperatorName: "王主管", OperatorRole: RoleReviewer, OperatorRoleName: "会诊申请审核主管",
+					Action: "review_pass", ActionName: "审核通过",
+					FromStatus: StatusSubmitted, FromStatusName: "已提交", ToStatus: StatusReviewPassed, ToStatusName: "审核通过",
+					Opinion: "病例资料完整，会诊指征明确，同意提交医务部复核。",
+					Version: 2, CreatedAt: now.AddDate(0, 0, -5),
+				},
+				{
+					ID: "h004", ConsultationID: "c001",
+					OperatorID: "u005", OperatorName: "陈主任", OperatorRole: RoleDirector, OperatorRoleName: "医务部复核负责人",
+					Action: "archive", ActionName: "复核归档",
+					FromStatus: StatusReviewPassed, FromStatusName: "审核通过", ToStatus: StatusArchived, ToStatusName: "已归档",
+					Opinion: "复核通过，同意归档。病例资料完整，会诊指征明确。",
+					Version: 3, CreatedAt: now.AddDate(0, 0, -2),
+				},
+			},
+		},
+		{
+			c: Consultation{
+				ID:              "c002",
+				Title:           "神经内科重症患者多学科会诊",
+				PatientName:     "李小明",
+				PatientID:       "P20240002",
+				Dept:            "神经内科",
+				ChiefComplaint:  "突发意识障碍伴右侧肢体无力",
+				ConsultType:     "多学科会诊",
+				ConsultDept:     "神经外科+影像科+康复科",
+				Status:          StatusCorrectionReq,
+				StatusName:      "退回补正",
+				Version:         2,
+				RegistrarID:     "u002",
+				RegistrarName:   "李登记员",
+				ReviewerID:      "u004",
+				ReviewerName:    "赵主管",
+				LatestOpinion:   "",
+				LatestRejectReason: "缺少头颅MRI弥散加权成像报告及凝血功能全套检查结果，请补充后重新提交。",
+				EvidenceList:    "病历记录,头颅CT,血常规",
+				HasAppeal:       false,
+				Deadline:        now.AddDate(0, 0, 2),
+				CreatedAt:       now.AddDate(0, 0, -7),
+				UpdatedAt:       now.AddDate(0, 0, -1),
+			},
+			history: []HistoryRecord{
+				{
+					ID: "h005", ConsultationID: "c002",
+					OperatorID: "u002", OperatorName: "李登记员", OperatorRole: RoleRegistrar, OperatorRoleName: "会诊申请登记员",
+					Action: "create", ActionName: "创建申请单",
+					FromStatus: "", FromStatusName: "", ToStatus: StatusDraft, ToStatusName: "草稿",
+					Version: 1, CreatedAt: now.AddDate(0, 0, -7),
+				},
+				{
+					ID: "h006", ConsultationID: "c002",
+					OperatorID: "u002", OperatorName: "李登记员", OperatorRole: RoleRegistrar, OperatorRoleName: "会诊申请登记员",
+					Action: "submit", ActionName: "提交申请",
+					FromStatus: StatusDraft, FromStatusName: "草稿", ToStatus: StatusSubmitted, ToStatusName: "已提交",
+					Opinion: "重症患者，加急处理。",
+					Version: 1, CreatedAt: now.AddDate(0, 0, -6),
+				},
+				{
+					ID: "h007", ConsultationID: "c002",
+					OperatorID: "u004", OperatorName: "赵主管", OperatorRole: RoleReviewer, OperatorRoleName: "会诊申请审核主管",
+					Action: "reject_correction", ActionName: "退回补正",
+					FromStatus: StatusSubmitted, FromStatusName: "已提交", ToStatus: StatusCorrectionReq, ToStatusName: "退回补正",
+					RejectReason: "缺少头颅MRI弥散加权成像报告及凝血功能全套检查结果，请补充后重新提交。",
+					Version: 2, CreatedAt: now.AddDate(0, 0, -1),
+				},
+			},
+		},
+		{
+			c: Consultation{
+				ID:              "c003",
+				Title:           "呼吸科发热待查患者会诊",
+				PatientName:     "赵秀兰",
+				PatientID:       "P20240003",
+				Dept:            "呼吸内科",
+				ChiefComplaint:  "持续发热2周，咳嗽咳痰",
+				ConsultType:     "科间会诊",
+				ConsultDept:     "感染科",
+				Status:          StatusEvidenceMissing,
+				StatusName:      "缺证据",
+				Version:         2,
+				RegistrarID:     "u001",
+				RegistrarName:   "张登记员",
+				ReviewerID:      "u003",
+				ReviewerName:    "王主管",
+				LatestOpinion:   "",
+				LatestRejectReason: "缺少血培养结果及降钙素原检查，无法明确感染指征。",
+				EvidenceList:    "病历记录,胸部CT,血常规,CRP",
+				IsOverdue:       false,
+				HasAppeal:       true,
+				AppealStatus:    StatusAppealSubmitted,
+				AppealStatusName: "申诉已提交",
+				AppealReason:    "患者目前临床症状典型，虽血培养暂未回报，但结合影像学及炎症指标可先行会诊。血培养预计48小时内回报，后续可补充。申请加急安排会诊。",
+				Deadline:        now.AddDate(0, 0, 3),
+				CreatedAt:       now.AddDate(0, 0, -6),
+				UpdatedAt:       now.AddDate(0, 0, -1),
+			},
+			history: []HistoryRecord{
+				{
+					ID: "h008", ConsultationID: "c003",
+					OperatorID: "u001", OperatorName: "张登记员", OperatorRole: RoleRegistrar, OperatorRoleName: "会诊申请登记员",
+					Action: "create", ActionName: "创建申请单",
+					FromStatus: "", FromStatusName: "", ToStatus: StatusDraft, ToStatusName: "草稿",
+					Version: 1, CreatedAt: now.AddDate(0, 0, -6),
+				},
+				{
+					ID: "h009", ConsultationID: "c003",
+					OperatorID: "u001", OperatorName: "张登记员", OperatorRole: RoleRegistrar, OperatorRoleName: "会诊申请登记员",
+					Action: "submit", ActionName: "提交申请",
+					FromStatus: StatusDraft, FromStatusName: "草稿", ToStatus: StatusSubmitted, ToStatusName: "已提交",
+					Opinion: "发热原因待查，申请感染科会诊。",
+					Version: 1, CreatedAt: now.AddDate(0, 0, -5),
+				},
+				{
+					ID: "h010", ConsultationID: "c003",
+					OperatorID: "u003", OperatorName: "王主管", OperatorRole: RoleReviewer, OperatorRoleName: "会诊申请审核主管",
+					Action: "evidence_missing", ActionName: "证据不足",
+					FromStatus: StatusSubmitted, FromStatusName: "已提交", ToStatus: StatusEvidenceMissing, ToStatusName: "缺证据",
+					RejectReason: "缺少血培养结果及降钙素原检查，无法明确感染指征。",
+					Version: 2, CreatedAt: now.AddDate(0, 0, -3),
+				},
+				{
+					ID: "h011", ConsultationID: "c003",
+					OperatorID: "u001", OperatorName: "张登记员", OperatorRole: RoleRegistrar, OperatorRoleName: "会诊申请登记员",
+					Action: "appeal_submit", ActionName: "提交申诉",
+					FromStatus: StatusEvidenceMissing, FromStatusName: "缺证据", ToStatus: StatusAppealSubmitted, ToStatusName: "申诉已提交",
+					Opinion: "患者目前临床症状典型，虽血培养暂未回报，但结合影像学及炎症指标可先行会诊。血培养预计48小时内回报，后续可补充。申请加急安排会诊。",
+					Version: 2, CreatedAt: now.AddDate(0, 0, -1),
+				},
+			},
+		},
+		{
+			c: Consultation{
+				ID:              "c004",
+				Title:           "骨科术后并发症会诊",
+				PatientName:     "孙大伟",
+				PatientID:       "P20240004",
+				Dept:            "骨科",
+				ChiefComplaint:  "左股骨骨折术后伤口不愈合",
+				ConsultType:     "科间会诊",
+				ConsultDept:     "整形外科",
+				Status:          StatusReviewPassed,
+				StatusName:      "审核通过",
+				Version:         3,
+				RegistrarID:     "u002",
+				RegistrarName:   "李登记员",
+				ReviewerID:      "u004",
+				ReviewerName:    "赵主管",
+				LatestOpinion:   "审核通过，资料齐全，同意提交医务部复核归档。",
+				EvidenceList:    "病历记录,手术记录,伤口照片,实验室检查,X线片",
+				HasAppeal:       false,
+				Deadline:        now.AddDate(0, 0, 5),
+				CreatedAt:       now.AddDate(0, 0, -8),
+				UpdatedAt:       now.AddDate(0, 0, -1),
+			},
+			history: []HistoryRecord{
+				{
+					ID: "h012", ConsultationID: "c004",
+					OperatorID: "u002", OperatorName: "李登记员", OperatorRole: RoleRegistrar, OperatorRoleName: "会诊申请登记员",
+					Action: "create", ActionName: "创建申请单",
+					FromStatus: "", FromStatusName: "", ToStatus: StatusDraft, ToStatusName: "草稿",
+					Version: 1, CreatedAt: now.AddDate(0, 0, -8),
+				},
+				{
+					ID: "h013", ConsultationID: "c004",
+					OperatorID: "u002", OperatorName: "李登记员", OperatorRole: RoleRegistrar, OperatorRoleName: "会诊申请登记员",
+					Action: "submit", ActionName: "提交申请",
+					FromStatus: StatusDraft, FromStatusName: "草稿", ToStatus: StatusSubmitted, ToStatusName: "已提交",
+					Opinion: "术后伤口不愈合，申请整形外科会诊。",
+					Version: 1, CreatedAt: now.AddDate(0, 0, -7),
+				},
+				{
+					ID: "h014", ConsultationID: "c004",
+					OperatorID: "u004", OperatorName: "赵主管", OperatorRole: RoleReviewer, OperatorRoleName: "会诊申请审核主管",
+					Action: "reject_correction", ActionName: "退回补正",
+					FromStatus: StatusSubmitted, FromStatusName: "已提交", ToStatus: StatusCorrectionReq, ToStatusName: "退回补正",
+					RejectReason: "缺少伤口近期彩色照片及细菌培养药敏结果，请补充。",
+					Version: 2, CreatedAt: now.AddDate(0, 0, -5),
+				},
+				{
+					ID: "h015", ConsultationID: "c004",
+					OperatorID: "u002", OperatorName: "李登记员", OperatorRole: RoleRegistrar, OperatorRoleName: "会诊申请登记员",
+					Action: "resubmit", ActionName: "补正重提",
+					FromStatus: StatusCorrectionReq, FromStatusName: "退回补正", ToStatus: StatusResubmitted, ToStatusName: "再次提交",
+					Opinion: "已补充伤口彩色照片和细菌培养报告，请审核。",
+					Version: 2, CreatedAt: now.AddDate(0, 0, -3),
+				},
+				{
+					ID: "h016", ConsultationID: "c004",
+					OperatorID: "u004", OperatorName: "赵主管", OperatorRole: RoleReviewer, OperatorRoleName: "会诊申请审核主管",
+					Action: "review_pass", ActionName: "审核通过",
+					FromStatus: StatusResubmitted, FromStatusName: "再次提交", ToStatus: StatusReviewPassed, ToStatusName: "审核通过",
+					Opinion: "审核通过，资料齐全，同意提交医务部复核归档。",
+					Version: 3, CreatedAt: now.AddDate(0, 0, -1),
+				},
+			},
+		},
+		{
+			c: Consultation{
+				ID:              "c005",
+				Title:           "消化科消化道出血急诊会诊",
+				PatientName:     "周富贵",
+				PatientID:       "P20240005",
+				Dept:            "消化内科",
+				ChiefComplaint:  "呕血黑便2天",
+				ConsultType:     "急诊会诊",
+				ConsultDept:     "胃肠外科",
+				Status:          StatusUnderFinal,
+				StatusName:      "复核中",
+				Version:         2,
+				RegistrarID:     "u001",
+				RegistrarName:   "张登记员",
+				ReviewerID:      "u003",
+				ReviewerName:    "王主管",
+				DirectorID:      "u006",
+				DirectorName:    "刘主任",
+				LatestOpinion:   "急诊病例，已紧急审核通过，请医务部加急复核。",
+				EvidenceList:    "病历记录,急诊胃镜报告,血常规,凝血功能,腹部CT",
+				IsOverdue:       false,
+				HasAppeal:       false,
+				Deadline:        now.AddDate(0, 0, 1),
+				CreatedAt:       now.AddDate(0, 0, -3),
+				UpdatedAt:       now.AddDate(0, 0, -1),
+			},
+			history: []HistoryRecord{
+				{
+					ID: "h017", ConsultationID: "c005",
+					OperatorID: "u001", OperatorName: "张登记员", OperatorRole: RoleRegistrar, OperatorRoleName: "会诊申请登记员",
+					Action: "create", ActionName: "创建申请单",
+					FromStatus: "", FromStatusName: "", ToStatus: StatusDraft, ToStatusName: "草稿",
+					Version: 1, CreatedAt: now.AddDate(0, 0, -3),
+				},
+				{
+					ID: "h018", ConsultationID: "c005",
+					OperatorID: "u001", OperatorName: "张登记员", OperatorRole: RoleRegistrar, OperatorRoleName: "会诊申请登记员",
+					Action: "submit", ActionName: "提交申请",
+					FromStatus: StatusDraft, FromStatusName: "草稿", ToStatus: StatusSubmitted, ToStatusName: "已提交",
+					Opinion: "急诊病例，消化道大出血，请加急处理。",
+					Version: 1, CreatedAt: now.AddDate(0, 0, -3),
+				},
+				{
+					ID: "h019", ConsultationID: "c005",
+					OperatorID: "u003", OperatorName: "王主管", OperatorRole: RoleReviewer, OperatorRoleName: "会诊申请审核主管",
+					Action: "review_pass", ActionName: "审核通过",
+					FromStatus: StatusSubmitted, FromStatusName: "已提交", ToStatus: StatusReviewPassed, ToStatusName: "审核通过",
+					Opinion: "急诊病例，已紧急审核通过，请医务部加急复核。",
+					Version: 2, CreatedAt: now.AddDate(0, 0, -2),
+				},
+				{
+					ID: "h020", ConsultationID: "c005",
+					OperatorID: "u006", OperatorName: "刘主任", OperatorRole: RoleDirector, OperatorRoleName: "医务部复核负责人",
+					Action: "start_final", ActionName: "开始复核",
+					FromStatus: StatusReviewPassed, FromStatusName: "审核通过", ToStatus: StatusUnderFinal, ToStatusName: "复核中",
+					Opinion: "正在复核中...",
+					Version: 2, CreatedAt: now.AddDate(0, 0, -1),
+				},
+			},
+		},
+		{
+			c: Consultation{
+				ID:              "c006",
+				Title:           "内分泌科糖尿病足会诊",
+				PatientName:     "吴桂芳",
+				PatientID:       "P20240006",
+				Dept:            "内分泌科",
+				ChiefComplaint:  "左足破溃1月，伴发热3天",
+				ConsultType:     "多学科会诊",
+				ConsultDept:     "血管外科+骨科+创面修复科",
+				Status:          StatusOverdue,
+				StatusName:      "逾期",
+				Version:         1,
+				RegistrarID:     "u002",
+				RegistrarName:   "李登记员",
+				LatestOpinion:   "",
+				EvidenceList:    "病历记录,血糖监测,下肢血管彩超",
+				IsOverdue:       true,
+				HasAppeal:       false,
+				Deadline:        now.AddDate(0, 0, -2),
+				CreatedAt:       now.AddDate(0, 0, -10),
+				UpdatedAt:       now.AddDate(0, 0, -10),
+			},
+			history: []HistoryRecord{
+				{
+					ID: "h021", ConsultationID: "c006",
+					OperatorID: "u002", OperatorName: "李登记员", OperatorRole: RoleRegistrar, OperatorRoleName: "会诊申请登记员",
+					Action: "create", ActionName: "创建申请单",
+					FromStatus: "", FromStatusName: "", ToStatus: StatusDraft, ToStatusName: "草稿",
+					Version: 1, CreatedAt: now.AddDate(0, 0, -10),
+				},
+			},
+		},
+		{
+			c: Consultation{
+				ID:              "c007",
+				Title:           "肾内科尿毒症患者肾移植前评估会诊",
+				PatientName:     "郑建设",
+				PatientID:       "P20240007",
+				Dept:            "肾内科",
+				ChiefComplaint:  "维持性血液透析5年，拟肾移植评估",
+				ConsultType:     "多学科会诊",
+				ConsultDept:     "泌尿外科+移植科+心内科+麻醉科",
+				Status:          StatusConflict,
+				StatusName:      "状态冲突",
+				Version:         4,
+				RegistrarID:     "u001",
+				RegistrarName:   "张登记员",
+				ReviewerID:      "u003",
+				ReviewerName:    "王主管",
+				DirectorID:      "u005",
+				DirectorName:    "陈主任",
+				LatestOpinion:   "复核中发现患者已于3日前转入ICU，原申请科室与当前所在科室不一致，存在状态冲突，需核实。",
+				LatestRejectReason: "状态冲突：患者已转入ICU，原申请科室信息与实际情况不符，请核实患者当前状态后重新提交。",
+				EvidenceList:    "病历记录,肾功能检查,透析记录,血型配型,心脏超声",
+				HasAppeal:       true,
+				AppealStatus:    StatusAppealAccepted,
+				AppealStatusName: "申诉已受理",
+				AppealReason:    "患者虽已转入ICU，但肾移植评估工作仍需继续推进，多学科会诊仍有必要。建议重新评估状态冲突问题。",
+				Deadline:        now.AddDate(0, 0, 4),
+				CreatedAt:       now.AddDate(0, 0, -12),
+				UpdatedAt:       now.AddDate(0, 0, -1),
+			},
+			history: []HistoryRecord{
+				{
+					ID: "h022", ConsultationID: "c007",
+					OperatorID: "u001", OperatorName: "张登记员", OperatorRole: RoleRegistrar, OperatorRoleName: "会诊申请登记员",
+					Action: "create", ActionName: "创建申请单",
+					FromStatus: "", FromStatusName: "", ToStatus: StatusDraft, ToStatusName: "草稿",
+					Version: 1, CreatedAt: now.AddDate(0, 0, -12),
+				},
+				{
+					ID: "h023", ConsultationID: "c007",
+					OperatorID: "u001", OperatorName: "张登记员", OperatorRole: RoleRegistrar, OperatorRoleName: "会诊申请登记员",
+					Action: "submit", ActionName: "提交申请",
+					FromStatus: StatusDraft, FromStatusName: "草稿", ToStatus: StatusSubmitted, ToStatusName: "已提交",
+					Opinion: "肾移植前多学科评估会诊。",
+					Version: 1, CreatedAt: now.AddDate(0, 0, -11),
+				},
+				{
+					ID: "h024", ConsultationID: "c007",
+					OperatorID: "u003", OperatorName: "王主管", OperatorRole: RoleReviewer, OperatorRoleName: "会诊申请审核主管",
+					Action: "review_pass", ActionName: "审核通过",
+					FromStatus: StatusSubmitted, FromStatusName: "已提交", ToStatus: StatusReviewPassed, ToStatusName: "审核通过",
+					Opinion: "资料齐全，符合肾移植前多学科评估指征。",
+					Version: 2, CreatedAt: now.AddDate(0, 0, -8),
+				},
+				{
+					ID: "h025", ConsultationID: "c007",
+					OperatorID: "u005", OperatorName: "陈主任", OperatorRole: RoleDirector, OperatorRoleName: "医务部复核负责人",
+					Action: "conflict", ActionName: "状态冲突",
+					FromStatus: StatusReviewPassed, FromStatusName: "审核通过", ToStatus: StatusConflict, ToStatusName: "状态冲突",
+					Opinion: "复核中发现患者已于3日前转入ICU，原申请科室与当前所在科室不一致，存在状态冲突，需核实。",
+					RejectReason: "状态冲突：患者已转入ICU，原申请科室信息与实际情况不符，请核实患者当前状态后重新提交。",
+					Version: 3, CreatedAt: now.AddDate(0, 0, -4),
+				},
+				{
+					ID: "h026", ConsultationID: "c007",
+					OperatorID: "u001", OperatorName: "张登记员", OperatorRole: RoleRegistrar, OperatorRoleName: "会诊申请登记员",
+					Action: "appeal_submit", ActionName: "提交申诉",
+					FromStatus: StatusConflict, FromStatusName: "状态冲突", ToStatus: StatusAppealSubmitted, ToStatusName: "申诉已提交",
+					Opinion: "患者虽已转入ICU，但肾移植评估工作仍需继续推进，多学科会诊仍有必要。建议重新评估状态冲突问题。",
+					Version: 3, CreatedAt: now.AddDate(0, 0, -2),
+				},
+				{
+					ID: "h027", ConsultationID: "c007",
+					OperatorID: "u005", OperatorName: "陈主任", OperatorRole: RoleDirector, OperatorRoleName: "医务部复核负责人",
+					Action: "appeal_accept", ActionName: "受理申诉",
+					FromStatus: StatusAppealSubmitted, FromStatusName: "申诉已提交", ToStatus: StatusAppealAccepted, ToStatusName: "申诉已受理",
+					Opinion: "已受理申诉，将协调相关科室核实患者状态后重新处理。",
+					Version: 4, CreatedAt: now.AddDate(0, 0, -1),
+				},
+			},
+		},
+		{
+			c: Consultation{
+				ID:              "c008",
+				Title:           "儿科重症肺炎会诊",
+				PatientName:     "钱小宝",
+				PatientID:       "P20240008",
+				Dept:            "儿科",
+				ChiefComplaint:  "发热咳嗽5天，气促1天",
+				ConsultType:     "科间会诊",
+				ConsultDept:     "儿童重症医学科",
+				Status:          StatusDraft,
+				StatusName:      "草稿",
+				Version:         1,
+				RegistrarID:     "u002",
+				RegistrarName:   "李登记员",
+				LatestOpinion:   "",
+				EvidenceList:    "病历记录,胸片,血常规",
+				HasAppeal:       false,
+				Deadline:        now.AddDate(0, 0, 5),
+				CreatedAt:       now.AddDate(0, 0, -1),
+				UpdatedAt:       now.AddDate(0, 0, -1),
+			},
+			history: []HistoryRecord{
+				{
+					ID: "h028", ConsultationID: "c008",
+					OperatorID: "u002", OperatorName: "李登记员", OperatorRole: RoleRegistrar, OperatorRoleName: "会诊申请登记员",
+					Action: "create", ActionName: "创建申请单",
+					FromStatus: "", FromStatusName: "", ToStatus: StatusDraft, ToStatusName: "草稿",
+					Version: 1, CreatedAt: now.AddDate(0, 0, -1),
+				},
+			},
+		},
+	}
+
+	for _, item := range consultations {
+		c := item.c
+		_, err := tx.Exec(`
+			INSERT INTO consultations (
+				id, title, patient_name, patient_id, dept, chief_complaint,
+				consult_type, consult_dept, status, status_name, version,
+				registrar_id, registrar_name, reviewer_id, reviewer_name,
+				director_id, director_name, latest_opinion, latest_reject_reason,
+				evidence_list, is_overdue, has_appeal, appeal_status, appeal_status_name,
+				appeal_reason, deadline, created_at, updated_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`,
+			c.ID, c.Title, c.PatientName, c.PatientID, c.Dept, c.ChiefComplaint,
+			c.ConsultType, c.ConsultDept, c.Status, c.StatusName, c.Version,
+			c.RegistrarID, c.RegistrarName, c.ReviewerID, c.ReviewerName,
+			c.DirectorID, c.DirectorName, c.LatestOpinion, c.LatestRejectReason,
+			c.EvidenceList, boolToInt(c.IsOverdue), boolToInt(c.HasAppeal),
+			c.AppealStatus, c.AppealStatusName, c.AppealReason,
+			c.Deadline, c.CreatedAt, c.UpdatedAt,
+		)
+		if err != nil {
+			return err
+		}
+
+		for _, h := range item.history {
+			h.ID = uuid.New().String()
+			_, err := tx.Exec(`
+				INSERT INTO history_records (
+					id, consultation_id, operator_id, operator_name, operator_role,
+					operator_role_name, action, action_name, from_status, from_status_name,
+					to_status, to_status_name, opinion, reject_reason, version, created_at
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			`,
+				h.ID, h.ConsultationID, h.OperatorID, h.OperatorName, h.OperatorRole,
+				h.OperatorRoleName, h.Action, h.ActionName, h.FromStatus, h.FromStatusName,
+				h.ToStatus, h.ToStatusName, h.Opinion, h.RejectReason, h.Version, h.CreatedAt,
+			)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	return tx.Commit()
+}
+
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+func scanConsultation(row *sql.Row) (*Consultation, error) {
+	var c Consultation
+	var reviewerID, reviewerName, directorID, directorName sql.NullString
+	var latestOpinion, latestRejectReason sql.NullString
+	var appealStatus, appealStatusName, appealReason sql.NullString
+	var isOverdue, hasAppeal int
+
+	err := row.Scan(
+		&c.ID, &c.Title, &c.PatientName, &c.PatientID, &c.Dept,
+		&c.ChiefComplaint, &c.ConsultType, &c.ConsultDept,
+		&c.Status, &c.StatusName, &c.Version,
+		&c.RegistrarID, &c.RegistrarName, &reviewerID, &reviewerName,
+		&directorID, &directorName, &latestOpinion, &latestRejectReason,
+		&c.EvidenceList, &isOverdue, &hasAppeal,
+		&appealStatus, &appealStatusName, &appealReason,
+		&c.Deadline, &c.CreatedAt, &c.UpdatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	c.ReviewerID = reviewerID.String
+	c.ReviewerName = reviewerName.String
+	c.DirectorID = directorID.String
+	c.DirectorName = directorName.String
+	c.LatestOpinion = latestOpinion.String
+	c.LatestRejectReason = latestRejectReason.String
+	c.AppealStatus = appealStatus.String
+	c.AppealStatusName = appealStatusName.String
+	c.AppealReason = appealReason.String
+	c.IsOverdue = isOverdue == 1
+	c.HasAppeal = hasAppeal == 1
+
+	return &c, nil
+}
+
+func scanConsultationRows(rows *sql.Rows) ([]Consultation, error) {
+	var list []Consultation
+	for rows.Next() {
+		var c Consultation
+		var reviewerID, reviewerName, directorID, directorName sql.NullString
+		var latestOpinion, latestRejectReason sql.NullString
+		var appealStatus, appealStatusName, appealReason sql.NullString
+		var isOverdue, hasAppeal int
+
+		err := rows.Scan(
+			&c.ID, &c.Title, &c.PatientName, &c.PatientID, &c.Dept,
+			&c.ChiefComplaint, &c.ConsultType, &c.ConsultDept,
+			&c.Status, &c.StatusName, &c.Version,
+			&c.RegistrarID, &c.RegistrarName, &reviewerID, &reviewerName,
+			&directorID, &directorName, &latestOpinion, &latestRejectReason,
+			&c.EvidenceList, &isOverdue, &hasAppeal,
+			&appealStatus, &appealStatusName, &appealReason,
+			&c.Deadline, &c.CreatedAt, &c.UpdatedAt,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		c.ReviewerID = reviewerID.String
+		c.ReviewerName = reviewerName.String
+		c.DirectorID = directorID.String
+		c.DirectorName = directorName.String
+		c.LatestOpinion = latestOpinion.String
+		c.LatestRejectReason = latestRejectReason.String
+		c.AppealStatus = appealStatus.String
+		c.AppealStatusName = appealStatusName.String
+		c.AppealReason = appealReason.String
+		c.IsOverdue = isOverdue == 1
+		c.HasAppeal = hasAppeal == 1
+
+		list = append(list, c)
+	}
+	return list, rows.Err()
+}

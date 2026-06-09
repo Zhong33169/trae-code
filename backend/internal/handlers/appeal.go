@@ -1,0 +1,337 @@
+package handlers
+
+import (
+	"consultation-system/internal/middleware"
+	"consultation-system/internal/models"
+	"consultation-system/internal/utils"
+	"database/sql"
+	"time"
+
+	"github.com/gofiber/fiber/v2"
+	"github.com/google/uuid"
+)
+
+type AppealRequest struct {
+	Version int    `json:"version"`
+	Reason  string `json:"reason"`
+	Opinion string `json:"opinion"`
+}
+
+func SubmitAppeal(c *fiber.Ctx) error {
+	user := middleware.GetCurrentUser(c)
+	id := c.Params("id")
+
+	var req AppealRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "请求参数无效"})
+	}
+
+	if req.Reason == "" {
+		return c.Status(400).JSON(fiber.Map{"error": "申诉理由不能为空"})
+	}
+
+	row := models.DB.QueryRow(`
+		SELECT status, version, registrar_id
+		FROM consultations WHERE id = ?
+	`, id)
+
+	var status string
+	var version int
+	var registrarID string
+	err := row.Scan(&status, &version, &registrarID)
+	if err == sql.ErrNoRows {
+		return c.Status(404).JSON(fiber.Map{"error": "申请单不存在"})
+	}
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	canAppeal := status == models.StatusEvidenceMissing ||
+		status == models.StatusCorrectionReq ||
+		status == models.StatusConflict ||
+		status == models.StatusRejected
+
+	if !canAppeal {
+		return c.Status(400).JSON(fiber.Map{
+			"error":          "当前状态不允许申诉",
+			"current_status": status,
+		})
+	}
+
+	if registrarID != user.UserID && user.Role != models.RoleRegistrar {
+		return c.Status(403).JSON(fiber.Map{"error": "只有登记人可以提交申诉"})
+	}
+
+	if req.Version != version {
+		return c.Status(409).JSON(fiber.Map{
+			"error":   "版本冲突，请刷新后重试",
+			"version": version,
+		})
+	}
+
+	fromStatus := status
+	newStatus := models.StatusAppealSubmitted
+	action := "appeal_submit"
+	actionName := "提交申诉"
+
+	now := time.Now()
+
+	tx, err := models.DB.Begin()
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+	}
+	defer tx.Rollback()
+
+	_, err = tx.Exec(`
+		UPDATE consultations SET
+			status = ?, status_name = ?, has_appeal = 1,
+			appeal_status = ?, appeal_status_name = ?,
+			appeal_reason = ?, latest_opinion = ?, updated_at = ?
+		WHERE id = ?
+	`,
+		newStatus, utils.StatusName(newStatus),
+		models.StatusAppealSubmitted, utils.StatusName(models.StatusAppealSubmitted),
+		req.Reason, req.Opinion, now, id,
+	)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	historyID := uuid.New().String()
+	_, err = tx.Exec(`
+		INSERT INTO history_records (
+			id, consultation_id, operator_id, operator_name, operator_role,
+			operator_role_name, action, action_name, from_status, from_status_name,
+			to_status, to_status_name, opinion, version, created_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`,
+		historyID, id, user.UserID, user.UserName, user.Role, user.RoleName,
+		action, actionName,
+		fromStatus, utils.StatusName(fromStatus),
+		newStatus, utils.StatusName(newStatus),
+		req.Reason, version, now,
+	)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	if err := tx.Commit(); err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	return c.JSON(fiber.Map{
+		"message": actionName + "成功",
+		"status":  newStatus,
+	})
+}
+
+type AppealHandleRequest struct {
+	Version int    `json:"version"`
+	Opinion string `json:"opinion"`
+}
+
+func AcceptAppeal(c *fiber.Ctx) error {
+	user := middleware.GetCurrentUser(c)
+	id := c.Params("id")
+
+	if user.Role != models.RoleDirector {
+		return c.Status(403).JSON(fiber.Map{"error": "只有医务部复核负责人可以受理申诉"})
+	}
+
+	var req AppealHandleRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "请求参数无效"})
+	}
+
+	row := models.DB.QueryRow(`
+		SELECT status, version
+		FROM consultations WHERE id = ?
+	`, id)
+
+	var status string
+	var version int
+	err := row.Scan(&status, &version)
+	if err == sql.ErrNoRows {
+		return c.Status(404).JSON(fiber.Map{"error": "申请单不存在"})
+	}
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	if status != models.StatusAppealSubmitted {
+		return c.Status(400).JSON(fiber.Map{
+			"error":          "当前状态不允许受理申诉",
+			"current_status": status,
+		})
+	}
+
+	if req.Version != version {
+		return c.Status(409).JSON(fiber.Map{
+			"error":   "版本冲突，请刷新后重试",
+			"version": version,
+		})
+	}
+
+	newStatus := models.StatusAppealAccepted
+	action := "appeal_accept"
+	actionName := "受理申诉"
+
+	now := time.Now()
+	newVersion := version + 1
+
+	tx, err := models.DB.Begin()
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+	}
+	defer tx.Rollback()
+
+	_, err = tx.Exec(`
+		UPDATE consultations SET
+			status = ?, status_name = ?, version = ?,
+			appeal_status = ?, appeal_status_name = ?,
+			director_id = ?, director_name = ?,
+			latest_opinion = ?, updated_at = ?
+		WHERE id = ?
+	`,
+		newStatus, utils.StatusName(newStatus), newVersion,
+		models.StatusAppealAccepted, utils.StatusName(models.StatusAppealAccepted),
+		user.UserID, user.UserName,
+		req.Opinion, now, id,
+	)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	historyID := uuid.New().String()
+	_, err = tx.Exec(`
+		INSERT INTO history_records (
+			id, consultation_id, operator_id, operator_name, operator_role,
+			operator_role_name, action, action_name, from_status, from_status_name,
+			to_status, to_status_name, opinion, version, created_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`,
+		historyID, id, user.UserID, user.UserName, user.Role, user.RoleName,
+		action, actionName,
+		status, utils.StatusName(status),
+		newStatus, utils.StatusName(newStatus),
+		req.Opinion, newVersion, now,
+	)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	if err := tx.Commit(); err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	return c.JSON(fiber.Map{
+		"message": actionName + "成功",
+		"status":  newStatus,
+		"version": newVersion,
+	})
+}
+
+func RejectAppeal(c *fiber.Ctx) error {
+	user := middleware.GetCurrentUser(c)
+	id := c.Params("id")
+
+	if user.Role != models.RoleDirector {
+		return c.Status(403).JSON(fiber.Map{"error": "只有医务部复核负责人可以驳回申诉"})
+	}
+
+	var req AppealHandleRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "请求参数无效"})
+	}
+
+	if req.Opinion == "" {
+		return c.Status(400).JSON(fiber.Map{"error": "驳回申诉必须填写理由"})
+	}
+
+	row := models.DB.QueryRow(`
+		SELECT status, version
+		FROM consultations WHERE id = ?
+	`, id)
+
+	var status string
+	var version int
+	err := row.Scan(&status, &version)
+	if err == sql.ErrNoRows {
+		return c.Status(404).JSON(fiber.Map{"error": "申请单不存在"})
+	}
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	if status != models.StatusAppealSubmitted && status != models.StatusAppealAccepted {
+		return c.Status(400).JSON(fiber.Map{
+			"error":          "当前状态不允许驳回申诉",
+			"current_status": status,
+		})
+	}
+
+	if req.Version != version {
+		return c.Status(409).JSON(fiber.Map{
+			"error":   "版本冲突，请刷新后重试",
+			"version": version,
+		})
+	}
+
+	newStatus := models.StatusAppealRejected
+	action := "appeal_reject"
+	actionName := "驳回申诉"
+
+	now := time.Now()
+	newVersion := version + 1
+
+	tx, err := models.DB.Begin()
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+	}
+	defer tx.Rollback()
+
+	_, err = tx.Exec(`
+		UPDATE consultations SET
+			status = ?, status_name = ?, version = ?,
+			appeal_status = ?, appeal_status_name = ?,
+			director_id = ?, director_name = ?,
+			latest_reject_reason = ?, updated_at = ?
+		WHERE id = ?
+	`,
+		newStatus, utils.StatusName(newStatus), newVersion,
+		models.StatusAppealRejected, utils.StatusName(models.StatusAppealRejected),
+		user.UserID, user.UserName,
+		req.Opinion, now, id,
+	)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	historyID := uuid.New().String()
+	_, err = tx.Exec(`
+		INSERT INTO history_records (
+			id, consultation_id, operator_id, operator_name, operator_role,
+			operator_role_name, action, action_name, from_status, from_status_name,
+			to_status, to_status_name, reject_reason, version, created_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`,
+		historyID, id, user.UserID, user.UserName, user.Role, user.RoleName,
+		action, actionName,
+		status, utils.StatusName(status),
+		newStatus, utils.StatusName(newStatus),
+		req.Opinion, newVersion, now,
+	)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	if err := tx.Commit(); err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	return c.JSON(fiber.Map{
+		"message": actionName + "成功",
+		"status":  newStatus,
+		"version": newVersion,
+	})
+}
