@@ -9,6 +9,7 @@ export class AuthService {
     { id: 'user-3', name: '张院长', role: UserRole.DIRECTOR, store: '总店' },
     { id: 'user-4', name: '陈前台', role: UserRole.RECEPTIONIST, store: '分店A' },
     { id: 'user-5', name: '李牙医', role: UserRole.DENTIST, store: '分店A' },
+    { id: 'user-6', name: '刘院长', role: UserRole.DIRECTOR, store: '分店A' },
   ];
 
   getUsers(): User[] {

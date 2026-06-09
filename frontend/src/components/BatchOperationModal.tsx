@@ -50,7 +50,7 @@ const BatchOperationModal = (props: Props) => {
       const baseData = {
         items: props.items,
         userId: currentUser()?.id,
-        remark: remark(),
+        opinion: remark(),
       };
 
       switch (props.action) {

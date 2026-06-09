@@ -52,6 +52,7 @@ export class TreatmentPlanService {
       'user-3': { id: 'user-3', name: '张院长', role: 'director', store: '总店' },
       'user-4': { id: 'user-4', name: '陈前台', role: 'receptionist', store: '分店A' },
       'user-5': { id: 'user-5', name: '李牙医', role: 'dentist', store: '分店A' },
+      'user-6': { id: 'user-6', name: '刘院长', role: 'director', store: '分店A' },
     };
 
     const seedPlans: TreatmentPlan[] = [
@@ -207,6 +208,33 @@ export class TreatmentPlanService {
         reviewedAt: addDays(-10),
         rejectReason: '院长退回：费用核算有问题，种植体型号与报价单不一致，请重新核对',
         version: 4,
+      },
+      {
+        id: 'plan-7',
+        planNo: 'TP-2024-0007',
+        patientName: '周雪',
+        patientPhone: '13800138007',
+        store: '分店A',
+        status: TreatmentPlanStatus.PENDING_REVIEW,
+        urgencyLevel: UrgencyLevel.WARNING,
+        createdAt: addDays(-12),
+        deadline: addDays(3),
+        receptionistId: 'user-4',
+        dentistId: 'user-5',
+        materials: [
+          { id: 'm1', name: '牙齿美白凝胶', quantity: 2, checked: true, verified: true, verifiedBy: 'user-5', verifiedAt: addDays(-10) },
+          { id: 'm2', name: '美白托盘', quantity: 1, checked: true, verified: true, verifiedBy: 'user-5', verifiedAt: addDays(-10) },
+          { id: 'm3', name: '护敏牙膏', quantity: 1, checked: true, verified: true, verifiedBy: 'user-5', verifiedAt: addDays(-10) },
+        ],
+        attachments: [
+          { id: 'att-7', name: '比色记录.jpg', type: 'image', uploadedBy: 'user-5', uploadedAt: addDays(-10) },
+          { id: 'att-8', name: '美白知情同意书.pdf', type: 'document', uploadedBy: 'user-4', uploadedAt: addDays(-11) },
+        ],
+        remarks: '家庭式牙齿美白套餐',
+        verificationOpinion: '材料齐全，患者适合家庭美白，注意使用指导',
+        verificationResult: 'pass',
+        verifiedAt: addDays(-9),
+        version: 3,
       },
     ];
 
@@ -504,13 +532,73 @@ export class TreatmentPlanService {
       });
       this.auditService.addLog({
         planId: plan6.id,
-        user: users['user-3'] as any,
+        user: users['user-6'] as any,
         action: '复核退回',
         fromStatus: TreatmentPlanStatus.PENDING_REVIEW,
         toStatus: TreatmentPlanStatus.REVIEW_REJECTED,
         details: `复核退回，原因：${plan6.rejectReason}`,
         opinion: plan6.reviewOpinion,
         rejectReason: plan6.rejectReason,
+      });
+    }
+
+    // plan-7: 草稿 → 提交核验 → 核验通过 → 待复核
+    const plan7 = this.plans.find(p => p.id === 'plan-7');
+    if (plan7) {
+      this.auditService.addLog({
+        planId: plan7.id,
+        user: users['user-4'] as any,
+        action: '创建计划单',
+        fromStatus: undefined,
+        toStatus: TreatmentPlanStatus.DRAFT,
+        details: '陈前台创建了家庭式牙齿美白计划单',
+        materialChanges: plan7.materials.map(m => ({
+          id: m.id,
+          name: m.name,
+          before: { checked: false, verified: false },
+          after: { checked: true, verified: false },
+        })),
+      });
+      this.auditService.addLog({
+        planId: plan7.id,
+        user: users['user-4'] as any,
+        action: '添加附件',
+        details: '添加附件：美白知情同意书.pdf',
+        attachmentChanges: [
+          { id: 'att-8', name: '美白知情同意书.pdf', type: 'document', changeType: 'add' as const },
+        ],
+      });
+      this.auditService.addLog({
+        planId: plan7.id,
+        user: users['user-4'] as any,
+        action: '提交核验',
+        fromStatus: TreatmentPlanStatus.DRAFT,
+        toStatus: TreatmentPlanStatus.PENDING_VERIFICATION,
+        details: '前台提交核验，等待医生核验',
+      });
+      this.auditService.addLog({
+        planId: plan7.id,
+        user: users['user-5'] as any,
+        action: '添加附件',
+        details: '添加附件：比色记录.jpg',
+        attachmentChanges: [
+          { id: 'att-7', name: '比色记录.jpg', type: 'image', changeType: 'add' as const },
+        ],
+      });
+      this.auditService.addLog({
+        planId: plan7.id,
+        user: users['user-5'] as any,
+        action: '核验通过',
+        fromStatus: TreatmentPlanStatus.PENDING_VERIFICATION,
+        toStatus: TreatmentPlanStatus.PENDING_REVIEW,
+        details: `核验通过，意见：${plan7.verificationOpinion}`,
+        materialChanges: plan7.materials.map(m => ({
+          id: m.id,
+          name: m.name,
+          before: { checked: true, verified: false },
+          after: { checked: true, verified: true },
+        })),
+        opinion: plan7.verificationOpinion,
       });
     }
   }
@@ -612,7 +700,7 @@ export class TreatmentPlanService {
   }
 
   private isPlanInUserQueue(plan: TreatmentPlan, user: User): boolean {
-    if (plan.store !== user.store && user.role !== UserRole.DIRECTOR) {
+    if (plan.store !== user.store) {
       return false;
     }
 
@@ -995,6 +1083,10 @@ export class TreatmentPlanService {
       throw new ForbiddenException('只有门店院长可以复核');
     }
 
+    if (plan.store !== user.store) {
+      throw new ForbiddenException('无权复核其他门店的计划单');
+    }
+
     if (plan.status !== TreatmentPlanStatus.PENDING_REVIEW) {
       throw new BadRequestException('当前状态不可复核');
     }
@@ -1143,6 +1235,13 @@ export class TreatmentPlanService {
         plan.status = TreatmentPlanStatus.PENDING_VERIFICATION;
         plan.version++;
 
+        const materialChanges = plan.materials.map(m => ({
+          id: m.id,
+          name: m.name,
+          before: { checked: m.checked, verified: m.verified },
+          after: { checked: m.checked, verified: m.verified },
+        }));
+
         this.auditService.addLog({
           planId: plan.id,
           user,
@@ -1150,12 +1249,7 @@ export class TreatmentPlanService {
           fromStatus,
           toStatus: TreatmentPlanStatus.PENDING_VERIFICATION,
           details: `批量提交核验成功，共 ${plan.materials.length} 项材料`,
-          materialChanges: plan.materials.map(m => ({
-            id: m.id,
-            name: m.name,
-            checked: m.checked,
-            verified: m.verified,
-          })),
+          materialChanges,
         });
 
         results.push({ id: item.id, planNo: plan.planNo, success: true });
@@ -1165,15 +1259,34 @@ export class TreatmentPlanService {
     }
 
     const successCount = results.filter(r => r.success).length;
+    const failCount = results.length - successCount;
+
+    const successPlans = results.filter(r => r.success).map(r => ({ id: r.id, planNo: r.planNo }));
+    const failedPlans = results.filter(r => !r.success).map(r => ({ id: r.id, planNo: r.planNo, reason: r.message }));
+
+    if (successCount > 0) {
+      for (const sp of successPlans) {
+        const log = this.auditService.getLogsByPlanId(sp.id).find(l => l.action === '批量提交核验');
+        if (log) {
+          (log as any).batchInfo = {
+            totalCount: results.length,
+            successCount,
+            failCount,
+            successPlans: successPlans.map(p => ({ id: p.id, planNo: p.planNo })),
+            failedPlans,
+          };
+        }
+      }
+    }
 
     return {
       results,
       successCount,
-      failCount: results.length - successCount,
+      failCount,
     };
   }
 
-  batchVerify(dto: BatchOperationDto & { result: 'pass' | 'reject' }) {
+  batchVerify(dto: any) {
     const user = this.getUserOrThrow(dto.userId);
 
     if (user.role !== UserRole.DENTIST) {
@@ -1205,15 +1318,34 @@ export class TreatmentPlanService {
           continue;
         }
 
+        if (dto.result === 'reject' && !dto.rejectReason) {
+          results.push({ id: item.id, planNo: plan.planNo, success: false, message: '退回时必须填写退回原因' });
+          continue;
+        }
+
         const fromStatus = plan.status;
-        const materialChanges = plan.materials.map(m => ({
-          id: m.id,
-          name: m.name,
-          before: { checked: m.checked, verified: m.verified },
-          after: { checked: m.checked, verified: dto.result === 'pass' ? true : m.verified },
-        }));
+        const materialChanges = plan.materials.map(m => {
+          const beforeVerified = m.verified;
+          let afterVerified = beforeVerified;
+          if (dto.result === 'pass') {
+            afterVerified = true;
+          } else if (dto.verifiedMaterials && dto.verifiedMaterials.includes(m.id)) {
+            afterVerified = true;
+          }
+          return {
+            id: m.id,
+            name: m.name,
+            before: { checked: m.checked, verified: beforeVerified },
+            after: { checked: m.checked, verified: afterVerified },
+          };
+        });
 
         if (dto.result === 'pass') {
+          const allVerified = plan.materials.length > 0 && plan.materials.every(m => m.verified);
+          if (!allVerified) {
+            results.push({ id: item.id, planNo: plan.planNo, success: false, message: '通过核验前请确认所有材料已核验' });
+            continue;
+          }
           plan.materials = plan.materials.map(m => ({
             ...m,
             verified: true,
@@ -1222,21 +1354,25 @@ export class TreatmentPlanService {
           }));
           plan.status = TreatmentPlanStatus.PENDING_REVIEW;
           plan.verificationResult = 'pass';
-          plan.verificationOpinion = dto.opinion || dto.remark || '批量核验通过';
+          plan.verificationOpinion = dto.opinion || '';
           plan.verifiedAt = new Date().toISOString();
           plan.dentistId = user.id;
           plan.rejectReason = undefined;
         } else {
-          if (!dto.rejectReason && !dto.remark) {
-            results.push({ id: item.id, planNo: plan.planNo, success: false, message: '批量退回需要填写原因' });
-            continue;
+          if (dto.verifiedMaterials) {
+            plan.materials = plan.materials.map(m => ({
+              ...m,
+              verified: dto.verifiedMaterials.includes(m.id) ? true : m.verified,
+              verifiedBy: dto.verifiedMaterials.includes(m.id) ? user.id : m.verifiedBy,
+              verifiedAt: dto.verifiedMaterials.includes(m.id) ? new Date().toISOString() : m.verifiedAt,
+            }));
           }
           plan.status = TreatmentPlanStatus.VERIFICATION_REJECTED;
           plan.verificationResult = 'reject';
           plan.verificationOpinion = dto.opinion || '';
           plan.verifiedAt = new Date().toISOString();
           plan.dentistId = user.id;
-          plan.rejectReason = dto.rejectReason || dto.remark || '';
+          plan.rejectReason = dto.rejectReason;
         }
 
         plan.version++;
@@ -1248,11 +1384,11 @@ export class TreatmentPlanService {
           fromStatus,
           toStatus: plan.status,
           details: dto.result === 'pass'
-            ? `批量核验通过，处理意见：${dto.opinion || dto.remark || '无'}`
-            : `批量核验退回，原因：${dto.rejectReason || dto.remark}`,
+            ? `批量核验通过，处理意见：${dto.opinion || '无'}`
+            : `批量核验退回，原因：${dto.rejectReason}`,
           materialChanges,
-          opinion: dto.opinion || dto.remark,
-          rejectReason: dto.result === 'reject' ? (dto.rejectReason || dto.remark) : undefined,
+          opinion: dto.opinion,
+          rejectReason: dto.result === 'reject' ? dto.rejectReason : undefined,
         });
 
         results.push({ id: item.id, planNo: plan.planNo, success: true });
@@ -1262,15 +1398,36 @@ export class TreatmentPlanService {
     }
 
     const successCount = results.filter(r => r.success).length;
+    const failCount = results.length - successCount;
+
+    const successPlans = results.filter(r => r.success).map(r => ({ id: r.id, planNo: r.planNo }));
+    const failedPlans = results.filter(r => !r.success).map(r => ({ id: r.id, planNo: r.planNo, reason: r.message }));
+
+    if (successCount > 0) {
+      for (const sp of successPlans) {
+        const log = this.auditService.getLogsByPlanId(sp.id).find(l => l.action.startsWith('批量核验'));
+        if (log) {
+          (log as any).batchInfo = {
+            totalCount: results.length,
+            successCount,
+            failCount,
+            successPlans: successPlans.map(p => ({ id: p.id, planNo: p.planNo })),
+            failedPlans,
+            opinion: dto.opinion,
+            rejectReason: dto.result === 'reject' ? dto.rejectReason : undefined,
+          };
+        }
+      }
+    }
 
     return {
       results,
       successCount,
-      failCount: results.length - successCount,
+      failCount,
     };
   }
 
-  batchReview(dto: BatchOperationDto & { result: 'pass' | 'reject' }) {
+  batchReview(dto: any) {
     const user = this.getUserOrThrow(dto.userId);
 
     if (user.role !== UserRole.DIRECTOR) {
@@ -1287,6 +1444,11 @@ export class TreatmentPlanService {
           continue;
         }
 
+        if (plan.store !== user.store) {
+          results.push({ id: item.id, planNo: plan.planNo, success: false, message: '无权复核其他门店的计划单' });
+          continue;
+        }
+
         if (plan.version !== item.version) {
           results.push({ id: item.id, planNo: plan.planNo, success: false, message: '数据已过期，请刷新后重试' });
           continue;
@@ -1297,10 +1459,22 @@ export class TreatmentPlanService {
           continue;
         }
 
+        if (dto.result === 'reject' && !dto.rejectReason) {
+          results.push({ id: item.id, planNo: plan.planNo, success: false, message: '退回时必须填写退回原因' });
+          continue;
+        }
+
         const fromStatus = plan.status;
 
+        const materialStatus = plan.materials.map(m => ({
+          id: m.id,
+          name: m.name,
+          checked: m.checked,
+          verified: m.verified,
+        }));
+
         plan.reviewResult = dto.result;
-        plan.reviewOpinion = dto.opinion || dto.remark || (dto.result === 'pass' ? '批量复核通过' : '');
+        plan.reviewOpinion = dto.opinion || '';
         plan.reviewedAt = new Date().toISOString();
         plan.directorId = user.id;
 
@@ -1308,12 +1482,8 @@ export class TreatmentPlanService {
           plan.status = TreatmentPlanStatus.ARCHIVED;
           plan.rejectReason = undefined;
         } else {
-          if (!dto.rejectReason && !dto.remark) {
-            results.push({ id: item.id, planNo: plan.planNo, success: false, message: '批量退回需要填写原因' });
-            continue;
-          }
           plan.status = TreatmentPlanStatus.REVIEW_REJECTED;
-          plan.rejectReason = dto.rejectReason || dto.remark || '';
+          plan.rejectReason = dto.rejectReason;
         }
 
         plan.version++;
@@ -1325,10 +1495,16 @@ export class TreatmentPlanService {
           fromStatus,
           toStatus: plan.status,
           details: dto.result === 'pass'
-            ? `批量复核通过，处理意见：${dto.opinion || dto.remark || '无'}`
-            : `批量复核退回，原因：${dto.rejectReason || dto.remark}`,
-          opinion: dto.opinion || dto.remark,
-          rejectReason: dto.result === 'reject' ? (dto.rejectReason || dto.remark) : undefined,
+            ? `批量复核通过，处理意见：${dto.opinion || '无'}`
+            : `批量复核退回，原因：${dto.rejectReason}`,
+          opinion: dto.opinion,
+          rejectReason: dto.result === 'reject' ? dto.rejectReason : undefined,
+          materialChanges: materialStatus.map(m => ({
+            id: m.id,
+            name: m.name,
+            before: { checked: m.checked, verified: m.verified },
+            after: { checked: m.checked, verified: m.verified },
+          })),
         });
 
         results.push({ id: item.id, planNo: plan.planNo, success: true });
@@ -1338,20 +1514,38 @@ export class TreatmentPlanService {
     }
 
     const successCount = results.filter(r => r.success).length;
+    const failCount = results.length - successCount;
+
+    const successPlans = results.filter(r => r.success).map(r => ({ id: r.id, planNo: r.planNo }));
+    const failedPlans = results.filter(r => !r.success).map(r => ({ id: r.id, planNo: r.planNo, reason: r.message }));
+
+    if (successCount > 0) {
+      for (const sp of successPlans) {
+        const log = this.auditService.getLogsByPlanId(sp.id).find(l => l.action.startsWith('批量复核'));
+        if (log) {
+          (log as any).batchInfo = {
+            totalCount: results.length,
+            successCount,
+            failCount,
+            successPlans: successPlans.map(p => ({ id: p.id, planNo: p.planNo })),
+            failedPlans,
+            opinion: dto.opinion,
+            rejectReason: dto.result === 'reject' ? dto.rejectReason : undefined,
+          };
+        }
+      }
+    }
 
     return {
       results,
       successCount,
-      failCount: results.length - successCount,
+      failCount,
     };
   }
 
   getStats(userId: string) {
     const user = this.getUserOrThrow(userId);
-    const userPlans = this.plans.filter(p => {
-      if (user.role === UserRole.DIRECTOR) return true;
-      return p.store === user.store;
-    });
+    const userPlans = this.plans.filter(p => p.store === user.store);
 
     return this.calculateStats(
       userPlans.map(p => ({ ...p, urgencyLevel: this.calculateUrgency(p.deadline) }))
