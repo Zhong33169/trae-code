@@ -398,9 +398,9 @@ def seed_follow_up_records(db: Session, patients, appointments, visits, follow_u
         remarks="【测试9】可补证据 - 缺随访回访",
         created_by="李护士",
         updated_by="李护士",
-        version=1,
+        version=2,
         created_at=base_date - timedelta(days=8),
-        updated_at=base_date - timedelta(days=8),
+        updated_at=base_date - timedelta(days=7),
     )
     records.append(r9)
 
@@ -418,10 +418,10 @@ def seed_follow_up_records(db: Session, patients, appointments, visits, follow_u
         remarks="【测试10】已驳回记录",
         created_by="王护士",
         updated_by="张医生",
-        version=2,
+        version=3,
         doctor_opinion="随访内容不完整，需要补充",
         created_at=base_date - timedelta(days=9),
-        updated_at=base_date - timedelta(days=8),
+        updated_at=base_date - timedelta(days=7),
     )
     records.append(r10)
 

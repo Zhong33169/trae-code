@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   FollowUpRecord, STATUS_NAMES, STATUS_COLORS,
-  ROLE_NAMES, ApiError, Patient, Appointment, Visit, FollowUpVisit,
+  ROLE_NAMES, ApiError, Patient, Appointment, Visit, FollowUpVisit, AuditLog,
 } from '../types';
 import { api } from '../api';
 import { useAuth } from '../context/AuthContext';
@@ -10,7 +10,7 @@ import './RecordDetailModal.css';
 interface RecordDetailModalProps {
   record: FollowUpRecord | null;
   onClose: () => void;
-  onSuccess: () => void;
+  onSuccess?: (updatedRecord?: FollowUpRecord) => void;
 }
 
 const RecordDetailModal: React.FC<RecordDetailModalProps> = ({ record, onClose, onSuccess }) => {
@@ -37,7 +37,7 @@ const RecordDetailModal: React.FC<RecordDetailModalProps> = ({ record, onClose, 
     follow_up_visits: FollowUpVisit[];
   } | null>(null);
 
-  const [auditLogs, setAuditLogs] = useState<any[]>([]);
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [auditLogsVisible, setAuditLogsVisible] = useState(false);
 
   const [opinion, setOpinion] = useState('');
@@ -112,7 +112,7 @@ const RecordDetailModal: React.FC<RecordDetailModalProps> = ({ record, onClose, 
       });
       setDetail(updated);
       setEditMode(false);
-      onSuccess(updated);
+      onSuccess?.(updated);
     } catch (err) {
       setError(err as ApiError);
     } finally {
@@ -127,7 +127,7 @@ const RecordDetailModal: React.FC<RecordDetailModalProps> = ({ record, onClose, 
     try {
       const updated = await api.submitRecord(detail.id, detail.version);
       setDetail(updated);
-      onSuccess(updated);
+      onSuccess?.(updated);
     } catch (err) {
       setError(err as ApiError);
     } finally {
@@ -147,7 +147,7 @@ const RecordDetailModal: React.FC<RecordDetailModalProps> = ({ record, onClose, 
       });
       setDetail(updated);
       setOpinion('');
-      onSuccess(updated);
+      onSuccess?.(updated);
     } catch (err) {
       setError(err as ApiError);
     } finally {
@@ -171,7 +171,7 @@ const RecordDetailModal: React.FC<RecordDetailModalProps> = ({ record, onClose, 
       const updated = await api.rejectRecord(detail.id, detail.version, opinion);
       setDetail(updated);
       setOpinion('');
-      onSuccess(updated);
+      onSuccess?.(updated);
     } catch (err) {
       setError(err as ApiError);
     } finally {
@@ -364,9 +364,6 @@ const RecordDetailModal: React.FC<RecordDetailModalProps> = ({ record, onClose, 
                             )}
                             {log.reason && (
                               <div className="log-reason">原因: {log.reason}</div>
-                            )}
-                            {log.field_name && (
-                              <div className="log-field">字段变更: {log.field_name}</div>
                             )}
                           </div>
                         ))

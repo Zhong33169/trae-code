@@ -1,6 +1,6 @@
 import {
   FollowUpRecord, RecordListResponse, Patient,
-  EvidenceResponse, User, BatchResult, ApiError,
+  EvidenceResponse, User, BatchResult, ApiError, AuditLog,
 } from './types';
 
 const API_BASE = '/api';
@@ -167,7 +167,7 @@ export const api = {
     return handleResponse(response);
   },
 
-  async getAuditLogs(recordId: number): Promise<any[]> {
+  async getAuditLogs(recordId: number): Promise<AuditLog[]> {
     const response = await fetch(`${API_BASE}/records/${recordId}/audit-logs`, {
       headers: getHeaders(),
     });

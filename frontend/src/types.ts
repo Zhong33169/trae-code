@@ -41,6 +41,18 @@ export interface FollowUpVisit {
   operator: string | null;
 }
 
+export interface AuditLog {
+  id: number;
+  record_id: number | null;
+  action: string;
+  operator: string;
+  operator_role: string | null;
+  from_status: string | null;
+  to_status: string | null;
+  reason: string | null;
+  created_at: string;
+}
+
 export interface FollowUpRecord {
   id: number;
   record_no: string;
