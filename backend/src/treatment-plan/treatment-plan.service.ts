@@ -1,0 +1,944 @@
+import { Injectable, BadRequestException, ForbiddenException, NotFoundException, ConflictException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { v4 as uuidv4 } from 'uuid';
+import {
+  TreatmentPlan,
+  TreatmentPlanStatus,
+  UserRole,
+  UrgencyLevel,
+  MaterialItem,
+  Attachment,
+  User,
+} from '../common/types';
+import {
+  CreateTreatmentPlanDto,
+  UpdateTreatmentPlanDto,
+  QueryTreatmentPlanDto,
+  SubmitVerificationDto,
+  VerifyTreatmentPlanDto,
+  SubmitReviewDto,
+  ReviewTreatmentPlanDto,
+  BatchOperationDto,
+  AddAttachmentDto,
+} from './dto/treatment-plan.dto';
+import { AuditService } from '../audit/audit.service';
+import { AuthService } from '../auth/auth.service';
+
+@Injectable()
+export class TreatmentPlanService {
+  private plans: TreatmentPlan[] = [];
+  private warningDays: number;
+
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly auditService: AuditService,
+    private readonly authService: AuthService,
+  ) {
+    this.warningDays = this.configService.get<number>('WARNING_DAYS', 7);
+    this.seedData();
+  }
+
+  private seedData() {
+    const now = new Date();
+    const addDays = (d: number) => {
+      const date = new Date(now);
+      date.setDate(date.getDate() + d);
+      return date.toISOString();
+    };
+
+    const seedPlans: TreatmentPlan[] = [
+      {
+        id: uuidv4(),
+        planNo: 'TP-2024-0001',
+        patientName: '张伟',
+        patientPhone: '13800138001',
+        store: '总店',
+        status: TreatmentPlanStatus.PENDING_VERIFICATION,
+        urgencyLevel: UrgencyLevel.NORMAL,
+        createdAt: addDays(-5),
+        deadline: addDays(10),
+        receptionistId: 'user-1',
+        materials: [
+          { id: 'm1', name: '口腔检查报告', quantity: 1, checked: true, verified: false },
+          { id: 'm2', name: 'X光片', quantity: 2, checked: true, verified: false },
+          { id: 'm3', name: '治疗同意书', quantity: 1, checked: false, verified: false },
+        ],
+        attachments: [],
+        remarks: '种植牙方案，需确认骨密度',
+        version: 1,
+      },
+      {
+        id: uuidv4(),
+        planNo: 'TP-2024-0002',
+        patientName: '李娜',
+        patientPhone: '13800138002',
+        store: '总店',
+        status: TreatmentPlanStatus.DRAFT,
+        urgencyLevel: UrgencyLevel.WARNING,
+        createdAt: addDays(-10),
+        deadline: addDays(5),
+        receptionistId: 'user-1',
+        materials: [
+          { id: 'm1', name: '口腔检查报告', quantity: 1, checked: true },
+          { id: 'm2', name: '洁牙记录', quantity: 1, checked: false },
+        ],
+        attachments: [],
+        remarks: '正畸咨询初诊',
+        version: 1,
+      },
+      {
+        id: uuidv4(),
+        planNo: 'TP-2024-0003',
+        patientName: '王芳',
+        patientPhone: '13800138003',
+        store: '总店',
+        status: TreatmentPlanStatus.VERIFICATION_REJECTED,
+        urgencyLevel: UrgencyLevel.OVERDUE,
+        createdAt: addDays(-20),
+        deadline: addDays(-2),
+        receptionistId: 'user-1',
+        dentistId: 'user-2',
+        materials: [
+          { id: 'm1', name: '口腔检查报告', quantity: 1, checked: true, verified: true, verifiedBy: 'user-2' },
+          { id: 'm2', name: '治疗方案', quantity: 1, checked: true, verified: false },
+        ],
+        attachments: [],
+        remarks: '根管治疗方案',
+        verificationOpinion: '材料不完整，缺少血常规检查',
+        verificationResult: 'reject',
+        verifiedAt: addDays(-3),
+        rejectReason: '缺少血常规检查报告',
+        version: 2,
+      },
+      {
+        id: uuidv4(),
+        planNo: 'TP-2024-0004',
+        patientName: '刘强',
+        patientPhone: '13800138004',
+        store: '总店',
+        status: TreatmentPlanStatus.PENDING_REVIEW,
+        urgencyLevel: UrgencyLevel.WARNING,
+        createdAt: addDays(-8),
+        deadline: addDays(3),
+        receptionistId: 'user-1',
+        dentistId: 'user-2',
+        materials: [
+          { id: 'm1', name: '口腔检查报告', quantity: 1, checked: true, verified: true, verifiedBy: 'user-2' },
+          { id: 'm2', name: '补牙材料清单', quantity: 3, checked: true, verified: true, verifiedBy: 'user-2' },
+        ],
+        attachments: [],
+        remarks: '3颗树脂补牙',
+        verificationOpinion: '材料齐全，方案可行',
+        verificationResult: 'pass',
+        verifiedAt: addDays(-1),
+        version: 2,
+      },
+      {
+        id: uuidv4(),
+        planNo: 'TP-2024-0005',
+        patientName: '陈静',
+        patientPhone: '13800138005',
+        store: '分店A',
+        status: TreatmentPlanStatus.ARCHIVED,
+        urgencyLevel: UrgencyLevel.NORMAL,
+        createdAt: addDays(-30),
+        deadline: addDays(-15),
+        receptionistId: 'user-4',
+        dentistId: 'user-5',
+        directorId: 'user-3',
+        materials: [
+          { id: 'm1', name: '洗牙记录', quantity: 1, checked: true, verified: true, verifiedBy: 'user-5' },
+        ],
+        attachments: [],
+        remarks: '常规洗牙保健',
+        verificationOpinion: '正常',
+        verificationResult: 'pass',
+        verifiedAt: addDays(-25),
+        reviewOpinion: '同意归档',
+        reviewResult: 'pass',
+        reviewedAt: addDays(-20),
+        version: 3,
+      },
+      {
+        id: uuidv4(),
+        planNo: 'TP-2024-0006',
+        patientName: '赵磊',
+        patientPhone: '13800138006',
+        store: '分店A',
+        status: TreatmentPlanStatus.REVIEW_REJECTED,
+        urgencyLevel: UrgencyLevel.OVERDUE,
+        createdAt: addDays(-25),
+        deadline: addDays(-5),
+        receptionistId: 'user-4',
+        dentistId: 'user-5',
+        materials: [
+          { id: 'm1', name: '口腔CT', quantity: 1, checked: true, verified: true, verifiedBy: 'user-5' },
+          { id: 'm2', name: '种植体型号确认', quantity: 1, checked: true, verified: true, verifiedBy: 'user-5' },
+        ],
+        attachments: [],
+        remarks: '种植牙修复方案',
+        verificationOpinion: '方案完整',
+        verificationResult: 'pass',
+        verifiedAt: addDays(-15),
+        reviewOpinion: '费用核算有误',
+        reviewResult: 'reject',
+        reviewedAt: addDays(-10),
+        rejectReason: '院长退回：费用核算有问题，请重新核对',
+        version: 3,
+      },
+    ];
+
+    this.plans = seedPlans.map(p => ({
+      ...p,
+      urgencyLevel: this.calculateUrgency(p.deadline),
+    }));
+  }
+
+  private calculateUrgency(deadline: string): UrgencyLevel {
+    const now = new Date();
+    const deadlineDate = new Date(deadline);
+    const diffMs = deadlineDate.getTime() - now.getTime();
+    const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+
+    if (diffDays <= 0) {
+      return UrgencyLevel.OVERDUE;
+    } else if (diffDays <= this.warningDays) {
+      return UrgencyLevel.WARNING;
+    }
+    return UrgencyLevel.NORMAL;
+  }
+
+  private getUserOrThrow(userId: string): User {
+    const user = this.authService.getUserById(userId);
+    if (!user) {
+      throw new NotFoundException('用户不存在');
+    }
+    return user;
+  }
+
+  private getPlanOrThrow(id: string): TreatmentPlan {
+    const plan = this.plans.find(p => p.id === id);
+    if (!plan) {
+      throw new NotFoundException('治疗计划单不存在');
+    }
+    return plan;
+  }
+
+  private checkVersion(plan: TreatmentPlan, version: number) {
+    if (plan.version !== version) {
+      throw new ConflictException('数据已过期，请刷新后重试');
+    }
+  }
+
+  private canEdit(plan: TreatmentPlan, user: User): boolean {
+    if (user.role === UserRole.DIRECTOR) return true;
+
+    if (plan.status === TreatmentPlanStatus.DRAFT ||
+        plan.status === TreatmentPlanStatus.VERIFICATION_REJECTED) {
+      return user.role === UserRole.RECEPTIONIST && plan.receptionistId === user.id;
+    }
+
+    if (plan.status === TreatmentPlanStatus.REVIEW_REJECTED) {
+      return user.role === UserRole.DENTIST;
+    }
+
+    return false;
+  }
+
+  findAll(query: QueryTreatmentPlanDto) {
+    let result = [...this.plans];
+
+    result = result.map(p => ({
+      ...p,
+      urgencyLevel: this.calculateUrgency(p.deadline),
+    }));
+
+    if (query.status) {
+      result = result.filter(p => p.status === query.status);
+    }
+
+    if (query.urgency) {
+      result = result.filter(p => p.urgencyLevel === query.urgency);
+    }
+
+    if (query.store) {
+      result = result.filter(p => p.store === query.store);
+    }
+
+    if (query.keyword) {
+      const kw = query.keyword.toLowerCase();
+      result = result.filter(p =>
+        p.patientName.toLowerCase().includes(kw) ||
+        p.planNo.toLowerCase().includes(kw) ||
+        p.patientPhone.includes(kw)
+      );
+    }
+
+    if (query.role && query.userId) {
+      const user = this.getUserOrThrow(query.userId);
+      result = result.filter(p => this.isPlanInUserQueue(p, user));
+    }
+
+    result.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+    const stats = this.calculateStats(result);
+
+    return {
+      list: result,
+      total: result.length,
+      stats,
+    };
+  }
+
+  private isPlanInUserQueue(plan: TreatmentPlan, user: User): boolean {
+    if (plan.store !== user.store && user.role !== UserRole.DIRECTOR) {
+      return false;
+    }
+
+    switch (user.role) {
+      case UserRole.RECEPTIONIST:
+        return [
+          TreatmentPlanStatus.DRAFT,
+          TreatmentPlanStatus.VERIFICATION_REJECTED,
+        ].includes(plan.status) && plan.receptionistId === user.id;
+
+      case UserRole.DENTIST:
+        return [
+          TreatmentPlanStatus.PENDING_VERIFICATION,
+          TreatmentPlanStatus.REVIEW_REJECTED,
+        ].includes(plan.status);
+
+      case UserRole.DIRECTOR:
+        return plan.status === TreatmentPlanStatus.PENDING_REVIEW;
+
+      default:
+        return false;
+    }
+  }
+
+  private calculateStats(plans: TreatmentPlan[]) {
+    const stats = {
+      total: plans.length,
+      draft: 0,
+      pendingVerification: 0,
+      verificationRejected: 0,
+      pendingReview: 0,
+      reviewRejected: 0,
+      archived: 0,
+      normal: 0,
+      warning: 0,
+      overdue: 0,
+    };
+
+    plans.forEach(p => {
+      switch (p.status) {
+        case TreatmentPlanStatus.DRAFT: stats.draft++; break;
+        case TreatmentPlanStatus.PENDING_VERIFICATION: stats.pendingVerification++; break;
+        case TreatmentPlanStatus.VERIFICATION_REJECTED: stats.verificationRejected++; break;
+        case TreatmentPlanStatus.PENDING_REVIEW: stats.pendingReview++; break;
+        case TreatmentPlanStatus.REVIEW_REJECTED: stats.reviewRejected++; break;
+        case TreatmentPlanStatus.ARCHIVED: stats.archived++; break;
+      }
+      switch (p.urgencyLevel) {
+        case UrgencyLevel.NORMAL: stats.normal++; break;
+        case UrgencyLevel.WARNING: stats.warning++; break;
+        case UrgencyLevel.OVERDUE: stats.overdue++; break;
+      }
+    });
+
+    return stats;
+  }
+
+  findOne(id: string, userId: string) {
+    const plan = this.getPlanOrThrow(id);
+    const user = this.getUserOrThrow(userId);
+
+    const planWithUrgency = {
+      ...plan,
+      urgencyLevel: this.calculateUrgency(plan.deadline),
+    };
+
+    const auditLogs = this.auditService.getLogsByPlanId(id);
+
+    return {
+      plan: planWithUrgency,
+      auditLogs,
+      canEdit: this.canEdit(planWithUrgency, user),
+      availableActions: this.getAvailableActions(planWithUrgency, user),
+    };
+  }
+
+  private getAvailableActions(plan: TreatmentPlan, user: User): string[] {
+    const actions: string[] = [];
+
+    if (plan.store !== user.store && user.role !== UserRole.DIRECTOR) {
+      return actions;
+    }
+
+    if (this.canEdit(plan, user)) {
+      actions.push('edit');
+      actions.push('add_attachment');
+    }
+
+    switch (user.role) {
+      case UserRole.RECEPTIONIST:
+        if (plan.receptionistId === user.id &&
+            (plan.status === TreatmentPlanStatus.DRAFT ||
+             plan.status === TreatmentPlanStatus.VERIFICATION_REJECTED)) {
+          actions.push('submit_verification');
+        }
+        break;
+
+      case UserRole.DENTIST:
+        if (plan.status === TreatmentPlanStatus.PENDING_VERIFICATION) {
+          actions.push('verify_pass');
+          actions.push('verify_reject');
+        }
+        if (plan.status === TreatmentPlanStatus.REVIEW_REJECTED) {
+          actions.push('submit_review');
+        }
+        break;
+
+      case UserRole.DIRECTOR:
+        if (plan.status === TreatmentPlanStatus.PENDING_REVIEW) {
+          actions.push('review_pass');
+          actions.push('review_reject');
+        }
+        break;
+    }
+
+    return actions;
+  }
+
+  create(dto: CreateTreatmentPlanDto) {
+    const user = this.getUserOrThrow(dto.userId);
+
+    if (user.role !== UserRole.RECEPTIONIST) {
+      throw new ForbiddenException('只有前台顾问可以创建治疗计划单');
+    }
+
+    const planNo = `TP-${new Date().getFullYear()}-${String(this.plans.length + 1).padStart(4, '0')}`;
+
+    const materials: MaterialItem[] = (dto.materials || []).map((m: any) => ({
+      id: uuidv4(),
+      name: m.name,
+      quantity: m.quantity || 1,
+      checked: false,
+    }));
+
+    const plan: TreatmentPlan = {
+      id: uuidv4(),
+      planNo,
+      patientName: dto.patientName,
+      patientPhone: dto.patientPhone,
+      store: user.store,
+      status: TreatmentPlanStatus.DRAFT,
+      urgencyLevel: this.calculateUrgency(dto.deadline),
+      createdAt: new Date().toISOString(),
+      deadline: dto.deadline,
+      receptionistId: user.id,
+      materials,
+      attachments: [],
+      remarks: dto.remarks || '',
+      version: 1,
+    };
+
+    this.plans.unshift(plan);
+
+    this.auditService.addLog({
+      planId: plan.id,
+      user,
+      action: '创建计划单',
+      fromStatus: undefined,
+      toStatus: TreatmentPlanStatus.DRAFT,
+      details: `创建治疗计划单 ${planNo}`,
+    });
+
+    return plan;
+  }
+
+  update(id: string, dto: UpdateTreatmentPlanDto, userId: string) {
+    const plan = this.getPlanOrThrow(id);
+    const user = this.getUserOrThrow(userId);
+
+    if (!this.canEdit(plan, user)) {
+      throw new ForbiddenException('您没有权限编辑此治疗计划单');
+    }
+
+    if (dto.version !== undefined) {
+      this.checkVersion(plan, dto.version);
+    }
+
+    const originalStatus = plan.status;
+
+    if (dto.materials) {
+      plan.materials = dto.materials.map((m: any) => ({
+        id: m.id || uuidv4(),
+        name: m.name,
+        quantity: m.quantity || 1,
+        checked: m.checked ?? false,
+        verified: m.verified || false,
+        verifiedBy: m.verifiedBy,
+        verifiedAt: m.verifiedAt,
+      }));
+    }
+
+    if (dto.patientName !== undefined) plan.patientName = dto.patientName;
+    if (dto.patientPhone !== undefined) plan.patientPhone = dto.patientPhone;
+    if (dto.deadline !== undefined) {
+      plan.deadline = dto.deadline;
+      plan.urgencyLevel = this.calculateUrgency(dto.deadline);
+    }
+    if (dto.remarks !== undefined) plan.remarks = dto.remarks;
+
+    plan.version++;
+
+    this.auditService.addLog({
+      planId: plan.id,
+      user,
+      action: '编辑计划单',
+      fromStatus: originalStatus,
+      toStatus: plan.status,
+      details: '更新了治疗计划单信息',
+    });
+
+    return { ...plan, urgencyLevel: this.calculateUrgency(plan.deadline) };
+  }
+
+  submitForVerification(id: string, dto: SubmitVerificationDto) {
+    const plan = this.getPlanOrThrow(id);
+    const user = this.getUserOrThrow(dto.userId);
+
+    this.checkVersion(plan, dto.version);
+
+    if (user.role !== UserRole.RECEPTIONIST) {
+      throw new ForbiddenException('只有前台顾问可以提交核验');
+    }
+
+    if (plan.receptionistId !== user.id) {
+      throw new ForbiddenException('只能提交自己负责的计划单');
+    }
+
+    if (![TreatmentPlanStatus.DRAFT, TreatmentPlanStatus.VERIFICATION_REJECTED].includes(plan.status)) {
+      throw new BadRequestException('当前状态不可提交核验');
+    }
+
+    const allChecked = plan.materials.length > 0 && plan.materials.every(m => m.checked);
+    if (!allChecked) {
+      throw new BadRequestException('请先确认所有材料已齐备');
+    }
+
+    const fromStatus = plan.status;
+    plan.status = TreatmentPlanStatus.PENDING_VERIFICATION;
+    plan.version++;
+
+    this.auditService.addLog({
+      planId: plan.id,
+      user,
+      action: '提交核验',
+      fromStatus,
+      toStatus: TreatmentPlanStatus.PENDING_VERIFICATION,
+      details: '前台提交核验，等待医生核验',
+    });
+
+    return { ...plan, urgencyLevel: this.calculateUrgency(plan.deadline) };
+  }
+
+  verifyPlan(id: string, dto: VerifyTreatmentPlanDto) {
+    const plan = this.getPlanOrThrow(id);
+    const user = this.getUserOrThrow(dto.userId);
+
+    this.checkVersion(plan, dto.version);
+
+    if (user.role !== UserRole.DENTIST) {
+      throw new ForbiddenException('只有口腔医生可以核验');
+    }
+
+    if (plan.status !== TreatmentPlanStatus.PENDING_VERIFICATION) {
+      throw new BadRequestException('当前状态不可核验');
+    }
+
+    const fromStatus = plan.status;
+
+    if (dto.verifiedMaterials) {
+      plan.materials = plan.materials.map(m => ({
+        ...m,
+        verified: dto.verifiedMaterials.includes(m.id) ? true : m.verified,
+        verifiedBy: dto.verifiedMaterials.includes(m.id) ? user.id : m.verifiedBy,
+        verifiedAt: dto.verifiedMaterials.includes(m.id) ? new Date().toISOString() : m.verifiedAt,
+      }));
+    }
+
+    plan.verificationOpinion = dto.opinion || '';
+    plan.verificationResult = dto.result;
+    plan.verifiedAt = new Date().toISOString();
+    plan.dentistId = user.id;
+
+    if (dto.result === 'pass') {
+      const allVerified = plan.materials.length > 0 && plan.materials.every(m => m.verified);
+      if (!allVerified) {
+        throw new BadRequestException('通过核验前请确认所有材料已核验');
+      }
+      plan.status = TreatmentPlanStatus.PENDING_REVIEW;
+      plan.rejectReason = undefined;
+
+      this.auditService.addLog({
+        planId: plan.id,
+        user,
+        action: '核验通过',
+        fromStatus,
+        toStatus: TreatmentPlanStatus.PENDING_REVIEW,
+        details: `核验通过，意见：${dto.opinion || '无'}`,
+      });
+    } else {
+      if (!dto.rejectReason) {
+        throw new BadRequestException('退回时必须填写退回原因');
+      }
+      plan.status = TreatmentPlanStatus.VERIFICATION_REJECTED;
+      plan.rejectReason = dto.rejectReason;
+
+      this.auditService.addLog({
+        planId: plan.id,
+        user,
+        action: '核验退回',
+        fromStatus,
+        toStatus: TreatmentPlanStatus.VERIFICATION_REJECTED,
+        details: `核验退回，原因：${dto.rejectReason}`,
+      });
+    }
+
+    plan.version++;
+
+    return { ...plan, urgencyLevel: this.calculateUrgency(plan.deadline) };
+  }
+
+  submitForReview(id: string, dto: SubmitReviewDto) {
+    const plan = this.getPlanOrThrow(id);
+    const user = this.getUserOrThrow(dto.userId);
+
+    this.checkVersion(plan, dto.version);
+
+    if (user.role !== UserRole.DENTIST) {
+      throw new ForbiddenException('只有口腔医生可以提交复核');
+    }
+
+    if (plan.status !== TreatmentPlanStatus.REVIEW_REJECTED) {
+      throw new BadRequestException('当前状态不可提交复核');
+    }
+
+    const fromStatus = plan.status;
+    plan.status = TreatmentPlanStatus.PENDING_REVIEW;
+    plan.rejectReason = undefined;
+    plan.version++;
+
+    this.auditService.addLog({
+      planId: plan.id,
+      user,
+      action: '重新提交复核',
+      fromStatus,
+      toStatus: TreatmentPlanStatus.PENDING_REVIEW,
+      details: '医生修改后重新提交院长复核',
+    });
+
+    return { ...plan, urgencyLevel: this.calculateUrgency(plan.deadline) };
+  }
+
+  reviewPlan(id: string, dto: ReviewTreatmentPlanDto) {
+    const plan = this.getPlanOrThrow(id);
+    const user = this.getUserOrThrow(dto.userId);
+
+    this.checkVersion(plan, dto.version);
+
+    if (user.role !== UserRole.DIRECTOR) {
+      throw new ForbiddenException('只有门店院长可以复核');
+    }
+
+    if (plan.status !== TreatmentPlanStatus.PENDING_REVIEW) {
+      throw new BadRequestException('当前状态不可复核');
+    }
+
+    const fromStatus = plan.status;
+
+    plan.reviewOpinion = dto.opinion || '';
+    plan.reviewResult = dto.result;
+    plan.reviewedAt = new Date().toISOString();
+    plan.directorId = user.id;
+
+    if (dto.result === 'pass') {
+      plan.status = TreatmentPlanStatus.ARCHIVED;
+      plan.rejectReason = undefined;
+
+      this.auditService.addLog({
+        planId: plan.id,
+        user,
+        action: '复核通过并归档',
+        fromStatus,
+        toStatus: TreatmentPlanStatus.ARCHIVED,
+        details: `复核通过并归档，意见：${dto.opinion || '无'}`,
+      });
+    } else {
+      if (!dto.rejectReason) {
+        throw new BadRequestException('退回时必须填写退回原因');
+      }
+      plan.status = TreatmentPlanStatus.REVIEW_REJECTED;
+      plan.rejectReason = dto.rejectReason;
+
+      this.auditService.addLog({
+        planId: plan.id,
+        user,
+        action: '复核退回',
+        fromStatus,
+        toStatus: TreatmentPlanStatus.REVIEW_REJECTED,
+        details: `复核退回，原因：${dto.rejectReason}`,
+      });
+    }
+
+    plan.version++;
+
+    return { ...plan, urgencyLevel: this.calculateUrgency(plan.deadline) };
+  }
+
+  addAttachment(id: string, dto: AddAttachmentDto) {
+    const plan = this.getPlanOrThrow(id);
+    const user = this.getUserOrThrow(dto.userId);
+
+    if (!this.canEdit(plan, user)) {
+      throw new ForbiddenException('您没有权限添加附件');
+    }
+
+    const attachment: Attachment = {
+      id: uuidv4(),
+      name: dto.name,
+      type: dto.type,
+      uploadedBy: user.id,
+      uploadedAt: new Date().toISOString(),
+    };
+
+    plan.attachments.push(attachment);
+    plan.version++;
+
+    this.auditService.addLog({
+      planId: plan.id,
+      user,
+      action: '添加附件',
+      details: `添加附件：${dto.name}`,
+    });
+
+    return attachment;
+  }
+
+  removeAttachment(id: string, attachmentId: string, userId: string) {
+    const plan = this.getPlanOrThrow(id);
+    const user = this.getUserOrThrow(userId);
+
+    if (!this.canEdit(plan, user)) {
+      throw new ForbiddenException('您没有权限删除附件');
+    }
+
+    const attachment = plan.attachments.find(a => a.id === attachmentId);
+    if (attachment) {
+      plan.attachments = plan.attachments.filter(a => a.id !== attachmentId);
+      plan.version++;
+
+      this.auditService.addLog({
+        planId: plan.id,
+        user,
+        action: '删除附件',
+        details: `删除附件：${attachment.name}`,
+      });
+    }
+
+    return { success: true };
+  }
+
+  batchSubmitVerification(dto: BatchOperationDto) {
+    const user = this.getUserOrThrow(dto.userId);
+
+    if (user.role !== UserRole.RECEPTIONIST) {
+      throw new ForbiddenException('只有前台顾问可以批量提交核验');
+    }
+
+    const results: { id: string; success: boolean; message?: string }[] = [];
+
+    for (const planId of dto.planIds) {
+      try {
+        const plan = this.getPlanOrThrow(planId);
+        if (plan.receptionistId !== user.id) {
+          results.push({ id: planId, success: false, message: '不是您负责的计划单' });
+          continue;
+        }
+        if (![TreatmentPlanStatus.DRAFT, TreatmentPlanStatus.VERIFICATION_REJECTED].includes(plan.status)) {
+          results.push({ id: planId, success: false, message: '状态不允许提交' });
+          continue;
+        }
+        const allChecked = plan.materials.length > 0 && plan.materials.every(m => m.checked);
+        if (!allChecked) {
+          results.push({ id: planId, success: false, message: '材料未确认齐全' });
+          continue;
+        }
+
+        const fromStatus = plan.status;
+        plan.status = TreatmentPlanStatus.PENDING_VERIFICATION;
+        plan.version++;
+
+        this.auditService.addLog({
+          planId: plan.id,
+          user,
+          action: '批量提交核验',
+          fromStatus,
+          toStatus: TreatmentPlanStatus.PENDING_VERIFICATION,
+          details: '批量提交核验',
+        });
+
+        results.push({ id: planId, success: true });
+      } catch (e) {
+        results.push({ id: planId, success: false, message: (e as Error).message });
+      }
+    }
+
+    const successCount = results.filter(r => r.success).length;
+
+    return {
+      results,
+      successCount,
+      failCount: results.length - successCount,
+    };
+  }
+
+  batchVerify(dto: BatchOperationDto & { result: 'pass' | 'reject' }) {
+    const user = this.getUserOrThrow(dto.userId);
+
+    if (user.role !== UserRole.DENTIST) {
+      throw new ForbiddenException('只有口腔医生可以批量核验');
+    }
+
+    const results: { id: string; success: boolean; message?: string }[] = [];
+
+    for (const planId of dto.planIds) {
+      try {
+        const plan = this.getPlanOrThrow(planId);
+        if (plan.status !== TreatmentPlanStatus.PENDING_VERIFICATION) {
+          results.push({ id: planId, success: false, message: '状态不允许核验' });
+          continue;
+        }
+
+        if (dto.result === 'pass') {
+          plan.materials = plan.materials.map(m => ({
+            ...m,
+            verified: true,
+            verifiedBy: user.id,
+            verifiedAt: new Date().toISOString(),
+          }));
+          plan.status = TreatmentPlanStatus.PENDING_REVIEW;
+          plan.verificationResult = 'pass';
+          plan.verificationOpinion = dto.remark || '批量核验通过';
+          plan.verifiedAt = new Date().toISOString();
+          plan.dentistId = user.id;
+          plan.rejectReason = undefined;
+        } else {
+          if (!dto.remark) {
+            results.push({ id: planId, success: false, message: '批量退回需要填写原因' });
+            continue;
+          }
+          plan.status = TreatmentPlanStatus.VERIFICATION_REJECTED;
+          plan.verificationResult = 'reject';
+          plan.verificationOpinion = dto.remark;
+          plan.verifiedAt = new Date().toISOString();
+          plan.dentistId = user.id;
+          plan.rejectReason = dto.remark;
+        }
+
+        plan.version++;
+
+        this.auditService.addLog({
+          planId: plan.id,
+          user,
+          action: `批量核验${dto.result === 'pass' ? '通过' : '退回'}`,
+          details: dto.remark || '批量处理',
+        });
+
+        results.push({ id: planId, success: true });
+      } catch (e) {
+        results.push({ id: planId, success: false, message: (e as Error).message });
+      }
+    }
+
+    const successCount = results.filter(r => r.success).length;
+
+    return {
+      results,
+      successCount,
+      failCount: results.length - successCount,
+    };
+  }
+
+  batchReview(dto: BatchOperationDto & { result: 'pass' | 'reject' }) {
+    const user = this.getUserOrThrow(dto.userId);
+
+    if (user.role !== UserRole.DIRECTOR) {
+      throw new ForbiddenException('只有门店院长可以批量复核');
+    }
+
+    const results: { id: string; success: boolean; message?: string }[] = [];
+
+    for (const planId of dto.planIds) {
+      try {
+        const plan = this.getPlanOrThrow(planId);
+        if (plan.status !== TreatmentPlanStatus.PENDING_REVIEW) {
+          results.push({ id: planId, success: false, message: '状态不允许复核' });
+          continue;
+        }
+
+        plan.reviewResult = dto.result;
+        plan.reviewOpinion = dto.remark || (dto.result === 'pass' ? '批量复核通过' : '');
+        plan.reviewedAt = new Date().toISOString();
+        plan.directorId = user.id;
+
+        if (dto.result === 'pass') {
+          plan.status = TreatmentPlanStatus.ARCHIVED;
+          plan.rejectReason = undefined;
+        } else {
+          if (!dto.remark) {
+            results.push({ id: planId, success: false, message: '批量退回需要填写原因' });
+            continue;
+          }
+          plan.status = TreatmentPlanStatus.REVIEW_REJECTED;
+          plan.rejectReason = dto.remark;
+        }
+
+        plan.version++;
+
+        this.auditService.addLog({
+          planId: plan.id,
+          user,
+          action: `批量复核${dto.result === 'pass' ? '通过归档' : '退回'}`,
+          details: dto.remark || '批量处理',
+        });
+
+        results.push({ id: planId, success: true });
+      } catch (e) {
+        results.push({ id: planId, success: false, message: (e as Error).message });
+      }
+    }
+
+    const successCount = results.filter(r => r.success).length;
+
+    return {
+      results,
+      successCount,
+      failCount: results.length - successCount,
+    };
+  }
+
+  getStats(userId: string) {
+    const user = this.getUserOrThrow(userId);
+    const userPlans = this.plans.filter(p => {
+      if (user.role === UserRole.DIRECTOR) return true;
+      return p.store === user.store;
+    });
+
+    return this.calculateStats(
+      userPlans.map(p => ({ ...p, urgencyLevel: this.calculateUrgency(p.deadline) }))
+    );
+  }
+}
