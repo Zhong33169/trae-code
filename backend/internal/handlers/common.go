@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/gofiber/fiber/v2"
 )
 
@@ -227,4 +228,43 @@ func scanConsultationRows(rows *sql.Rows) ([]models.Consultation, error) {
 	return list, rows.Err()
 }
 
-var _ = time.Now()
+type FailRecordParams struct {
+	ConsultationID string
+	OperatorID     string
+	OperatorName   string
+	OperatorRole   string
+	OperatorRoleName string
+	Action         string
+	ActionName     string
+	FromStatus     string
+	Version        int
+	RejectReason   string
+	Opinion        string
+}
+
+func WriteFailRecord(p FailRecordParams) error {
+	now := time.Now()
+	action := "fail_" + p.Action
+	actionName := "[失败]" + p.ActionName
+
+	fromStatusName := ""
+	if p.FromStatus != "" {
+		fromStatusName = utils.StatusName(p.FromStatus)
+	}
+
+	_, err := models.DB.Exec(`
+		INSERT INTO history_records (
+			id, consultation_id, operator_id, operator_name, operator_role,
+			operator_role_name, action, action_name, from_status, from_status_name,
+			to_status, to_status_name, opinion, reject_reason, version, created_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`,
+		uuid.New().String(), p.ConsultationID, p.OperatorID, p.OperatorName, p.OperatorRole, p.OperatorRoleName,
+		action, actionName,
+		p.FromStatus, fromStatusName,
+		p.FromStatus, fromStatusName,
+		p.Opinion, p.RejectReason,
+		p.Version, now,
+	)
+	return err
+}

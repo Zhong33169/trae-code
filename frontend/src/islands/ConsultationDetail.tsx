@@ -64,8 +64,11 @@ export default function ConsultationDetail({ consultationId }: Props) {
     setTimeout(() => setSuccessMsg(''), 3000);
   };
 
-  const handleAction = async (action: string, formData: any) => {
-    if (!id || !data) return;
+  const [actionError, setActionError] = useState('');
+
+  const handleAction = async (action: string, formData: any): Promise<boolean> => {
+    if (!id || !data) return false;
+    setActionError('');
     try {
       let result: any;
       switch (action) {
@@ -194,9 +197,11 @@ export default function ConsultationDetail({ consultationId }: Props) {
       }
       showSuccess(result.message || '操作成功');
       loadData();
+      return true;
     } catch (err: any) {
-      setError(err.message || '操作失败');
-      setTimeout(() => setError(''), 5000);
+      setActionError(err.message || '操作失败');
+      loadData();
+      return false;
     }
   };
 
@@ -339,6 +344,7 @@ export default function ConsultationDetail({ consultationId }: Props) {
             consultation={data}
             userRole={userRole}
             onAction={handleAction}
+            error={actionError}
           />
 
           {data.has_appeal && (

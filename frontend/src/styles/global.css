@@ -491,6 +491,21 @@ table .action-buttons {
 .timeline-dot.danger { background: #ef4444; box-shadow: 0 0 0 2px #ef4444; }
 .timeline-dot.info { background: #3b82f6; box-shadow: 0 0 0 2px #3b82f6; }
 .timeline-dot.purple { background: #8b5cf6; box-shadow: 0 0 0 2px #8b5cf6; }
+.timeline-dot.failed {
+  background: #9ca3af;
+  box-shadow: 0 0 0 2px #9ca3af;
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+}
+.timeline-item-failed {
+  opacity: 0.75;
+}
+.timeline-item-failed .timeline-action {
+  color: #6b7280;
+}
 
 .timeline-header {
   display: flex;

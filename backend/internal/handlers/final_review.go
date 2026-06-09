@@ -5,6 +5,7 @@ import (
 	"consultation-system/internal/models"
 	"consultation-system/internal/utils"
 	"database/sql"
+	"fmt"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -21,10 +22,6 @@ type FinalReviewRequest struct {
 func FinalReviewConsultation(c *fiber.Ctx) error {
 	user := middleware.GetCurrentUser(c)
 	id := c.Params("id")
-
-	if user.Role != models.RoleDirector {
-		return c.Status(403).JSON(fiber.Map{"error": "只有医务部复核负责人可以执行复核操作"})
-	}
 
 	var req FinalReviewRequest
 	if err := c.BodyParser(&req); err != nil {
@@ -46,7 +43,37 @@ func FinalReviewConsultation(c *fiber.Ctx) error {
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
 
+	if user.Role != models.RoleDirector {
+		_ = WriteFailRecord(FailRecordParams{
+			ConsultationID:   id,
+			OperatorID:       user.UserID,
+			OperatorName:     user.UserName,
+			OperatorRole:     user.Role,
+			OperatorRoleName: user.RoleName,
+			Action:           "final_review",
+			ActionName:       "复核操作",
+			FromStatus:       status,
+			Version:          version,
+			RejectReason:     "只有医务部复核负责人可以执行复核操作",
+			Opinion:          "",
+		})
+		return c.Status(403).JSON(fiber.Map{"error": "只有医务部复核负责人可以执行复核操作"})
+	}
+
 	if status != models.StatusReviewPassed && status != models.StatusUnderFinal {
+		_ = WriteFailRecord(FailRecordParams{
+			ConsultationID:   id,
+			OperatorID:       user.UserID,
+			OperatorName:     user.UserName,
+			OperatorRole:     user.Role,
+			OperatorRoleName: user.RoleName,
+			Action:           "final_review",
+			ActionName:       "复核操作",
+			FromStatus:       status,
+			Version:          version,
+			RejectReason:     fmt.Sprintf("当前状态不允许复核: %s", status),
+			Opinion:          "",
+		})
 		return c.Status(400).JSON(fiber.Map{
 			"error":          "当前状态不允许复核",
 			"current_status": status,
@@ -54,6 +81,19 @@ func FinalReviewConsultation(c *fiber.Ctx) error {
 	}
 
 	if req.Version != version {
+		_ = WriteFailRecord(FailRecordParams{
+			ConsultationID:   id,
+			OperatorID:       user.UserID,
+			OperatorName:     user.UserName,
+			OperatorRole:     user.Role,
+			OperatorRoleName: user.RoleName,
+			Action:           "final_review",
+			ActionName:       "复核操作",
+			FromStatus:       status,
+			Version:          version,
+			RejectReason:     fmt.Sprintf("版本冲突，当前版本: %d，提交版本: %d", version, req.Version),
+			Opinion:          "",
+		})
 		return c.Status(409).JSON(fiber.Map{
 			"error":   "版本冲突，请刷新后重试",
 			"version": version,
@@ -74,6 +114,19 @@ func FinalReviewConsultation(c *fiber.Ctx) error {
 		action = "conflict"
 		actionName = "状态冲突"
 		if req.RejectReason == "" {
+			_ = WriteFailRecord(FailRecordParams{
+				ConsultationID:   id,
+				OperatorID:       user.UserID,
+				OperatorName:     user.UserName,
+				OperatorRole:     user.Role,
+				OperatorRoleName: user.RoleName,
+				Action:           action,
+				ActionName:       actionName,
+				FromStatus:       status,
+				Version:          version,
+				RejectReason:     "状态冲突必须填写原因",
+				Opinion:          req.Opinion,
+			})
 			return c.Status(400).JSON(fiber.Map{"error": "状态冲突必须填写原因"})
 		}
 	case "reject":
@@ -81,9 +134,35 @@ func FinalReviewConsultation(c *fiber.Ctx) error {
 		action = "final_reject"
 		actionName = "复核驳回"
 		if req.RejectReason == "" {
+			_ = WriteFailRecord(FailRecordParams{
+				ConsultationID:   id,
+				OperatorID:       user.UserID,
+				OperatorName:     user.UserName,
+				OperatorRole:     user.Role,
+				OperatorRoleName: user.RoleName,
+				Action:           action,
+				ActionName:       actionName,
+				FromStatus:       status,
+				Version:          version,
+				RejectReason:     "复核驳回必须填写原因",
+				Opinion:          req.Opinion,
+			})
 			return c.Status(400).JSON(fiber.Map{"error": "复核驳回必须填写原因"})
 		}
 	default:
+		_ = WriteFailRecord(FailRecordParams{
+			ConsultationID:   id,
+			OperatorID:       user.UserID,
+			OperatorName:     user.UserName,
+			OperatorRole:     user.Role,
+			OperatorRoleName: user.RoleName,
+			Action:           "final_review",
+			ActionName:       "复核操作",
+			FromStatus:       status,
+			Version:          version,
+			RejectReason:     fmt.Sprintf("无效的复核操作: %s", req.Action),
+			Opinion:          "",
+		})
 		return c.Status(400).JSON(fiber.Map{"error": "无效的复核操作"})
 	}
 
@@ -152,10 +231,6 @@ func ArchiveConsultation(c *fiber.Ctx) error {
 	user := middleware.GetCurrentUser(c)
 	id := c.Params("id")
 
-	if user.Role != models.RoleDirector {
-		return c.Status(403).JSON(fiber.Map{"error": "只有医务部复核负责人可以执行归档操作"})
-	}
-
 	var req ArchiveRequest
 	if err := c.BodyParser(&req); err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": "请求参数无效"})
@@ -178,8 +253,38 @@ func ArchiveConsultation(c *fiber.Ctx) error {
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
 
+	if user.Role != models.RoleDirector {
+		_ = WriteFailRecord(FailRecordParams{
+			ConsultationID:   id,
+			OperatorID:       user.UserID,
+			OperatorName:     user.UserName,
+			OperatorRole:     user.Role,
+			OperatorRoleName: user.RoleName,
+			Action:           "archive",
+			ActionName:       "复核归档",
+			FromStatus:       status,
+			Version:          version,
+			RejectReason:     "只有医务部复核负责人可以执行归档操作",
+			Opinion:          "",
+		})
+		return c.Status(403).JSON(fiber.Map{"error": "只有医务部复核负责人可以执行归档操作"})
+	}
+
 	if status != models.StatusUnderFinal && status != models.StatusReviewPassed &&
 		status != models.StatusAppealResolved && status != models.StatusAppealAccepted {
+		_ = WriteFailRecord(FailRecordParams{
+			ConsultationID:   id,
+			OperatorID:       user.UserID,
+			OperatorName:     user.UserName,
+			OperatorRole:     user.Role,
+			OperatorRoleName: user.RoleName,
+			Action:           "archive",
+			ActionName:       "复核归档",
+			FromStatus:       status,
+			Version:          version,
+			RejectReason:     fmt.Sprintf("当前状态不允许归档: %s", status),
+			Opinion:          "",
+		})
 		return c.Status(400).JSON(fiber.Map{
 			"error":          "当前状态不允许归档",
 			"current_status": status,
@@ -187,6 +292,19 @@ func ArchiveConsultation(c *fiber.Ctx) error {
 	}
 
 	if req.Version != version {
+		_ = WriteFailRecord(FailRecordParams{
+			ConsultationID:   id,
+			OperatorID:       user.UserID,
+			OperatorName:     user.UserName,
+			OperatorRole:     user.Role,
+			OperatorRoleName: user.RoleName,
+			Action:           "archive",
+			ActionName:       "复核归档",
+			FromStatus:       status,
+			Version:          version,
+			RejectReason:     fmt.Sprintf("版本冲突，当前版本: %d，提交版本: %d", version, req.Version),
+			Opinion:          "",
+		})
 		return c.Status(409).JSON(fiber.Map{
 			"error":   "版本冲突，请刷新后重试",
 			"version": version,
@@ -195,6 +313,19 @@ func ArchiveConsultation(c *fiber.Ctx) error {
 
 	missing := utils.CheckRequiredEvidence(evidenceList)
 	if len(missing) > 0 {
+		_ = WriteFailRecord(FailRecordParams{
+			ConsultationID:   id,
+			OperatorID:       user.UserID,
+			OperatorName:     user.UserName,
+			OperatorRole:     user.Role,
+			OperatorRoleName: user.RoleName,
+			Action:           "archive",
+			ActionName:       "复核归档",
+			FromStatus:       status,
+			Version:          version,
+			RejectReason:     fmt.Sprintf("缺少必填证据材料: %v", missing),
+			Opinion:          req.Opinion,
+		})
 		return c.Status(400).JSON(fiber.Map{
 			"error":            "缺少必填证据材料，无法归档",
 			"missing_evidence": missing,

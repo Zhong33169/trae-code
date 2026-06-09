@@ -4,7 +4,8 @@ import { parseEvidenceList } from '../lib/types';
 interface Props {
   consultation: any;
   userRole: string;
-  onAction: (action: string, data: any) => void;
+  onAction: (action: string, data: any) => Promise<boolean> | void;
+  error?: string;
 }
 
 interface ActionConfig {
@@ -15,7 +16,7 @@ interface ActionConfig {
   description: string;
 }
 
-export default function ActionPanel({ consultation, userRole, onAction }: Props) {
+export default function ActionPanel({ consultation, userRole, onAction, error }: Props) {
   const [action, setAction] = useState<string | null>(null);
   const [opinion, setOpinion] = useState('');
   const [rejectReason, setRejectReason] = useState('');
@@ -24,6 +25,7 @@ export default function ActionPanel({ consultation, userRole, onAction }: Props)
     parseEvidenceList(consultation.evidence_list)
   );
   const [newEvidence, setNewEvidence] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
   const availableEvidenceOptions = [
     '病历记录', '实验室检查', '影像学检查', '心电图',
@@ -210,8 +212,8 @@ export default function ActionPanel({ consultation, userRole, onAction }: Props)
     setAppealReason('');
   };
 
-  const handleConfirm = () => {
-    if (!action) return;
+  const handleConfirm = async () => {
+    if (!action || submitting) return;
 
     const formData: any = {};
 
@@ -228,8 +230,22 @@ export default function ActionPanel({ consultation, userRole, onAction }: Props)
       formData.opinion = opinion;
     }
 
-    onAction(action, formData);
-    handleCancel();
+    setSubmitting(true);
+    const result = onAction(action, formData);
+
+    if (result && typeof result.then === 'function') {
+      try {
+        const success = await result;
+        if (success) {
+          handleCancel();
+        }
+      } catch {
+        // 错误由父组件处理，保留表单
+      }
+    } else {
+      handleCancel();
+    }
+    setSubmitting(false);
   };
 
   const addEvidence = () => {
@@ -387,15 +403,22 @@ export default function ActionPanel({ consultation, userRole, onAction }: Props)
               />
             </div>
 
+            {error && (
+              <div className="alert alert-error" style={{ marginBottom: 12, fontSize: 13 }}>
+                {error}
+              </div>
+            )}
+
             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-              <button className="btn btn-sm" onClick={handleCancel}>
+              <button className="btn btn-sm" onClick={handleCancel} disabled={submitting}>
                 取消
               </button>
               <button
                 className={`btn btn-sm ${currentActionConfig ? getActionButtonClass(currentActionConfig.type).replace('btn-sm ', '') : 'btn-primary'}`}
                 onClick={handleConfirm}
+                disabled={submitting}
               >
-                确认
+                {submitting ? '提交中...' : '确认'}
               </button>
             </div>
           </div>
