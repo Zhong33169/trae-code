@@ -106,7 +106,8 @@ class OrderValidationService:
 
         if AnomalyType.MISSING_MATERIALS in anomalies:
             result.blocking_errors.append(
-                f'材料缺失：{cls._extract_material_remark(order.anomaly_remark)}'
+                f'材料缺失：{cls._extract_material_remark(order.anomaly_remark)}，'
+                f'提交前必须补齐所有必备材料'
             )
             result.passed = False
 
@@ -123,16 +124,19 @@ class OrderValidationService:
             duplicate_count = GlassesOrder.objects.filter(
                 batch_no=order.batch_no
             ).exclude(id=order.id).count()
-            result.warnings.append(
-                f'重复批次提示：批次号「{order.batch_no}」下已有 {duplicate_count} 条订单，'
-                f'请确认是否为同一批次的不同订单'
+            result.blocking_errors.append(
+                f'重复批次：批次号「{order.batch_no}」下已有 {duplicate_count} 条订单，'
+                f'请确认是否为同一批次的不同订单，核实后再提交'
             )
+            result.passed = False
 
         if AnomalyType.OVERDUE in anomalies:
             age_days = (timezone.now() - order.created_at).days
-            result.warnings.append(
-                f'订单超时提醒：订单创建已 {age_days} 天，超过 3 天处理时限，请尽快处理'
+            result.blocking_errors.append(
+                f'订单超时：创建已 {age_days} 天，超过 3 天处理时限，'
+                f'需登记超时说明后方可提交'
             )
+            result.passed = False
 
         if not order.patient_name:
             result.blocking_errors.append('缺少患者姓名')
@@ -143,7 +147,7 @@ class OrderValidationService:
             result.passed = False
 
         if not order.lens_type and not order.lens_power and not order.frame_model:
-            result.warnings.append('配镜信息不完整，建议补充镜片类型、度数和镜架型号')
+            result.info.append('配镜信息不完整，建议补充镜片类型、度数和镜架型号')
 
         return result
 
@@ -156,7 +160,8 @@ class OrderValidationService:
 
         if AnomalyType.MISSING_MATERIALS in anomalies:
             result.blocking_errors.append(
-                f'材料缺失：{cls._extract_material_remark(order.anomaly_remark)}'
+                f'材料缺失：{cls._extract_material_remark(order.anomaly_remark)}，'
+                f'审核前必须补齐所有必备材料'
             )
             result.passed = False
 
@@ -172,10 +177,11 @@ class OrderValidationService:
             duplicate_count = GlassesOrder.objects.filter(
                 batch_no=order.batch_no
             ).exclude(id=order.id).count()
-            result.warnings.append(
-                f'重复批次提示：批次号「{order.batch_no}」下有 {duplicate_count} 条关联订单，'
-                f'请确认该批次配镜信息一致性'
+            result.blocking_errors.append(
+                f'重复批次：批次号「{order.batch_no}」下有 {duplicate_count} 条关联订单，'
+                f'请确认该批次配镜信息一致性后再审核'
             )
+            result.passed = False
 
         if AnomalyType.OVERDUE in anomalies:
             age_days = (timezone.now() - order.created_at).days
