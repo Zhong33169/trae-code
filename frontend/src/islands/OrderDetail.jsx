@@ -1,0 +1,374 @@
+import { useState, useEffect } from 'react';
+import { getOrderDetail, performAction } from '../lib/api';
+
+export default function OrderDetail({ orderId, userId, userRole, onBack, onActionComplete }) {
+  const [detail, setDetail] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [selectedAction, setSelectedAction] = useState(null);
+  const [opinion, setOpinion] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [toast, setToast] = useState(null);
+
+  const loadDetail = () => {
+    if (!orderId || !userId) return;
+    setLoading(true);
+    getOrderDetail(orderId, userId)
+      .then(res => {
+        if (res.success) {
+          setDetail(res);
+        }
+      })
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    loadDetail();
+  }, [orderId, userId]);
+
+  const showToast = (message, type = 'info') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3000);
+  };
+
+  const handleAction = async (action) => {
+    const actionDef = detail.availableActions.find(a => a.key === action);
+    if (!actionDef) return;
+
+    if (actionDef.needOpinion) {
+      setSelectedAction(action);
+      setOpinion('');
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const res = await performAction(orderId, action, {
+        userId,
+        userRole,
+        version: detail.order.version
+      });
+      if (res.success) {
+        showToast('操作成功', 'success');
+        setDetail(res);
+        setSelectedAction(null);
+        onActionComplete && onActionComplete();
+      } else {
+        showToast(res.message || '操作失败', 'error');
+      }
+    } catch (e) {
+      showToast('操作失败', 'error');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const confirmAction = async () => {
+    if (!selectedAction) return;
+    const actionDef = detail.availableActions.find(a => a.key === selectedAction);
+    if (actionDef?.needOpinion && !opinion.trim()) {
+      showToast('请填写处理意见', 'error');
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const res = await performAction(orderId, selectedAction, {
+        userId,
+        userRole,
+        opinion: opinion.trim(),
+        version: detail.order.version
+      });
+      if (res.success) {
+        showToast('操作成功', 'success');
+        setDetail(res);
+        setSelectedAction(null);
+        setOpinion('');
+        onActionComplete && onActionComplete();
+      } else {
+        showToast(res.message || '操作失败', 'error');
+      }
+    } catch (e) {
+      showToast('操作失败', 'error');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const getLogClass = (action) => {
+    if (action.includes('pass') || action === 'review_archive') return 'log-pass';
+    if (action.includes('return') || action === 'resubmit') return 'log-return';
+    if (action.includes('reject')) return 'log-reject';
+    if (action === 'submit') return 'log-submit';
+    if (action.includes('start_')) return 'log-process';
+    return '';
+  };
+
+  const getActionBtnClass = (action) => {
+    if (action.includes('pass') || action === 'review_archive') return 'btn-success';
+    if (action.includes('return') || action === 'resubmit') return 'btn-warning';
+    if (action.includes('reject')) return 'btn-danger';
+    if (action.includes('start_')) return 'btn-primary';
+    return 'btn-default';
+  };
+
+  const getActionModalTitle = (action) => {
+    const map = {
+      submit: '提交审核',
+      resubmit: '补正后重新提交',
+      audit_pass: '审核通过',
+      audit_return: '退回补正',
+      audit_reject: '审核驳回',
+      review_archive: '复核归档',
+      review_reject: '复核驳回'
+    };
+    return map[action] || '确认操作';
+  };
+
+  if (loading || !detail) {
+    return (
+      <div className="detail-container">
+        <div className="detail-main">
+          <div className="detail-card">
+            <div className="loading">加载中...</div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const { order, evidences, logs, availableActions, evidenceCheck } = detail;
+
+  return (
+    <div>
+      {toast && (
+        <div className={`toast toast-${toast.type}`}>
+          {toast.message}
+        </div>
+      )}
+
+      <div className="back-link" onClick={onBack}>
+        ← 返回列表
+      </div>
+
+      <div className="detail-container">
+        <div className="detail-main">
+          {order.last_opinion && (
+            <div className="last-opinion">
+              <div className="last-opinion-header">
+                上一处理人：{order.last_handler}（{order.lastHandlerRoleLabel}）
+                ｜ 结果：{order.last_result === 'passed' ? '通过' : 
+                        order.last_result === 'returned' ? '退回补正' :
+                        order.last_result === 'rejected' ? '驳回' :
+                        order.last_result === 'archived' ? '归档' :
+                        order.last_result === 'submitted' ? '提交' : order.last_result}
+              </div>
+              <div className="last-opinion-text">{order.last_opinion}</div>
+            </div>
+          )}
+
+          <div className="detail-card">
+            <h3>基本信息</h3>
+            <div className="detail-row">
+              <div className="detail-label">订单编号</div>
+              <div className="detail-value">
+                <span className="order-no">{order.order_no}</span>
+              </div>
+            </div>
+            <div className="detail-row">
+              <div className="detail-label">风险等级</div>
+              <div className="detail-value">
+                <span className={`risk-badge risk-${order.risk_level}`}>
+                  {order.riskLabel}
+                </span>
+                {order.risk_level === 'high' && (
+                  <span className="order-priority-tag">高优先级</span>
+                )}
+              </div>
+            </div>
+            <div className="detail-row">
+              <div className="detail-label">当前状态</div>
+              <div className="detail-value">
+                <span className={`status-badge status-${order.status}`}>
+                  {order.statusLabel}
+                </span>
+              </div>
+            </div>
+            <div className="detail-row">
+              <div className="detail-label">当前处理人</div>
+              <div className="detail-value">
+                {order.current_handler ? (
+                  `${order.current_handler || '待分配'}（${order.currentHandlerRoleLabel || ''}）`
+                ) : '无'}
+              </div>
+            </div>
+            <div className="detail-row">
+              <div className="detail-label">所属门店</div>
+              <div className="detail-value">{order.store_name || '-'}</div>
+            </div>
+            <div className="detail-row">
+              <div className="detail-label">版本号</div>
+              <div className="detail-value">v{order.version}</div>
+            </div>
+            {order.deadline && (
+              <div className="detail-row">
+                <div className="detail-label">截止时间</div>
+                <div className="detail-value" style={{ color: order.status === 'overdue' ? '#c62828' : 'inherit' }}>
+                  {order.deadline}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="detail-card">
+            <h3>患者信息</h3>
+            <div className="detail-row">
+              <div className="detail-label">患者姓名</div>
+              <div className="detail-value">{order.patient_name}</div>
+            </div>
+            <div className="detail-row">
+              <div className="detail-label">联系电话</div>
+              <div className="detail-value">{order.patient_phone || '-'}</div>
+            </div>
+          </div>
+
+          <div className="detail-card">
+            <h3>药品信息</h3>
+            <div className="detail-row">
+              <div className="detail-label">药品名称</div>
+              <div className="detail-value"><strong>{order.drug_name}</strong></div>
+            </div>
+            <div className="detail-row">
+              <div className="detail-label">规格</div>
+              <div className="detail-value">{order.drug_spec || '-'}</div>
+            </div>
+            <div className="detail-row">
+              <div className="detail-label">数量</div>
+              <div className="detail-value">{order.quantity} 盒/瓶</div>
+            </div>
+          </div>
+
+          <div className="detail-card">
+            <h3>证据附件</h3>
+            {evidenceCheck && !evidenceCheck.valid && (
+              <div className="evidence-missing">
+                ⚠️ 缺少必填证据：{evidenceCheck.missingLabels.join('、')}
+              </div>
+            )}
+            <div className="evidence-list">
+              {evidences.length === 0 ? (
+                <div className="empty-state">暂无证据附件</div>
+              ) : (
+                evidences.map(ev => (
+                  <div key={ev.id} className="evidence-item">
+                    <div className="ev-info">
+                      <span className="ev-type">{ev.typeLabel}</span>
+                      <span className="ev-name">{ev.name}</span>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          <div className="detail-card">
+            <h3>操作记录</h3>
+            <div className="log-list">
+              {logs.length === 0 ? (
+                <div className="empty-state">暂无操作记录</div>
+              ) : (
+                logs.map(log => (
+                  <div key={log.id} className={`log-item ${getLogClass(log.action)}`}>
+                    <div className="log-dot"></div>
+                    <div className="log-content">
+                      <div className="log-header">
+                        <span className="log-operator">
+                          {log.operator_name}（{log.operatorRoleLabel}）
+                        </span>
+                        <span className="log-time">{log.created_at?.slice(0, 19) || ''}</span>
+                      </div>
+                      <div className="log-action">
+                        {log.fromStatusLabel && log.toStatusLabel ? (
+                          <>
+                            状态从 <strong>{log.fromStatusLabel}</strong> 变为 <strong>{log.toStatusLabel}</strong>
+                          </>
+                        ) : (
+                          <span>{log.action}</span>
+                        )}
+                        {log.version_from !== log.version_to && (
+                          <span style={{ marginLeft: 8, color: '#999', fontSize: 12 }}>
+                            (v{log.version_from} → v{log.version_to})
+                          </span>
+                        )}
+                      </div>
+                      {log.opinion && (
+                        <div className="log-opinion">意见：{log.opinion}</div>
+                      )}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="detail-side">
+          <div className="detail-card action-panel">
+            <h3>操作</h3>
+            <div className="action-buttons">
+              {availableActions.length === 0 ? (
+                <div className="empty-state" style={{ padding: 20 }}>
+                  当前状态无可用操作
+                </div>
+              ) : (
+                availableActions.map(action => (
+                  <button
+                    key={action.key}
+                    className={`btn ${getActionBtnClass(action.key)}`}
+                    onClick={() => handleAction(action.key)}
+                    disabled={submitting}
+                  >
+                    {action.label}
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {selectedAction && (
+        <div className="modal-overlay" onClick={() => !submitting && setSelectedAction(null)}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <h3>{getActionModalTitle(selectedAction)}</h3>
+            <div className="form-group">
+              <label>处理意见</label>
+              <textarea
+                className="opinion-textarea"
+                value={opinion}
+                onChange={e => setOpinion(e.target.value)}
+                placeholder="请填写处理意见..."
+                disabled={submitting}
+              />
+            </div>
+            <div className="modal-actions">
+              <button
+                className="btn btn-default"
+                onClick={() => setSelectedAction(null)}
+                disabled={submitting}
+              >
+                取消
+              </button>
+              <button
+                className={`btn ${getActionBtnClass(selectedAction)}`}
+                onClick={confirmAction}
+                disabled={submitting}
+              >
+                {submitting ? '处理中...' : '确认'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
