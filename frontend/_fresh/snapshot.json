@@ -1,0 +1,64 @@
+{
+  "build_id": "3ff8ece91aa951e161c7f6d1a6c8b9dda2ab8723",
+  "files": {
+    "plugin-twind-main.js": [
+      "chunk-GI7LLYGM.js",
+      "chunk-JP5XG2OT.js"
+    ],
+    "main.js": [
+      "chunk-GI7LLYGM.js",
+      "chunk-JP5XG2OT.js"
+    ],
+    "deserializer.js": [],
+    "signals.js": [
+      "chunk-GI7LLYGM.js",
+      "chunk-C3VGWBGP.js",
+      "chunk-JP5XG2OT.js"
+    ],
+    "chunk-GI7LLYGM.js": [],
+    "island-auditloglist.js": [
+      "chunk-V3TIUKT3.js",
+      "chunk-2D3P22FS.js",
+      "chunk-C3VGWBGP.js",
+      "chunk-JP5XG2OT.js"
+    ],
+    "island-batchlist.js": [
+      "chunk-V3TIUKT3.js",
+      "chunk-2D3P22FS.js",
+      "chunk-C3VGWBGP.js",
+      "chunk-JP5XG2OT.js"
+    ],
+    "island-loginform.js": [
+      "chunk-2D3P22FS.js",
+      "chunk-C3VGWBGP.js",
+      "chunk-JP5XG2OT.js"
+    ],
+    "island-transferdashboard.js": [
+      "chunk-ZBL53HPL.js",
+      "chunk-V3TIUKT3.js",
+      "chunk-2D3P22FS.js",
+      "chunk-C3VGWBGP.js",
+      "chunk-JP5XG2OT.js"
+    ],
+    "island-transferdetail.js": [
+      "chunk-ZBL53HPL.js",
+      "chunk-V3TIUKT3.js",
+      "chunk-2D3P22FS.js",
+      "chunk-C3VGWBGP.js",
+      "chunk-JP5XG2OT.js"
+    ],
+    "chunk-ZBL53HPL.js": [
+      "chunk-V3TIUKT3.js",
+      "chunk-2D3P22FS.js"
+    ],
+    "chunk-V3TIUKT3.js": [],
+    "chunk-2D3P22FS.js": [
+      "chunk-JP5XG2OT.js"
+    ],
+    "chunk-C3VGWBGP.js": [
+      "chunk-JP5XG2OT.js"
+    ],
+    "chunk-JP5XG2OT.js": [],
+    "metafile.json": []
+  }
+}
