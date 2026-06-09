@@ -73,6 +73,9 @@ class FollowUpRecordCreate(BaseModel):
 
 
 class FollowUpRecordUpdate(BaseModel):
+    appointment_id: Optional[int] = None
+    visit_id: Optional[int] = None
+    follow_up_visit_id: Optional[int] = None
     follow_up_type: Optional[str] = None
     content: Optional[str] = None
     result: Optional[str] = None
@@ -134,3 +137,18 @@ class ErrorResponse(BaseModel):
     detail: str
     error_code: Optional[str] = None
     field: Optional[str] = None
+
+
+class AuditLogOut(BaseModel):
+    id: int
+    record_id: Optional[int]
+    action: str
+    operator: str
+    operator_role: Optional[str]
+    from_status: Optional[str]
+    to_status: Optional[str]
+    reason: Optional[str]
+    created_at: datetime
+
+    class Config:
+        from_attributes = True

@@ -2,7 +2,7 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 from typing import Tuple, Optional
 
-from .database import FollowUpRecord, AuditLog, User, Patient
+from .database import FollowUpRecord, AuditLog, User, Patient, Appointment, Visit, FollowUpVisit
 from .config import (
     STATUS_DRAFT, STATUS_PENDING_DOCTOR, STATUS_PENDING_DIRECTOR,
     STATUS_CONFIRMED, STATUS_REJECTED,
@@ -152,6 +152,68 @@ def create_audit_log(db: Session, record_id: int, action: str, operator: str,
         reason=reason,
     )
     db.add(log)
+
+
+def validate_evidence_belong_to_patient(
+    db: Session,
+    patient_id: int,
+    appointment_id: Optional[int] = None,
+    visit_id: Optional[int] = None,
+    follow_up_visit_id: Optional[int] = None,
+):
+    if appointment_id:
+        apt = db.query(Appointment).filter(Appointment.id == appointment_id).first()
+        if not apt:
+            raise ValidationError(
+                detail=f"预约登记记录不存在: ID={appointment_id}",
+                error_code="EVIDENCE_NOT_FOUND",
+                field="appointment_id"
+            )
+        if apt.patient_id != patient_id:
+            raise ValidationError(
+                detail=f"预约登记记录不属于该患者（患者ID={patient_id}）",
+                error_code="EVIDENCE_PATIENT_MISMATCH",
+                field="appointment_id"
+            )
+
+    if visit_id:
+        visit = db.query(Visit).filter(Visit.id == visit_id).first()
+        if not visit:
+            raise ValidationError(
+                detail=f"就诊分诊记录不存在: ID={visit_id}",
+                error_code="EVIDENCE_NOT_FOUND",
+                field="visit_id"
+            )
+        if visit.patient_id != patient_id:
+            raise ValidationError(
+                detail=f"就诊分诊记录不属于该患者（患者ID={patient_id}）",
+                error_code="EVIDENCE_PATIENT_MISMATCH",
+                field="visit_id"
+            )
+
+    if follow_up_visit_id:
+        fuv = db.query(FollowUpVisit).filter(FollowUpVisit.id == follow_up_visit_id).first()
+        if not fuv:
+            raise ValidationError(
+                detail=f"随访回访记录不存在: ID={follow_up_visit_id}",
+                error_code="EVIDENCE_NOT_FOUND",
+                field="follow_up_visit_id"
+            )
+        if fuv.patient_id != patient_id:
+            raise ValidationError(
+                detail=f"随访回访记录不属于该患者（患者ID={patient_id}）",
+                error_code="EVIDENCE_PATIENT_MISMATCH",
+                field="follow_up_visit_id"
+            )
+
+
+def validate_follow_up_type_required(follow_up_type: Optional[str]):
+    if not follow_up_type or not follow_up_type.strip():
+        raise ValidationError(
+            detail="随访类型不能为空",
+            error_code="FOLLOW_UP_TYPE_REQUIRED",
+            field="follow_up_type"
+        )
 
 
 def generate_record_no() -> str:

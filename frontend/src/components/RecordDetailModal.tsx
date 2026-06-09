@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   FollowUpRecord, STATUS_NAMES, STATUS_COLORS,
-  ROLE_NAMES, ApiError,
+  ROLE_NAMES, ApiError, Patient, Appointment, Visit, FollowUpVisit,
 } from '../types';
 import { api } from '../api';
 import { useAuth } from '../context/AuthContext';
@@ -22,11 +22,23 @@ const RecordDetailModal: React.FC<RecordDetailModalProps> = ({ record, onClose, 
 
   const [editMode, setEditMode] = useState(false);
   const [editForm, setEditForm] = useState({
+    appointment_id: null as number | null,
+    visit_id: null as number | null,
+    follow_up_visit_id: null as number | null,
     follow_up_type: '',
     content: '',
     result: '',
     remarks: '',
   });
+
+  const [evidenceData, setEvidenceData] = useState<{
+    appointments: Appointment[];
+    visits: Visit[];
+    follow_up_visits: FollowUpVisit[];
+  } | null>(null);
+
+  const [auditLogs, setAuditLogs] = useState<any[]>([]);
+  const [auditLogsVisible, setAuditLogsVisible] = useState(false);
 
   const [opinion, setOpinion] = useState('');
 
@@ -43,11 +55,22 @@ const RecordDetailModal: React.FC<RecordDetailModalProps> = ({ record, onClose, 
       const data = await api.getRecord(id);
       setDetail(data);
       setEditForm({
+        appointment_id: data.appointment_id,
+        visit_id: data.visit_id,
+        follow_up_visit_id: data.follow_up_visit_id,
         follow_up_type: data.follow_up_type || '',
         content: data.content || '',
         result: data.result || '',
         remarks: data.remarks || '',
       });
+
+      if (data.patient_id) {
+        const evidence = await api.getEvidence(data.patient_id);
+        setEvidenceData(evidence);
+      }
+
+      const logs = await api.getAuditLogs(id);
+      setAuditLogs(logs);
     } catch (err) {
       setError(err as ApiError);
     } finally {
@@ -89,6 +112,7 @@ const RecordDetailModal: React.FC<RecordDetailModalProps> = ({ record, onClose, 
       });
       setDetail(updated);
       setEditMode(false);
+      onSuccess(updated);
     } catch (err) {
       setError(err as ApiError);
     } finally {
@@ -103,7 +127,7 @@ const RecordDetailModal: React.FC<RecordDetailModalProps> = ({ record, onClose, 
     try {
       const updated = await api.submitRecord(detail.id, detail.version);
       setDetail(updated);
-      onSuccess();
+      onSuccess(updated);
     } catch (err) {
       setError(err as ApiError);
     } finally {
@@ -123,7 +147,7 @@ const RecordDetailModal: React.FC<RecordDetailModalProps> = ({ record, onClose, 
       });
       setDetail(updated);
       setOpinion('');
-      onSuccess();
+      onSuccess(updated);
     } catch (err) {
       setError(err as ApiError);
     } finally {
@@ -147,7 +171,7 @@ const RecordDetailModal: React.FC<RecordDetailModalProps> = ({ record, onClose, 
       const updated = await api.rejectRecord(detail.id, detail.version, opinion);
       setDetail(updated);
       setOpinion('');
-      onSuccess();
+      onSuccess(updated);
     } catch (err) {
       setError(err as ApiError);
     } finally {
@@ -228,6 +252,9 @@ const RecordDetailModal: React.FC<RecordDetailModalProps> = ({ record, onClose, 
                   <span className={`evidence-status ${hasEvidence ? 'complete' : 'incomplete'}`}>
                     {hasEvidence ? '✓ 证据齐全' : '⚠ 证据缺失'}
                   </span>
+                  <span className="toggle-btn" onClick={() => setAuditLogsVisible(!auditLogsVisible)}>
+                    {auditLogsVisible ? '隐藏' : '查看'}审计日志
+                  </span>
                 </h3>
                 <div className="detail-grid">
                   <div className="detail-item">
@@ -243,17 +270,110 @@ const RecordDetailModal: React.FC<RecordDetailModalProps> = ({ record, onClose, 
                     <span className="value">{detail.patient?.phone || '-'}</span>
                   </div>
                 </div>
-                <div className="evidence-links">
-                  <span className="evidence-chip">
-                    {detail.appointment_id ? '✓' : '✗'} 预约登记 #{detail.appointment_id || '无'}
-                  </span>
-                  <span className="evidence-chip">
-                    {detail.visit_id ? '✓' : '✗'} 就诊分诊 #{detail.visit_id || '无'}
-                  </span>
-                  <span className="evidence-chip">
-                    {detail.follow_up_visit_id ? '✓' : '✗'} 随访回访 #{detail.follow_up_visit_id || '无'}
-                  </span>
-                </div>
+
+                {editMode ? (
+                  <div className="evidence-edit-section">
+                    <div className="evidence-edit-col">
+                      <label>预约登记 <span className="required">*</span></label>
+                      <select
+                        value={editForm.appointment_id || ''}
+                        onChange={e => setEditForm(f => ({
+                          ...f,
+                          appointment_id: e.target.value ? Number(e.target.value) : null
+                        }))}
+                      >
+                        <option value="">-- 请选择 --</option>
+                        {evidenceData?.appointments.map(apt => (
+                          <option key={apt.id} value={apt.id}>
+                            #{apt.id} {new Date(apt.appointment_date).toLocaleDateString('zh-CN')} {apt.department}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="evidence-edit-col">
+                      <label>就诊分诊 <span className="required">*</span></label>
+                      <select
+                        value={editForm.visit_id || ''}
+                        onChange={e => setEditForm(f => ({
+                          ...f,
+                          visit_id: e.target.value ? Number(e.target.value) : null
+                        }))}
+                      >
+                        <option value="">-- 请选择 --</option>
+                        {evidenceData?.visits.map(v => (
+                          <option key={v.id} value={v.id}>
+                            #{v.id} {new Date(v.visit_date).toLocaleDateString('zh-CN')} {v.department}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="evidence-edit-col">
+                      <label>随访回访 <span className="required">*</span></label>
+                      <select
+                        value={editForm.follow_up_visit_id || ''}
+                        onChange={e => setEditForm(f => ({
+                          ...f,
+                          follow_up_visit_id: e.target.value ? Number(e.target.value) : null
+                        }))}
+                      >
+                        <option value="">-- 请选择 --</option>
+                        {evidenceData?.follow_up_visits.map(fuv => (
+                          <option key={fuv.id} value={fuv.id}>
+                            #{fuv.id} {new Date(fuv.follow_up_date).toLocaleDateString('zh-CN')} {fuv.follow_up_type}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="evidence-links">
+                    <span className="evidence-chip">
+                      {detail.appointment_id ? '✓' : '✗'} 预约登记 #{detail.appointment_id || '无'}
+                    </span>
+                    <span className="evidence-chip">
+                      {detail.visit_id ? '✓' : '✗'} 就诊分诊 #{detail.visit_id || '无'}
+                    </span>
+                    <span className="evidence-chip">
+                      {detail.follow_up_visit_id ? '✓' : '✗'} 随访回访 #{detail.follow_up_visit_id || '无'}
+                    </span>
+                  </div>
+                )}
+
+                {auditLogsVisible && (
+                  <div className="audit-logs-section">
+                    <div className="audit-logs-title">操作日志</div>
+                    <div className="audit-logs-list">
+                      {auditLogs.length === 0 ? (
+                        <div className="empty-small">暂无日志</div>
+                      ) : (
+                        auditLogs.map(log => (
+                          <div key={log.id} className="audit-log-item">
+                            <div className="log-time">
+                              {new Date(log.created_at).toLocaleString('zh-CN')}
+                            </div>
+                            <div className="log-main">
+                              <span className="log-action">{log.action}</span>
+                              <span className="log-user">
+                                {log.operator}（{ROLE_NAMES[log.operator_role as keyof typeof ROLE_NAMES] || log.operator_role}）
+                              </span>
+                            </div>
+                            {log.from_status && log.to_status && (
+                              <div className="log-status">
+                                {STATUS_NAMES[log.from_status as keyof typeof STATUS_NAMES]} → {STATUS_NAMES[log.to_status as keyof typeof STATUS_NAMES]}
+                              </div>
+                            )}
+                            {log.reason && (
+                              <div className="log-reason">原因: {log.reason}</div>
+                            )}
+                            {log.field_name && (
+                              <div className="log-field">字段变更: {log.field_name}</div>
+                            )}
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="detail-section">

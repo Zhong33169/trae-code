@@ -288,6 +288,19 @@ async def list_users_endpoint(request: Request):
         db.close()
 
 
+async def list_audit_logs_endpoint(request: Request):
+    from .services import list_audit_logs
+    from .schemas import AuditLogOut
+    db: Session = next(get_db())
+    try:
+        record_id = int(request.path_params["record_id"])
+        logs = list_audit_logs(db, record_id)
+        result = [AuditLogOut.model_validate(log).model_dump(mode="json") for log in logs]
+        return JSONResponse(result)
+    finally:
+        db.close()
+
+
 async def health_endpoint(request):
     return JSONResponse({"status": "ok", "message": "随访记录补录校验系统运行中"})
 
@@ -296,6 +309,7 @@ routes = [
     Route("/api/health", health_endpoint, methods=["GET"]),
     Route("/api/records", list_records_endpoint, methods=["GET"]),
     Route("/api/records/{record_id:int}", get_record_endpoint, methods=["GET"]),
+    Route("/api/records/{record_id:int}/audit-logs", list_audit_logs_endpoint, methods=["GET"]),
     Route("/api/records", create_record_endpoint, methods=["POST"]),
     Route("/api/records/{record_id:int}", update_record_endpoint, methods=["PUT"]),
     Route("/api/records/{record_id:int}/submit", submit_record_endpoint, methods=["POST"]),

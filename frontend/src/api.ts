@@ -65,6 +65,9 @@ export const api = {
 
   async updateRecord(id: number, data: {
     version: number;
+    appointment_id?: number | null;
+    visit_id?: number | null;
+    follow_up_visit_id?: number | null;
     follow_up_type?: string;
     content?: string;
     result?: string;
@@ -159,6 +162,13 @@ export const api = {
 
   async getRoles(): Promise<Record<string, { name: string; allowed_statuses: string[] }>> {
     const response = await fetch(`${API_BASE}/roles`, {
+      headers: getHeaders(),
+    });
+    return handleResponse(response);
+  },
+
+  async getAuditLogs(recordId: number): Promise<any[]> {
+    const response = await fetch(`${API_BASE}/records/${recordId}/audit-logs`, {
       headers: getHeaders(),
     });
     return handleResponse(response);

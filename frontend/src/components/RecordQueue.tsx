@@ -6,6 +6,7 @@ import FilterBar from './FilterBar';
 import RecordList from './RecordList';
 import EvidencePanel from './EvidencePanel';
 import RecordDetailModal from './RecordDetailModal';
+import CreateRecordModal from './CreateRecordModal';
 import RoleSwitcher from './RoleSwitcher';
 import './RecordQueue.css';
 
@@ -17,6 +18,7 @@ const RecordQueue: React.FC = () => {
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [selectedRecord, setSelectedRecord] = useState<FollowUpRecord | null>(null);
   const [detailVisible, setDetailVisible] = useState(false);
+  const [createVisible, setCreateVisible] = useState(false);
   const [status, setStatus] = useState('');
   const [patientName, setPatientName] = useState('');
 
@@ -58,7 +60,14 @@ const RecordQueue: React.FC = () => {
     setSelectedRecord(null);
   };
 
-  const handleDetailSuccess = () => {
+  const handleDetailSuccess = (updatedRecord?: FollowUpRecord) => {
+    loadRecords();
+    if (updatedRecord && selectedRecord?.id === updatedRecord.id) {
+      setSelectedRecord(updatedRecord);
+    }
+  };
+
+  const handleCreateSuccess = () => {
     loadRecords();
   };
 
@@ -161,6 +170,11 @@ const RecordQueue: React.FC = () => {
           </span>
         </div>
         <div className="header-right">
+          {currentRole === 'triage_nurse' && (
+            <button className="btn btn-primary create-btn" onClick={() => setCreateVisible(true)}>
+              + 新建补录
+            </button>
+          )}
           <RoleSwitcher />
         </div>
       </header>
@@ -247,6 +261,14 @@ const RecordQueue: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {createVisible && (
+        <CreateRecordModal
+          visible={createVisible}
+          onClose={() => setCreateVisible(false)}
+          onSuccess={handleCreateSuccess}
+        />
       )}
     </div>
   );

@@ -1,0 +1,410 @@
+.create-modal {
+  max-width: 680px;
+  width: 95%;
+}
+
+.create-body {
+  padding: 20px;
+  min-height: 400px;
+}
+
+.create-steps {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px 20px 0 20px;
+  gap: 0;
+}
+
+.step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.step-num {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #f0f0f0;
+  color: #999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.3s;
+}
+
+.step.active .step-num {
+  background: #1890ff;
+  color: #fff;
+}
+
+.step.done .step-num {
+  background: #52c41a;
+  color: #fff;
+}
+
+.step-text {
+  font-size: 14px;
+  color: #999;
+  transition: color 0.3s;
+}
+
+.step.active .step-text {
+  color: #1890ff;
+  font-weight: 500;
+}
+
+.step.done .step-text {
+  color: #52c41a;
+}
+
+.step-line {
+  width: 60px;
+  height: 2px;
+  background: #f0f0f0;
+  margin: 0 8px;
+}
+
+.step-content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.patient-search {
+  display: flex;
+  gap: 8px;
+}
+
+.patient-search input {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid #d9d9d9;
+  border-radius: 4px;
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.3s;
+}
+
+.patient-search input:focus {
+  border-color: #1890ff;
+}
+
+.patient-list {
+  max-height: 280px;
+  overflow-y: auto;
+  border: 1px solid #f0f0f0;
+  border-radius: 6px;
+}
+
+.patient-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid #f5f5f5;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.patient-item:last-child {
+  border-bottom: none;
+}
+
+.patient-item:hover {
+  background: #f5f9ff;
+}
+
+.patient-item.selected {
+  background: #e6f7ff;
+}
+
+.patient-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.patient-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: #333;
+}
+
+.patient-id {
+  font-size: 12px;
+  color: #999;
+  font-family: monospace;
+}
+
+.check-mark {
+  color: #52c41a;
+  font-weight: bold;
+  font-size: 16px;
+}
+
+.empty, .loading {
+  padding: 40px;
+  text-align: center;
+  color: #999;
+  font-size: 14px;
+}
+
+.empty-small {
+  padding: 20px;
+  text-align: center;
+  color: #bbb;
+  font-size: 13px;
+}
+
+.selected-patient-card {
+  background: #f6ffed;
+  border: 1px solid #b7eb8f;
+  border-radius: 6px;
+  padding: 12px 16px;
+}
+
+.card-title {
+  font-size: 13px;
+  color: #52c41a;
+  font-weight: 500;
+  margin-bottom: 8px;
+}
+
+.card-content {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  font-size: 13px;
+  color: #333;
+}
+
+.evidence-select {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-height: 420px;
+  overflow-y: auto;
+  padding-right: 8px;
+}
+
+.evidence-section {
+  border: 1px solid #f0f0f0;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: #fafafa;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.section-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: #333;
+}
+
+.section-hint {
+  font-size: 12px;
+  color: #999;
+}
+
+.evidence-badge {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+}
+
+.evidence-badge.complete {
+  background: #52c41a;
+  color: #fff;
+}
+
+.evidence-badge.incomplete {
+  background: #ff4d4f;
+  color: #fff;
+}
+
+.evidence-options {
+  padding: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.evidence-option {
+  position: relative;
+  padding: 10px 12px;
+  border: 1px solid #e8e8e8;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+  background: #fff;
+  min-width: 200px;
+  flex: 1;
+  min-width: 180px;
+}
+
+.evidence-option:hover {
+  border-color: #1890ff;
+  background: #f5f9ff;
+}
+
+.evidence-option.selected {
+  border-color: #1890ff;
+  background: #e6f7ff;
+}
+
+.evidence-option .check-mark {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+}
+
+.option-date {
+  font-size: 13px;
+  color: #333;
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+
+.option-detail {
+  font-size: 12px;
+  color: #666;
+  margin-bottom: 4px;
+}
+
+.option-diagnosis {
+  font-size: 12px;
+  color: #999;
+}
+
+.form-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.form-item.mt-16 {
+  margin-top: 16px;
+}
+
+.form-item label {
+  font-size: 13px;
+  color: #666;
+  font-weight: 500;
+}
+
+.form-item input,
+.form-item textarea {
+  padding: 8px 12px;
+  border: 1px solid #d9d9d9;
+  border-radius: 4px;
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.3s;
+  font-family: inherit;
+}
+
+.form-item input:focus,
+.form-item textarea:focus {
+  border-color: #1890ff;
+}
+
+.form-item textarea {
+  resize: vertical;
+  min-height: 60px;
+}
+
+.required {
+  color: #ff4d4f;
+}
+
+.summary-card {
+  background: #f0f5ff;
+  border: 1px solid #adc6ff;
+  border-radius: 6px;
+  padding: 16px;
+}
+
+.summary-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: #2f54eb;
+  margin-bottom: 12px;
+}
+
+.summary-item {
+  display: flex;
+  padding: 6px 0;
+  border-bottom: 1px dashed #d6e4ff;
+}
+
+.summary-item:last-child {
+  border-bottom: none;
+}
+
+.summary-item .label {
+  width: 80px;
+  color: #666;
+  font-size: 13px;
+}
+
+.summary-item .value {
+  flex: 1;
+  color: #333;
+  font-size: 13px;
+}
+
+.summary-item .value.complete {
+  color: #52c41a;
+}
+
+.step-indicator {
+  font-size: 13px;
+  color: #999;
+}
+
+.error-alert {
+  background: #fff2f0;
+  border: 1px solid #ffccc7;
+  border-radius: 6px;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+}
+
+.error-title {
+  color: #ff4d4f;
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+
+.error-code {
+  font-size: 12px;
+  color: #ff7a45;
+  margin-bottom: 4px;
+  font-family: monospace;
+}
+
+.error-detail {
+  font-size: 14px;
+  color: #cf1322;
+}
+
+.error-field {
+  font-size: 12px;
+  color: #999;
+  margin-top: 4px;
+}

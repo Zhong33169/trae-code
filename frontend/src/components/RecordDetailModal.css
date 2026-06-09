@@ -399,3 +399,141 @@
   color: #fff;
   border-color: #ff4d4f;
 }
+
+.toggle-btn {
+  font-size: 12px;
+  color: #1890ff;
+  cursor: pointer;
+  font-weight: normal;
+  margin-left: auto;
+}
+
+.toggle-btn:hover {
+  text-decoration: underline;
+}
+
+.evidence-edit-section {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-top: 12px;
+  background: #fff;
+  padding: 12px;
+  border-radius: 4px;
+  border: 1px solid #e8e8e8;
+}
+
+.evidence-edit-col {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.evidence-edit-col label {
+  font-size: 13px;
+  color: #666;
+  font-weight: 500;
+}
+
+.evidence-edit-col select {
+  padding: 6px 10px;
+  border: 1px solid #d9d9d9;
+  border-radius: 4px;
+  font-size: 13px;
+  outline: none;
+  background: #fff;
+  cursor: pointer;
+}
+
+.evidence-edit-col select:focus {
+  border-color: #1890ff;
+}
+
+.required {
+  color: #ff4d4f;
+}
+
+.audit-logs-section {
+  margin-top: 16px;
+  background: #fff;
+  border: 1px solid #e8e8e8;
+  border-radius: 4px;
+  padding: 12px;
+}
+
+.audit-logs-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: #333;
+  margin-bottom: 12px;
+}
+
+.audit-logs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.audit-log-item {
+  padding: 10px 12px;
+  background: #fafafa;
+  border-left: 3px solid #1890ff;
+  border-radius: 0 4px 4px 0;
+}
+
+.audit-log-item:nth-child(even) {
+  border-left-color: #52c41a;
+}
+
+.log-time {
+  font-size: 12px;
+  color: #999;
+  margin-bottom: 4px;
+}
+
+.log-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
+.log-action {
+  font-size: 14px;
+  font-weight: 500;
+  color: #333;
+}
+
+.log-user {
+  font-size: 12px;
+  color: #666;
+}
+
+.log-status {
+  font-size: 12px;
+  color: #1890ff;
+  margin-bottom: 2px;
+}
+
+.log-reason {
+  font-size: 12px;
+  color: #666;
+}
+
+.log-field {
+  font-size: 12px;
+  color: #999;
+}
+
+.empty-small {
+  padding: 20px;
+  text-align: center;
+  color: #bbb;
+  font-size: 13px;
+}
+
+.detail-section h3 {
+  gap: 10px;
+}

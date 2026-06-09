@@ -8,6 +8,7 @@ from .validators import (
     ValidationError, validate_role_permission, validate_version,
     validate_status_transition, validate_evidence_complete,
     validate_no_duplicate, validate_not_confirmed,
+    validate_evidence_belong_to_patient, validate_follow_up_type_required,
     get_next_status_for_role, create_audit_log, generate_record_no,
 )
 from .config import (
@@ -77,8 +78,14 @@ def create_record(db: Session, data: FollowUpRecordCreate, operator: str, role: 
             field="patient_id"
         )
 
-    if data.follow_up_type:
-        validate_no_duplicate(db, data.patient_id, data.follow_up_type)
+    validate_follow_up_type_required(data.follow_up_type)
+
+    validate_evidence_belong_to_patient(
+        db, data.patient_id,
+        data.appointment_id, data.visit_id, data.follow_up_visit_id
+    )
+
+    validate_no_duplicate(db, data.patient_id, data.follow_up_type)
 
     record_no = generate_record_no()
 
@@ -210,9 +217,44 @@ def update_record(db: Session, record_id: int, data: FollowUpRecordUpdate,
     validate_version(record, data.version)
     validate_not_confirmed(record)
 
-    if data.follow_up_type and data.follow_up_type != record.follow_up_type:
+    new_appointment_id = data.appointment_id if data.appointment_id is not None else record.appointment_id
+    new_visit_id = data.visit_id if data.visit_id is not None else record.visit_id
+    new_follow_up_visit_id = data.follow_up_visit_id if data.follow_up_visit_id is not None else record.follow_up_visit_id
+    new_follow_up_type = data.follow_up_type if data.follow_up_type is not None else record.follow_up_type
+
+    evidence_changed = (
+        data.appointment_id is not None and data.appointment_id != record.appointment_id) or \
+        (data.visit_id is not None and data.visit_id != record.visit_id) or \
+        (data.follow_up_visit_id is not None and data.follow_up_visit_id != record.follow_up_visit_id)
+
+    if evidence_changed:
+        validate_evidence_belong_to_patient(
+            db, record.patient_id,
+            new_appointment_id, new_visit_id, new_follow_up_visit_id
+        )
+
+    if data.follow_up_type is not None and data.follow_up_type != record.follow_up_type:
+        validate_follow_up_type_required(data.follow_up_type)
         validate_no_duplicate(db, record.patient_id, data.follow_up_type, exclude_id=record.id)
 
+    change_reasons = []
+    if data.follow_up_type is not None and data.follow_up_type != record.follow_up_type:
+        change_reasons.append("修改随访类型")
+    if evidence_changed:
+        change_reasons.append("补充/修改关联证据")
+    if data.content is not None and data.content != record.content:
+        change_reasons.append("修改随访内容")
+    if data.result is not None and data.result != record.result:
+        change_reasons.append("修改处理结果")
+    if data.remarks is not None and data.remarks != record.remarks:
+        change_reasons.append("修改备注")
+
+    if data.appointment_id is not None:
+        record.appointment_id = data.appointment_id
+    if data.visit_id is not None:
+        record.visit_id = data.visit_id
+    if data.follow_up_visit_id is not None:
+        record.follow_up_visit_id = data.follow_up_visit_id
     if data.follow_up_type is not None:
         record.follow_up_type = data.follow_up_type
     if data.content is not None:
@@ -227,7 +269,8 @@ def update_record(db: Session, record_id: int, data: FollowUpRecordUpdate,
 
     create_audit_log(
         db, record.id, "update", operator, role,
-        record.status, record.status, "编辑记录"
+        record.status, record.status,
+        "、".join(change_reasons) if change_reasons else "编辑记录"
     )
 
     db.commit()
@@ -248,6 +291,17 @@ def process_record(db: Session, record_id: int, data: ProcessRecordRequest,
     validate_role_permission(role, record.status, "办理")
     validate_version(record, data.version)
     validate_not_confirmed(record)
+
+    is_complete, missing = validate_evidence_complete(db, record)
+    if not is_complete:
+        raise ValidationError(
+            detail=f"证据不完整，缺少：{', '.join(missing)}。办理前请确保关联了预约登记、就诊分诊和随访回访记录。",
+            error_code="INCOMPLETE_EVIDENCE",
+            field="evidence"
+        )
+
+    if record.follow_up_type:
+        validate_no_duplicate(db, record.patient_id, record.follow_up_type, exclude_id=record.id)
 
     if data.result and role == ROLE_GP_DOCTOR:
         record.result = data.result
@@ -350,3 +404,14 @@ def list_evidence_for_patient(db: Session, patient_id: int) -> dict:
         "visits": visits,
         "follow_up_visits": follow_up_visits,
     }
+
+
+def list_audit_logs(db: Session, record_id: int) -> list:
+    from .database import AuditLog
+    logs = (
+        db.query(AuditLog)
+        .filter(AuditLog.record_id == record_id)
+        .order_by(AuditLog.created_at.asc())
+        .all()
+    )
+    return logs
