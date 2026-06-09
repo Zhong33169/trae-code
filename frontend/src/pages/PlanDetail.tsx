@@ -1,5 +1,5 @@
-import { createSignal, onMount, For, Show, createEffect } from 'solid-js';
-import { useNavigate } from '../router';
+import { createSignal, onMount, For, Show, createEffect, on } from 'solid-js';
+import { useNavigate, useParams, useSearchParams } from '../router';
 import { useUser } from '../contexts/UserContext';
 import { api } from '../services/api';
 import {
@@ -19,8 +19,9 @@ interface PlanDetailProps {
 }
 
 const PlanDetail = (props: PlanDetailProps) => {
-  const params = props.params || {};
-  const planId = params.id || '';
+  const routeParams = useParams();
+  const searchParams = useSearchParams();
+  const planId = routeParams.id || props.params?.id || '';
   const navigate = useNavigate();
   const { currentUser, hasRole } = useUser();
   const [plan, setPlan] = createSignal<TreatmentPlan | null>(null);
@@ -30,7 +31,23 @@ const PlanDetail = (props: PlanDetailProps) => {
   const [loading, setLoading] = createSignal(false);
   const [editing, setEditing] = createSignal(false);
   const [error, setError] = createSignal('');
-  const [activeTab, setActiveTab] = createSignal<'info' | 'audit'>('info');
+  const [successMsg, setSuccessMsg] = createSignal('');
+
+  const activeTab = (): 'info' | 'audit' => {
+    const tab = searchParams().get('tab');
+    return tab === 'audit' ? 'audit' : 'info';
+  };
+
+  const setActiveTab = (tab: 'info' | 'audit') => {
+    const params = new URLSearchParams(searchParams());
+    if (tab === 'audit') {
+      params.set('tab', 'audit');
+    } else {
+      params.delete('tab');
+    }
+    const query = params.toString();
+    navigate(`/plans/${planId}${query ? '?' + query : ''}`, { replace: true });
+  };
 
   const [editForm, setEditForm] = createSignal<any>({});
   const [verifyForm, setVerifyForm] = createSignal({ opinion: '', rejectReason: '' });
@@ -62,6 +79,11 @@ const PlanDetail = (props: PlanDetailProps) => {
       loadDetail();
     }
   });
+
+  const showSuccess = (msg: string) => {
+    setSuccessMsg(msg);
+    setTimeout(() => setSuccessMsg(''), 3000);
+  };
 
   const formatDate = (dateStr?: string) => {
     if (!dateStr) return '-';
@@ -152,6 +174,7 @@ const PlanDetail = (props: PlanDetailProps) => {
       );
       setPlan(updated);
       setEditing(false);
+      showSuccess('保存成功');
       loadDetail();
     } catch (e: any) {
       setError(e.message || '保存失败');
@@ -167,6 +190,7 @@ const PlanDetail = (props: PlanDetailProps) => {
         version: plan()!.version,
       });
       setPlan(result);
+      showSuccess('已提交核验，等待医生处理');
       loadDetail();
     } catch (e: any) {
       setError(e.message || '提交失败');
@@ -187,6 +211,7 @@ const PlanDetail = (props: PlanDetailProps) => {
       });
       setPlan(result);
       setVerifyForm({ opinion: '', rejectReason: '' });
+      showSuccess('核验通过，已提交院长复核');
       loadDetail();
     } catch (e: any) {
       setError(e.message || '操作失败');
@@ -210,6 +235,7 @@ const PlanDetail = (props: PlanDetailProps) => {
       });
       setPlan(result);
       setVerifyForm({ opinion: '', rejectReason: '' });
+      showSuccess('已退回，等待前台修改');
       loadDetail();
     } catch (e: any) {
       setError(e.message || '操作失败');
@@ -225,6 +251,7 @@ const PlanDetail = (props: PlanDetailProps) => {
         version: plan()!.version,
       });
       setPlan(result);
+      showSuccess('已重新提交复核');
       loadDetail();
     } catch (e: any) {
       setError(e.message || '提交失败');
