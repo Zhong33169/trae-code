@@ -501,10 +501,42 @@ table .action-buttons {
   font-weight: bold;
 }
 .timeline-item-failed {
-  opacity: 0.75;
+  opacity: 0.85;
 }
 .timeline-item-failed .timeline-action {
   color: #6b7280;
+}
+.fail-type-tag {
+  display: inline-block;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: 10px;
+  line-height: 1.4;
+}
+.fail-type-version {
+  background: #fef3c7;
+  color: #b45309;
+}
+.fail-type-permission {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+.fail-type-status {
+  background: #e0e7ff;
+  color: #3730a3;
+}
+.fail-type-evidence {
+  background: #fce7f3;
+  color: #9d174d;
+}
+.fail-type-param {
+  background: #d1fae5;
+  color: #047857;
+}
+.fail-type-default {
+  background: #f3f4f6;
+  color: #374151;
 }
 
 .timeline-header {

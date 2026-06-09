@@ -210,14 +210,15 @@ func ReviewConsultation(c *fiber.Ctx) error {
 	}
 
 	row := models.DB.QueryRow(`
-		SELECT status, version, evidence_list
+		SELECT status, version, evidence_list, reviewer_id
 		FROM consultations WHERE id = ?
 	`, id)
 
 	var status string
 	var version int
 	var evidenceList string
-	err := row.Scan(&status, &version, &evidenceList)
+	var reviewerID sql.NullString
+	err := row.Scan(&status, &version, &evidenceList, &reviewerID)
 	if err == sql.ErrNoRows {
 		return c.Status(404).JSON(fiber.Map{"error": "申请单不存在"})
 	}
@@ -240,6 +241,23 @@ func ReviewConsultation(c *fiber.Ctx) error {
 			Opinion:        req.Opinion,
 		})
 		return c.Status(403).JSON(fiber.Map{"error": "只有审核主管可以执行审核操作"})
+	}
+
+	if reviewerID.Valid && reviewerID.String != user.UserID {
+		_ = WriteFailRecord(FailRecordParams{
+			ConsultationID: id,
+			OperatorID:     user.UserID,
+			OperatorName:   user.UserName,
+			OperatorRole:   user.Role,
+			OperatorRoleName: user.RoleName,
+			Action:         "review",
+			ActionName:     "审核处理",
+			FromStatus:     status,
+			Version:        version,
+			RejectReason:   "权限不足：该申请单已由其他审核主管负责，请您处理自己名下的申请单",
+			Opinion:        req.Opinion,
+		})
+		return c.Status(403).JSON(fiber.Map{"error": "该申请单已由其他审核主管负责"})
 	}
 
 	if status != models.StatusSubmitted && status != models.StatusResubmitted {

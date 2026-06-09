@@ -29,13 +29,14 @@ func FinalReviewConsultation(c *fiber.Ctx) error {
 	}
 
 	row := models.DB.QueryRow(`
-		SELECT status, version
+		SELECT status, version, director_id
 		FROM consultations WHERE id = ?
 	`, id)
 
 	var status string
 	var version int
-	err := row.Scan(&status, &version)
+	var directorID sql.NullString
+	err := row.Scan(&status, &version, &directorID)
 	if err == sql.ErrNoRows {
 		return c.Status(404).JSON(fiber.Map{"error": "申请单不存在"})
 	}
@@ -54,10 +55,27 @@ func FinalReviewConsultation(c *fiber.Ctx) error {
 			ActionName:       "复核操作",
 			FromStatus:       status,
 			Version:          version,
-			RejectReason:     "只有医务部复核负责人可以执行复核操作",
+			RejectReason:     "权限不足：只有医务部复核负责人可以执行复核操作",
 			Opinion:          "",
 		})
 		return c.Status(403).JSON(fiber.Map{"error": "只有医务部复核负责人可以执行复核操作"})
+	}
+
+	if directorID.Valid && directorID.String != user.UserID {
+		_ = WriteFailRecord(FailRecordParams{
+			ConsultationID:   id,
+			OperatorID:       user.UserID,
+			OperatorName:     user.UserName,
+			OperatorRole:     user.Role,
+			OperatorRoleName: user.RoleName,
+			Action:           "final_review",
+			ActionName:       "复核操作",
+			FromStatus:       status,
+			Version:          version,
+			RejectReason:     "权限不足：该申请单已由其他复核负责人负责，请您处理自己名下的申请单",
+			Opinion:          "",
+		})
+		return c.Status(403).JSON(fiber.Map{"error": "该申请单已由其他复核负责人负责"})
 	}
 
 	if status != models.StatusReviewPassed && status != models.StatusUnderFinal {
@@ -237,7 +255,7 @@ func ArchiveConsultation(c *fiber.Ctx) error {
 	}
 
 	row := models.DB.QueryRow(`
-		SELECT status, version, evidence_list, has_appeal
+		SELECT status, version, evidence_list, has_appeal, director_id
 		FROM consultations WHERE id = ?
 	`, id)
 
@@ -245,7 +263,8 @@ func ArchiveConsultation(c *fiber.Ctx) error {
 	var version int
 	var evidenceList string
 	var hasAppeal int
-	err := row.Scan(&status, &version, &evidenceList, &hasAppeal)
+	var directorID sql.NullString
+	err := row.Scan(&status, &version, &evidenceList, &hasAppeal, &directorID)
 	if err == sql.ErrNoRows {
 		return c.Status(404).JSON(fiber.Map{"error": "申请单不存在"})
 	}
@@ -264,10 +283,27 @@ func ArchiveConsultation(c *fiber.Ctx) error {
 			ActionName:       "复核归档",
 			FromStatus:       status,
 			Version:          version,
-			RejectReason:     "只有医务部复核负责人可以执行归档操作",
+			RejectReason:     "权限不足：只有医务部复核负责人可以执行归档操作",
 			Opinion:          "",
 		})
 		return c.Status(403).JSON(fiber.Map{"error": "只有医务部复核负责人可以执行归档操作"})
+	}
+
+	if directorID.Valid && directorID.String != user.UserID {
+		_ = WriteFailRecord(FailRecordParams{
+			ConsultationID:   id,
+			OperatorID:       user.UserID,
+			OperatorName:     user.UserName,
+			OperatorRole:     user.Role,
+			OperatorRoleName: user.RoleName,
+			Action:           "archive",
+			ActionName:       "复核归档",
+			FromStatus:       status,
+			Version:          version,
+			RejectReason:     "权限不足：该申请单已由其他复核负责人负责，请您处理自己名下的申请单",
+			Opinion:          "",
+		})
+		return c.Status(403).JSON(fiber.Map{"error": "该申请单已由其他复核负责人负责"})
 	}
 
 	if status != models.StatusUnderFinal && status != models.StatusReviewPassed &&

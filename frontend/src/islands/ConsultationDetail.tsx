@@ -49,6 +49,16 @@ export default function ConsultationDetail({ consultationId }: Props) {
     }
   };
 
+  const loadHistory = async () => {
+    if (!id) return;
+    try {
+      const historyRes = await getConsultationHistory(id);
+      setHistory(historyRes.data || []);
+    } catch (err: any) {
+      console.error('刷新历史记录失败', err);
+    }
+  };
+
   useEffect(() => {
     loadData();
     const handleUserChange = () => {
@@ -200,7 +210,7 @@ export default function ConsultationDetail({ consultationId }: Props) {
       return true;
     } catch (err: any) {
       setActionError(err.message || '操作失败');
-      loadData();
+      loadHistory();
       return false;
     }
   };

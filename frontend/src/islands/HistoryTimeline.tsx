@@ -30,6 +30,37 @@ function isFailed(action: string): boolean {
   return action.startsWith('fail_');
 }
 
+function getFailType(rejectReason: string): { label: string; type: string } {
+  if (!rejectReason) return { label: '失败', type: 'default' };
+  if (rejectReason.includes('版本冲突') || rejectReason.includes('版本')) {
+    return { label: '版本冲突', type: 'version' };
+  }
+  if (rejectReason.includes('权限') || rejectReason.includes('越权') || rejectReason.includes('只有')) {
+    return { label: '权限不足', type: 'permission' };
+  }
+  if (rejectReason.includes('状态') || rejectReason.includes('不允许')) {
+    return { label: '状态错误', type: 'status' };
+  }
+  if (rejectReason.includes('证据') || rejectReason.includes('必填') || rejectReason.includes('缺少')) {
+    return { label: '证据缺失', type: 'evidence' };
+  }
+  if (rejectReason.includes('不能为空') || rejectReason.includes('必须填写')) {
+    return { label: '参数缺失', type: 'param' };
+  }
+  return { label: '操作失败', type: 'default' };
+}
+
+function getFailTypeClass(type: string): string {
+  switch (type) {
+    case 'version': return 'fail-type-version';
+    case 'permission': return 'fail-type-permission';
+    case 'status': return 'fail-type-status';
+    case 'evidence': return 'fail-type-evidence';
+    case 'param': return 'fail-type-param';
+    default: return 'fail-type-default';
+  }
+}
+
 export default function HistoryTimeline({ records }: Props) {
   if (records.length === 0) {
     return (
@@ -44,16 +75,24 @@ export default function HistoryTimeline({ records }: Props) {
     <div className="timeline">
       {records.map((record) => {
         const failed = isFailed(record.action);
+        const failType = failed ? getFailType(record.reject_reason) : null;
         return (
           <div key={record.id} className={`timeline-item ${failed ? 'timeline-item-failed' : ''}`}>
             <div className={`timeline-dot ${getDotColor(record.action, record.to_status)}`}>
               {failed && <span style={{ fontSize: 10 }}>✕</span>}
             </div>
             <div className="timeline-header">
-              <span className="timeline-action">
-                {failed && <span style={{ marginRight: 4 }}>⚠️</span>}
-                {record.action_name}
-              </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <span className="timeline-action">
+                  {failed && <span style={{ marginRight: 4 }}>⚠️</span>}
+                  {record.action_name}
+                </span>
+                {failType && (
+                  <span className={`fail-type-tag ${getFailTypeClass(failType.type)}`}>
+                    {failType.label}
+                  </span>
+                )}
+              </div>
               <span className="timeline-time">{formatDate(record.created_at)}</span>
               <span className="status-tag" style={{ fontSize: 11 }}>
                 v{record.version}
