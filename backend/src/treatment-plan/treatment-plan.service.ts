@@ -46,9 +46,17 @@ export class TreatmentPlanService {
       return date.toISOString();
     };
 
+    const users: Record<string, { id: string; name: string; role: string; store: string }> = {
+      'user-1': { id: 'user-1', name: '林小前台', role: 'receptionist', store: '总店' },
+      'user-2': { id: 'user-2', name: '王牙医', role: 'dentist', store: '总店' },
+      'user-3': { id: 'user-3', name: '张院长', role: 'director', store: '总店' },
+      'user-4': { id: 'user-4', name: '陈前台', role: 'receptionist', store: '分店A' },
+      'user-5': { id: 'user-5', name: '李牙医', role: 'dentist', store: '分店A' },
+    };
+
     const seedPlans: TreatmentPlan[] = [
       {
-        id: uuidv4(),
+        id: 'plan-1',
         planNo: 'TP-2024-0001',
         patientName: '张伟',
         patientPhone: '13800138001',
@@ -61,14 +69,16 @@ export class TreatmentPlanService {
         materials: [
           { id: 'm1', name: '口腔检查报告', quantity: 1, checked: true, verified: false },
           { id: 'm2', name: 'X光片', quantity: 2, checked: true, verified: false },
-          { id: 'm3', name: '治疗同意书', quantity: 1, checked: false, verified: false },
+          { id: 'm3', name: '治疗同意书', quantity: 1, checked: true, verified: false },
         ],
-        attachments: [],
+        attachments: [
+          { id: 'att-1', name: '初诊记录.pdf', type: 'document', uploadedBy: 'user-1', uploadedAt: addDays(-5) },
+        ],
         remarks: '种植牙方案，需确认骨密度',
-        version: 1,
+        version: 2,
       },
       {
-        id: uuidv4(),
+        id: 'plan-2',
         planNo: 'TP-2024-0002',
         patientName: '李娜',
         patientPhone: '13800138002',
@@ -79,15 +89,15 @@ export class TreatmentPlanService {
         deadline: addDays(5),
         receptionistId: 'user-1',
         materials: [
-          { id: 'm1', name: '口腔检查报告', quantity: 1, checked: true },
-          { id: 'm2', name: '洁牙记录', quantity: 1, checked: false },
+          { id: 'm1', name: '口腔检查报告', quantity: 1, checked: true, verified: false },
+          { id: 'm2', name: '洁牙记录', quantity: 1, checked: false, verified: false },
         ],
         attachments: [],
         remarks: '正畸咨询初诊',
         version: 1,
       },
       {
-        id: uuidv4(),
+        id: 'plan-3',
         planNo: 'TP-2024-0003',
         patientName: '王芳',
         patientPhone: '13800138003',
@@ -99,19 +109,22 @@ export class TreatmentPlanService {
         receptionistId: 'user-1',
         dentistId: 'user-2',
         materials: [
-          { id: 'm1', name: '口腔检查报告', quantity: 1, checked: true, verified: true, verifiedBy: 'user-2' },
+          { id: 'm1', name: '口腔检查报告', quantity: 1, checked: true, verified: true, verifiedBy: 'user-2', verifiedAt: addDays(-3) },
           { id: 'm2', name: '治疗方案', quantity: 1, checked: true, verified: false },
+          { id: 'm3', name: '血常规检查', quantity: 1, checked: false, verified: false },
         ],
-        attachments: [],
+        attachments: [
+          { id: 'att-2', name: '牙片影像.jpg', type: 'image', uploadedBy: 'user-1', uploadedAt: addDays(-18) },
+        ],
         remarks: '根管治疗方案',
         verificationOpinion: '材料不完整，缺少血常规检查',
         verificationResult: 'reject',
         verifiedAt: addDays(-3),
-        rejectReason: '缺少血常规检查报告',
-        version: 2,
+        rejectReason: '缺少血常规检查报告，无法确认治疗安全性',
+        version: 3,
       },
       {
-        id: uuidv4(),
+        id: 'plan-4',
         planNo: 'TP-2024-0004',
         patientName: '刘强',
         patientPhone: '13800138004',
@@ -123,18 +136,21 @@ export class TreatmentPlanService {
         receptionistId: 'user-1',
         dentistId: 'user-2',
         materials: [
-          { id: 'm1', name: '口腔检查报告', quantity: 1, checked: true, verified: true, verifiedBy: 'user-2' },
-          { id: 'm2', name: '补牙材料清单', quantity: 3, checked: true, verified: true, verifiedBy: 'user-2' },
+          { id: 'm1', name: '口腔检查报告', quantity: 1, checked: true, verified: true, verifiedBy: 'user-2', verifiedAt: addDays(-1) },
+          { id: 'm2', name: '补牙材料清单', quantity: 3, checked: true, verified: true, verifiedBy: 'user-2', verifiedAt: addDays(-1) },
         ],
-        attachments: [],
+        attachments: [
+          { id: 'att-3', name: '术前照片.jpg', type: 'image', uploadedBy: 'user-2', uploadedAt: addDays(-2) },
+          { id: 'att-4', name: '治疗方案.pdf', type: 'document', uploadedBy: 'user-2', uploadedAt: addDays(-1) },
+        ],
         remarks: '3颗树脂补牙',
-        verificationOpinion: '材料齐全，方案可行',
+        verificationOpinion: '材料齐全，方案可行，建议尽快安排治疗',
         verificationResult: 'pass',
         verifiedAt: addDays(-1),
-        version: 2,
+        version: 3,
       },
       {
-        id: uuidv4(),
+        id: 'plan-5',
         planNo: 'TP-2024-0005',
         patientName: '陈静',
         patientPhone: '13800138005',
@@ -147,20 +163,23 @@ export class TreatmentPlanService {
         dentistId: 'user-5',
         directorId: 'user-3',
         materials: [
-          { id: 'm1', name: '洗牙记录', quantity: 1, checked: true, verified: true, verifiedBy: 'user-5' },
+          { id: 'm1', name: '洗牙记录', quantity: 1, checked: true, verified: true, verifiedBy: 'user-5', verifiedAt: addDays(-28) },
+          { id: 'm2', name: '抛光材料', quantity: 1, checked: true, verified: true, verifiedBy: 'user-5', verifiedAt: addDays(-28) },
         ],
-        attachments: [],
+        attachments: [
+          { id: 'att-5', name: '洗牙后照片.jpg', type: 'image', uploadedBy: 'user-5', uploadedAt: addDays(-25) },
+        ],
         remarks: '常规洗牙保健',
-        verificationOpinion: '正常',
+        verificationOpinion: '正常，洗牙效果良好',
         verificationResult: 'pass',
-        verifiedAt: addDays(-25),
-        reviewOpinion: '同意归档',
+        verifiedAt: addDays(-28),
+        reviewOpinion: '同意归档，治疗规范',
         reviewResult: 'pass',
         reviewedAt: addDays(-20),
-        version: 3,
+        version: 4,
       },
       {
-        id: uuidv4(),
+        id: 'plan-6',
         planNo: 'TP-2024-0006',
         patientName: '赵磊',
         patientPhone: '13800138006',
@@ -172,19 +191,22 @@ export class TreatmentPlanService {
         receptionistId: 'user-4',
         dentistId: 'user-5',
         materials: [
-          { id: 'm1', name: '口腔CT', quantity: 1, checked: true, verified: true, verifiedBy: 'user-5' },
-          { id: 'm2', name: '种植体型号确认', quantity: 1, checked: true, verified: true, verifiedBy: 'user-5' },
+          { id: 'm1', name: '口腔CT', quantity: 1, checked: true, verified: true, verifiedBy: 'user-5', verifiedAt: addDays(-22) },
+          { id: 'm2', name: '种植体型号确认', quantity: 1, checked: true, verified: true, verifiedBy: 'user-5', verifiedAt: addDays(-22) },
+          { id: 'm3', name: '骨粉材料', quantity: 2, checked: true, verified: true, verifiedBy: 'user-5', verifiedAt: addDays(-22) },
         ],
-        attachments: [],
+        attachments: [
+          { id: 'att-6', name: 'CT影像.dcm', type: 'image', uploadedBy: 'user-5', uploadedAt: addDays(-22) },
+        ],
         remarks: '种植牙修复方案',
-        verificationOpinion: '方案完整',
+        verificationOpinion: '方案完整，骨密度适合种植',
         verificationResult: 'pass',
         verifiedAt: addDays(-15),
-        reviewOpinion: '费用核算有误',
+        reviewOpinion: '费用核算有误，种植体型号与报价不一致',
         reviewResult: 'reject',
         reviewedAt: addDays(-10),
-        rejectReason: '院长退回：费用核算有问题，请重新核对',
-        version: 3,
+        rejectReason: '院长退回：费用核算有问题，种植体型号与报价单不一致，请重新核对',
+        version: 4,
       },
     ];
 
@@ -192,6 +214,305 @@ export class TreatmentPlanService {
       ...p,
       urgencyLevel: this.calculateUrgency(p.deadline),
     }));
+
+    // 生成审计日志
+    this.seedAuditLogs(users);
+  }
+
+  private seedAuditLogs(users: Record<string, { id: string; name: string; role: string; store: string }>) {
+    // plan-1: 草稿 → 提交核验
+    const plan1 = this.plans.find(p => p.id === 'plan-1');
+    if (plan1) {
+      this.auditService.addLog({
+        planId: plan1.id,
+        user: users['user-1'] as any,
+        action: '创建计划单',
+        fromStatus: undefined,
+        toStatus: TreatmentPlanStatus.DRAFT,
+        details: '林小前台创建了新的治疗计划单',
+        materialChanges: plan1.materials.map(m => ({
+          id: m.id,
+          name: m.name,
+          checked: m.checked,
+          verified: false,
+        })),
+      });
+      this.auditService.addLog({
+        planId: plan1.id,
+        user: users['user-1'] as any,
+        action: '添加附件',
+        details: '添加附件：初诊记录.pdf',
+        attachmentChanges: [
+          { id: 'att-1', name: '初诊记录.pdf', type: 'document', changeType: 'add' as const },
+        ],
+      });
+      this.auditService.addLog({
+        planId: plan1.id,
+        user: users['user-1'] as any,
+        action: '提交核验',
+        fromStatus: TreatmentPlanStatus.DRAFT,
+        toStatus: TreatmentPlanStatus.PENDING_VERIFICATION,
+        details: '前台提交核验，等待医生核验',
+        materialChanges: plan1.materials.map(m => ({
+          id: m.id,
+          name: m.name,
+          before: { checked: false, verified: false },
+          after: { checked: m.checked, verified: false },
+        })),
+      });
+    }
+
+    // plan-2: 草稿
+    const plan2 = this.plans.find(p => p.id === 'plan-2');
+    if (plan2) {
+      this.auditService.addLog({
+        planId: plan2.id,
+        user: users['user-1'] as any,
+        action: '创建计划单',
+        fromStatus: undefined,
+        toStatus: TreatmentPlanStatus.DRAFT,
+        details: '林小前台创建了正畸咨询计划单，正在完善中',
+        materialChanges: plan2.materials.map(m => ({
+          id: m.id,
+          name: m.name,
+          checked: m.checked,
+          verified: false,
+        })),
+      });
+    }
+
+    // plan-3: 草稿 → 提交核验 → 核验退回
+    const plan3 = this.plans.find(p => p.id === 'plan-3');
+    if (plan3) {
+      this.auditService.addLog({
+        planId: plan3.id,
+        user: users['user-1'] as any,
+        action: '创建计划单',
+        fromStatus: undefined,
+        toStatus: TreatmentPlanStatus.DRAFT,
+        details: '林小前台创建了根管治疗计划单',
+        materialChanges: plan3.materials.map(m => ({
+          id: m.id,
+          name: m.name,
+          checked: m.id === 'm1' || m.id === 'm2' ? true : false,
+          verified: false,
+        })),
+      });
+      this.auditService.addLog({
+        planId: plan3.id,
+        user: users['user-1'] as any,
+        action: '添加附件',
+        details: '添加附件：牙片影像.jpg',
+        attachmentChanges: [
+          { id: 'att-2', name: '牙片影像.jpg', type: 'image', changeType: 'add' as const },
+        ],
+      });
+      this.auditService.addLog({
+        planId: plan3.id,
+        user: users['user-1'] as any,
+        action: '提交核验',
+        fromStatus: TreatmentPlanStatus.DRAFT,
+        toStatus: TreatmentPlanStatus.PENDING_VERIFICATION,
+        details: '前台提交核验，等待医生核验',
+      });
+      this.auditService.addLog({
+        planId: plan3.id,
+        user: users['user-2'] as any,
+        action: '核验退回',
+        fromStatus: TreatmentPlanStatus.PENDING_VERIFICATION,
+        toStatus: TreatmentPlanStatus.VERIFICATION_REJECTED,
+        details: `核验退回，原因：${plan3.rejectReason}`,
+        materialChanges: plan3.materials.map(m => ({
+          id: m.id,
+          name: m.name,
+          before: { checked: m.checked, verified: false },
+          after: { checked: m.checked, verified: m.verified },
+        })),
+        opinion: plan3.verificationOpinion,
+        rejectReason: plan3.rejectReason,
+      });
+    }
+
+    // plan-4: 草稿 → 提交核验 → 核验通过 → 待复核
+    const plan4 = this.plans.find(p => p.id === 'plan-4');
+    if (plan4) {
+      this.auditService.addLog({
+        planId: plan4.id,
+        user: users['user-1'] as any,
+        action: '创建计划单',
+        fromStatus: undefined,
+        toStatus: TreatmentPlanStatus.DRAFT,
+        details: '林小前台创建了补牙计划单',
+        materialChanges: plan4.materials.map(m => ({
+          id: m.id,
+          name: m.name,
+          checked: true,
+          verified: false,
+        })),
+      });
+      this.auditService.addLog({
+        planId: plan4.id,
+        user: users['user-1'] as any,
+        action: '提交核验',
+        fromStatus: TreatmentPlanStatus.DRAFT,
+        toStatus: TreatmentPlanStatus.PENDING_VERIFICATION,
+        details: '前台提交核验，等待医生核验',
+      });
+      this.auditService.addLog({
+        planId: plan4.id,
+        user: users['user-2'] as any,
+        action: '添加附件',
+        details: '添加附件：术前照片.jpg',
+        attachmentChanges: [
+          { id: 'att-3', name: '术前照片.jpg', type: 'image', changeType: 'add' as const },
+        ],
+      });
+      this.auditService.addLog({
+        planId: plan4.id,
+        user: users['user-2'] as any,
+        action: '添加附件',
+        details: '添加附件：治疗方案.pdf',
+        attachmentChanges: [
+          { id: 'att-4', name: '治疗方案.pdf', type: 'document', changeType: 'add' as const },
+        ],
+      });
+      this.auditService.addLog({
+        planId: plan4.id,
+        user: users['user-2'] as any,
+        action: '核验通过',
+        fromStatus: TreatmentPlanStatus.PENDING_VERIFICATION,
+        toStatus: TreatmentPlanStatus.PENDING_REVIEW,
+        details: `核验通过，意见：${plan4.verificationOpinion}`,
+        materialChanges: plan4.materials.map(m => ({
+          id: m.id,
+          name: m.name,
+          before: { checked: true, verified: false },
+          after: { checked: true, verified: true },
+        })),
+        opinion: plan4.verificationOpinion,
+      });
+    }
+
+    // plan-5: 草稿 → 提交核验 → 核验通过 → 待复核 → 复核通过归档
+    const plan5 = this.plans.find(p => p.id === 'plan-5');
+    if (plan5) {
+      this.auditService.addLog({
+        planId: plan5.id,
+        user: users['user-4'] as any,
+        action: '创建计划单',
+        fromStatus: undefined,
+        toStatus: TreatmentPlanStatus.DRAFT,
+        details: '陈前台创建了洗牙保健计划单',
+        materialChanges: plan5.materials.map(m => ({
+          id: m.id,
+          name: m.name,
+          checked: true,
+          verified: false,
+        })),
+      });
+      this.auditService.addLog({
+        planId: plan5.id,
+        user: users['user-4'] as any,
+        action: '提交核验',
+        fromStatus: TreatmentPlanStatus.DRAFT,
+        toStatus: TreatmentPlanStatus.PENDING_VERIFICATION,
+        details: '前台提交核验，等待医生核验',
+      });
+      this.auditService.addLog({
+        planId: plan5.id,
+        user: users['user-5'] as any,
+        action: '核验通过',
+        fromStatus: TreatmentPlanStatus.PENDING_VERIFICATION,
+        toStatus: TreatmentPlanStatus.PENDING_REVIEW,
+        details: `核验通过，意见：${plan5.verificationOpinion}`,
+        materialChanges: plan5.materials.map(m => ({
+          id: m.id,
+          name: m.name,
+          before: { checked: true, verified: false },
+          after: { checked: true, verified: true },
+        })),
+        opinion: plan5.verificationOpinion,
+      });
+      this.auditService.addLog({
+        planId: plan5.id,
+        user: users['user-5'] as any,
+        action: '添加附件',
+        details: '添加附件：洗牙后照片.jpg',
+        attachmentChanges: [
+          { id: 'att-5', name: '洗牙后照片.jpg', type: 'image', changeType: 'add' as const },
+        ],
+      });
+      this.auditService.addLog({
+        planId: plan5.id,
+        user: users['user-3'] as any,
+        action: '复核通过归档',
+        fromStatus: TreatmentPlanStatus.PENDING_REVIEW,
+        toStatus: TreatmentPlanStatus.ARCHIVED,
+        details: `复核通过归档，意见：${plan5.reviewOpinion}`,
+        opinion: plan5.reviewOpinion,
+      });
+    }
+
+    // plan-6: 草稿 → 提交核验 → 核验通过 → 待复核 → 复核退回
+    const plan6 = this.plans.find(p => p.id === 'plan-6');
+    if (plan6) {
+      this.auditService.addLog({
+        planId: plan6.id,
+        user: users['user-4'] as any,
+        action: '创建计划单',
+        fromStatus: undefined,
+        toStatus: TreatmentPlanStatus.DRAFT,
+        details: '陈前台创建了种植牙修复计划单',
+        materialChanges: plan6.materials.map(m => ({
+          id: m.id,
+          name: m.name,
+          checked: true,
+          verified: false,
+        })),
+      });
+      this.auditService.addLog({
+        planId: plan6.id,
+        user: users['user-4'] as any,
+        action: '提交核验',
+        fromStatus: TreatmentPlanStatus.DRAFT,
+        toStatus: TreatmentPlanStatus.PENDING_VERIFICATION,
+        details: '前台提交核验，等待医生核验',
+      });
+      this.auditService.addLog({
+        planId: plan6.id,
+        user: users['user-5'] as any,
+        action: '添加附件',
+        details: '添加附件：CT影像.dcm',
+        attachmentChanges: [
+          { id: 'att-6', name: 'CT影像.dcm', type: 'image', changeType: 'add' as const },
+        ],
+      });
+      this.auditService.addLog({
+        planId: plan6.id,
+        user: users['user-5'] as any,
+        action: '核验通过',
+        fromStatus: TreatmentPlanStatus.PENDING_VERIFICATION,
+        toStatus: TreatmentPlanStatus.PENDING_REVIEW,
+        details: `核验通过，意见：${plan6.verificationOpinion}`,
+        materialChanges: plan6.materials.map(m => ({
+          id: m.id,
+          name: m.name,
+          before: { checked: true, verified: false },
+          after: { checked: true, verified: true },
+        })),
+        opinion: plan6.verificationOpinion,
+      });
+      this.auditService.addLog({
+        planId: plan6.id,
+        user: users['user-3'] as any,
+        action: '复核退回',
+        fromStatus: TreatmentPlanStatus.PENDING_REVIEW,
+        toStatus: TreatmentPlanStatus.REVIEW_REJECTED,
+        details: `复核退回，原因：${plan6.rejectReason}`,
+        opinion: plan6.reviewOpinion,
+        rejectReason: plan6.rejectReason,
+      });
+    }
   }
 
   private calculateUrgency(deadline: string): UrgencyLevel {
@@ -560,6 +881,22 @@ export class TreatmentPlanService {
 
     const fromStatus = plan.status;
 
+    const materialChanges = plan.materials.map(m => {
+      const beforeChecked = m.checked;
+      const beforeVerified = m.verified;
+      let afterChecked = beforeChecked;
+      let afterVerified = beforeVerified;
+      if (dto.verifiedMaterials && dto.verifiedMaterials.includes(m.id)) {
+        afterVerified = true;
+      }
+      return {
+        id: m.id,
+        name: m.name,
+        before: { checked: beforeChecked, verified: beforeVerified },
+        after: { checked: afterChecked, verified: afterVerified },
+      };
+    });
+
     if (dto.verifiedMaterials) {
       plan.materials = plan.materials.map(m => ({
         ...m,
@@ -589,6 +926,8 @@ export class TreatmentPlanService {
         fromStatus,
         toStatus: TreatmentPlanStatus.PENDING_REVIEW,
         details: `核验通过，意见：${dto.opinion || '无'}`,
+        materialChanges,
+        opinion: dto.opinion,
       });
     } else {
       if (!dto.rejectReason) {
@@ -604,6 +943,9 @@ export class TreatmentPlanService {
         fromStatus,
         toStatus: TreatmentPlanStatus.VERIFICATION_REJECTED,
         details: `核验退回，原因：${dto.rejectReason}`,
+        materialChanges,
+        opinion: dto.opinion,
+        rejectReason: dto.rejectReason,
       });
     }
 
@@ -675,6 +1017,7 @@ export class TreatmentPlanService {
         fromStatus,
         toStatus: TreatmentPlanStatus.ARCHIVED,
         details: `复核通过并归档，意见：${dto.opinion || '无'}`,
+        opinion: dto.opinion,
       });
     } else {
       if (!dto.rejectReason) {
@@ -690,6 +1033,8 @@ export class TreatmentPlanService {
         fromStatus,
         toStatus: TreatmentPlanStatus.REVIEW_REJECTED,
         details: `复核退回，原因：${dto.rejectReason}`,
+        opinion: dto.opinion,
+        rejectReason: dto.rejectReason,
       });
     }
 
@@ -751,29 +1096,46 @@ export class TreatmentPlanService {
     return { success: true };
   }
 
-  batchSubmitVerification(dto: BatchOperationDto) {
+  batchSubmitVerification(dto: any) {
     const user = this.getUserOrThrow(dto.userId);
 
     if (user.role !== UserRole.RECEPTIONIST) {
       throw new ForbiddenException('只有前台顾问可以批量提交核验');
     }
 
-    const results: { id: string; success: boolean; message?: string }[] = [];
+    const results: { id: string; planNo?: string; success: boolean; message?: string }[] = [];
 
-    for (const planId of dto.planIds) {
+    for (const item of dto.items) {
       try {
-        const plan = this.getPlanOrThrow(planId);
+        const plan = this.plans.find(p => p.id === item.id);
+        if (!plan) {
+          results.push({ id: item.id, success: false, message: '计划单不存在' });
+          continue;
+        }
+
+        if (plan.store !== user.store) {
+          results.push({ id: item.id, planNo: plan.planNo, success: false, message: '无权操作其他门店的计划单' });
+          continue;
+        }
+
+        if (plan.version !== item.version) {
+          results.push({ id: item.id, planNo: plan.planNo, success: false, message: '数据已过期，请刷新后重试' });
+          continue;
+        }
+
         if (plan.receptionistId !== user.id) {
-          results.push({ id: planId, success: false, message: '不是您负责的计划单' });
+          results.push({ id: item.id, planNo: plan.planNo, success: false, message: '不是您负责的计划单' });
           continue;
         }
+
         if (![TreatmentPlanStatus.DRAFT, TreatmentPlanStatus.VERIFICATION_REJECTED].includes(plan.status)) {
-          results.push({ id: planId, success: false, message: '状态不允许提交' });
+          results.push({ id: item.id, planNo: plan.planNo, success: false, message: '当前状态不可提交核验' });
           continue;
         }
+
         const allChecked = plan.materials.length > 0 && plan.materials.every(m => m.checked);
         if (!allChecked) {
-          results.push({ id: planId, success: false, message: '材料未确认齐全' });
+          results.push({ id: item.id, planNo: plan.planNo, success: false, message: '材料未确认齐全' });
           continue;
         }
 
@@ -787,12 +1149,18 @@ export class TreatmentPlanService {
           action: '批量提交核验',
           fromStatus,
           toStatus: TreatmentPlanStatus.PENDING_VERIFICATION,
-          details: '批量提交核验',
+          details: `批量提交核验成功，共 ${plan.materials.length} 项材料`,
+          materialChanges: plan.materials.map(m => ({
+            id: m.id,
+            name: m.name,
+            checked: m.checked,
+            verified: m.verified,
+          })),
         });
 
-        results.push({ id: planId, success: true });
+        results.push({ id: item.id, planNo: plan.planNo, success: true });
       } catch (e) {
-        results.push({ id: planId, success: false, message: (e as Error).message });
+        results.push({ id: item.id, success: false, message: (e as Error).message });
       }
     }
 
@@ -812,15 +1180,38 @@ export class TreatmentPlanService {
       throw new ForbiddenException('只有口腔医生可以批量核验');
     }
 
-    const results: { id: string; success: boolean; message?: string }[] = [];
+    const results: { id: string; planNo?: string; success: boolean; message?: string }[] = [];
 
-    for (const planId of dto.planIds) {
+    for (const item of dto.items) {
       try {
-        const plan = this.getPlanOrThrow(planId);
-        if (plan.status !== TreatmentPlanStatus.PENDING_VERIFICATION) {
-          results.push({ id: planId, success: false, message: '状态不允许核验' });
+        const plan = this.plans.find(p => p.id === item.id);
+        if (!plan) {
+          results.push({ id: item.id, success: false, message: '计划单不存在' });
           continue;
         }
+
+        if (plan.store !== user.store) {
+          results.push({ id: item.id, planNo: plan.planNo, success: false, message: '无权操作其他门店的计划单' });
+          continue;
+        }
+
+        if (plan.version !== item.version) {
+          results.push({ id: item.id, planNo: plan.planNo, success: false, message: '数据已过期，请刷新后重试' });
+          continue;
+        }
+
+        if (plan.status !== TreatmentPlanStatus.PENDING_VERIFICATION) {
+          results.push({ id: item.id, planNo: plan.planNo, success: false, message: '当前状态不可核验' });
+          continue;
+        }
+
+        const fromStatus = plan.status;
+        const materialChanges = plan.materials.map(m => ({
+          id: m.id,
+          name: m.name,
+          before: { checked: m.checked, verified: m.verified },
+          after: { checked: m.checked, verified: dto.result === 'pass' ? true : m.verified },
+        }));
 
         if (dto.result === 'pass') {
           plan.materials = plan.materials.map(m => ({
@@ -831,21 +1222,21 @@ export class TreatmentPlanService {
           }));
           plan.status = TreatmentPlanStatus.PENDING_REVIEW;
           plan.verificationResult = 'pass';
-          plan.verificationOpinion = dto.remark || '批量核验通过';
+          plan.verificationOpinion = dto.opinion || dto.remark || '批量核验通过';
           plan.verifiedAt = new Date().toISOString();
           plan.dentistId = user.id;
           plan.rejectReason = undefined;
         } else {
-          if (!dto.remark) {
-            results.push({ id: planId, success: false, message: '批量退回需要填写原因' });
+          if (!dto.rejectReason && !dto.remark) {
+            results.push({ id: item.id, planNo: plan.planNo, success: false, message: '批量退回需要填写原因' });
             continue;
           }
           plan.status = TreatmentPlanStatus.VERIFICATION_REJECTED;
           plan.verificationResult = 'reject';
-          plan.verificationOpinion = dto.remark;
+          plan.verificationOpinion = dto.opinion || '';
           plan.verifiedAt = new Date().toISOString();
           plan.dentistId = user.id;
-          plan.rejectReason = dto.remark;
+          plan.rejectReason = dto.rejectReason || dto.remark || '';
         }
 
         plan.version++;
@@ -854,12 +1245,19 @@ export class TreatmentPlanService {
           planId: plan.id,
           user,
           action: `批量核验${dto.result === 'pass' ? '通过' : '退回'}`,
-          details: dto.remark || '批量处理',
+          fromStatus,
+          toStatus: plan.status,
+          details: dto.result === 'pass'
+            ? `批量核验通过，处理意见：${dto.opinion || dto.remark || '无'}`
+            : `批量核验退回，原因：${dto.rejectReason || dto.remark}`,
+          materialChanges,
+          opinion: dto.opinion || dto.remark,
+          rejectReason: dto.result === 'reject' ? (dto.rejectReason || dto.remark) : undefined,
         });
 
-        results.push({ id: planId, success: true });
+        results.push({ id: item.id, planNo: plan.planNo, success: true });
       } catch (e) {
-        results.push({ id: planId, success: false, message: (e as Error).message });
+        results.push({ id: item.id, success: false, message: (e as Error).message });
       }
     }
 
@@ -879,18 +1277,30 @@ export class TreatmentPlanService {
       throw new ForbiddenException('只有门店院长可以批量复核');
     }
 
-    const results: { id: string; success: boolean; message?: string }[] = [];
+    const results: { id: string; planNo?: string; success: boolean; message?: string }[] = [];
 
-    for (const planId of dto.planIds) {
+    for (const item of dto.items) {
       try {
-        const plan = this.getPlanOrThrow(planId);
-        if (plan.status !== TreatmentPlanStatus.PENDING_REVIEW) {
-          results.push({ id: planId, success: false, message: '状态不允许复核' });
+        const plan = this.plans.find(p => p.id === item.id);
+        if (!plan) {
+          results.push({ id: item.id, success: false, message: '计划单不存在' });
           continue;
         }
 
+        if (plan.version !== item.version) {
+          results.push({ id: item.id, planNo: plan.planNo, success: false, message: '数据已过期，请刷新后重试' });
+          continue;
+        }
+
+        if (plan.status !== TreatmentPlanStatus.PENDING_REVIEW) {
+          results.push({ id: item.id, planNo: plan.planNo, success: false, message: '当前状态不可复核' });
+          continue;
+        }
+
+        const fromStatus = plan.status;
+
         plan.reviewResult = dto.result;
-        plan.reviewOpinion = dto.remark || (dto.result === 'pass' ? '批量复核通过' : '');
+        plan.reviewOpinion = dto.opinion || dto.remark || (dto.result === 'pass' ? '批量复核通过' : '');
         plan.reviewedAt = new Date().toISOString();
         plan.directorId = user.id;
 
@@ -898,12 +1308,12 @@ export class TreatmentPlanService {
           plan.status = TreatmentPlanStatus.ARCHIVED;
           plan.rejectReason = undefined;
         } else {
-          if (!dto.remark) {
-            results.push({ id: planId, success: false, message: '批量退回需要填写原因' });
+          if (!dto.rejectReason && !dto.remark) {
+            results.push({ id: item.id, planNo: plan.planNo, success: false, message: '批量退回需要填写原因' });
             continue;
           }
           plan.status = TreatmentPlanStatus.REVIEW_REJECTED;
-          plan.rejectReason = dto.remark;
+          plan.rejectReason = dto.rejectReason || dto.remark || '';
         }
 
         plan.version++;
@@ -912,12 +1322,18 @@ export class TreatmentPlanService {
           planId: plan.id,
           user,
           action: `批量复核${dto.result === 'pass' ? '通过归档' : '退回'}`,
-          details: dto.remark || '批量处理',
+          fromStatus,
+          toStatus: plan.status,
+          details: dto.result === 'pass'
+            ? `批量复核通过，处理意见：${dto.opinion || dto.remark || '无'}`
+            : `批量复核退回，原因：${dto.rejectReason || dto.remark}`,
+          opinion: dto.opinion || dto.remark,
+          rejectReason: dto.result === 'reject' ? (dto.rejectReason || dto.remark) : undefined,
         });
 
-        results.push({ id: planId, success: true });
+        results.push({ id: item.id, planNo: plan.planNo, success: true });
       } catch (e) {
-        results.push({ id: planId, success: false, message: (e as Error).message });
+        results.push({ id: item.id, success: false, message: (e as Error).message });
       }
     }
 

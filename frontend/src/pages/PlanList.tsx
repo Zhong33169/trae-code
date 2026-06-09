@@ -24,10 +24,12 @@ const PlanList = () => {
   const [statusFilter, setStatusFilter] = createSignal<string>('');
   const [urgencyFilter, setUrgencyFilter] = createSignal<string>('');
   const [keyword, setKeyword] = createSignal('');
-  const [selectedIds, setSelectedIds] = createSignal<string[]>([]);
+  const [selectedItems, setSelectedItems] = createSignal<{ id: string; version: number }[]>([]);
   const [showCreateModal, setShowCreateModal] = createSignal(false);
   const [showBatchModal, setShowBatchModal] = createSignal(false);
   const [batchAction, setBatchAction] = createSignal<string>('');
+
+  const selectedIds = () => selectedItems().map(item => item.id);
 
   const loadData = async () => {
     if (!currentUser()) return;
@@ -97,22 +99,25 @@ const PlanList = () => {
     navigate(`/plans/${id}`);
   };
 
-  const toggleSelect = (id: string, e: Event) => {
+  const toggleSelect = (plan: TreatmentPlan, e: Event) => {
     e.stopPropagation();
-    const current = selectedIds();
-    if (current.includes(id)) {
-      setSelectedIds(current.filter(i => i !== id));
+    const current = selectedItems();
+    const idx = current.findIndex(item => item.id === plan.id);
+    if (idx >= 0) {
+      const next = [...current];
+      next.splice(idx, 1);
+      setSelectedItems(next);
     } else {
-      setSelectedIds([...current, id]);
+      setSelectedItems([...current, { id: plan.id, version: plan.version }]);
     }
   };
 
   const toggleSelectAll = (e: Event) => {
     const target = e.target as HTMLInputElement;
     if (target.checked) {
-      setSelectedIds(plans().map(p => p.id));
+      setSelectedItems(plans().map(p => ({ id: p.id, version: p.version })));
     } else {
-      setSelectedIds([]);
+      setSelectedItems([]);
     }
   };
 
@@ -123,7 +128,7 @@ const PlanList = () => {
   };
 
   const handleBatchSuccess = () => {
-    setSelectedIds([]);
+    setSelectedItems([]);
     setShowBatchModal(false);
     loadData();
   };
@@ -304,7 +309,7 @@ const PlanList = () => {
                       <input
                         type="checkbox"
                         checked={selectedIds().includes(plan.id)}
-                        onChange={(e) => toggleSelect(plan.id, e)}
+                        onChange={(e) => toggleSelect(plan, e)}
                       />
                     </td>
                     <td class="plan-no">{plan.planNo}</td>
@@ -364,7 +369,7 @@ const PlanList = () => {
       <Show when={showBatchModal()}>
         <BatchOperationModal
           action={batchAction()}
-          selectedIds={selectedIds()}
+          items={selectedItems()}
           onClose={() => setShowBatchModal(false)}
           onSuccess={handleBatchSuccess}
         />

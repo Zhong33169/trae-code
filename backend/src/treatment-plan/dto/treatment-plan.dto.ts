@@ -1,5 +1,11 @@
-import { IsString, IsEnum, IsOptional, IsArray, IsNumber, IsNotEmpty } from 'class-validator';
+import { IsString, IsEnum, IsOptional, IsArray, IsNumber, IsNotEmpty, ValidateNested } from 'class-validator';
+import { Type } from 'class-transformer';
 import { TreatmentPlanStatus, UrgencyLevel } from '../../common/types';
+
+export class BatchItemDto {
+  id: string;
+  version: number;
+}
 
 export class CreateTreatmentPlanDto {
   @IsString()
@@ -154,7 +160,7 @@ export class ReviewTreatmentPlanDto {
 export class BatchOperationDto {
   @IsArray()
   @IsNotEmpty()
-  planIds: string[];
+  items: any[];
 
   @IsString()
   @IsNotEmpty()
@@ -163,6 +169,18 @@ export class BatchOperationDto {
   @IsString()
   @IsOptional()
   remark?: string;
+
+  @IsString()
+  @IsOptional()
+  result?: 'pass' | 'reject';
+
+  @IsString()
+  @IsOptional()
+  rejectReason?: string;
+
+  @IsString()
+  @IsOptional()
+  opinion?: string;
 }
 
 export class AddAttachmentDto {

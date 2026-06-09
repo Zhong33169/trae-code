@@ -75,11 +75,33 @@ export interface AuditLog {
   planId: string;
   userId: string;
   userName: string;
+  userRole?: string;
   action: string;
   fromStatus?: TreatmentPlanStatus;
   toStatus?: TreatmentPlanStatus;
   details: string;
   timestamp: string;
+  materialChanges?: Array<{
+    id: string;
+    name: string;
+    before?: { checked?: boolean; verified?: boolean };
+    after?: { checked?: boolean; verified?: boolean };
+    checked?: boolean;
+    verified?: boolean;
+  }>;
+  attachmentChanges?: Array<{
+    id?: string;
+    name: string;
+    type: string;
+    changeType: 'add' | 'remove';
+  }>;
+  opinion?: string;
+  rejectReason?: string;
+  batchInfo?: {
+    batchId?: string;
+    success?: boolean;
+    failReason?: string;
+  };
 }
 
 export interface PlanListResponse {

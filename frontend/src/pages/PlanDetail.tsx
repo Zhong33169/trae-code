@@ -753,6 +753,67 @@ const PlanDetail = (props: PlanDetailProps) => {
                       </div>
                     </Show>
                     <div class="audit-details">{log.details}</div>
+                    <Show when={log.opinion}>
+                      <div class="audit-extra">
+                        <span class="extra-label">处理意见：</span>
+                        <span class="extra-value">{log.opinion}</span>
+                      </div>
+                    </Show>
+                    <Show when={log.rejectReason}>
+                      <div class="audit-extra audit-reject">
+                        <span class="extra-label">退回原因：</span>
+                        <span class="extra-value">{log.rejectReason}</span>
+                      </div>
+                    </Show>
+                    <Show when={log.materialChanges && log.materialChanges.length > 0}>
+                      <div class="audit-extra">
+                        <div class="extra-label">材料变更：</div>
+                        <ul class="material-changes">
+                          <For each={log.materialChanges}>
+                            {(mc) => (
+                              <li>
+                                <span class="material-name">{mc.name}</span>
+                                <span class="material-status">
+                                  <Show when={mc.before && mc.after}>
+                                    {(() => {
+                                      const before = mc.before!;
+                                      const after = mc.after!;
+                                      return (
+                                        <>
+                                          (确认: {before.checked ? '是' : '否'} → {after.checked ? '是' : '否'}，
+                                          核验: {before.verified ? '是' : '否'} → {after.verified ? '是' : '否'})
+                                        </>
+                                      );
+                                    })()}
+                                  </Show>
+                                  <Show when={!mc.before || !mc.after}>
+                                    (确认: {mc.checked ? '是' : '否'}，核验: {mc.verified ? '是' : '否'})
+                                  </Show>
+                                </span>
+                              </li>
+                            )}
+                          </For>
+                        </ul>
+                      </div>
+                    </Show>
+                    <Show when={log.attachmentChanges && log.attachmentChanges.length > 0}>
+                      <div class="audit-extra">
+                        <div class="extra-label">附件变更：</div>
+                        <ul class="attachment-changes">
+                          <For each={log.attachmentChanges}>
+                            {(ac) => (
+                              <li>
+                                <span class={`attach-change ${ac.changeType}`}>
+                                  {ac.changeType === 'add' ? '+' : '-'}
+                                </span>
+                                <span class="attach-name">{ac.name}</span>
+                                <span class="attach-type">({ac.type})</span>
+                              </li>
+                            )}
+                          </For>
+                        </ul>
+                      </div>
+                    </Show>
                   </div>
                 </div>
               )}

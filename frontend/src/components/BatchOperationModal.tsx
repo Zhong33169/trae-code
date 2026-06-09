@@ -3,9 +3,14 @@ import { useUser } from '../contexts/UserContext';
 import { api } from '../services/api';
 import './Modal.css';
 
+interface BatchItem {
+  id: string;
+  version: number;
+}
+
 interface Props {
   action: string;
-  selectedIds: string[];
+  items: BatchItem[];
   onClose: () => void;
   onSuccess: () => void;
 }
@@ -42,33 +47,34 @@ const BatchOperationModal = (props: Props) => {
 
     try {
       let result;
-      const data = {
-        planIds: props.selectedIds,
+      const baseData = {
+        items: props.items,
         userId: currentUser()?.id,
         remark: remark(),
       };
 
       switch (props.action) {
         case 'submit':
-          result = await api.batchSubmitVerification(data);
+          result = await api.batchSubmitVerification(baseData);
           break;
         case 'verify_pass':
-          result = await api.batchVerify({ ...data, result: 'pass' });
+          result = await api.batchVerify({ ...baseData, result: 'pass' });
           break;
         case 'verify_reject':
-          result = await api.batchVerify({ ...data, result: 'reject' });
+          result = await api.batchVerify({ ...baseData, result: 'reject', rejectReason: remark() });
           break;
         case 'review_pass':
-          result = await api.batchReview({ ...data, result: 'pass' });
+          result = await api.batchReview({ ...baseData, result: 'pass' });
           break;
         case 'review_reject':
-          result = await api.batchReview({ ...data, result: 'reject' });
+          result = await api.batchReview({ ...baseData, result: 'reject', rejectReason: remark() });
           break;
       }
 
       if (result && result.failCount > 0) {
         const failed = result.results.filter((r: any) => !r.success);
-        setError(`成功 ${result.successCount} 条，失败 ${result.failCount} 条：${failed.map((f: any) => f.message).join('；')}`);
+        const reasons = failed.map((f: any) => `${f.planNo || f.id}: ${f.message}`).join('；');
+        setError(`成功 ${result.successCount} 条，失败 ${result.failCount} 条：${reasons}`);
       } else {
         props.onSuccess();
       }
@@ -90,13 +96,13 @@ const BatchOperationModal = (props: Props) => {
           {error() && <div class="form-error">{error()}</div>}
 
           <p style="margin-bottom: 16px; color: #666;">
-            共选中 <strong style="color: #1890ff;">{props.selectedIds.length}</strong> 条记录，确定执行此操作？
+            共选中 <strong style="color: #1890ff;">{props.items.length}</strong> 条记录，确定执行此操作？
           </p>
 
           {needRemark() && (
             <div class="form-item">
               <label class="form-label">
-                {props.action.includes('verify') ? '退回原因' : '退回原因'} <span class="required">*</span>
+                退回原因 <span class="required">*</span>
               </label>
               <textarea
                 value={remark()}
@@ -110,12 +116,12 @@ const BatchOperationModal = (props: Props) => {
 
           {!needRemark() && (
             <div class="form-item">
-              <label class="form-label">备注（可选）</label>
+              <label class="form-label">处理意见（可选）</label>
               <textarea
                 value={remark()}
                 onInput={(e) => setRemark(e.target.value)}
                 class="form-textarea"
-                placeholder="请填写备注信息"
+                placeholder="请填写处理意见"
                 rows={3}
               />
             </div>

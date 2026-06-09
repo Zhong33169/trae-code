@@ -1,4 +1,14 @@
-import { createSignal, createContext, useContext, onMount, ParentComponent, onCleanup, Accessor, createMemo } from 'solid-js';
+import {
+  createSignal,
+  createContext,
+  useContext,
+  onMount,
+  ParentComponent,
+  onCleanup,
+  Accessor,
+  createMemo,
+  Show,
+} from 'solid-js';
 
 interface RouterContextType {
   path: Accessor<string>;
@@ -26,13 +36,13 @@ function parseParams(currentPath: string, pattern: string): Record<string, strin
   return result;
 }
 
-const ROUTES = [
+const ROUTE_PATTERNS = [
   '/',
   '/plans/:id',
 ];
 
 function extractParams(currentPath: string): Record<string, string> {
-  for (const pattern of ROUTES) {
+  for (const pattern of ROUTE_PATTERNS) {
     const params = parseParams(currentPath, pattern);
     if (params) return params;
   }
@@ -48,13 +58,14 @@ export const Router: ParentComponent = (props) => {
   const params = createMemo(() => extractParams(path()));
 
   const navigate = (newPath: string, options?: { replace?: boolean }) => {
+    const [pathPart, searchPart] = newPath.split('?');
     if (options?.replace) {
       window.history.replaceState({}, '', newPath);
     } else {
       window.history.pushState({}, '', newPath);
     }
-    setPath(newPath.split('?')[0]);
-    setSearch(newPath.includes('?') ? '?' + newPath.split('?')[1] : '');
+    setPath(pathPart);
+    setSearch(searchPart ? '?' + searchPart : '');
   };
 
   const handlePopState = () => {
@@ -108,13 +119,16 @@ interface RouteProps {
 
 export const Route = (props: RouteProps) => {
   const ctx = useContext(RouterContext)!;
-  const currentPath = ctx.path();
-  const params = parseParams(currentPath, props.path);
 
-  if (!params) return null;
+  const matchResult = createMemo(() => parseParams(ctx.path(), props.path));
 
   const Component = props.component;
-  return <Component params={params} />;
+
+  return (
+    <Show when={matchResult() !== null}>
+      <Component params={matchResult() || {}} />
+    </Show>
+  );
 };
 
 interface RoutesProps {

@@ -19,7 +19,6 @@ import {
   VerifyTreatmentPlanDto,
   SubmitReviewDto,
   ReviewTreatmentPlanDto,
-  BatchOperationDto,
   AddAttachmentDto,
 } from './dto/treatment-plan.dto';
 
@@ -35,6 +34,21 @@ export class TreatmentPlanController {
   @Get('stats')
   getStats(@Query('userId') userId: string) {
     return this.service.getStats(userId);
+  }
+
+  @Post('batch/submit-verification')
+  batchSubmitVerification(@Body() dto: any) {
+    return this.service.batchSubmitVerification(dto);
+  }
+
+  @Post('batch/verify')
+  batchVerify(@Body() dto: any) {
+    return this.service.batchVerify(dto);
+  }
+
+  @Post('batch/review')
+  batchReview(@Body() dto: any) {
+    return this.service.batchReview(dto);
   }
 
   @Get(':id')
@@ -104,20 +118,5 @@ export class TreatmentPlanController {
     @Query('userId') userId: string,
   ) {
     return this.service.removeAttachment(id, attachmentId, userId);
-  }
-
-  @Post('batch/submit-verification')
-  batchSubmitVerification(@Body() dto: BatchOperationDto) {
-    return this.service.batchSubmitVerification(dto);
-  }
-
-  @Post('batch/verify')
-  batchVerify(@Body() dto: BatchOperationDto & { result: 'pass' | 'reject' }) {
-    return this.service.batchVerify(dto);
-  }
-
-  @Post('batch/review')
-  batchReview(@Body() dto: BatchOperationDto & { result: 'pass' | 'reject' }) {
-    return this.service.batchReview(dto);
   }
 }

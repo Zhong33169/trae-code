@@ -400,6 +400,87 @@
   color: #666;
 }
 
+.audit-extra {
+  margin-top: 8px;
+  font-size: 12px;
+  padding: 8px 12px;
+  background: #fafafa;
+  border-radius: 4px;
+}
+
+.audit-extra.audit-reject {
+  background: #fff1f0;
+  border-left: 3px solid #ff4d4f;
+}
+
+.extra-label {
+  color: #999;
+  font-weight: 500;
+}
+
+.extra-value {
+  color: #333;
+}
+
+.material-changes,
+.attachment-changes {
+  list-style: none;
+  padding: 0;
+  margin: 6px 0 0 0;
+}
+
+.material-changes li,
+.attachment-changes li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+  font-size: 12px;
+  color: #666;
+}
+
+.material-name {
+  font-weight: 500;
+  color: #333;
+  min-width: 100px;
+}
+
+.material-status {
+  color: #999;
+  font-size: 11px;
+}
+
+.attach-change {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: bold;
+  line-height: 1;
+}
+
+.attach-change.add {
+  background: #f6ffed;
+  color: #52c41a;
+}
+
+.attach-change.remove {
+  background: #fff1f0;
+  color: #ff4d4f;
+}
+
+.attach-name {
+  color: #333;
+}
+
+.attach-type {
+  color: #999;
+  font-size: 11px;
+}
+
 .loading {
   text-align: center;
   padding: 40px;
