@@ -640,7 +640,9 @@ export class TreatmentPlanService {
   }
 
   private canEdit(plan: TreatmentPlan, user: User): boolean {
-    if (user.role === UserRole.DIRECTOR) return true;
+    if (plan.store !== user.store) {
+      return false;
+    }
 
     if (plan.status === TreatmentPlanStatus.DRAFT ||
         plan.status === TreatmentPlanStatus.VERIFICATION_REJECTED) {
@@ -762,6 +764,10 @@ export class TreatmentPlanService {
     const plan = this.getPlanOrThrow(id);
     const user = this.getUserOrThrow(userId);
 
+    if (plan.store !== user.store) {
+      throw new ForbiddenException('无权查看其他门店的计划单');
+    }
+
     const planWithUrgency = {
       ...plan,
       urgencyLevel: this.calculateUrgency(plan.deadline),
@@ -780,7 +786,7 @@ export class TreatmentPlanService {
   private getAvailableActions(plan: TreatmentPlan, user: User): string[] {
     const actions: string[] = [];
 
-    if (plan.store !== user.store && user.role !== UserRole.DIRECTOR) {
+    if (plan.store !== user.store) {
       return actions;
     }
 

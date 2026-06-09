@@ -98,8 +98,12 @@ export interface AuditLog {
   opinion?: string;
   rejectReason?: string;
   batchInfo?: {
-    batchId?: string;
-    success?: boolean;
-    failReason?: string;
+    totalCount: number;
+    successCount: number;
+    failCount: number;
+    successPlans: Array<{ id: string; planNo: string }>;
+    failedPlans: Array<{ id: string; planNo?: string; reason?: string }>;
+    opinion?: string;
+    rejectReason?: string;
   };
 }

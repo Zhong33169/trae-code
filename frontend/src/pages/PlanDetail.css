@@ -481,6 +481,52 @@
   font-size: 11px;
 }
 
+.audit-extra.audit-batch {
+  background: #f0f5ff;
+  border-left: 3px solid #1890ff;
+}
+
+.batch-summary {
+  margin-bottom: 8px;
+  font-weight: 500;
+  color: #1890ff;
+}
+
+.batch-section {
+  margin-top: 6px;
+}
+
+.batch-section-title {
+  font-size: 11px;
+  color: #999;
+  margin-bottom: 4px;
+}
+
+.batch-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.batch-item {
+  font-size: 11px;
+  padding: 2px 0;
+}
+
+.batch-item.success {
+  color: #52c41a;
+}
+
+.batch-item.failed {
+  color: #ff4d4f;
+}
+
+.batch-opinion {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed #d9d9d9;
+}
+
 .loading {
   text-align: center;
   padding: 40px;

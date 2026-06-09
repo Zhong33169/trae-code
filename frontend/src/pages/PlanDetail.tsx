@@ -765,6 +765,45 @@ const PlanDetail = (props: PlanDetailProps) => {
                         <span class="extra-value">{log.rejectReason}</span>
                       </div>
                     </Show>
+                    <Show when={log.batchInfo}>
+                      <div class="audit-extra audit-batch">
+                        <div class="extra-label">批量操作信息：</div>
+                        <div class="batch-summary">
+                          共 {log.batchInfo!.totalCount} 条，成功 {log.batchInfo!.successCount} 条，失败 {log.batchInfo!.failCount} 条
+                        </div>
+                        <Show when={log.batchInfo!.successPlans && log.batchInfo!.successPlans.length > 0}>
+                          <div class="batch-section">
+                            <div class="batch-section-title">成功计划单：</div>
+                            <ul class="batch-list">
+                              <For each={log.batchInfo!.successPlans}>
+                                {(p) => <li class="batch-item success">✅ {p.planNo}</li>}
+                              </For>
+                            </ul>
+                          </div>
+                        </Show>
+                        <Show when={log.batchInfo!.failedPlans && log.batchInfo!.failedPlans.length > 0}>
+                          <div class="batch-section">
+                            <div class="batch-section-title">失败计划单：</div>
+                            <ul class="batch-list">
+                              <For each={log.batchInfo!.failedPlans}>
+                                {(p) => (
+                                  <li class="batch-item failed">
+                                    ❌ {p.planNo || p.id}
+                                    <Show when={p.reason}> — {p.reason}</Show>
+                                  </li>
+                                )}
+                              </For>
+                            </ul>
+                          </div>
+                        </Show>
+                        <Show when={log.batchInfo!.opinion && log.batchInfo!.opinion !== log.opinion}>
+                          <div class="batch-opinion">
+                            <span class="extra-label">批量意见：</span>
+                            <span class="extra-value">{log.batchInfo!.opinion}</span>
+                          </div>
+                        </Show>
+                      </div>
+                    </Show>
                     <Show when={log.materialChanges && log.materialChanges.length > 0}>
                       <div class="audit-extra">
                         <div class="extra-label">材料变更：</div>
