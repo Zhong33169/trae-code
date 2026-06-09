@@ -202,6 +202,9 @@ def batch_submit(request, order_ids: List[str]):
                     order_no=order.order_no,
                     success=False,
                     message=msg,
+                    failure_type='permission',
+                    blocking_errors=[msg],
+                    warnings=[],
                 ))
                 failure_count += 1
                 _add_audit_log(
@@ -210,7 +213,7 @@ def batch_submit(request, order_ids: List[str]):
                     user=user,
                     is_failure=True,
                     failure_reason=msg,
-                    detail='批量提交审核失败',
+                    detail='批量提交审核失败：权限不足',
                 )
                 continue
 
@@ -223,6 +226,9 @@ def batch_submit(request, order_ids: List[str]):
                     order_no=order.order_no,
                     success=False,
                     message=f'拦截：{failure_msg}',
+                    failure_type='validation',
+                    blocking_errors=validation.blocking_errors,
+                    warnings=validation.warnings,
                 ))
                 failure_count += 1
                 _add_audit_log(
@@ -259,7 +265,10 @@ def batch_submit(request, order_ids: List[str]):
                 order_id=order.id,
                 order_no=order.order_no,
                 success=True,
-                message='提交成功',
+                message='提交成功' + ('（有警告提示）' if validation.warnings else ''),
+                failure_type='',
+                blocking_errors=[],
+                warnings=validation.warnings,
             ))
             success_count += 1
         except Exception as e:
@@ -268,6 +277,9 @@ def batch_submit(request, order_ids: List[str]):
                 order_no='未知',
                 success=False,
                 message=str(e),
+                failure_type='error',
+                blocking_errors=[str(e)],
+                warnings=[],
             ))
             failure_count += 1
 
@@ -308,6 +320,9 @@ def batch_review(request, order_ids: List[str]):
                     order_no=order.order_no,
                     success=False,
                     message=msg,
+                    failure_type='permission',
+                    blocking_errors=[msg],
+                    warnings=[],
                 ))
                 failure_count += 1
                 _add_audit_log(
@@ -316,7 +331,7 @@ def batch_review(request, order_ids: List[str]):
                     user=user,
                     is_failure=True,
                     failure_reason=msg,
-                    detail='批量审核失败',
+                    detail='批量审核失败：权限不足',
                 )
                 continue
 
@@ -329,6 +344,9 @@ def batch_review(request, order_ids: List[str]):
                     order_no=order.order_no,
                     success=False,
                     message=f'拦截：{failure_msg}',
+                    failure_type='validation',
+                    blocking_errors=validation.blocking_errors,
+                    warnings=validation.warnings,
                 ))
                 failure_count += 1
                 _add_audit_log(
@@ -365,7 +383,10 @@ def batch_review(request, order_ids: List[str]):
                 order_id=order.id,
                 order_no=order.order_no,
                 success=True,
-                message='审核通过',
+                message='审核通过' + ('（有警告提示）' if validation.warnings else ''),
+                failure_type='',
+                blocking_errors=[],
+                warnings=validation.warnings,
             ))
             success_count += 1
         except Exception as e:
@@ -374,6 +395,9 @@ def batch_review(request, order_ids: List[str]):
                 order_no='未知',
                 success=False,
                 message=str(e),
+                failure_type='error',
+                blocking_errors=[str(e)],
+                warnings=[],
             ))
             failure_count += 1
 
@@ -661,12 +685,28 @@ def review_return(request, order_id: str, payload: OrderReturnSchema):
     order = GlassesOrder.objects.get(id=order_id)
 
     if not OrderAuthorizationService.can_review_order(user, order):
+        _add_audit_log(
+            order=order,
+            action='审核退回失败',
+            user=user,
+            is_failure=True,
+            failure_reason=f'权限不足或状态错误：当前状态{order.get_status_display()}',
+            detail='审核退回操作失败：无权限或状态不允许',
+        )
         return 403, {
             'detail': '无权限审核或当前状态不允许退回',
             'code': 'permission_denied',
         }
 
     if not payload.reason.strip():
+        _add_audit_log(
+            order=order,
+            action='审核退回失败',
+            user=user,
+            is_failure=True,
+            failure_reason='退回原因不能为空',
+            detail='审核退回操作失败：未填写退回原因',
+        )
         return 400, {'detail': '退回原因不能为空', 'code': 'empty_reason'}
 
     with transaction.atomic():
@@ -785,12 +825,28 @@ def final_return(request, order_id: str, payload: OrderReturnSchema):
     order = GlassesOrder.objects.get(id=order_id)
 
     if not OrderAuthorizationService.can_finalize_order(user, order):
+        _add_audit_log(
+            order=order,
+            action='复核退回失败',
+            user=user,
+            is_failure=True,
+            failure_reason=f'权限不足或状态错误：当前状态{order.get_status_display()}',
+            detail='复核退回操作失败：无权限或状态不允许',
+        )
         return 403, {
             'detail': '无权限复核或当前状态不允许退回',
             'code': 'permission_denied',
         }
 
     if not payload.reason.strip():
+        _add_audit_log(
+            order=order,
+            action='复核退回失败',
+            user=user,
+            is_failure=True,
+            failure_reason='退回原因不能为空',
+            detail='复核退回操作失败：未填写退回原因',
+        )
         return 400, {'detail': '退回原因不能为空', 'code': 'empty_reason'}
 
     with transaction.atomic():

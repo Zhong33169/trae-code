@@ -207,7 +207,7 @@ export default function OrderList({ currentRole, currentUser }) {
         onClose={() => setShowBatchResult(false)}
         okText="知道了"
         onOk={() => setShowBatchResult(false)}
-        width={600}
+        width={650}
       >
         {batchResult && (
           <div className="batch-result">
@@ -217,13 +217,39 @@ export default function OrderList({ currentRole, currentUser }) {
               <span className="failure">失败 <strong>{batchResult.failure_count}</strong> 条</span>
             </div>
             <div className="batch-result-list">
-              <h4>逐条说明：</h4>
+              <h4>逐条详情：</h4>
               <ul>
                 {batchResult.results.map((item, idx) => (
-                  <li key={idx} className={item.success ? 'success' : 'failure'}>
-                    <span className="order-no">{item.order_no}</span>
-                    <span className="result-status">{item.success ? '成功' : '失败'}</span>
-                    <span className="result-msg">{item.message}</span>
+                  <li
+                    key={idx}
+                    className={`batch-item ${item.success ? 'success' : 'failure'}`}
+                  >
+                    <div className="batch-item-header">
+                      <span className="order-no">{item.order_no}</span>
+                      <span className={`result-status ${item.failure_type || 'success'}`}>
+                        {item.success ? (item.warnings && item.warnings.length > 0 ? '成功（有警告）' : '成功') : (item.failure_type === 'permission' ? '权限不足' : item.failure_type === 'validation' ? '被拦截' : '失败')}
+                      </span>
+                    </div>
+                    {item.blocking_errors && item.blocking_errors.length > 0 && (
+                      <div className="batch-item-blocking">
+                        <div className="batch-item-title">🚫 阻断原因</div>
+                        <ul>
+                          {item.blocking_errors.map((err, i) => (
+                            <li key={i}>{err}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    {item.warnings && item.warnings.length > 0 && (
+                      <div className="batch-item-warnings">
+                        <div className="batch-item-title">⚠️ 警告提示</div>
+                        <ul>
+                          {item.warnings.map((warn, i) => (
+                            <li key={i}>{warn}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
                   </li>
                 ))}
               </ul>

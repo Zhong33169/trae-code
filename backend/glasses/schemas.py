@@ -159,6 +159,9 @@ class BatchResultItem(Schema):
     order_no: str
     success: bool
     message: str
+    failure_type: str = ''
+    blocking_errors: List[str] = []
+    warnings: List[str] = []
 
 
 class BatchOperationResult(Schema):

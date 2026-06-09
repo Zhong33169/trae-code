@@ -117,9 +117,10 @@ class GlassesOrder(models.Model):
                 f'线上状态「{self.get_status_display()}」与线下状态「{self.get_offline_status_display()}」不一致'
             )
 
-        if not self.has_prescription:
+        missing_materials = self._get_missing_materials()
+        if missing_materials:
             anomalies.append(AnomalyType.MISSING_MATERIALS)
-            remarks.append('缺少处方单')
+            remarks.append(f'缺少必备材料：{"、".join(missing_materials)}')
 
         if self.created_at:
             age_days = (timezone.now() - self.created_at).days
@@ -134,6 +135,20 @@ class GlassesOrder(models.Model):
         self.anomaly_types = anomalies
         self.anomaly_remark = '; '.join(remarks) if remarks else ''
         return anomalies
+
+    def _get_missing_materials(self):
+        required_materials = []
+        missing = []
+
+        required_materials.append(('has_prescription', '处方单'))
+        required_materials.append(('has_id_copy', '身份证复印件'))
+        required_materials.append(('has_receipt', '收费凭证'))
+
+        for field, label in required_materials:
+            if not getattr(self, field, False):
+                missing.append(label)
+
+        return missing
 
 
 class OrderAttachment(models.Model):

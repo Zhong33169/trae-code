@@ -379,3 +379,163 @@ class Command(BaseCommand):
         self.stdout.write(f'  - 材料缺失订单: {missing_count}')
         self.stdout.write(f'用户总数: {SystemUser.objects.count()}')
         self.stdout.write(f'附件总数: {OrderAttachment.objects.count()}')
+
+        audit_logs = []
+
+        # 正常操作审计
+        order0 = all_orders[0]
+        audit_logs.append(AuditLog(
+            order=order0,
+            action='提交审核',
+            actor=wang.name,
+            actor_role=Role.REGISTRAR,
+            status_before=OrderStatus.PENDING_REGISTRATION,
+            status_after=OrderStatus.PENDING_REVIEW,
+            detail='登记完成，提交审核进入待审核状态',
+            is_failure=False,
+            failure_reason='',
+        ))
+        audit_logs.append(AuditLog(
+            order=order0,
+            action='审核通过',
+            actor=li.name,
+            actor_role=Role.SUPERVISOR,
+            status_before=OrderStatus.PENDING_REVIEW,
+            status_after=OrderStatus.PENDING_FINAL,
+            detail='审核通过，提交复核；审核意见：配镜参数符合处方要求',
+            is_failure=False,
+            failure_reason='',
+        ))
+        audit_logs.append(AuditLog(
+            order=order0,
+            action='复核归档',
+            actor=zhao.name,
+            actor_role=Role.REVIEWER,
+            status_before=OrderStatus.PENDING_FINAL,
+            status_after=OrderStatus.ARCHIVED,
+            detail='复核完成，订单归档；配镜完成，患者已取镜，视力矫正良好',
+            is_failure=False,
+            failure_reason='',
+        ))
+
+        # 退回操作审计
+        order3 = all_orders[3]
+        audit_logs.append(AuditLog(
+            order=order3,
+            action='提交审核',
+            actor=wang.name,
+            actor_role=Role.REGISTRAR,
+            status_before=OrderStatus.PENDING_REGISTRATION,
+            status_after=OrderStatus.PENDING_REVIEW,
+            detail='登记完成，提交审核',
+            is_failure=False,
+            failure_reason='',
+        ))
+        audit_logs.append(AuditLog(
+            order=order3,
+            action='审核退回',
+            actor=li.name,
+            actor_role=Role.SUPERVISOR,
+            status_before=OrderStatus.PENDING_REVIEW,
+            status_after=OrderStatus.RETURNED,
+            reason='缺少收费凭证，需补充后重新提交',
+            detail='审核退回，原因：缺少收费凭证，需补充后重新提交',
+            is_failure=False,
+            failure_reason='',
+        ))
+
+        # 退回失败 - 空原因
+        order4 = all_orders[4]
+        audit_logs.append(AuditLog(
+            order=order4,
+            action='审核退回失败',
+            actor=li.name,
+            actor_role=Role.SUPERVISOR,
+            status_before='',
+            status_after='',
+            reason='',
+            detail='审核退回操作失败：未填写退回原因',
+            is_failure=True,
+            failure_reason='退回原因不能为空',
+        ))
+
+        # 权限失败
+        audit_logs.append(AuditLog(
+            order=order4,
+            action='复核失败',
+            actor=li.name,
+            actor_role=Role.SUPERVISOR,
+            status_before='',
+            status_after='',
+            detail='复核操作失败：无权限或状态不允许',
+            is_failure=True,
+            failure_reason=f'权限不足或状态错误：当前状态{order4.get_status_display()}',
+        ))
+
+        # 拦截失败 - 材料缺失
+        order2 = all_orders[2]
+        audit_logs.append(AuditLog(
+            order=order2,
+            action='提交失败',
+            actor=wang.name,
+            actor_role=Role.REGISTRAR,
+            status_before='',
+            status_after='',
+            detail='提交审核被拦截：材料缺失',
+            is_failure=True,
+            failure_reason='材料缺失：缺少处方单、身份证复印件、收费凭证',
+        ))
+
+        # 拦截失败 - 状态不一致
+        order8 = all_orders[8]
+        audit_logs.append(AuditLog(
+            order=order8,
+            action='提交失败',
+            actor=zhang.name,
+            actor_role=Role.REGISTRAR,
+            status_before='',
+            status_after='',
+            detail='提交审核被拦截：线上线下状态不一致',
+            is_failure=True,
+            failure_reason='线上线下状态不一致：线上「待登记」，线下「线下已登记」，请先核对台账状态再提交',
+        ))
+
+        # 拦截失败 - 超时
+        order6 = all_orders[6]
+        audit_logs.append(AuditLog(
+            order=order6,
+            action='审核失败',
+            actor=li.name,
+            actor_role=Role.SUPERVISOR,
+            status_before='',
+            status_after='',
+            detail='审核被拦截：订单已超时',
+            is_failure=True,
+            failure_reason='订单已超时：创建已 12 天，超过 3 天处理时限，需退回补正并登记超时原因',
+        ))
+
+        # 批量操作审计
+        audit_logs.append(AuditLog(
+            order=None,
+            action='批量提交审核',
+            actor=wang.name,
+            actor_role=Role.REGISTRAR,
+            status_before='',
+            status_after='',
+            detail='批量提交审核操作：共 5 条，成功 3 条，失败 2 条',
+            is_failure=False,
+            failure_reason='',
+        ))
+
+        AuditLog.objects.bulk_create(audit_logs)
+        self.stdout.write(f'审计日志总数: {AuditLog.objects.count()}')
+
+        self.stdout.write('')
+        self.stdout.write(self.style.SUCCESS('=== 演示数据说明 ==='))
+        self.stdout.write('1. 正常单: GZ20260601A001（已归档）')
+        self.stdout.write('2. 材料缺失单: GZ20260602A003（待登记，缺处方/身份证/收费凭证）')
+        self.stdout.write('3. 退回单: GZ20260602A004（已退回，缺收费凭证）')
+        self.stdout.write('4. 超时单: GZ20260528A007（待审核，超时12天）')
+        self.stdout.write('5. 重复批次单: GZ20260601A001/A002/A010（同一批次）')
+        self.stdout.write('6. 状态不一致单: GZ20260604A009（线上待登记/线下已登记）')
+        self.stdout.write('7. 审计日志: 包含成功/失败/退回/拦截/批量操作等类型')
