@@ -1,0 +1,97 @@
+.role-switcher {
+  position: relative;
+  display: inline-block;
+}
+
+.role-switcher-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: #fff;
+  border: 1px solid #d9d9d9;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.3s;
+}
+
+.role-switcher-btn:hover {
+  border-color: #1890ff;
+  color: #1890ff;
+}
+
+.role-badge {
+  padding: 2px 8px;
+  background: #e6f7ff;
+  color: #1890ff;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.user-name {
+  font-weight: 500;
+}
+
+.dropdown-arrow {
+  font-size: 10px;
+  color: #999;
+}
+
+.role-dropdown {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 8px;
+  background: #fff;
+  border: 1px solid #e8e8e8;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  min-width: 240px;
+  z-index: 1000;
+  padding: 8px 0;
+}
+
+.dropdown-title {
+  padding: 8px 16px;
+  font-size: 12px;
+  color: #999;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.role-group {
+  padding: 4px 0;
+}
+
+.role-group-title {
+  padding: 8px 16px;
+  font-size: 12px;
+  color: #666;
+  font-weight: 500;
+  background: #fafafa;
+}
+
+.user-option {
+  padding: 8px 16px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.user-option:hover {
+  background: #f5f5f5;
+}
+
+.user-option.active {
+  background: #e6f7ff;
+  color: #1890ff;
+}
+
+.username {
+  font-size: 12px;
+  color: #999;
+}

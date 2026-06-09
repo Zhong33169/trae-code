@@ -1,0 +1,116 @@
+.record-list {
+  background: #fff;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.record-list table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.record-list thead {
+  background: #fafafa;
+}
+
+.record-list th {
+  padding: 12px 16px;
+  text-align: left;
+  font-size: 13px;
+  font-weight: 500;
+  color: #666;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.record-list td {
+  padding: 12px 16px;
+  font-size: 14px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.record-row {
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.record-row:hover {
+  background: #f5f9ff;
+}
+
+.record-row.selected {
+  background: #e6f7ff;
+}
+
+.record-no {
+  font-family: monospace;
+  color: #1890ff;
+  font-size: 13px;
+}
+
+.patient-name {
+  font-weight: 500;
+  color: #333;
+}
+
+.status-tag {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.time-cell {
+  font-size: 13px;
+  color: #999;
+}
+
+.evidence-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.evidence-badge.complete {
+  background: #f6ffed;
+  color: #52c41a;
+  border: 1px solid #b7eb8f;
+}
+
+.evidence-badge.incomplete {
+  background: #fff2f0;
+  color: #ff4d4f;
+  border: 1px solid #ffccc7;
+}
+
+.record-list-loading,
+.record-list-empty {
+  padding: 40px;
+  text-align: center;
+  color: #999;
+  background: #fff;
+  border-radius: 8px;
+}
+
+.record-list-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+}
+
+.loading-spinner {
+  width: 24px;
+  height: 24px;
+  border: 2px solid #f0f0f0;
+  border-top-color: #1890ff;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
