@@ -147,11 +147,39 @@ export default function ActionPanel({ consultation, userRole, onAction }: Props)
 
       if (status === 'appeal_accepted') {
         actions.push({
-          key: 'archive',
-          label: '处理后归档',
+          key: 'recheck_pass',
+          label: '核实通过',
           type: 'success',
           requireFields: ['opinion'],
-          description: '申诉处理完成，归档保存',
+          description: '核实申诉成立，回到审核通过状态',
+        });
+        actions.push({
+          key: 'recheck_reject_correction',
+          label: '核实退回补正',
+          type: 'warning',
+          requireFields: ['reject_reason'],
+          description: '核实后发现资料仍需补正',
+        });
+        actions.push({
+          key: 'recheck_evidence_missing',
+          label: '核实证据不足',
+          type: 'danger',
+          requireFields: ['reject_reason'],
+          description: '核实后证据材料仍不充分',
+        });
+        actions.push({
+          key: 'recheck_resolve',
+          label: '申诉解决',
+          type: 'primary',
+          requireFields: ['opinion'],
+          description: '申诉问题已解决，标记为已解决',
+        });
+        actions.push({
+          key: 'recheck_archive',
+          label: '核实后归档',
+          type: 'success',
+          requireFields: ['opinion'],
+          description: '核实完成，直接归档',
         });
       }
 

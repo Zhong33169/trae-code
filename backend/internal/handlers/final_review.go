@@ -162,14 +162,15 @@ func ArchiveConsultation(c *fiber.Ctx) error {
 	}
 
 	row := models.DB.QueryRow(`
-		SELECT status, version, evidence_list
+		SELECT status, version, evidence_list, has_appeal
 		FROM consultations WHERE id = ?
 	`, id)
 
 	var status string
 	var version int
 	var evidenceList string
-	err := row.Scan(&status, &version, &evidenceList)
+	var hasAppeal int
+	err := row.Scan(&status, &version, &evidenceList, &hasAppeal)
 	if err == sql.ErrNoRows {
 		return c.Status(404).JSON(fiber.Map{"error": "申请单不存在"})
 	}
@@ -178,7 +179,7 @@ func ArchiveConsultation(c *fiber.Ctx) error {
 	}
 
 	if status != models.StatusUnderFinal && status != models.StatusReviewPassed &&
-		status != models.StatusAppealResolved {
+		status != models.StatusAppealResolved && status != models.StatusAppealAccepted {
 		return c.Status(400).JSON(fiber.Map{
 			"error":          "当前状态不允许归档",
 			"current_status": status,
@@ -213,17 +214,35 @@ func ArchiveConsultation(c *fiber.Ctx) error {
 	}
 	defer tx.Rollback()
 
-	_, err = tx.Exec(`
-		UPDATE consultations SET
-			status = ?, status_name = ?, version = ?,
-			director_id = ?, director_name = ?,
-			latest_opinion = ?, updated_at = ?
-		WHERE id = ?
-	`,
-		newStatus, utils.StatusName(newStatus), newVersion,
-		user.UserID, user.UserName,
-		req.Opinion, now, id,
-	)
+	if hasAppeal == 1 {
+		_, err = tx.Exec(`
+			UPDATE consultations SET
+				status = ?, status_name = ?, version = ?,
+				director_id = ?, director_name = ?,
+				latest_opinion = ?,
+				appeal_status = ?, appeal_status_name = ?,
+				updated_at = ?
+			WHERE id = ?
+		`,
+			newStatus, utils.StatusName(newStatus), newVersion,
+			user.UserID, user.UserName,
+			req.Opinion,
+			models.StatusAppealResolved, utils.StatusName(models.StatusAppealResolved),
+			now, id,
+		)
+	} else {
+		_, err = tx.Exec(`
+			UPDATE consultations SET
+				status = ?, status_name = ?, version = ?,
+				director_id = ?, director_name = ?,
+				latest_opinion = ?, updated_at = ?
+			WHERE id = ?
+		`,
+			newStatus, utils.StatusName(newStatus), newVersion,
+			user.UserID, user.UserName,
+			req.Opinion, now, id,
+		)
+	}
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}

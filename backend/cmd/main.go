@@ -60,6 +60,7 @@ func main() {
 	auth.Post("/consultations/:id/appeal", handlers.SubmitAppeal)
 	auth.Post("/consultations/:id/appeal/accept", handlers.AcceptAppeal)
 	auth.Post("/consultations/:id/appeal/reject", handlers.RejectAppeal)
+	auth.Post("/consultations/:id/appeal/recheck", handlers.RecheckAppeal)
 
 	auth.Get("/consultations/:id/history", handlers.GetConsultationHistory)
 

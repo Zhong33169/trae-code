@@ -10,6 +10,7 @@ import {
   submitAppeal,
   acceptAppeal,
   rejectAppeal,
+  recheckAppeal,
   getCurrentUserRole,
 } from '../lib/api';
 import { formatDate, parseEvidenceList } from '../lib/types';
@@ -150,6 +151,43 @@ export default function ConsultationDetail({ consultationId }: Props) {
         case 'appeal_reject':
           result = await rejectAppeal(id, {
             version: data.version,
+            opinion: formData.opinion,
+          });
+          break;
+        case 'recheck_pass':
+          result = await recheckAppeal(id, {
+            version: data.version,
+            action: 'pass',
+            opinion: formData.opinion,
+          });
+          break;
+        case 'recheck_reject_correction':
+          result = await recheckAppeal(id, {
+            version: data.version,
+            action: 'reject_correction',
+            opinion: formData.opinion,
+            reject_reason: formData.reject_reason,
+          });
+          break;
+        case 'recheck_evidence_missing':
+          result = await recheckAppeal(id, {
+            version: data.version,
+            action: 'evidence_missing',
+            opinion: formData.opinion,
+            reject_reason: formData.reject_reason,
+          });
+          break;
+        case 'recheck_resolve':
+          result = await recheckAppeal(id, {
+            version: data.version,
+            action: 'resolve',
+            opinion: formData.opinion,
+          });
+          break;
+        case 'recheck_archive':
+          result = await recheckAppeal(id, {
+            version: data.version,
+            action: 'archive',
             opinion: formData.opinion,
           });
           break;

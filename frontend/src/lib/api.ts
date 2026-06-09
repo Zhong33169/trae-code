@@ -144,6 +144,13 @@ export function rejectAppeal(id: string, data: any) {
   });
 }
 
+export function recheckAppeal(id: string, data: any) {
+  return apiRequest<any>(`/consultations/${id}/appeal/recheck`, {
+    method: 'POST',
+    body: data,
+  });
+}
+
 export function getStatusDict() {
   return apiRequest<any[]>('/dict/statuses');
 }

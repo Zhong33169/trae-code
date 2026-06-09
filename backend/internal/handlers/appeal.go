@@ -335,3 +335,205 @@ func RejectAppeal(c *fiber.Ctx) error {
 		"version": newVersion,
 	})
 }
+
+type RecheckRequest struct {
+	Version      int    `json:"version"`
+	Action       string `json:"action"`
+	Opinion      string `json:"opinion"`
+	RejectReason string `json:"reject_reason"`
+}
+
+func RecheckAppeal(c *fiber.Ctx) error {
+	user := middleware.GetCurrentUser(c)
+	id := c.Params("id")
+
+	if user.Role != models.RoleDirector {
+		return c.Status(403).JSON(fiber.Map{"error": "只有医务部复核负责人可以执行重新核实"})
+	}
+
+	var req RecheckRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "请求参数无效"})
+	}
+
+	row := models.DB.QueryRow(`
+		SELECT status, version, evidence_list, appeal_reason
+		FROM consultations WHERE id = ?
+	`, id)
+
+	var status string
+	var version int
+	var evidenceList string
+	var appealReason string
+	err := row.Scan(&status, &version, &evidenceList, &appealReason)
+	if err == sql.ErrNoRows {
+		return c.Status(404).JSON(fiber.Map{"error": "申请单不存在"})
+	}
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	if status != models.StatusAppealAccepted {
+		return c.Status(400).JSON(fiber.Map{
+			"error":          "当前状态不允许重新核实",
+			"current_status": status,
+		})
+	}
+
+	if req.Version != version {
+		return c.Status(409).JSON(fiber.Map{
+			"error":   "版本冲突，请刷新后重试",
+			"version": version,
+		})
+	}
+
+	var newStatus string
+	var action string
+	var actionName string
+	var needRejectReason bool
+	var needEvidenceCheck bool
+	var newAppealStatus string
+
+	switch req.Action {
+	case "pass":
+		newStatus = models.StatusReviewPassed
+		action = "recheck_pass"
+		actionName = "核实通过"
+		newAppealStatus = models.StatusAppealResolved
+	case "reject_correction":
+		newStatus = models.StatusCorrectionReq
+		action = "recheck_reject_correction"
+		actionName = "核实退回补正"
+		needRejectReason = true
+		newAppealStatus = models.StatusAppealAccepted
+	case "evidence_missing":
+		newStatus = models.StatusEvidenceMissing
+		action = "recheck_evidence_missing"
+		actionName = "核实证据不足"
+		needRejectReason = true
+		newAppealStatus = models.StatusAppealAccepted
+	case "resolve":
+		newStatus = models.StatusAppealResolved
+		action = "appeal_resolve"
+		actionName = "申诉解决"
+		newAppealStatus = models.StatusAppealResolved
+	case "archive":
+		newStatus = models.StatusArchived
+		action = "recheck_archive"
+		actionName = "核实后归档"
+		needEvidenceCheck = true
+		newAppealStatus = models.StatusAppealResolved
+	default:
+		return c.Status(400).JSON(fiber.Map{"error": "无效的核实操作"})
+	}
+
+	if needRejectReason && req.RejectReason == "" {
+		return c.Status(400).JSON(fiber.Map{"error": "必须填写原因"})
+	}
+
+	if needEvidenceCheck {
+		missing := utils.CheckRequiredEvidence(evidenceList)
+		if len(missing) > 0 {
+			return c.Status(400).JSON(fiber.Map{
+				"error":            "缺少必填证据材料，无法归档",
+				"missing_evidence": missing,
+			})
+		}
+	}
+
+	if req.Opinion == "" {
+		return c.Status(400).JSON(fiber.Map{"error": "请填写核实意见"})
+	}
+
+	now := time.Now()
+	newVersion := version + 1
+
+	tx, err := models.DB.Begin()
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+	}
+	defer tx.Rollback()
+
+	if newStatus == models.StatusArchived {
+		_, err = tx.Exec(`
+			UPDATE consultations SET
+				status = ?, status_name = ?, version = ?,
+				director_id = ?, director_name = ?,
+				latest_opinion = ?, has_appeal = 1,
+				appeal_status = ?, appeal_status_name = ?,
+				updated_at = ?
+			WHERE id = ?
+		`,
+			newStatus, utils.StatusName(newStatus), newVersion,
+			user.UserID, user.UserName,
+			req.Opinion,
+			newAppealStatus, utils.StatusName(newAppealStatus),
+			now, id,
+		)
+	} else if newStatus == models.StatusAppealResolved {
+		_, err = tx.Exec(`
+			UPDATE consultations SET
+				status = ?, status_name = ?, version = ?,
+				director_id = ?, director_name = ?,
+				latest_opinion = ?,
+				appeal_status = ?, appeal_status_name = ?,
+				updated_at = ?
+			WHERE id = ?
+		`,
+			newStatus, utils.StatusName(newStatus), newVersion,
+			user.UserID, user.UserName,
+			req.Opinion,
+			newAppealStatus, utils.StatusName(newAppealStatus),
+			now, id,
+		)
+	} else {
+		_, err = tx.Exec(`
+			UPDATE consultations SET
+				status = ?, status_name = ?, version = ?,
+				director_id = ?, director_name = ?,
+				latest_opinion = ?, latest_reject_reason = ?,
+				has_appeal = 1,
+				appeal_status = ?, appeal_status_name = ?,
+				updated_at = ?
+			WHERE id = ?
+		`,
+			newStatus, utils.StatusName(newStatus), newVersion,
+			user.UserID, user.UserName,
+			req.Opinion, req.RejectReason,
+			newAppealStatus, utils.StatusName(newAppealStatus),
+			now, id,
+		)
+	}
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	historyID := uuid.New().String()
+	_, err = tx.Exec(`
+		INSERT INTO history_records (
+			id, consultation_id, operator_id, operator_name, operator_role,
+			operator_role_name, action, action_name, from_status, from_status_name,
+			to_status, to_status_name, opinion, reject_reason, version, created_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`,
+		historyID, id, user.UserID, user.UserName, user.Role, user.RoleName,
+		action, actionName,
+		status, utils.StatusName(status),
+		newStatus, utils.StatusName(newStatus),
+		req.Opinion, req.RejectReason,
+		newVersion, now,
+	)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	if err := tx.Commit(); err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	return c.JSON(fiber.Map{
+		"message": actionName + "成功",
+		"status":  newStatus,
+		"version": newVersion,
+	})
+}
