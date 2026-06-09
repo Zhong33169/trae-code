@@ -454,6 +454,7 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAuthStore } from '~/stores/auth'
+import { useStatisticsStore } from '~/stores/statistics'
 import { 
   STATUS_MAP, 
   ASSESSMENT_STATUS_MAP, 
@@ -470,6 +471,7 @@ definePageMeta({
 
 const route = useRoute()
 const authStore = useAuthStore()
+const statsStore = useStatisticsStore()
 
 const plan = ref<NursingPlan | null>(null)
 const logs = ref<OperationLog[]>([])
@@ -783,6 +785,7 @@ async function handleSubmit() {
       showMessage(result.message || '提交成功')
       loadLogs()
       loadHandovers()
+      statsStore.refreshStats()
     } else {
       showMessage(result.message || '提交失败', 'error')
     }
@@ -837,6 +840,7 @@ async function handleApproveOrArchive() {
       showMessage(result.message || '操作成功')
       loadLogs()
       loadHandovers()
+      statsStore.refreshStats()
     } else {
       showMessage(result.message || '操作失败', 'error')
     }
@@ -869,6 +873,7 @@ async function handleReject() {
       rejectReason.value = ''
       showMessage(result.message || '已退回')
       loadLogs()
+      statsStore.refreshStats()
     } else {
       showMessage(result.message || '操作失败', 'error')
     }

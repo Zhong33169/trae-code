@@ -49,29 +49,30 @@ fn get_plan_by_id(conn: &rusqlite::Connection, id: &str) -> Result<NursingPlan, 
         [id],
         |row| {
             Ok(NursingPlan {
-                id: row.get(0)?,
-                plan_no: row.get(1)?,
-                elder_name: row.get(2)?,
-                elder_gender: row.get(3)?,
-                elder_age: row.get(4)?,
-                room_no: row.get(5)?,
-                bed_no: row.get(6)?,
-                admission_date: row.get(7)?,
-                assessment_status: row.get(8)?,
-                assessment_content: row.get(9)?,
-                assessment_by: row.get(10)?,
-                assessment_at: row.get(11)?,
-                plan_content: row.get(12)?,
-                plan_level: row.get(13)?,
-                family_confirm_status: row.get(14)?,
-                family_confirm_by: row.get(15)?,
-                family_confirm_at: row.get(16)?,
-                family_confirm_remark: row.get(17)?,
-                status: row.get(18)?,
-                current_step: row.get(19)?,
-                created_by: row.get(20)?,
-                created_at: row.get(21)?,
-                updated_at: row.get(22)?,
+                id: row.get("id")?,
+                plan_no: row.get("plan_no")?,
+                elder_name: row.get("elder_name")?,
+                elder_gender: row.get("elder_gender")?,
+                elder_age: row.get("elder_age")?,
+                room_no: row.get("room_no")?,
+                bed_no: row.get("bed_no")?,
+                admission_date: row.get("admission_date")?,
+                assessment_status: row.get("assessment_status")?,
+                assessment_content: row.get("assessment_content")?,
+                assessment_by: row.get("assessment_by")?,
+                assessment_at: row.get("assessment_at")?,
+                plan_content: row.get("plan_content")?,
+                plan_level: row.get("plan_level")?,
+                family_confirm_status: row.get("family_confirm_status")?,
+                family_confirm_by: row.get("family_confirm_by")?,
+                family_confirm_at: row.get("family_confirm_at")?,
+                family_confirm_remark: row.get("family_confirm_remark")?,
+                status: row.get("status")?,
+                current_step: row.get("current_step")?,
+                return_reason: row.get("return_reason")?,
+                created_by: row.get("created_by")?,
+                created_at: row.get("created_at")?,
+                updated_at: row.get("updated_at")?,
             })
         },
     )
@@ -93,6 +94,111 @@ fn validate_handover(handover: &HandoverInfo) -> Result<(), AppError> {
         return Err(AppError::Validation("确认时间不能为空".into()));
     }
     Ok(())
+}
+
+fn do_transition(
+    conn: &rusqlite::Connection,
+    plan: &NursingPlan,
+    action: &str,
+    reason: Option<&str>,
+    handover: Option<&HandoverInfo>,
+    operator_id: &str,
+    operator_name: &str,
+) -> Result<NursingPlan, AppError> {
+    let from_status = plan.status.clone();
+
+    let to_status = match (plan.status.as_str(), action, operator_name) {
+        ("draft", "submit", _) => Ok("pending_audit"),
+        ("returned", "resubmit", _) => Ok("pending_audit"),
+        ("pending_audit", "approve", _) => Ok("pending_review"),
+        ("pending_audit", "reject", _) => Ok("returned"),
+        ("pending_review", "archive", _) => Ok("archived"),
+        ("pending_review", "reject", _) => Ok("returned"),
+        _ => Err(AppError::StateTransition(format!(
+            "当前状态 {} 无法执行 {} 操作",
+            plan.status, action
+        ))),
+    }?;
+
+    if action == "submit" || action == "resubmit" {
+        if plan.assessment_status != "completed" {
+            return Err(AppError::StateTransition(
+                "入住评估未完成，不能提交审核".into(),
+            ));
+        }
+        if plan.family_confirm_status != "confirmed" {
+            return Err(AppError::StateTransition(
+                "家属未确认，不能提交审核".into(),
+            ));
+        }
+        if plan.plan_content.is_none() || plan.plan_content.as_ref().unwrap().trim().is_empty() {
+            return Err(AppError::StateTransition(
+                "护理计划内容不能为空，不能提交审核".into(),
+            ));
+        }
+    }
+
+    if action == "reject" {
+        if reason.is_none() || reason.unwrap().trim().is_empty() {
+            return Err(AppError::Validation(
+                "退回时必须填写退回原因".into(),
+            ));
+        }
+    }
+
+    if action == "approve" || action == "archive" {
+        match handover {
+            Some(h) => {
+                validate_handover(h)?;
+                add_handover_record(conn, &plan.id, h)?;
+            }
+            None => {
+                return Err(AppError::Validation(
+                    "进入下一步前必须填写交接信息（班次、交出人、接收人、确认时间）".into(),
+                ));
+            }
+        }
+    }
+
+    if action == "reject" {
+        conn.execute(
+            "UPDATE nursing_plans SET status = ?1, return_reason = ?2, updated_at = datetime('now') WHERE id = ?3",
+            rusqlite::params![to_status, reason, plan.id],
+        )?;
+    } else if action == "submit" || action == "resubmit" {
+        conn.execute(
+            "UPDATE nursing_plans SET status = ?1, return_reason = NULL, updated_at = datetime('now') WHERE id = ?2",
+            rusqlite::params![to_status, plan.id],
+        )?;
+    } else {
+        conn.execute(
+            "UPDATE nursing_plans SET status = ?1, updated_at = datetime('now') WHERE id = ?2",
+            rusqlite::params![to_status, plan.id],
+        )?;
+    }
+
+    let action_desc = match action {
+        "submit" => "提交审核",
+        "resubmit" => "重新提交",
+        "approve" => "审核通过",
+        "reject" => "退回",
+        "archive" => "复核归档",
+        _ => action,
+    };
+
+    add_operation_log(
+        conn,
+        &plan.id,
+        operator_id,
+        operator_name,
+        action_desc,
+        Some(&from_status),
+        Some(to_status),
+        reason,
+    )?;
+
+    let updated = get_plan_by_id(conn, &plan.id)?;
+    Ok(updated)
 }
 
 fn add_handover_record(
@@ -162,29 +268,30 @@ pub async fn list_plans(
 
     let plans_iter = stmt.query_map(&param_refs[..], |row| {
         Ok(NursingPlan {
-            id: row.get(0)?,
-            plan_no: row.get(1)?,
-            elder_name: row.get(2)?,
-            elder_gender: row.get(3)?,
-            elder_age: row.get(4)?,
-            room_no: row.get(5)?,
-            bed_no: row.get(6)?,
-            admission_date: row.get(7)?,
-            assessment_status: row.get(8)?,
-            assessment_content: row.get(9)?,
-            assessment_by: row.get(10)?,
-            assessment_at: row.get(11)?,
-            plan_content: row.get(12)?,
-            plan_level: row.get(13)?,
-            family_confirm_status: row.get(14)?,
-            family_confirm_by: row.get(15)?,
-            family_confirm_at: row.get(16)?,
-            family_confirm_remark: row.get(17)?,
-            status: row.get(18)?,
-            current_step: row.get(19)?,
-            created_by: row.get(20)?,
-            created_at: row.get(21)?,
-            updated_at: row.get(22)?,
+            id: row.get("id")?,
+            plan_no: row.get("plan_no")?,
+            elder_name: row.get("elder_name")?,
+            elder_gender: row.get("elder_gender")?,
+            elder_age: row.get("elder_age")?,
+            room_no: row.get("room_no")?,
+            bed_no: row.get("bed_no")?,
+            admission_date: row.get("admission_date")?,
+            assessment_status: row.get("assessment_status")?,
+            assessment_content: row.get("assessment_content")?,
+            assessment_by: row.get("assessment_by")?,
+            assessment_at: row.get("assessment_at")?,
+            plan_content: row.get("plan_content")?,
+            plan_level: row.get("plan_level")?,
+            family_confirm_status: row.get("family_confirm_status")?,
+            family_confirm_by: row.get("family_confirm_by")?,
+            family_confirm_at: row.get("family_confirm_at")?,
+            family_confirm_remark: row.get("family_confirm_remark")?,
+            status: row.get("status")?,
+            current_step: row.get("current_step")?,
+            return_reason: row.get("return_reason")?,
+            created_by: row.get("created_by")?,
+            created_at: row.get("created_at")?,
+            updated_at: row.get("updated_at")?,
         })
     })?;
 
@@ -478,93 +585,45 @@ pub async fn transition_status(
     let conn = pool.get()?;
     let plan = get_plan_by_id(&conn, id)?;
 
-    let from_status = plan.status.clone();
     let action = req.action.as_str();
+    let role = auth.role.as_str();
 
-    let to_status = match (plan.status.as_str(), action, auth.role.as_str()) {
-        ("draft", "submit", "registrar") => Ok("pending_audit"),
-        ("returned", "resubmit", "registrar") => Ok("pending_audit"),
-        ("pending_audit", "approve", "auditor") => Ok("pending_review"),
-        ("pending_audit", "reject", "auditor") => Ok("returned"),
-        ("pending_review", "archive", "reviewer") => Ok("archived"),
-        ("pending_review", "reject", "reviewer") => Ok("returned"),
-        _ => Err(AppError::StateTransition(format!(
-            "当前状态 {} 无法执行 {} 操作（角色：{}）",
-            plan.status, action, auth.role
-        ))),
-    }?;
-
-    if action == "submit" || action == "resubmit" {
-        if plan.assessment_status != "completed" {
-            return Err(AppError::StateTransition(
-                "入住评估未完成，不能提交审核".into(),
-            ));
-        }
-        if plan.family_confirm_status != "confirmed" {
-            return Err(AppError::StateTransition(
-                "家属未确认，不能提交审核".into(),
-            ));
-        }
-        if plan.plan_content.is_none() || plan.plan_content.as_ref().unwrap().trim().is_empty() {
-            return Err(AppError::StateTransition(
-                "护理计划内容不能为空，不能提交审核".into(),
-            ));
-        }
-    }
-
-    if action == "approve" || action == "archive" {
-        match &req.handover {
-            Some(handover) => {
-                validate_handover(handover)?;
-                add_handover_record(&conn, id, handover)?;
-            }
-            None => {
-                return Err(AppError::Validation(
-                    "进入下一步前必须填写交接信息（班次、交出人、接收人、确认时间）".into(),
-                ));
-            }
-        }
-    }
-
-    conn.execute(
-        "UPDATE nursing_plans SET status = ?1, updated_at = datetime('now') WHERE id = ?2",
-        rusqlite::params![to_status, id],
-    )?;
-
-    let action_desc = match action {
-        "submit" => "提交审核",
-        "resubmit" => "重新提交",
-        "approve" => "审核通过",
-        "reject" => "退回",
-        "archive" => "复核归档",
-        _ => action,
+    let can_do = match (action, role) {
+        ("submit", "registrar") | ("resubmit", "registrar") => true,
+        ("approve", "auditor") | ("reject", "auditor") => true,
+        ("archive", "reviewer") | ("reject", "reviewer") => true,
+        _ => false,
     };
 
+    if !can_do {
+        return Err(AppError::Permission(format!(
+            "角色 {} 没有权限执行 {} 操作",
+            auth.role, action
+        )));
+    }
+
     let reason_str = req.reason.clone().unwrap_or_default();
-    let final_reason = if reason_str.is_empty() {
+    let reason = if reason_str.is_empty() {
         None
     } else {
         Some(reason_str.as_str())
     };
 
-    add_operation_log(
+    let updated = do_transition(
         &conn,
-        id,
+        &plan,
+        action,
+        reason,
+        req.handover.as_ref(),
         &auth.id,
         &auth.real_name,
-        action_desc,
-        Some(&from_status),
-        Some(to_status),
-        final_reason,
     )?;
-
-    let updated = get_plan_by_id(&conn, id)?;
 
     let message = match action {
         "reject" => format!("已退回：{}", req.reason.clone().unwrap_or_default()),
         "approve" => "审核通过，已流转至复核环节".into(),
         "archive" => "复核归档完成".into(),
-        _ => format!("状态已更新为 {}", to_status),
+        _ => format!("状态已更新为 {}", updated.status),
     };
 
     Ok(Json(ApiResponse {
@@ -651,6 +710,264 @@ pub async fn get_handover_records(
     }))
 }
 
+fn generate_batch_no() -> String {
+    use chrono::Local;
+    let now = Local::now();
+    let date_str = now.format("%Y%m%d%H%M%S").to_string();
+    let rand = Uuid::new_v4().to_string().chars().take(4).collect::<String>();
+    format!("BATCH{}{}", date_str, rand.to_uppercase())
+}
+
+#[post("/batch/transition", data = "<req>")]
+pub async fn batch_transition(
+    pool: &State<DbPool>,
+    auth: AuthUser,
+    req: Json<BatchTransitionRequest>,
+) -> AppResult<BatchTransitionResponse> {
+    let action = req.action.as_str();
+    let role = auth.role.as_str();
+
+    let can_do = match (action, role) {
+        ("submit", "registrar") | ("resubmit", "registrar") => true,
+        ("approve", "auditor") | ("reject", "auditor") => true,
+        ("archive", "reviewer") | ("reject", "reviewer") => true,
+        _ => false,
+    };
+
+    if !can_do {
+        return Err(AppError::Permission(format!(
+            "角色 {} 没有权限执行批量 {} 操作",
+            auth.role, action
+        )));
+    }
+
+    if req.plan_ids.is_empty() {
+        return Err(AppError::Validation("请选择要处理的护理计划单".into()));
+    }
+
+    if action == "reject" {
+        if req.reason.is_none() || req.reason.as_ref().unwrap().trim().is_empty() {
+            return Err(AppError::Validation("批量退回时必须填写退回原因".into()));
+        }
+    }
+
+    if action == "approve" || action == "archive" {
+        if req.handover.is_none() {
+            return Err(AppError::Validation(
+                "批量审核通过/归档时必须填写交接信息".into(),
+            ));
+        }
+        if let Some(h) = req.handover.as_ref() {
+            validate_handover(h)?;
+        }
+    }
+
+    let conn = pool.get()?;
+    let batch_id = Uuid::new_v4().to_string();
+    let batch_no = generate_batch_no();
+
+    conn.execute(
+        r#"INSERT INTO batch_operations (
+            id, batch_no, action, operator_id, operator_name, total_count, success_count, fail_count, reason
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, 0, ?7)"#,
+        rusqlite::params![
+            batch_id,
+            batch_no,
+            action,
+            auth.id,
+            auth.real_name,
+            req.plan_ids.len() as i64,
+            req.reason.clone()
+        ],
+    )?;
+
+    let reason_str = req.reason.clone().unwrap_or_default();
+    let reason = if reason_str.is_empty() {
+        None
+    } else {
+        Some(reason_str.as_str())
+    };
+
+    let mut success_count = 0;
+    let mut fail_count = 0;
+    let mut items: Vec<BatchItem> = Vec::new();
+
+    for plan_id in &req.plan_ids {
+        let plan_result = get_plan_by_id(&conn, plan_id);
+        
+        let (success, error_msg, from_status, to_status, plan_no_val, elder_name_val) = match plan_result {
+            Ok(plan) => {
+                let from = Some(plan.status.clone());
+                let plan_no = plan.plan_no.clone();
+                let elder_name = plan.elder_name.clone();
+                let result = do_transition(
+                    &conn,
+                    &plan,
+                    action,
+                    reason,
+                    req.handover.as_ref(),
+                    &auth.id,
+                    &auth.real_name,
+                );
+                match result {
+                    Ok(updated) => {
+                        success_count += 1;
+                        (true, None, from, Some(updated.status), plan_no, elder_name)
+                    }
+                    Err(e) => {
+                        fail_count += 1;
+                        (false, Some(e.to_string()), from, None, plan_no, elder_name)
+                    }
+                }
+            }
+            Err(e) => {
+                fail_count += 1;
+                (false, Some(e.to_string()), None, None, String::new(), String::new())
+            }
+        };
+
+        let item_id = Uuid::new_v4().to_string();
+
+        conn.execute(
+            r#"INSERT INTO batch_items (
+                id, batch_id, plan_id, plan_no, elder_name, success, error_message, from_status, to_status
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"#,
+            rusqlite::params![
+                item_id,
+                batch_id,
+                plan_id,
+                plan_no_val,
+                elder_name_val,
+                success,
+                error_msg,
+                from_status,
+                to_status
+            ],
+        )?;
+
+        items.push(BatchItem {
+            id: item_id,
+            batch_id: batch_id.clone(),
+            plan_id: plan_id.clone(),
+            plan_no: plan_no_val,
+            elder_name: elder_name_val,
+            success,
+            error_message: error_msg,
+            from_status,
+            to_status,
+            created_at: String::new(),
+        });
+    }
+
+    conn.execute(
+        "UPDATE batch_operations SET success_count = ?1, fail_count = ?2 WHERE id = ?3",
+        rusqlite::params![success_count, fail_count, batch_id],
+    )?;
+
+    let batch = BatchOperation {
+        id: batch_id,
+        batch_no,
+        action: req.action.clone(),
+        operator_id: auth.id.clone(),
+        operator_name: auth.real_name.clone(),
+        total_count: req.plan_ids.len() as i64,
+        success_count,
+        fail_count,
+        reason: req.reason.clone(),
+        created_at: String::new(),
+    };
+
+    Ok(Json(ApiResponse {
+        success: true,
+        message: format!("批量处理完成：成功 {} 条，失败 {} 条", success_count, fail_count),
+        data: Some(BatchTransitionResponse { batch, items }),
+    }))
+}
+
+#[get("/batch/list?<page>&<page_size>")]
+pub async fn list_batch_operations(
+    pool: &State<DbPool>,
+    _auth: AuthUser,
+    page: Option<i64>,
+    page_size: Option<i64>,
+) -> AppResult<Vec<BatchOperation>> {
+    let conn = pool.get()?;
+    let page = page.unwrap_or(1);
+    let page_size = page_size.unwrap_or(20);
+    let offset = (page - 1) * page_size;
+
+    let mut stmt = conn.prepare(
+        "SELECT id, batch_no, action, operator_id, operator_name, total_count, success_count, fail_count, reason, created_at
+         FROM batch_operations ORDER BY created_at DESC LIMIT ? OFFSET ?",
+    )?;
+
+    let batches_iter = stmt.query_map([page_size, offset], |row| {
+        Ok(BatchOperation {
+            id: row.get(0)?,
+            batch_no: row.get(1)?,
+            action: row.get(2)?,
+            operator_id: row.get(3)?,
+            operator_name: row.get(4)?,
+            total_count: row.get(5)?,
+            success_count: row.get(6)?,
+            fail_count: row.get(7)?,
+            reason: row.get(8)?,
+            created_at: row.get(9)?,
+        })
+    })?;
+
+    let mut batches = Vec::new();
+    for batch in batches_iter {
+        batches.push(batch?);
+    }
+
+    Ok(Json(ApiResponse {
+        success: true,
+        message: "OK".into(),
+        data: Some(batches),
+    }))
+}
+
+#[get("/batch/<id>/items")]
+pub async fn get_batch_items(
+    pool: &State<DbPool>,
+    _auth: AuthUser,
+    id: &str,
+) -> AppResult<Vec<BatchItem>> {
+    let conn = pool.get()?;
+
+    let mut stmt = conn.prepare(
+        "SELECT id, batch_id, plan_id, plan_no, elder_name, success, error_message, from_status, to_status, created_at
+         FROM batch_items WHERE batch_id = ?1 ORDER BY created_at",
+    )?;
+
+    let items_iter = stmt.query_map([id], |row| {
+        Ok(BatchItem {
+            id: row.get(0)?,
+            batch_id: row.get(1)?,
+            plan_id: row.get(2)?,
+            plan_no: row.get(3)?,
+            elder_name: row.get(4)?,
+            success: row.get::<_, i32>(5)? != 0,
+            error_message: row.get(6)?,
+            from_status: row.get(7)?,
+            to_status: row.get(8)?,
+            created_at: row.get(9)?,
+        })
+    })?;
+
+    let mut items = Vec::new();
+    for item in items_iter {
+        items.push(item?);
+    }
+
+    Ok(Json(ApiResponse {
+        success: true,
+        message: "OK".into(),
+        data: Some(items),
+    }))
+}
+
 pub fn routes() -> Vec<rocket::Route> {
     routes![
         list_plans,
@@ -661,6 +978,9 @@ pub fn routes() -> Vec<rocket::Route> {
         update_family_confirm,
         transition_status,
         get_operation_logs,
-        get_handover_records
+        get_handover_records,
+        batch_transition,
+        list_batch_operations,
+        get_batch_items
     ]
 }

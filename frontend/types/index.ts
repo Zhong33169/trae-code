@@ -23,6 +23,7 @@ export interface NursingPlan {
   
   status: string
   current_step: string
+  return_reason: string | null
   
   created_by: string
   created_at: string
@@ -138,3 +139,49 @@ export const ROLE_MAP: Record<string, string> = {
 }
 
 export const SHIFT_OPTIONS = ['早班', '中班', '晚班', '夜班']
+
+export interface BatchOperation {
+  id: string
+  batch_no: string
+  action: string
+  operator_id: string
+  operator_name: string
+  total_count: number
+  success_count: number
+  fail_count: number
+  reason: string | null
+  created_at: string
+}
+
+export interface BatchItem {
+  id: string
+  batch_id: string
+  plan_id: string
+  plan_no: string
+  elder_name: string
+  success: boolean
+  error_message: string | null
+  from_status: string | null
+  to_status: string | null
+  created_at: string
+}
+
+export interface BatchTransitionRequest {
+  plan_ids: string[]
+  action: string
+  reason?: string | null
+  handover?: HandoverInfo | null
+}
+
+export interface BatchTransitionResponse {
+  batch: BatchOperation
+  items: BatchItem[]
+}
+
+export const BATCH_ACTION_MAP: Record<string, string> = {
+  submit: '批量提交',
+  resubmit: '批量重新提交',
+  approve: '批量审核通过',
+  reject: '批量退回',
+  archive: '批量复核归档'
+}

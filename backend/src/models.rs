@@ -45,6 +45,7 @@ pub struct NursingPlan {
     
     pub status: String,
     pub current_step: String,
+    pub return_reason: Option<String>,
     
     pub created_by: String,
     pub created_at: String,
@@ -177,4 +178,46 @@ pub struct ShiftStat {
 pub struct LevelStat {
     pub level: String,
     pub count: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BatchTransitionRequest {
+    pub plan_ids: Vec<String>,
+    pub action: String,
+    pub reason: Option<String>,
+    pub handover: Option<HandoverInfo>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BatchOperation {
+    pub id: String,
+    pub batch_no: String,
+    pub action: String,
+    pub operator_id: String,
+    pub operator_name: String,
+    pub total_count: i64,
+    pub success_count: i64,
+    pub fail_count: i64,
+    pub reason: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BatchItem {
+    pub id: String,
+    pub batch_id: String,
+    pub plan_id: String,
+    pub plan_no: String,
+    pub elder_name: String,
+    pub success: bool,
+    pub error_message: Option<String>,
+    pub from_status: Option<String>,
+    pub to_status: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BatchTransitionResponse {
+    pub batch: BatchOperation,
+    pub items: Vec<BatchItem>,
 }

@@ -118,27 +118,16 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
-import { useAuthStore } from '~/stores/auth'
+import { computed, onMounted, watch } from 'vue'
+import { useStatisticsStore } from '~/stores/statistics'
+import { storeToRefs } from 'pinia'
 
 definePageMeta({
   layout: 'default'
 })
 
-const authStore = useAuthStore()
-
-const loading = ref(true)
-const stats = ref({
-  total_plans: 0,
-  draft: 0,
-  pending_audit: 0,
-  audited: 0,
-  pending_review: 0,
-  archived: 0,
-  returned: 0,
-  by_shift: [] as { shift: string; count: number }[],
-  by_level: [] as { level: string; count: number }[]
-})
+const statsStore = useStatisticsStore()
+const { stats, loading } = storeToRefs(statsStore)
 
 const completionRate = computed(() => {
   if (stats.value.total_plans === 0) return 0
@@ -155,29 +144,10 @@ function getLevelPercent(count: number) {
 }
 
 async function loadStats() {
-  loading.value = true
-  try {
-    const result = await $fetch('http://localhost:8001/api/statistics/summary', {
-      headers: {
-        'Authorization': `Bearer ${authStore.token}`
-      }
-    }) as any
-    
-    if (result.success) {
-      stats.value = result.data
-    }
-  } catch (e) {
-    console.error('加载统计失败', e)
-  } finally {
-    loading.value = false
-  }
+  await statsStore.loadStats()
 }
 
 onMounted(() => {
-  if (!authStore.isLoggedIn) {
-    navigateTo('/login')
-    return
-  }
   loadStats()
 })
 </script>
