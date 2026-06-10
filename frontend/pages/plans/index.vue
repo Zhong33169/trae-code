@@ -186,15 +186,19 @@
               </div>
               <div>
                 <label>交出人：</label>
-                <input type="text" v-model="handoverForm.handoff_person" placeholder="请输入交出人" />
+                <input type="text" v-model="handoverForm.handover_by" placeholder="请输入交出人" />
               </div>
               <div>
                 <label>接收人：</label>
-                <input type="text" v-model="handoverForm.receiver_person" placeholder="请输入接收人" />
+                <input type="text" v-model="handoverForm.takeover_by" placeholder="请输入接收人" />
               </div>
               <div>
                 <label>确认时间：</label>
                 <input type="datetime-local" v-model="handoverForm.confirm_time" />
+              </div>
+              <div class="col-full">
+                <label>交接内容：</label>
+                <textarea v-model="handoverForm.handover_content" rows="2" placeholder="请输入交接内容（可选）"></textarea>
               </div>
             </div>
             <p v-if="handoverError" class="error-text">{{ handoverError }}</p>
@@ -320,9 +324,10 @@ const batchAction = ref('')
 const batchSubmitting = ref(false)
 const handoverForm = ref({
   shift: '',
-  handoff_person: '',
-  receiver_person: '',
-  confirm_time: ''
+  handover_by: '',
+  takeover_by: '',
+  confirm_time: '',
+  handover_content: ''
 })
 const handoverError = ref('')
 const rejectReason = ref('')
@@ -487,9 +492,10 @@ function openBatchModal(action: string) {
   rejectError.value = ''
   handoverForm.value = {
     shift: '',
-    handoff_person: '',
-    receiver_person: '',
-    confirm_time: ''
+    handover_by: '',
+    takeover_by: '',
+    confirm_time: '',
+    handover_content: ''
   }
   rejectReason.value = ''
   showBatchModal.value = true
@@ -504,11 +510,11 @@ function validateHandover(): boolean {
     handoverError.value = '请选择班次'
     return false
   }
-  if (!handoverForm.value.handoff_person.trim()) {
+  if (!handoverForm.value.handover_by.trim()) {
     handoverError.value = '请输入交出人'
     return false
   }
-  if (!handoverForm.value.receiver_person.trim()) {
+  if (!handoverForm.value.takeover_by.trim()) {
     handoverError.value = '请输入接收人'
     return false
   }
@@ -548,9 +554,10 @@ async function executeBatch() {
     if (batchAction.value === 'approve' || batchAction.value === 'archive') {
       body.handover = {
         shift: handoverForm.value.shift,
-        handoff_person: handoverForm.value.handoff_person,
-        receiver_person: handoverForm.value.receiver_person,
-        confirm_time: handoverForm.value.confirm_time.replace('T', ' ') + ':00'
+        handover_by: handoverForm.value.handover_by,
+        takeover_by: handoverForm.value.takeover_by,
+        confirm_time: handoverForm.value.confirm_time.replace('T', ' ') + ':00',
+        handover_content: handoverForm.value.handover_content || null
       }
     }
 
@@ -666,6 +673,10 @@ onMounted(() => {
   grid-template-columns: 1fr 1fr;
   gap: 15px;
   margin-top: 10px;
+}
+
+.handover-form .col-full {
+  grid-column: 1 / -1;
 }
 
 .handover-form > div {
