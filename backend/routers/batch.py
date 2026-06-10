@@ -115,6 +115,7 @@ async def process_single_item(
                 InspectionStatus.PENDING_FAULT_REPORT,
                 InspectionStatus.REVIEW_REJECTED,
             ],
+            (UserRole.SUPERVISOR, InspectionStatus.REVIEW_REJECTED): [InspectionStatus.PENDING_FINAL_REVIEW],
             (UserRole.SUPERVISOR, InspectionStatus.PENDING_FAULT_REPORT): [InspectionStatus.FAULT_REPORTED],
             (UserRole.SUPERVISOR, InspectionStatus.FAULT_REPORTED): [InspectionStatus.PENDING_REPAIR],
             (UserRole.SUPERVISOR, InspectionStatus.PENDING_REPAIR): [InspectionStatus.REPAIR_COMPLETED],
@@ -123,10 +124,12 @@ async def process_single_item(
                 InspectionStatus.PENDING_FINAL_REVIEW,
                 InspectionStatus.ACCEPTANCE_REJECTED,
             ],
+            (UserRole.SUPERVISOR, InspectionStatus.ACCEPTANCE_REJECTED): [InspectionStatus.PENDING_FINAL_REVIEW],
             (UserRole.REVIEWER, InspectionStatus.PENDING_FINAL_REVIEW): [
                 InspectionStatus.ARCHIVED,
                 InspectionStatus.FINAL_REVIEW_REJECTED,
             ],
+            (UserRole.REVIEWER, InspectionStatus.FINAL_REVIEW_REJECTED): [InspectionStatus.ARCHIVED],
         }
 
         key = (current_user.role, inspection.status)
@@ -160,18 +163,40 @@ async def process_single_item(
 
         from_status = inspection.status
 
-        if item.target_status in [InspectionStatus.PENDING_FINAL_REVIEW, InspectionStatus.REVIEW_REJECTED]:
+        if item.target_status == InspectionStatus.PENDING_FINAL_REVIEW:
             inspection.supervisor_opinion = item.opinion
             inspection.supervisor_signature = item.signature
             inspection.supervisor_review_date = datetime.now(timezone.utc)
+            inspection.current_handler_id = None
 
-        elif item.target_status in [InspectionStatus.ARCHIVED, InspectionStatus.FINAL_REVIEW_REJECTED]:
+        elif item.target_status == InspectionStatus.REVIEW_REJECTED:
+            inspection.supervisor_opinion = item.opinion
+            inspection.supervisor_signature = item.signature
+            inspection.supervisor_review_date = datetime.now(timezone.utc)
+            inspection.current_handler_id = inspection.created_by
+
+        elif item.target_status == InspectionStatus.ARCHIVED:
             inspection.reviewer_opinion = item.opinion
             inspection.reviewer_signature = item.signature
             inspection.reviewer_review_date = datetime.now(timezone.utc)
+            inspection.current_handler_id = None
+
+        elif item.target_status == InspectionStatus.FINAL_REVIEW_REJECTED:
+            inspection.reviewer_opinion = item.opinion
+            inspection.reviewer_signature = item.signature
+            inspection.reviewer_review_date = datetime.now(timezone.utc)
+            inspection.current_handler_id = inspection.created_by
 
         elif item.target_status == InspectionStatus.PENDING_REVIEW:
             inspection.registrar_signature = item.signature
+            inspection.current_handler_id = None
+
+        elif item.target_status == InspectionStatus.ACCEPTANCE_REJECTED:
+            inspection.current_handler_id = inspection.created_by
+
+        elif item.target_status == InspectionStatus.PENDING_FAULT_REPORT:
+            inspection.supervisor_opinion = item.opinion
+            inspection.supervisor_signature = item.signature
 
         inspection.status = item.target_status
         inspection.version += 1

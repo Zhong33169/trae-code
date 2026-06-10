@@ -528,6 +528,12 @@ async def update_status(
                 detail=f"角色 [{get_role_label(current_user.role)}] 不允许从 [{get_status_label(from_status)}] 流转到 [{get_status_label(target_status)}]"
             )
 
+        if current_user.role == UserRole.REGISTRAR and inspection.created_by != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="登记员只能操作自己创建的巡检单"
+            )
+
         if target_status == InspectionStatus.PENDING_FINAL_REVIEW:
             inspection.supervisor_opinion = status_data.opinion
             inspection.supervisor_signature = status_data.signature

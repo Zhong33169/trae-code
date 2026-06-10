@@ -161,7 +161,7 @@ function InspectionsPage() {
     setBatchModalOpen(true);
   };
 
-  const handleBatchConfirm = async (): Promise<BatchProcessResult | null> => {
+  const handleBatchConfirm = async (opinion: string, signature: string): Promise<BatchProcessResult | null> => {
     setBatchLoading(true);
     try {
       const requestId = generateRequestId();
@@ -171,6 +171,8 @@ function InspectionsPage() {
           order_no: item.order_no,
           target_status: batchTargetStatus,
           current_version: item.version,
+          opinion: opinion,
+          signature: signature,
         })),
         request_id: requestId,
         operation: `batch_${batchTargetStatus}`,

@@ -10,7 +10,7 @@ interface BatchProcessModalProps {
   selectedItems: InspectionOrder[];
   targetStatus: string;
   targetStatusLabel: string;
-  onConfirm: () => Promise<BatchProcessResult | null>;
+  onConfirm: (opinion: string, signature: string) => Promise<BatchProcessResult | null>;
   loading: boolean;
 }
 
@@ -28,7 +28,7 @@ export function BatchProcessModal({
   const [signature, setSignature] = useState("");
 
   const handleConfirm = async () => {
-    const processResult = await onConfirm();
+    const processResult = await onConfirm(opinion, signature);
     if (processResult) {
       setResult(processResult);
     }
