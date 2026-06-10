@@ -187,6 +187,23 @@ export class OrderDetailComponent implements OnInit {
     return to === from;
   }
 
+  get failureHandlerName(): string {
+    if (!this.lastFailure?.current_handler) return '-';
+    const handler = this.lastFailure.current_handler as UserRole;
+    return this.ROLE_NAMES[handler] || this.lastFailure.current_handler;
+  }
+
+  get failureStatusName(): string {
+    if (!this.lastFailure?.current_status) return '-';
+    const status = this.lastFailure.current_status as OrderStatus;
+    return this.STATUS_NAMES[status] || this.lastFailure.current_status;
+  }
+
+  get failureVersionLabel(): string {
+    if (this.lastFailure?.current_version == null) return '-';
+    return 'v' + this.lastFailure.current_version;
+  }
+
   get availableActions(): { key: ActionKey; label: string; cls: string }[] {
     if (!this.order) return [];
     const actions: { key: ActionKey; label: string; cls: string }[] = [];

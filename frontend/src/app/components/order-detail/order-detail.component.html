@@ -179,9 +179,9 @@
         <div class="failure-title">❌ 操作失败</div>
         <div class="failure-error">{{ lastFailure.error }}</div>
         <div class="failure-meta">
-          <span>当前版本：<strong>v{{ lastFailure.current_version }}</strong></span>
-          <span>当前处理人：<strong>{{ ROLE_NAMES[lastFailure.current_handler as UserRole] || lastFailure.current_handler || '-' }}</strong></span>
-          <span>当前状态：<strong>{{ STATUS_NAMES[lastFailure.current_status as OrderStatus] || lastFailure.current_status }}</strong></span>
+          <span>当前版本：<strong>{{ failureVersionLabel }}</strong></span>
+          <span>当前处理人：<strong>{{ failureHandlerName }}</strong></span>
+          <span>当前状态：<strong>{{ failureStatusName }}</strong></span>
         </div>
         <div *ngIf="lastFailure.evidence_check" class="failure-evidence">
           证据校验：{{ lastFailure.evidence_check }}
