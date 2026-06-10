@@ -1,17 +1,17 @@
-import { createSignal, For, onMount, createEffect } from 'solid-js'
+import { createSignal, For, onMount, createEffect, useContext } from 'solid-js'
 import { A } from '@solidjs/router'
 import { api } from '../api'
-import { formatTime, getUser, ROLE_LABELS } from '../utils'
+import { formatTime, ROLE_LABELS } from '../utils'
+import { UserContext } from '../App'
 
 export default function AuditLogs() {
   const [data, setData] = createSignal({ items: [], total: 0 })
   const [page, setPage] = createSignal(1)
   const [size] = createSignal(50)
   const [filter, setFilter] = createSignal({ ticket_id: '', is_success: '' })
-  const [user, setUserState] = createSignal(null)
+  const { user } = useContext(UserContext)
 
   onMount(() => {
-    setUserState(getUser())
     refresh()
   })
 

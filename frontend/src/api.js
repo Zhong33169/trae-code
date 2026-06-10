@@ -1,4 +1,4 @@
-const API_BASE = 'http://localhost:8001'
+const API_BASE = 'http://localhost:8002'
 
 function getToken() {
   return localStorage.getItem('repair_token') || ''
@@ -33,6 +33,11 @@ export const api = {
 
   async getRoles() {
     const res = await fetch(`${API_BASE}/api/auth/roles`)
+    return handleResponse(res)
+  },
+
+  async listAllUsers() {
+    const res = await fetch(`${API_BASE}/api/auth/users`, { headers: authHeaders() })
     return handleResponse(res)
   },
 

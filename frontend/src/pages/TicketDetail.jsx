@@ -1,25 +1,44 @@
-import { createSignal, createEffect, For, onMount, Show } from 'solid-js'
+import { createSignal, createEffect, For, onMount, Show, useContext } from 'solid-js'
 import { useNavigate, useParams } from '@solidjs/router'
 import { api } from '../api'
 import {
   STATUS_LABELS, STATUS_COLORS, PRIORITY_LABELS, PRIORITY_COLORS,
-  formatTime, formatFileSize, getUser, ROLE_LABELS
+  formatTime, formatFileSize, ROLE_LABELS
 } from '../utils'
+import { UserContext } from '../App'
 
 export default function TicketDetail() {
   const nav = useNavigate()
   const params = useParams()
   const [ticket, setTicket] = createSignal(null)
-  const [user, setUserState] = createSignal(null)
+  const { user } = useContext(UserContext)
   const [loading, setLoading] = createSignal(true)
   const [tab, setTab] = createSignal('info')
   const [modal, setModal] = createSignal(null)
   const [form, setForm] = createSignal({})
   const [formError, setFormError] = createSignal('')
+  const [auditLogs, setAuditLogs] = createSignal([])
+  const [auditLoading, setAuditLoading] = createSignal(false)
+
+  const refreshAuditLogs = async () => {
+    if (!params.id) return
+    setAuditLoading(true)
+    try {
+      const res = await api.listAuditLogs({ ticket_id: params.id, size: 200 })
+      setAuditLogs(res.items || [])
+    } finally {
+      setAuditLoading(false)
+    }
+  }
 
   onMount(() => {
-    setUserState(getUser())
     refresh()
+  })
+
+  createEffect(() => {
+    if (ticket() && tab() === 'audit') {
+      refreshAuditLogs()
+    }
   })
 
   const refresh = async () => {
@@ -202,6 +221,9 @@ export default function TicketDetail() {
           <div class={`tab-item ${tab()==='logs'?'active':''}`} onClick={() => setTab('logs')}>
             流转记录 <span class="count">{ticket().work_logs?.length || 0}</span>
           </div>
+          <div class={`tab-item ${tab()==='audit'?'active':''}`} onClick={() => setTab('audit')}>
+            审计记录（逐条办理） <span class="count">{auditLogs().length}</span>
+          </div>
         </div>
 
         {tab() === 'info' && (
@@ -318,6 +340,62 @@ export default function TicketDetail() {
                 </For>
               </div>
             )}
+
+            {(ticket().status === 'revision_required' || supplementaryAtts().length > 0 || rejectedAtts().length > 0) && (
+              <div style="margin-top:24px">
+                <div class="section-title">补正前后附件对比</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+                  <div style="border:1px solid #ebeef5;border-radius:6px;padding:12px;background:#fafafa">
+                    <div style="font-weight:600;margin-bottom:10px;color:#909399">
+                      🔻 补正前原始附件
+                      <span class="tag tag-default" style="margin-left:6px">{atts().filter(a => !a.is_supplementary).length} 个</span>
+                    </div>
+                    {atts().filter(a => !a.is_supplementary).length === 0 ? (
+                      <div style="color:#c0c4cc;font-size:12px">（无）</div>
+                    ) : (
+                      <For each={atts().filter(a => !a.is_supplementary)}>
+                        {a => (
+                          <div style="padding:6px 8px;border-bottom:1px dashed #ebeef5;font-size:13px">
+                            <div>
+                              📎 {a.file_name}
+                              {a.is_required && !a.is_rejected && <span class="tag tag-primary" style="margin-left:4px">必填</span>}
+                              {a.is_rejected && <span class="tag tag-danger" style="margin-left:4px">已驳回</span>}
+                            </div>
+                            {a.reject_reason && <div style="color:#f56c6c;font-size:12px;margin-top:2px">驳回原因：{a.reject_reason}</div>}
+                            {a.review_note && <div style="color:#409eff;font-size:12px;margin-top:2px">审核备注：{a.review_note}</div>}
+                          </div>
+                        )}
+                      </For>
+                    )}
+                  </div>
+                  <div style="border:1px solid #e1f3d8;border-radius:6px;padding:12px;background:#f0f9eb">
+                    <div style="font-weight:600;margin-bottom:10px;color:#67c23a">
+                      🔺 补正后补传附件
+                      <span class="tag tag-success" style="margin-left:6px">{supplementaryAtts().length} 个</span>
+                    </div>
+                    {supplementaryAtts().length === 0 ? (
+                      <div style="color:#c0c4cc;font-size:12px">（暂未补传）</div>
+                    ) : (
+                      <For each={supplementaryAtts()}>
+                        {a => (
+                          <div style="padding:6px 8px;border-bottom:1px dashed #e1f3d8;font-size:13px">
+                            <div>
+                              📎 {a.file_name}
+                              {a.is_rejected && <span class="tag tag-danger" style="margin-left:4px">已驳回</span>}
+                              {!a.is_rejected && <span class="tag tag-warning" style="margin-left:4px">补传</span>}
+                            </div>
+                            <div style="color:#909399;font-size:12px;margin-top:2px">
+                              上传：{a.uploaded_by_name || '-'} · {formatTime(a.uploaded_at)}
+                            </div>
+                            {a.review_note && <div style="color:#409eff;font-size:12px;margin-top:2px">审核备注：{a.review_note}</div>}
+                          </div>
+                        )}
+                      </For>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -409,6 +487,70 @@ export default function TicketDetail() {
                 }}
               </For>
             </div>
+          </div>
+        )}
+
+        {tab() === 'audit' && (
+          <div class="card" style="box-shadow:none;padding:0;margin:0">
+            <div class="section-title">
+              审计记录（逐条办理结果）
+              <span class="tag" style="margin-left:10px">共 {auditLogs().length} 条</span>
+              <button class="btn btn-sm" style="margin-left:10px" onClick={refreshAuditLogs}>刷新</button>
+            </div>
+            <div class="alert-box alert-info">
+              <b>说明：</b>每条操作都会写入审计日志，包括成功/失败状态、失败原因、附件逐条校验结果、办理步骤逐条结果。失败条目显示为红色。
+            </div>
+            {auditLoading() ? (
+              <div style="padding:40px;text-align:center;color:#909399">加载中...</div>
+            ) : auditLogs().length === 0 ? (
+              <div style="padding:40px;text-align:center;color:#909399">暂无审计记录</div>
+            ) : (
+              <div style="max-height:640px;overflow-y:auto">
+                <For each={auditLogs()}>
+                  {log => (
+                    <div style={`border-left:4px solid ${log.is_success ? (log.action.includes('驳回')||log.action.includes('退回')?'#f56c6c':(log.action.includes('通过')||log.action.includes('归档')||log.action.includes('完工')?'#67c23a':'#409eff')) : '#f56c6c'};padding:10px 14px;margin-bottom:10px;background:${log.is_success ? '#fafafa' : '#fef0f0'};border-radius:0 6px 6px 0`}>
+                      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px">
+                        <div style="font-weight:600;color:#303133">
+                          {log.action}
+                          {!log.is_success && <span class="tag tag-danger" style="margin-left:8px">失败</span>}
+                          {log.is_success && <span class="tag tag-success" style="margin-left:8px">成功</span>}
+                        </div>
+                        <div style="font-size:12px;color:#909399">
+                          {formatTime(log.created_at)}
+                        </div>
+                      </div>
+                      <div style="font-size:12px;color:#606266;margin-bottom:4px">
+                        <span>模块：{log.module}</span>
+                        <span style="margin:0 8px">|</span>
+                        <span>操作人：{log.operator_name || '-'}（{ROLE_LABELS[log.operator_role] || log.operator_role}）</span>
+                        {log.ip_address && <span style="margin:0 8px">|</span>}
+                        {log.ip_address && <span>IP：{log.ip_address}</span>}
+                      </div>
+                      {log.attachment_result && (
+                        <div style="background:#ecf5ff;border:1px solid #d9ecff;padding:6px 10px;border-radius:4px;font-size:12px;color:#409eff;margin-top:4px">
+                          <b>附件处理结果：</b>{log.attachment_result}
+                        </div>
+                      )}
+                      {log.processing_result && (
+                        <div style="background:#f0f9eb;border:1px solid #e1f3d8;padding:6px 10px;border-radius:4px;font-size:12px;color:#67c23a;margin-top:4px">
+                          <b>逐条办理结果：</b>{log.processing_result}
+                        </div>
+                      )}
+                      {log.failure_reason && (
+                        <div style="background:#fef0f0;border:1px solid #fde2e2;padding:6px 10px;border-radius:4px;font-size:12px;color:#f56c6c;margin-top:4px">
+                          <b>失败原因：</b>{log.failure_reason}
+                        </div>
+                      )}
+                      {log.remark && !log.failure_reason && (
+                        <div style="background:#fdf6ec;border:1px solid #faecd8;padding:6px 10px;border-radius:4px;font-size:12px;color:#e6a23c;margin-top:4px">
+                          <b>备注：</b>{log.remark}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </For>
+              </div>
+            )}
           </div>
         )}
       </div>

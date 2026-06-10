@@ -1,10 +1,11 @@
-import { createSignal, createEffect, For, onMount } from 'solid-js'
+import { createSignal, createEffect, For, onMount, useContext } from 'solid-js'
 import { A, useNavigate } from '@solidjs/router'
 import { api } from '../api'
 import {
   STATUS_LABELS, STATUS_COLORS, PRIORITY_LABELS, PRIORITY_COLORS,
-  formatTime, getUser, REPAIR_TYPES, ROLE_LABELS
+  formatTime, REPAIR_TYPES, ROLE_LABELS
 } from '../utils'
+import { UserContext } from '../App'
 
 export default function Tickets() {
   const nav = useNavigate()
@@ -22,10 +23,9 @@ export default function Tickets() {
   })
   const [formError, setFormError] = createSignal('')
   const [stats, setStats] = createSignal({ total: 0, pending: 0, ip: 0, overdue: 0, archived: 0 })
-  const [user, setUserState] = createSignal(null)
+  const { user } = useContext(UserContext)
 
   onMount(() => {
-    setUserState(getUser())
     refresh()
     refreshStats()
   })
