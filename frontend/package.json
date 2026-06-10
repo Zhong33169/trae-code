@@ -1,0 +1,19 @@
+{
+  "name": "repair-system-frontend",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --port 3001 --host",
+    "build": "vite build",
+    "preview": "vite preview --port 3001"
+  },
+  "dependencies": {
+    "@solidjs/router": "^0.13.6",
+    "solid-js": "^1.8.17"
+  },
+  "devDependencies": {
+    "vite": "^5.3.1",
+    "vite-plugin-solid": "^2.10.2"
+  }
+}
