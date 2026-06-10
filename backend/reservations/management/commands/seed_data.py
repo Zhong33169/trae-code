@@ -100,7 +100,9 @@ class Command(BaseCommand):
         ta_wang = User.objects.get(username='ta_wang')
         ta_li = User.objects.get(username='ta_li')
         labadmin_zhang = User.objects.get(username='labadmin_zhang')
+        labadmin_liu = User.objects.get(username='labadmin_liu')
         college_chen = User.objects.get(username='college_chen')
+        college_zhao = User.objects.get(username='college_zhao')
 
         now = timezone.now()
 
@@ -330,8 +332,8 @@ class Command(BaseCommand):
                 'lab': '计算机实验室A302',
                 'course': '计算机组成原理',
                 'experiment': '五级流水线CPU设计',
-                'applicant': ta_wang,
-                'dept': '计算机学院',
+                'applicant': ta_li,
+                'dept': '物理学院',
                 'start': now + timedelta(days=12),
                 'end': now + timedelta(days=12, hours=4),
                 'students': 40,
@@ -339,23 +341,15 @@ class Command(BaseCommand):
                 'has_plan': True,
                 'has_material': True,
                 'has_safety': True,
-                'description': '完整流程：提交→退回→补录→再提交→审核→确认 - 多角色连续办理',
+                'description': '完整流程 - 多角色连续办理：李助教提交→刘管理员审核→赵院长确认',
                 'submitted': True,
                 'lab_reviewed': True,
-                'reviewer': labadmin_zhang,
-                'review_comment': '补录材料齐全，同意通过',
+                'reviewer': labadmin_liu,
+                'review_comment': '实验方案合理，设备齐全，同意通过',
                 'college_confirmed': True,
-                'confirmer': college_chen,
+                'confirmer': college_zhao,
                 'confirm_comment': '学院确认通过，请按计划开展实验',
-                'add_evidence': ['experiment_plan'],
-                'has_supplementary': True,
-                'supplement_type': 'material_application',
-                'supplement_title': '耗材申领单（补录版）',
-                'has_second_supplementary': True,
-                'second_supplement_type': 'safety_confirmation',
-                'second_supplement_title': '安全确认书（补录版）',
-                'was_lab_rejected': True,
-                'first_rejection_reason': '缺少耗材申领单和安全确认书，两项证据缺失',
+                'add_evidence': ['experiment_plan', 'material_application', 'safety_confirmation'],
             },
             {
                 'no': 'LAB202506010012',

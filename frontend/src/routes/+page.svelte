@@ -1,66 +1,43 @@
 <script>
   import { onMount } from 'svelte';
-  import { refreshTrigger, selectedReservationId, currentUser } from '$lib/stores.js';
-  import { api } from '$lib/api.js';
+  import {
+    listData,
+    detailData,
+    selectedReservationId,
+    currentUser,
+    selectReservation,
+    refreshAll,
+    updateFilters,
+    filterParams,
+    loadReservations,
+  } from '$lib/stores.js';
   import { STATUS_LABELS, STATUS_COLORS, RESERVATION_STATUS } from '$lib/constants.js';
   import ReservationDetail from '$lib/components/ReservationDetail.svelte';
   import EvidencePanel from '$lib/components/EvidencePanel.svelte';
   import FilterBar from '$lib/components/FilterBar.svelte';
   import BatchToolbar from '$lib/components/BatchToolbar.svelte';
 
-  let reservations = [];
-  let total = 0;
-  let loading = false;
-  let error = null;
-
-  let page = 1;
-  let pageSize = 20;
-  let statusFilter = '';
-  let keyword = '';
-  let mineOnly = false;
-
   let selectedIds = new Set();
   let showDetail = false;
 
+  $: reservations = $listData.items;
+  $: total = $listData.total;
+  $: loading = $listData.loading;
+  $: error = $listData.error;
+
   $: if ($selectedReservationId) {
     showDetail = true;
+  } else {
+    showDetail = false;
   }
 
-  $: {
-    $refreshTrigger;
-    $currentUser;
-    loadReservations();
-  }
-
-  async function loadReservations() {
-    loading = true;
-    error = null;
-    try {
-      const params = {
-        page,
-        page_size: pageSize,
-      };
-      if (statusFilter) params.status = statusFilter;
-      if (keyword) params.keyword = keyword;
-      if (mineOnly) params.mine_only = 'true';
-
-      const data = await api.getReservations(params);
-      reservations = data.items;
-      total = data.total;
-    } catch (e) {
-      error = e.message;
-    } finally {
-      loading = false;
-    }
-  }
-
-  function selectReservation(id) {
-    selectedReservationId.set(id);
+  function handleSelect(id) {
+    selectReservation(id);
   }
 
   function closeDetail() {
     showDetail = false;
-    selectedReservationId.set(null);
+    selectReservation(null);
   }
 
   function toggleSelect(id, event) {
@@ -83,16 +60,13 @@
   }
 
   function handleFilterChange(filters) {
-    statusFilter = filters.status;
-    keyword = filters.keyword;
-    mineOnly = filters.mineOnly;
-    page = 1;
+    updateFilters(filters);
     selectedIds = new Set();
   }
 
   function handleBatchComplete() {
     selectedIds = new Set();
-    loadReservations();
+    refreshAll();
   }
 
   function getStatusClass(status) {
@@ -154,7 +128,7 @@
             class="reservation-card"
             class:selected={selectedIds.has(r.id)}
             class:has-supplementary={r.supplementary_count > 0}
-            on:click={() => selectReservation(r.id)}
+            on:click={() => handleSelect(r.id)}
           >
             <div class="card-checkbox" on:click|stopPropagation={(e) => toggleSelect(r.id, e)}>
               <input
@@ -184,6 +158,11 @@
                   <span class="supplementary-tag">补录{r.supplementary_count}次</span>
                 {/if}
               </div>
+              {#if r.disabled_reason && r.status !== 'confirmed'}
+                <div class="disabled-reason">
+                  <strong>操作提示：</strong>{r.disabled_reason}
+                </div>
+              {/if}
               {#if r.rejection_reason && (r.status === 'lab_rejected' || r.status === 'college_rejected')}
                 <div class="rejection-reason">
                   <strong>退回原因：</strong>{r.rejection_reason}
@@ -427,6 +406,19 @@
     background: #fff3e0;
     color: #f57c00;
     font-weight: 500;
+  }
+
+  .disabled-reason {
+    font-size: 12px;
+    color: #666;
+    background: #f5f5f5;
+    padding: 6px 8px;
+    border-radius: 4px;
+    margin-top: 6px;
+  }
+
+  .disabled-reason strong {
+    color: #888;
   }
 
   .rejection-reason {

@@ -1,7 +1,7 @@
 <script>
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount } from 'svelte';
   import { createEventDispatcher } from 'svelte';
-  import { currentUser, refreshData, refreshTrigger } from '$lib/stores.js';
+  import { currentUser, refreshAll, detailData } from '$lib/stores.js';
   import { api } from '$lib/api.js';
   import {
     STATUS_LABELS,
@@ -14,13 +14,6 @@
   const dispatch = createEventDispatcher();
 
   export let reservationId;
-
-  let reservation = null;
-  let evidences = [];
-  let supplementaryRecords = [];
-  let auditLogs = [];
-  let loading = true;
-  let error = null;
 
   let activeTab = 'info';
 
@@ -35,47 +28,24 @@
   let supplementTitle = '';
   let supplementDesc = '';
 
-  $: {
-    reservationId;
-    $refreshTrigger;
-    $currentUser;
-    loadData();
-  }
-
-  async function loadData() {
-    if (!reservationId) return;
-
-    loading = true;
-    error = null;
-    try {
-      const [res, ev, sup, logs] = await Promise.all([
-        api.getReservation(reservationId),
-        api.getEvidences(reservationId),
-        api.getSupplementaryRecords(reservationId),
-        api.getAuditLogs(reservationId),
-      ]);
-      reservation = res;
-      evidences = ev;
-      supplementaryRecords = sup;
-      auditLogs = logs;
-    } catch (e) {
-      error = e.message;
-    } finally {
-      loading = false;
-    }
-  }
+  $: reservation = $detailData.reservation;
+  $: evidences = $detailData.evidences;
+  $: supplementaryRecords = $detailData.supplementaryRecords;
+  $: auditLogs = $detailData.auditLogs;
+  $: loading = $detailData.loading;
+  $: error = $detailData.error;
 
   function getStatusClass(status) {
     return `status-badge status-${STATUS_COLORS[status] || 'gray'}`;
   }
 
   async function handleSubmit() {
-    if (!reservation.can_submit) return;
+    if (!reservation?.can_submit) return;
     operating = true;
     operateError = '';
     try {
-      reservation = await api.submitReservation(reservation.id, reservation.version);
-      refreshData();
+      await api.submitReservation(reservation.id, reservation.version);
+      refreshAll();
     } catch (e) {
       operateError = e.message + (e.errors?.length ? '\n' + e.errors.join('\n') : '');
     } finally {
@@ -101,14 +71,14 @@
 
     try {
       if (rejectType === 'lab') {
-        reservation = await api.labReview(
+        await api.labReview(
           reservation.id,
           false,
           rejectReason,
           reservation.version
         );
       } else {
-        reservation = await api.collegeConfirm(
+        await api.collegeConfirm(
           reservation.id,
           false,
           rejectReason,
@@ -116,8 +86,7 @@
         );
       }
       showRejectDialog = false;
-      refreshData();
-      loadData();
+      refreshAll();
     } catch (e) {
       operateError = e.message + (e.errors?.length ? '\n' + e.errors.join('\n') : '');
     } finally {
@@ -126,18 +95,17 @@
   }
 
   async function handleLabPass() {
-    if (!reservation.can_lab_review) return;
+    if (!reservation?.can_lab_review) return;
     operating = true;
     operateError = '';
     try {
-      reservation = await api.labReview(
+      await api.labReview(
         reservation.id,
         true,
         '审核通过，材料齐全',
         reservation.version
       );
-      refreshData();
-      loadData();
+      refreshAll();
     } catch (e) {
       operateError = e.message + (e.errors?.length ? '\n' + e.errors.join('\n') : '');
     } finally {
@@ -146,18 +114,17 @@
   }
 
   async function handleCollegePass() {
-    if (!reservation.can_college_confirm) return;
+    if (!reservation?.can_college_confirm) return;
     operating = true;
     operateError = '';
     try {
-      reservation = await api.collegeConfirm(
+      await api.collegeConfirm(
         reservation.id,
         true,
         '学院确认通过',
         reservation.version
       );
-      refreshData();
-      loadData();
+      refreshAll();
     } catch (e) {
       operateError = e.message + (e.errors?.length ? '\n' + e.errors.join('\n') : '');
     } finally {
@@ -183,15 +150,14 @@
     operateError = '';
 
     try {
-      reservation = await api.supplementEvidence(reservation.id, {
+      await api.supplementEvidence(reservation.id, {
         evidence_type: supplementType,
         title: supplementTitle,
         description: supplementDesc,
         expected_version: reservation.version,
       });
       showSupplementDialog = false;
-      refreshData();
-      loadData();
+      refreshAll();
     } catch (e) {
       operateError = e.message + (e.errors?.length ? '\n' + e.errors.join('\n') : '');
     } finally {
@@ -216,13 +182,6 @@
   function getEvidenceLabel(type) {
     return EVIDENCE_LABELS[type] || type;
   }
-
-  $: reservationId;
-  $: loadData();
-
-  onMount(() => {
-    loadData();
-  });
 </script>
 
 <div class="detail-panel">
@@ -315,6 +274,28 @@
           </div>
         {/if}
       </div>
+
+      {#if reservation.flow_steps?.length > 0}
+        <div class="flow-section">
+          <h4>审批流程</h4>
+          <div class="flow-steps">
+            {#each reservation.flow_steps as step (step.key)}
+              <div class="flow-step" class:{step.status}>
+                <div class="step-dot" />
+                <div class="step-content">
+                  <div class="step-label">{step.label}</div>
+                  {#if step.actor}
+                    <div class="step-actor">{step.actor}</div>
+                  {/if}
+                  {#if step.time}
+                    <div class="step-time">{formatTime(step.time)}</div>
+                  {/if}
+                </div>
+              </div>
+            {/each}
+          </div>
+        </div>
+      {/if}
 
       <div class="tabs">
         <button
@@ -430,13 +411,12 @@
             class="btn btn-primary"
             on:click={handleSubmit}
             disabled={operating}
-            title={reservation.submit_error}
           >
             提交审核
           </button>
-        {:else if reservation.submit_error}
+        {:else if reservation.submit_errors?.length > 0}
           <div class="cannot-do-hint">
-            不能提交：{reservation.submit_error}
+            不能提交：{reservation.submit_errors[0]}
           </div>
         {/if}
 
@@ -455,9 +435,9 @@
           >
             退回
           </button>
-        {:else if reservation.lab_review_error && $currentUser?.role === ROLES.LAB_ADMIN}
+        {:else if reservation.lab_review_errors?.length > 0 && $currentUser?.role === ROLES.LAB_ADMIN}
           <div class="cannot-do-hint">
-            不能审核：{reservation.lab_review_error}
+            不能审核：{reservation.lab_review_errors[0]}
           </div>
         {/if}
 
@@ -476,9 +456,9 @@
           >
             退回
           </button>
-        {:else if reservation.college_confirm_error && $currentUser?.role === ROLES.COLLEGE_HEAD}
+        {:else if reservation.college_confirm_errors?.length > 0 && $currentUser?.role === ROLES.COLLEGE_HEAD}
           <div class="cannot-do-hint">
-            不能确认：{reservation.college_confirm_error}
+            不能确认：{reservation.college_confirm_errors[0]}
           </div>
         {/if}
 
@@ -490,9 +470,9 @@
           >
             补录材料
           </button>
-        {:else if reservation.supplement_error && $currentUser?.role === ROLES.TEACHING_ASSISTANT}
+        {:else if reservation.supplement_errors?.length > 0 && $currentUser?.role === ROLES.TEACHING_ASSISTANT}
           <div class="cannot-do-hint">
-            不能补录：{reservation.supplement_error}
+            不能补录：{reservation.supplement_errors[0]}
           </div>
         {/if}
       </div>
@@ -599,9 +579,8 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 14px 18px;
+    padding: 16px 20px;
     border-bottom: 1px solid #eee;
-    background: #f8f9fb;
   }
 
   .panel-header h3 {
@@ -614,19 +593,13 @@
     background: none;
     border: none;
     font-size: 24px;
-    color: #999;
     cursor: pointer;
+    color: #999;
     line-height: 1;
   }
 
   .close-btn:hover {
     color: #333;
-  }
-
-  .detail-content {
-    flex: 1;
-    overflow-y: auto;
-    padding: 18px;
   }
 
   .loading,
@@ -639,6 +612,12 @@
 
   .error {
     color: #e74c3c;
+  }
+
+  .detail-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
   }
 
   .detail-header {
@@ -656,8 +635,8 @@
 
   .status-badge {
     font-size: 12px;
-    padding: 3px 10px;
-    border-radius: 12px;
+    padding: 2px 10px;
+    border-radius: 10px;
     font-weight: 500;
   }
 
@@ -692,30 +671,27 @@
   }
 
   .detail-title {
-    margin: 0 0 14px;
-    font-size: 17px;
-    color: #333;
+    font-size: 18px;
+    margin: 0 0 16px;
+    color: #1e3a5f;
   }
 
   .info-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 10px 14px;
-    margin-bottom: 18px;
-    padding: 12px;
-    background: #f8f9fb;
-    border-radius: 6px;
+    gap: 12px;
+    margin-bottom: 20px;
   }
 
   .info-item {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 4px;
   }
 
   .info-item .label {
     font-size: 12px;
-    color: #888;
+    color: #999;
   }
 
   .info-item .value {
@@ -725,29 +701,26 @@
   }
 
   .evidence-section {
-    margin-bottom: 16px;
+    margin-bottom: 20px;
   }
 
   .evidence-section h4 {
-    margin: 0 0 10px;
     font-size: 14px;
-    color: #333;
+    margin: 0 0 12px;
+    color: #1e3a5f;
   }
 
   .evidence-list {
     display: flex;
-    gap: 8px;
+    gap: 10px;
   }
 
   .evidence-item {
     flex: 1;
-    padding: 10px 8px;
+    padding: 10px;
     border-radius: 6px;
     text-align: center;
     font-size: 12px;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
   }
 
   .evidence-item.ok {
@@ -761,12 +734,10 @@
   }
 
   .ev-icon {
+    display: block;
     font-size: 18px;
     font-weight: bold;
-  }
-
-  .ev-label {
-    font-size: 12px;
+    margin-bottom: 4px;
   }
 
   .missing-hint {
@@ -778,21 +749,85 @@
     border-radius: 4px;
   }
 
+  .flow-section {
+    margin-bottom: 20px;
+  }
+
+  .flow-section h4 {
+    font-size: 14px;
+    margin: 0 0 12px;
+    color: #1e3a5f;
+  }
+
+  .flow-steps {
+    display: flex;
+    gap: 0;
+  }
+
+  .flow-step {
+    flex: 1;
+    position: relative;
+    padding: 10px;
+    text-align: center;
+  }
+
+  .flow-step .step-dot {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    margin: 0 auto 8px;
+    background: #ddd;
+    position: relative;
+    z-index: 1;
+  }
+
+  .flow-step.done .step-dot {
+    background: #27ae60;
+  }
+
+  .flow-step.current .step-dot {
+    background: #f39c12;
+    box-shadow: 0 0 0 4px rgba(243, 156, 18, 0.3);
+  }
+
+  .flow-step.rejected .step-dot {
+    background: #e74c3c;
+  }
+
+  .step-label {
+    font-size: 12px;
+    font-weight: 500;
+    color: #333;
+  }
+
+  .step-actor {
+    font-size: 11px;
+    color: #666;
+    margin-top: 4px;
+  }
+
+  .step-time {
+    font-size: 11px;
+    color: #999;
+    margin-top: 2px;
+  }
+
   .tabs {
     display: flex;
-    border-bottom: 2px solid #eee;
-    margin-bottom: 12px;
+    border-bottom: 1px solid #eee;
+    margin-bottom: 16px;
   }
 
   .tab-btn {
-    padding: 8px 14px;
+    flex: 1;
+    padding: 10px;
     background: none;
     border: none;
     font-size: 13px;
     color: #666;
     cursor: pointer;
     border-bottom: 2px solid transparent;
-    margin-bottom: -2px;
+    transition: all 0.2s;
   }
 
   .tab-btn.active {
@@ -802,24 +837,25 @@
   }
 
   .tab-content {
-    min-height: 200px;
-    margin-bottom: 16px;
+    min-height: 150px;
+    max-height: 250px;
+    overflow-y: auto;
   }
 
   .timeline {
-    padding-left: 4px;
+    padding-left: 8px;
   }
 
   .timeline-item {
     display: flex;
     gap: 12px;
-    margin-bottom: 14px;
+    margin-bottom: 16px;
     position: relative;
   }
 
   .timeline-dot {
-    width: 10px;
-    height: 10px;
+    width: 12px;
+    height: 12px;
     border-radius: 50%;
     background: #2d5a87;
     flex-shrink: 0;
@@ -828,20 +864,19 @@
 
   .timeline-content {
     flex: 1;
-    padding-bottom: 4px;
   }
 
   .timeline-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 2px;
+    margin-bottom: 4px;
   }
 
   .log-action {
     font-size: 13px;
-    font-weight: 600;
-    color: #333;
+    font-weight: 500;
+    color: #1e3a5f;
   }
 
   .log-time {
@@ -849,16 +884,12 @@
     color: #999;
   }
 
-  .log-actor {
+  .log-actor,
+  .log-comment,
+  .log-reason,
+  .log-status-change {
     font-size: 12px;
     color: #666;
-    margin-bottom: 2px;
-  }
-
-  .log-comment,
-  .log-reason {
-    font-size: 12px;
-    color: #555;
     margin-top: 2px;
   }
 
@@ -867,35 +898,29 @@
   }
 
   .log-status-change {
-    font-size: 11px;
-    color: #888;
-    margin-top: 4px;
+    color: #27ae60;
+    font-weight: 500;
   }
 
-  .supplementary-list,
-  .evidences-list {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-  }
-
-  .supp-item {
-    padding: 10px 12px;
-    background: #fff8e1;
-    border-left: 3px solid #f57c00;
-    border-radius: 4px;
+  .supplementary-list .supp-item {
+    padding: 12px;
+    border: 1px solid #f0e6d6;
+    background: #fffaf0;
+    border-radius: 6px;
+    margin-bottom: 10px;
   }
 
   .supp-header {
     display: flex;
     justify-content: space-between;
-    margin-bottom: 4px;
+    align-items: center;
+    margin-bottom: 6px;
   }
 
   .supp-action {
     font-size: 13px;
-    font-weight: 600;
-    color: #e65100;
+    font-weight: 500;
+    color: #f57c00;
   }
 
   .supp-time {
@@ -911,56 +936,58 @@
 
   .supp-desc {
     font-size: 12px;
-    color: #555;
+    color: #333;
   }
 
-  .ev-card {
-    padding: 10px 12px;
-    border: 1px solid #e0e0e0;
+  .evidences-list .ev-card {
+    padding: 12px;
+    border: 1px solid #eee;
     border-radius: 6px;
+    margin-bottom: 10px;
   }
 
   .ev-card.supplementary {
-    border-color: #ffb74d;
-    background: #fff8e1;
+    border-color: #f0e6d6;
+    background: #fffaf0;
   }
 
   .ev-header {
     display: flex;
-    gap: 8px;
     align-items: center;
-    margin-bottom: 4px;
+    gap: 8px;
+    margin-bottom: 6px;
   }
 
   .ev-type {
     font-size: 12px;
-    font-weight: 600;
-    color: #2d5a87;
+    font-weight: 500;
+    color: #1e3a5f;
   }
 
   .ev-version {
     font-size: 11px;
-    color: #888;
+    color: #999;
   }
 
   .ev-supp-tag {
     font-size: 10px;
     padding: 1px 6px;
-    background: #f57c00;
+    background: #f39c12;
     color: white;
-    border-radius: 8px;
+    border-radius: 3px;
   }
 
   .ev-title {
     font-size: 13px;
+    font-weight: 500;
     color: #333;
-    margin-bottom: 2px;
+    margin-bottom: 4px;
   }
 
   .ev-desc {
     font-size: 12px;
     color: #666;
-    margin-bottom: 4px;
+    margin-bottom: 6px;
   }
 
   .ev-meta {
@@ -971,26 +998,26 @@
   }
 
   .operate-error {
-    margin-bottom: 12px;
-    padding: 10px 12px;
+    margin: 12px 0;
+    padding: 10px;
     background: #fee;
     border: 1px solid #fcc;
     border-radius: 4px;
-    font-size: 13px;
+    font-size: 12px;
     color: #c33;
   }
 
   .operate-error pre {
     margin: 4px 0 0;
     white-space: pre-wrap;
-    font-size: 12px;
+    font-size: 11px;
   }
 
   .action-bar {
     display: flex;
-    gap: 8px;
+    gap: 10px;
     flex-wrap: wrap;
-    padding-top: 12px;
+    padding-top: 16px;
     border-top: 1px solid #eee;
   }
 
@@ -1013,7 +1040,7 @@
     color: white;
   }
 
-  .btn-primary:hover:not(:disabled) {
+  .btn-primary:hover {
     background: #1e3a5f;
   }
 
@@ -1022,7 +1049,7 @@
     color: white;
   }
 
-  .btn-success:hover:not(:disabled) {
+  .btn-success:hover {
     background: #1e8449;
   }
 
@@ -1031,7 +1058,7 @@
     color: white;
   }
 
-  .btn-warning:hover:not(:disabled) {
+  .btn-warning:hover {
     background: #d68910;
   }
 
@@ -1040,8 +1067,18 @@
     color: white;
   }
 
-  .btn-danger:hover:not(:disabled) {
+  .btn-danger:hover {
     background: #c0392b;
+  }
+
+  .btn-outline {
+    background: transparent;
+    color: #2d5a87;
+    border: 1px solid #2d5a87;
+  }
+
+  .btn-outline:hover {
+    background: #f0f6ff;
   }
 
   .btn-default {
@@ -1049,27 +1086,16 @@
     color: #333;
   }
 
-  .btn-default:hover:not(:disabled) {
+  .btn-default:hover {
     background: #bdc3c7;
-  }
-
-  .btn-outline {
-    background: white;
-    color: #2d5a87;
-    border: 1px solid #2d5a87;
-  }
-
-  .btn-outline:hover:not(:disabled) {
-    background: #f0f6ff;
   }
 
   .cannot-do-hint {
     font-size: 12px;
-    color: #e67e22;
-    background: #fff8e1;
-    padding: 6px 10px;
+    color: #999;
+    padding: 8px 12px;
+    background: #f5f5f5;
     border-radius: 4px;
-    flex: 1;
   }
 
   .dialog-overlay {
@@ -1106,17 +1132,18 @@
     display: flex;
     flex-direction: column;
     gap: 6px;
-    margin-bottom: 14px;
+    margin-bottom: 12px;
   }
 
   .form-group label {
     font-size: 13px;
-    color: #666;
+    color: #333;
+    font-weight: 500;
   }
 
   .form-group input,
-  .form-group select,
-  .form-group textarea {
+  .form-group textarea,
+  .form-group select {
     padding: 8px 10px;
     border: 1px solid #ddd;
     border-radius: 4px;
@@ -1125,16 +1152,16 @@
 
   .form-group textarea {
     resize: vertical;
-    min-height: 60px;
+    min-height: 80px;
   }
 
   .supplement-notice {
-    margin-top: 10px;
-    padding: 10px;
-    background: #fff8e1;
-    border-radius: 4px;
     font-size: 12px;
-    color: #e65100;
+    color: #e67e22;
+    background: #fff8e1;
+    padding: 8px 10px;
+    border-radius: 4px;
+    margin-top: 8px;
   }
 
   .dialog-footer {

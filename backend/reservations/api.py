@@ -493,6 +493,284 @@ def list_reservations(
     )
 
 
+@api.post('/reservations/batch', response=dict, auth=dev_auth, tags=['批量操作'])
+def batch_operation(request, payload: BatchOperationIn):
+    user = get_user_from_request(request)
+    results = []
+    success_count = 0
+    fail_count = 0
+
+    if len(payload.ids) != len(payload.expected_versions):
+        return api.create_response(
+            request,
+            {
+                'detail': 'ID列表和版本号列表长度不一致',
+                'code': 'invalid_input',
+            },
+            status=400,
+        )
+
+
+
+    valid_operations = ['lab_review_pass', 'lab_reject', 'college_confirm_pass', 'college_reject']
+    if payload.operation not in valid_operations:
+        return api.create_response(
+            request,
+            {
+                'detail': f'不支持的批量操作：{payload.operation}',
+                'code': 'invalid_operation',
+                'errors': [f'支持的操作：{", ".join(valid_operations)}'],
+            },
+            status=400,
+        )
+
+    for idx, (res_id, expected_ver) in enumerate(zip(payload.ids, payload.expected_versions)):
+        try:
+            reservation = LabReservation.objects.get(id=res_id)
+        except LabReservation.DoesNotExist:
+            fail_count += 1
+            results.append({
+                'id': res_id,
+                'success': False,
+                'error': '预约单不存在',
+                'code': 'not_found',
+            })
+            continue
+
+        if reservation.version != expected_ver:
+            fail_count += 1
+            results.append({
+                'id': res_id,
+                'reservation_no': reservation.reservation_no,
+                'success': False,
+                'error': '版本号不匹配',
+                'code': 'version_conflict',
+                'current_version': reservation.version,
+                'expected_version': expected_ver,
+            })
+            continue
+
+        if payload.operation == 'lab_review_pass':
+            can_op, err = reservation.can_lab_review(user)
+            if not can_op:
+                fail_count += 1
+                detailed_errors = _get_detailed_errors(reservation, user, 'lab_review')
+                results.append({
+                    'id': res_id,
+                    'reservation_no': reservation.reservation_no,
+                    'success': False,
+                    'error': err,
+                    'code': 'cannot_operate',
+                    'errors': detailed_errors,
+                    'previous_status': reservation.status,
+                    'current_version': reservation.version,
+                })
+                continue
+            missing = reservation.get_missing_evidence()
+            if missing:
+                fail_count += 1
+                labels = {'experiment_plan': '实验预约方案', 'material_application': '耗材申领单', 'safety_confirmation': '安全确认书'}
+                missing_labels = [labels.get(m, m) for m in missing]
+                results.append({
+                    'id': res_id,
+                    'reservation_no': reservation.reservation_no,
+                    'success': False,
+                    'error': f'证据不完整：缺少{"、".join(missing_labels)}',
+                    'code': 'insufficient_evidence',
+                    'errors': [f'缺少证据：{"、".join(missing_labels)}'],
+                    'previous_status': reservation.status,
+                    'current_version': reservation.version,
+                    'missing_evidence': missing,
+                })
+                continue
+
+            with transaction.atomic():
+                previous_status = reservation.status
+                reservation.status = LabReservation.STATUS_LAB_REVIEWED
+                reservation.lab_reviewed_at = timezone.now()
+                reservation.lab_reviewer = user
+                reservation.lab_review_comment = payload.comment
+                reservation.version += 1
+                reservation.save()
+
+                AuditLog.objects.create(
+                    reservation=reservation,
+                    action=AuditLog.ACTION_LAB_REVIEW_PASS,
+                    actor=user,
+                    comment=payload.comment,
+                    previous_status=previous_status,
+                    new_status=LabReservation.STATUS_LAB_REVIEWED,
+                    reason='批量审核通过',
+                )
+
+            success_count += 1
+            results.append({
+                'id': res_id,
+                'reservation_no': reservation.reservation_no,
+                'success': True,
+                'action': 'lab_review_pass',
+                'previous_status': previous_status,
+                'new_status': LabReservation.STATUS_LAB_REVIEWED,
+                'previous_version': expected_ver,
+                'new_version': reservation.version,
+                'comment': payload.comment,
+            })
+
+        elif payload.operation == 'lab_reject':
+            can_op, err = reservation.can_lab_review(user)
+            if not can_op:
+                fail_count += 1
+                detailed_errors = _get_detailed_errors(reservation, user, 'lab_review')
+                results.append({
+                    'id': res_id,
+                    'reservation_no': reservation.reservation_no,
+                    'success': False,
+                    'error': err,
+                    'code': 'cannot_operate',
+                    'errors': detailed_errors,
+                    'previous_status': reservation.status,
+                    'current_version': reservation.version,
+                })
+                continue
+
+            with transaction.atomic():
+                previous_status = reservation.status
+                reservation.status = LabReservation.STATUS_LAB_REJECTED
+                reservation.rejection_reason = payload.comment
+                reservation.rejected_by = user
+                reservation.rejected_at = timezone.now()
+                reservation.version += 1
+                reservation.save()
+
+                AuditLog.objects.create(
+                    reservation=reservation,
+                    action=AuditLog.ACTION_LAB_REJECT,
+                    actor=user,
+                    comment=payload.comment,
+                    previous_status=previous_status,
+                    new_status=LabReservation.STATUS_LAB_REJECTED,
+                    reason=payload.comment,
+                )
+
+            success_count += 1
+            results.append({
+                'id': res_id,
+                'reservation_no': reservation.reservation_no,
+                'success': True,
+                'action': 'lab_reject',
+                'previous_status': previous_status,
+                'new_status': LabReservation.STATUS_LAB_REJECTED,
+                'previous_version': expected_ver,
+                'new_version': reservation.version,
+                'comment': payload.comment,
+            })
+
+        elif payload.operation == 'college_confirm_pass':
+            can_op, err = reservation.can_college_confirm(user)
+            if not can_op:
+                fail_count += 1
+                detailed_errors = _get_detailed_errors(reservation, user, 'college_confirm')
+                results.append({
+                    'id': res_id,
+                    'reservation_no': reservation.reservation_no,
+                    'success': False,
+                    'error': err,
+                    'code': 'cannot_operate',
+                    'errors': detailed_errors,
+                    'previous_status': reservation.status,
+                    'current_version': reservation.version,
+                })
+                continue
+
+            with transaction.atomic():
+                previous_status = reservation.status
+                reservation.status = LabReservation.STATUS_CONFIRMED
+                reservation.confirmed_at = timezone.now()
+                reservation.confirmer = user
+                reservation.confirm_comment = payload.comment
+                reservation.version += 1
+                reservation.save()
+
+                AuditLog.objects.create(
+                    reservation=reservation,
+                    action=AuditLog.ACTION_COLLEGE_CONFIRM,
+                    actor=user,
+                    comment=payload.comment,
+                    previous_status=previous_status,
+                    new_status=LabReservation.STATUS_CONFIRMED,
+                    reason='批量确认通过',
+                )
+
+            success_count += 1
+            results.append({
+                'id': res_id,
+                'reservation_no': reservation.reservation_no,
+                'success': True,
+                'action': 'college_confirm_pass',
+                'previous_status': previous_status,
+                'new_status': LabReservation.STATUS_CONFIRMED,
+                'previous_version': expected_ver,
+                'new_version': reservation.version,
+                'comment': payload.comment,
+            })
+
+        elif payload.operation == 'college_reject':
+            can_op, err = reservation.can_college_confirm(user)
+            if not can_op:
+                fail_count += 1
+                detailed_errors = _get_detailed_errors(reservation, user, 'college_confirm')
+                results.append({
+                    'id': res_id,
+                    'reservation_no': reservation.reservation_no,
+                    'success': False,
+                    'error': err,
+                    'code': 'cannot_operate',
+                    'errors': detailed_errors,
+                    'previous_status': reservation.status,
+                    'current_version': reservation.version,
+                })
+                continue
+
+            with transaction.atomic():
+                previous_status = reservation.status
+                reservation.status = LabReservation.STATUS_COLLEGE_REJECTED
+                reservation.rejection_reason = payload.comment
+                reservation.rejected_by = user
+                reservation.rejected_at = timezone.now()
+                reservation.version += 1
+                reservation.save()
+
+                AuditLog.objects.create(
+                    reservation=reservation,
+                    action=AuditLog.ACTION_COLLEGE_REJECT,
+                    actor=user,
+                    comment=payload.comment,
+                    previous_status=previous_status,
+                    new_status=LabReservation.STATUS_COLLEGE_REJECTED,
+                    reason=payload.comment,
+                )
+
+            success_count += 1
+            results.append({
+                'id': res_id,
+                'reservation_no': reservation.reservation_no,
+                'success': True,
+                'action': 'college_reject',
+                'previous_status': previous_status,
+                'new_status': LabReservation.STATUS_COLLEGE_REJECTED,
+                'previous_version': expected_ver,
+                'new_version': reservation.version,
+                'comment': payload.comment,
+            })
+
+    return {
+        'success_count': success_count,
+        'fail_count': fail_count,
+        'total': len(payload.ids),
+        'results': results,
+    }
+
+
 @api.get('/reservations/{reservation_id}', response=LabReservationDetail, auth=dev_auth, tags=['预约单'])
 def get_reservation(request, reservation_id: int):
     user = get_user_from_request(request)
@@ -1039,280 +1317,6 @@ def supplement_evidence(request, reservation_id: int, payload: SupplementEvidenc
     return reservation_to_detail(reservation, user)
 
 
-@api.post('/reservations/batch', response=dict, auth=dev_auth, tags=['批量操作'])
-def batch_operation(request, payload: BatchOperationIn):
-    user = get_user_from_request(request)
-    results = []
-    success_count = 0
-    fail_count = 0
-
-    if len(payload.ids) != len(payload.expected_versions):
-        return api.create_response(
-            request,
-            {
-                'detail': 'ID列表和版本号列表长度不一致',
-                'code': 'invalid_input',
-            },
-            status=400,
-        )
-
-    valid_operations = ['lab_review_pass', 'lab_reject', 'college_confirm_pass', 'college_reject']
-    if payload.operation not in valid_operations:
-        return api.create_response(
-            request,
-            {
-                'detail': f'不支持的批量操作：{payload.operation}',
-                'code': 'invalid_operation',
-                'errors': [f'支持的操作：{", ".join(valid_operations)}'],
-            },
-            status=400,
-        )
-
-    for idx, (res_id, expected_ver) in enumerate(zip(payload.ids, payload.expected_versions)):
-        try:
-            reservation = LabReservation.objects.get(id=res_id)
-        except LabReservation.DoesNotExist:
-            fail_count += 1
-            results.append({
-                'id': res_id,
-                'success': False,
-                'error': '预约单不存在',
-                'code': 'not_found',
-            })
-            continue
-
-        if reservation.version != expected_ver:
-            fail_count += 1
-            results.append({
-                'id': res_id,
-                'reservation_no': reservation.reservation_no,
-                'success': False,
-                'error': '版本号不匹配',
-                'code': 'version_conflict',
-                'current_version': reservation.version,
-                'expected_version': expected_ver,
-            })
-            continue
-
-        if payload.operation == 'lab_review_pass':
-            can_op, err = reservation.can_lab_review(user)
-            if not can_op:
-                fail_count += 1
-                detailed_errors = _get_detailed_errors(reservation, user, 'lab_review')
-                results.append({
-                    'id': res_id,
-                    'reservation_no': reservation.reservation_no,
-                    'success': False,
-                    'error': err,
-                    'code': 'cannot_operate',
-                    'errors': detailed_errors,
-                    'previous_status': reservation.status,
-                    'current_version': reservation.version,
-                })
-                continue
-            missing = reservation.get_missing_evidence()
-            if missing:
-                fail_count += 1
-                labels = {'experiment_plan': '实验预约方案', 'material_application': '耗材申领单', 'safety_confirmation': '安全确认书'}
-                missing_labels = [labels.get(m, m) for m in missing]
-                results.append({
-                    'id': res_id,
-                    'reservation_no': reservation.reservation_no,
-                    'success': False,
-                    'error': f'证据不完整：缺少{"、".join(missing_labels)}',
-                    'code': 'insufficient_evidence',
-                    'errors': [f'缺少证据：{"、".join(missing_labels)}'],
-                    'previous_status': reservation.status,
-                    'current_version': reservation.version,
-                    'missing_evidence': missing,
-                })
-                continue
-
-            with transaction.atomic():
-                previous_status = reservation.status
-                reservation.status = LabReservation.STATUS_LAB_REVIEWED
-                reservation.lab_reviewed_at = timezone.now()
-                reservation.lab_reviewer = user
-                reservation.lab_review_comment = payload.comment
-                reservation.version += 1
-                reservation.save()
-
-                AuditLog.objects.create(
-                    reservation=reservation,
-                    action=AuditLog.ACTION_LAB_REVIEW_PASS,
-                    actor=user,
-                    comment=payload.comment,
-                    previous_status=previous_status,
-                    new_status=LabReservation.STATUS_LAB_REVIEWED,
-                    reason='批量审核通过',
-                )
-
-            success_count += 1
-            results.append({
-                'id': res_id,
-                'reservation_no': reservation.reservation_no,
-                'success': True,
-                'action': 'lab_review_pass',
-                'previous_status': previous_status,
-                'new_status': LabReservation.STATUS_LAB_REVIEWED,
-                'previous_version': expected_ver,
-                'new_version': reservation.version,
-                'comment': payload.comment,
-            })
-
-        elif payload.operation == 'lab_reject':
-            can_op, err = reservation.can_lab_review(user)
-            if not can_op:
-                fail_count += 1
-                detailed_errors = _get_detailed_errors(reservation, user, 'lab_review')
-                results.append({
-                    'id': res_id,
-                    'reservation_no': reservation.reservation_no,
-                    'success': False,
-                    'error': err,
-                    'code': 'cannot_operate',
-                    'errors': detailed_errors,
-                    'previous_status': reservation.status,
-                    'current_version': reservation.version,
-                })
-                continue
-
-            with transaction.atomic():
-                previous_status = reservation.status
-                reservation.status = LabReservation.STATUS_LAB_REJECTED
-                reservation.rejection_reason = payload.comment
-                reservation.rejected_by = user
-                reservation.rejected_at = timezone.now()
-                reservation.version += 1
-                reservation.save()
-
-                AuditLog.objects.create(
-                    reservation=reservation,
-                    action=AuditLog.ACTION_LAB_REJECT,
-                    actor=user,
-                    comment=payload.comment,
-                    previous_status=previous_status,
-                    new_status=LabReservation.STATUS_LAB_REJECTED,
-                    reason=payload.comment,
-                )
-
-            success_count += 1
-            results.append({
-                'id': res_id,
-                'reservation_no': reservation.reservation_no,
-                'success': True,
-                'action': 'lab_reject',
-                'previous_status': previous_status,
-                'new_status': LabReservation.STATUS_LAB_REJECTED,
-                'previous_version': expected_ver,
-                'new_version': reservation.version,
-                'comment': payload.comment,
-            })
-
-        elif payload.operation == 'college_confirm_pass':
-            can_op, err = reservation.can_college_confirm(user)
-            if not can_op:
-                fail_count += 1
-                detailed_errors = _get_detailed_errors(reservation, user, 'college_confirm')
-                results.append({
-                    'id': res_id,
-                    'reservation_no': reservation.reservation_no,
-                    'success': False,
-                    'error': err,
-                    'code': 'cannot_operate',
-                    'errors': detailed_errors,
-                    'previous_status': reservation.status,
-                    'current_version': reservation.version,
-                })
-                continue
-
-            with transaction.atomic():
-                previous_status = reservation.status
-                reservation.status = LabReservation.STATUS_CONFIRMED
-                reservation.confirmed_at = timezone.now()
-                reservation.confirmer = user
-                reservation.confirm_comment = payload.comment
-                reservation.version += 1
-                reservation.save()
-
-                AuditLog.objects.create(
-                    reservation=reservation,
-                    action=AuditLog.ACTION_COLLEGE_CONFIRM,
-                    actor=user,
-                    comment=payload.comment,
-                    previous_status=previous_status,
-                    new_status=LabReservation.STATUS_CONFIRMED,
-                    reason='批量确认通过',
-                )
-
-            success_count += 1
-            results.append({
-                'id': res_id,
-                'reservation_no': reservation.reservation_no,
-                'success': True,
-                'action': 'college_confirm_pass',
-                'previous_status': previous_status,
-                'new_status': LabReservation.STATUS_CONFIRMED,
-                'previous_version': expected_ver,
-                'new_version': reservation.version,
-                'comment': payload.comment,
-            })
-
-        elif payload.operation == 'college_reject':
-            can_op, err = reservation.can_college_confirm(user)
-            if not can_op:
-                fail_count += 1
-                detailed_errors = _get_detailed_errors(reservation, user, 'college_confirm')
-                results.append({
-                    'id': res_id,
-                    'reservation_no': reservation.reservation_no,
-                    'success': False,
-                    'error': err,
-                    'code': 'cannot_operate',
-                    'errors': detailed_errors,
-                    'previous_status': reservation.status,
-                    'current_version': reservation.version,
-                })
-                continue
-
-            with transaction.atomic():
-                previous_status = reservation.status
-                reservation.status = LabReservation.STATUS_COLLEGE_REJECTED
-                reservation.rejection_reason = payload.comment
-                reservation.rejected_by = user
-                reservation.rejected_at = timezone.now()
-                reservation.version += 1
-                reservation.save()
-
-                AuditLog.objects.create(
-                    reservation=reservation,
-                    action=AuditLog.ACTION_COLLEGE_REJECT,
-                    actor=user,
-                    comment=payload.comment,
-                    previous_status=previous_status,
-                    new_status=LabReservation.STATUS_COLLEGE_REJECTED,
-                    reason=payload.comment,
-                )
-
-            success_count += 1
-            results.append({
-                'id': res_id,
-                'reservation_no': reservation.reservation_no,
-                'success': True,
-                'action': 'college_reject',
-                'previous_status': previous_status,
-                'new_status': LabReservation.STATUS_COLLEGE_REJECTED,
-                'previous_version': expected_ver,
-                'new_version': reservation.version,
-                'comment': payload.comment,
-            })
-
-    return {
-        'success_count': success_count,
-        'fail_count': fail_count,
-        'total': len(payload.ids),
-        'results': results,
-    }
 
 
 from django.db import models
