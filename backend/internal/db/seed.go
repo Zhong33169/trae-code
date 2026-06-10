@@ -1,7 +1,9 @@
 package db
 
 import (
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -30,9 +32,10 @@ func SeedData(db *sql.DB) error {
 
 	userIDs := make(map[string]int64)
 	for _, u := range users {
+		passwordHash := hashPassword(u.password)
 		result, err := db.Exec(
 			`INSERT INTO users (username, password_hash, role, name) VALUES (?, ?, ?, ?)`,
-			u.username, u.password, u.role, u.name,
+			u.username, passwordHash, u.role, u.name,
 		)
 		if err != nil {
 			return fmt.Errorf("insert user %s: %w", u.username, err)
@@ -56,16 +59,16 @@ func SeedData(db *sql.DB) error {
 		status       string
 		version      int
 	}{
-		{"CF20260601001", "张三", "110101199001011234", "内科", "王医师", `{"items":[{"name":"感冒灵","spec":"10g*9袋","qty":2,"price":15.5}]}`, 31.00, "draft", 1},
-		{"CF20260601002", "李四", "110101199002022345", "外科", "王医师", `{"items":[{"name":"阿莫西林","spec":"0.5g*24粒","qty":1,"price":28.0}]}`, 28.00, "pending_registration", 1},
+		{"CF20260601001", "张三", "110101199001011234", "内科", "王医师", `{"items":[{"name":"感冒灵","spec":"10g*9袋","qty":2,"price":15.5}]}`, 31.00, "pending_verification", 2},
+		{"CF20260601002", "李四", "110101199002022345", "外科", "王医师", `{"items":[{"name":"阿莫西林","spec":"0.5g*24粒","qty":1,"price":28.0}]}`, 28.00, "pending_verification", 2},
 		{"CF20260601003", "王五", "110101199003033456", "内科", "赵医师", `{"items":[{"name":"布洛芬","spec":"0.3g*20片","qty":1,"price":12.8}]}`, 12.80, "pending_verification", 2},
-		{"CF20260601004", "赵六", "110101199004044567", "儿科", "王医师", `{"items":[{"name":"小儿氨酚黄那敏","spec":"12袋","qty":2,"price":18.0}]}`, 36.00, "pending_verification", 2},
+		{"CF20260601004", "赵六", "110101199004044567", "儿科", "王医师", `{"items":[{"name":"小儿氨酚黄那敏","spec":"12袋","qty":2,"price":18.0}]}`, 36.00, "pending_review", 3},
 		{"CF20260601005", "钱七", "110101199005055678", "内科", "王医师", `{"items":[{"name":"奥美拉唑","spec":"20mg*14粒","qty":1,"price":35.5}]}`, 35.50, "pending_verification", 2},
-		{"CF20260601006", "孙八", "110101199006066789", "外科", "李医师", `{"items":[{"name":"云南白药","spec":"4g*6瓶","qty":1,"price":42.0}]}`, 42.00, "pending_review", 3},
+		{"CF20260601006", "孙八", "110101199006066789", "外科", "李医师", `{"items":[{"name":"云南白药","spec":"4g*6瓶","qty":1,"price":42.0}]}`, 42.00, "archived", 4},
 		{"CF20260601007", "周九", "110101199007077890", "内科", "王医师", `{"items":[{"name":"六味地黄丸","spec":"200丸","qty":2,"price":25.0}]}`, 50.00, "archived", 4},
 		{"CF20260601008", "吴十", "110101199008088901", "皮肤科", "赵医师", `{"items":[{"name":"氯雷他定","spec":"10mg*6片","qty":1,"price":22.0}]}`, 22.00, "draft", 1},
 		{"CF20260601009", "郑十一", "110101199009099012", "内科", "王医师", `{"items":[{"name":"蒙脱石散","spec":"3g*10袋","qty":1,"price":16.5}]}`, 16.50, "pending_verification", 2},
-		{"CF20260601010", "冯十二", "110101199010100123", "外科", "李医师", `{"items":[{"name":"头孢克肟","spec":"0.1g*6粒","qty":2,"price":38.0}]}`, 76.00, "pending_review", 3},
+		{"CF20260601010", "冯十二", "110101199010100123", "外科", "李医师", `{"items":[{"name":"头孢克肟","spec":"0.1g*6粒","qty":2,"price":38.0}]}`, 76.00, "archived", 4},
 	}
 
 	transferIDs := make([]int64, 0, len(transfers))
@@ -99,19 +102,24 @@ func SeedData(db *sql.DB) error {
 		remark        string
 		offsetMinutes int
 	}{
-		{2, "registration", receptionID, "李接待", "reception_assistant", "已核对患者身份证与处方信息，患者签字确认", "接诊台登记", -120},
-		{3, "registration", receptionID, "李接待", "reception_assistant", "已核对患者就诊卡信息，处方信息完整", "急诊登记", -115},
-		{4, "registration", receptionID, "李接待", "reception_assistant", "患者家属代办，已核验代办人身份证", "家属代办", -110},
-		{5, "registration", receptionID, "李接待", "reception_assistant", "已核对处方与缴费凭证", "门诊登记", -105},
-		{6, "registration", receptionID, "李接待", "reception_assistant", "已核验电子处方与患者信息", "内科登记", -100},
-		{8, "registration", receptionID, "李接待", "reception_assistant", "已核验电子处方与患者身份", "线上预约登记", -95},
-		{9, "registration", receptionID, "李接待", "reception_assistant", "已核对外科手术处方与患者信息", "外科登记", -90},
+		{0, "registration", receptionID, "李接待", "reception_assistant", "已核对患者身份证与处方信息，患者签字确认", "批量登记-上午批次", -60},
+		{1, "registration", receptionID, "李接待", "reception_assistant", "已核对患者就诊卡信息，处方信息完整", "批量登记-上午批次", -60},
+		{2, "registration", receptionID, "李接待", "reception_assistant", "患者家属代办，已核验代办人身份证", "家属代办登记", -120},
+		{3, "registration", receptionID, "李接待", "reception_assistant", "已核对处方与缴费凭证", "急诊登记", -115},
+		{4, "registration", receptionID, "李接待", "reception_assistant", "已核验电子处方与患者信息", "内科登记", -110},
+		{5, "registration", receptionID, "李接待", "reception_assistant", "已核对外科手术处方与患者信息", "术前登记", -105},
+		{6, "registration", receptionID, "李接待", "reception_assistant", "已核验电子处方与患者身份", "门诊登记", -100},
+		{8, "registration", receptionID, "李接待", "reception_assistant", "已核验线上预约处方信息", "线上预约登记", -95},
+		{9, "registration", receptionID, "李接待", "reception_assistant", "已核对外科处方与患者信息", "外科登记", -90},
 
-		{5, "verification", physicianID, "王医师", "attending_physician", "已核验处方用药合理性，与诊断一致", "主治医生核验", -80},
-		{6, "verification", physicianID, "王医师", "attending_physician", "处方核验通过，按疗程用药", "内科核验", -75},
+		{3, "verification", physicianID, "王医师", "attending_physician", "已核验处方用药合理性，与诊断一致", "批量核验-午间批次", -30},
+		{5, "verification", physicianID, "王医师", "attending_physician", "处方核验通过，按疗程用药", "主治医生核验", -80},
+		{6, "verification", physicianID, "王医师", "attending_physician", "已核验用药方案，无配伍禁忌", "内科核验", -75},
 		{9, "verification", physicianID, "王医师", "attending_physician", "已核对术后用药方案，无药物相互作用", "外科核验", -70},
 
-		{6, "review", pharmacyID, "张药师", "pharmacy_admin", "已完成药品调配与复核，发药确认", "药房发药归档", -50},
+		{5, "review", pharmacyID, "张药师", "pharmacy_admin", "已完成药品调配与复核，发药确认", "批量复核-下午批次", -10},
+		{6, "review", pharmacyID, "张药师", "pharmacy_admin", "已完成发药并归档", "药房发药归档", -50},
+		{9, "review", pharmacyID, "张药师", "pharmacy_admin", "药品调配完成，患者已取药", "批量复核-下午批次", -10},
 	}
 
 	for _, e := range evidences {
@@ -169,9 +177,9 @@ func SeedData(db *sql.DB) error {
 		status      string
 		errorMsg    string
 	}{
-		{2, "success", ""},
-		{3, "success", ""},
-		{6, "failed", "当前状态不允许此操作：待复核状态不能重复登记"},
+		{0, "success", ""},
+		{1, "success", ""},
+		{6, "failed", "当前状态不允许此操作：已归档状态不能登记"},
 	}
 	for _, item := range batch1Items {
 		tid := transferIDs[item.transferIdx]
@@ -196,8 +204,8 @@ func SeedData(db *sql.DB) error {
 		status      string
 		errorMsg    string
 	}{
-		{4, "success", ""},
-		{7, "failed", "当前状态不允许此操作：已归档状态不能再核验"},
+		{3, "success", ""},
+		{7, "failed", "当前状态不允许此操作：草稿状态不能核验"},
 	}
 	for _, item := range batch2Items {
 		tid := transferIDs[item.transferIdx]
@@ -266,7 +274,7 @@ func SeedData(db *sql.DB) error {
 		{receptionID, "李接待", "reception_assistant", "create_transfer", "transfer", transferIDs[0], "",
 			`{"patient_name":"张三","total_amount":31.00}`, "192.168.1.100", -130},
 
-		{receptionID, "李接待", "reception_assistant", "register_transfer", "transfer", transferIDs[2],
+		{receptionID, "李接待", "reception_assistant", "register", "transfer", transferIDs[2],
 			`{"old_status":"pending_registration","version":1}`,
 			`{"new_status":"pending_verification","version":2}`, "192.168.1.100", -120},
 
@@ -277,7 +285,7 @@ func SeedData(db *sql.DB) error {
 				"total_count":      3,
 				"evidence_content": "批量登记当日门诊处方",
 				"remark":           "上午批次",
-				"transfer_ids":     []int64{transferIDs[2], transferIDs[3], transferIDs[6]},
+				"transfer_ids":     []int64{transferIDs[0], transferIDs[1], transferIDs[6]},
 			}), "192.168.1.100", -61},
 
 		{receptionID, "李接待", "reception_assistant", "batch_complete", "batch", batchIDs[batchNo1],
@@ -288,11 +296,11 @@ func SeedData(db *sql.DB) error {
 				"success_count":  2,
 				"fail_count":     1,
 				"failed_items": []map[string]interface{}{
-					{"transfer_id": transferIDs[6], "transfer_no": "CF20260601007", "error": "当前状态不允许此操作：待复核状态不能重复登记"},
+					{"transfer_id": transferIDs[6], "transfer_no": "CF20260601007", "error": "当前状态不允许此操作：已归档状态不能登记"},
 				},
 			}), "192.168.1.100", -59},
 
-		{physicianID, "王医师", "attending_physician", "verify_transfer", "transfer", transferIDs[5],
+		{physicianID, "王医师", "attending_physician", "verify", "transfer", transferIDs[5],
 			`{"old_status":"pending_verification","version":2}`,
 			`{"new_status":"pending_review","version":3}`, "192.168.1.101", -70},
 
@@ -303,7 +311,7 @@ func SeedData(db *sql.DB) error {
 				"total_count":      2,
 				"evidence_content": "批量核验今日内科处方",
 				"remark":           "午间批次",
-				"transfer_ids":     []int64{transferIDs[3], transferIDs[6]},
+				"transfer_ids":     []int64{transferIDs[3], transferIDs[7]},
 			}), "192.168.1.101", -31},
 
 		{physicianID, "王医师", "attending_physician", "batch_complete", "batch", batchIDs[batchNo2],
@@ -314,11 +322,11 @@ func SeedData(db *sql.DB) error {
 				"success_count":  1,
 				"fail_count":     1,
 				"failed_items": []map[string]interface{}{
-					{"transfer_id": transferIDs[6], "transfer_no": "CF20260601007", "error": "当前状态不允许此操作：已归档状态不能再核验"},
+					{"transfer_id": transferIDs[7], "transfer_no": "CF20260601008", "error": "当前状态不允许此操作：草稿状态不能核验"},
 				},
 			}), "192.168.1.101", -29},
 
-		{pharmacyID, "张药师", "pharmacy_admin", "review_transfer", "transfer", transferIDs[6],
+		{pharmacyID, "张药师", "pharmacy_admin", "review", "transfer", transferIDs[6],
 			`{"old_status":"pending_review","version":3}`,
 			`{"new_status":"archived","version":4}`, "192.168.1.102", -50},
 
@@ -397,4 +405,10 @@ func mustJSON(v interface{}) string {
 		return ""
 	}
 	return string(b)
+}
+
+func hashPassword(password string) string {
+	h := sha256.New()
+	h.Write([]byte(password))
+	return hex.EncodeToString(h.Sum(nil))
 }
