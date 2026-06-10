@@ -255,12 +255,9 @@ fn seed_data(conn: &Connection) -> Result<()> {
     }
 
     // ============================================================
-    // 3. 已归档完整流程（南京路店，v5 archived）
-    //    v1 创建 → v2 提交 → v3 审核通过 → v4？不，v3→v5应该是 v3 reviewed → v5？不对，应该连续。
-    //    让我们用正确的版本: v1(创建), v2(提交), v3(审核通过reviewed), v4(复核归档archived)
-    //    不过样例要求 current_version = 5，所以我们在中间加个补正？
-    //    实际上让它完整流程就好，版本号设为4就够了，但是原例子用的是5。
-    //    好的用：v1(创建), v2(提交), v3(审核驳回→补正), v4(重提→审核通过), v5(复核归档)
+    // 3. 已归档完整流程（南京路店，v7 archived）
+    //    v1 张三创建 → v2 张三提交 → v3 李四审核驳回(洗衣液数量偏大)
+    //    → v4 张三补正(确认数量)correct → v5 张三重提submit → v6 李四审核通过 → v7 王五复核归档
     // ============================================================
     {
         let app_no = "RP2026060100003";
@@ -272,21 +269,24 @@ fn seed_data(conn: &Connection) -> Result<()> {
         let ev_delivery = Some("配送确认单-PS20260530001.pdf");
         let ev_reg = Some("补货申请登记-SH001-0530.png");
         let remarks_create = Some("南京路店月度常规补货。".to_string());
-        let remarks_reject = Some("洗衣液数量偏大，请确认是否误填。".to_string());
-        let remarks_correct = Some("已与门店确认，数量准确。".to_string());
-        let remarks_review = Some("复核确认，审核通过。".to_string());
-        let remarks_final = Some("流程合规，已归档。".to_string());
+        let remarks_reject = Some("洗衣液数量偏大，请与门店确认是否误填，补正后重提。".to_string());
+        let remarks_correct = Some("已致电南京路店店长王某某核实：月末促销备货，洗衣液25瓶确为实际需求。".to_string());
+        let remarks_resubmit = Some("补正完成，重新提交审核。".to_string());
+        let remarks_review = Some("已核实补正记录，材料齐全，审核通过。".to_string());
+        let remarks_final = Some("流程合规，审核通过，已归档。".to_string());
 
+        // 当前状态 archived，版本 7
         conn.execute(
             "INSERT INTO replenishment_applications 
              (application_no, store_id, status, current_version, items, 
               evidence_store_replenishment, evidence_delivery_confirmation, evidence_registration,
               remarks, created_by, updated_by)
-             VALUES (?1, 4, 'archived', 5, ?2, ?3, ?4, ?5, ?6, 1, 3)",
+             VALUES (?1, 4, 'archived', 7, ?2, ?3, ?4, ?5, ?6, 1, 3)",
             params![app_no, items, ev_store, ev_delivery, ev_reg, remarks_final],
         )?;
         let app_id = conn.last_insert_rowid();
 
+        // v1: 张三创建 draft
         conn.execute(
             "INSERT INTO application_versions 
              (application_id, version, status_from, status_to, items, 
@@ -295,6 +295,7 @@ fn seed_data(conn: &Connection) -> Result<()> {
              VALUES (?1, 1, NULL, 'draft', ?2, ?3, ?4, ?5, ?6, 'create', 1)",
             params![app_id, items, ev_store, ev_delivery, ev_reg, remarks_create],
         )?;
+        // v2: 张三提交 pending_review
         conn.execute(
             "INSERT INTO application_versions 
              (application_id, version, status_from, status_to, items, 
@@ -303,6 +304,7 @@ fn seed_data(conn: &Connection) -> Result<()> {
              VALUES (?1, 2, 'draft', 'pending_review', ?2, ?3, ?4, ?5, ?6, 'submit', 1)",
             params![app_id, items, ev_store, ev_delivery, ev_reg, remarks_create],
         )?;
+        // v3: 李四审核驳回 needs_correction
         conn.execute(
             "INSERT INTO application_versions 
              (application_id, version, status_from, status_to, items, 
@@ -311,20 +313,40 @@ fn seed_data(conn: &Connection) -> Result<()> {
              VALUES (?1, 3, 'pending_review', 'needs_correction', ?2, ?3, ?4, ?5, ?6, 'review_reject', 2)",
             params![app_id, items, ev_store, ev_delivery, ev_reg, remarks_reject],
         )?;
+        // v4: 张三补正 correct（状态保持 needs_correction）
         conn.execute(
             "INSERT INTO application_versions 
              (application_id, version, status_from, status_to, items, 
               evidence_store_replenishment, evidence_delivery_confirmation, evidence_registration,
               remarks, action, performed_by)
-             VALUES (?1, 4, 'needs_correction', 'reviewed', ?2, ?3, ?4, ?5, ?6, 'review_approve', 2)",
+             VALUES (?1, 4, 'needs_correction', 'needs_correction', ?2, ?3, ?4, ?5, ?6, 'correct', 1)",
+            params![app_id, items, ev_store, ev_delivery, ev_reg, remarks_correct],
+        )?;
+        // v5: 张三重提 pending_review
+        conn.execute(
+            "INSERT INTO application_versions 
+             (application_id, version, status_from, status_to, items, 
+              evidence_store_replenishment, evidence_delivery_confirmation, evidence_registration,
+              remarks, action, performed_by)
+             VALUES (?1, 5, 'needs_correction', 'pending_review', ?2, ?3, ?4, ?5, ?6, 'submit', 1)",
+            params![app_id, items, ev_store, ev_delivery, ev_reg, remarks_resubmit],
+        )?;
+        // v6: 李四审核通过 reviewed
+        conn.execute(
+            "INSERT INTO application_versions 
+             (application_id, version, status_from, status_to, items, 
+              evidence_store_replenishment, evidence_delivery_confirmation, evidence_registration,
+              remarks, action, performed_by)
+             VALUES (?1, 6, 'pending_review', 'reviewed', ?2, ?3, ?4, ?5, ?6, 'review_approve', 2)",
             params![app_id, items, ev_store, ev_delivery, ev_reg, remarks_review],
         )?;
+        // v7: 王五复核归档 archived
         conn.execute(
             "INSERT INTO application_versions 
              (application_id, version, status_from, status_to, items, 
               evidence_store_replenishment, evidence_delivery_confirmation, evidence_registration,
               remarks, action, performed_by)
-             VALUES (?1, 5, 'reviewed', 'archived', ?2, ?3, ?4, ?5, ?6, 'final_approve', 3)",
+             VALUES (?1, 7, 'reviewed', 'archived', ?2, ?3, ?4, ?5, ?6, 'final_approve', 3)",
             params![app_id, items, ev_store, ev_delivery, ev_reg, remarks_final],
         )?;
     }

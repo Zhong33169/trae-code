@@ -640,6 +640,7 @@ fn do_review_single(
     remarks: Option<&str>,
     user_id: i64,
     role: &UserRole,
+    performer_name: &str,
 ) -> BatchResultItem {
     let app = match get_application_by_id(app_id) {
         Some(a) => a,
@@ -650,9 +651,29 @@ fn do_review_single(
                 success: false,
                 status: "not_found".to_string(),
                 message: "申请不存在".to_string(),
+                attempted_version: current_version,
+                new_version: None,
+                performer_role: Some(role.as_str().to_string()),
+                performer_name: Some(performer_name.to_string()),
+                status_from: None,
+                status_to: None,
+                remarks: remarks.map(|s| s.to_string()),
+                evidence_store_replenishment: None,
+                evidence_delivery_confirmation: None,
+                evidence_registration: None,
+                items_count: None,
             };
         }
     };
+
+    let role_str = role.as_str().to_string();
+    let performer = Some(performer_name.to_string());
+    let status_from_str = Some(app.status.as_str().to_string());
+    let remarks_owned = remarks.map(|s| s.to_string());
+    let ev_store = app.evidence_store_replenishment.clone();
+    let ev_delivery = app.evidence_delivery_confirmation.clone();
+    let ev_reg = app.evidence_registration.clone();
+    let items_cnt = Some(app.items.len());
 
     if app.current_version != current_version {
         return BatchResultItem {
@@ -661,6 +682,17 @@ fn do_review_single(
             success: false,
             status: app.status.as_str().to_string(),
             message: format!("版本冲突：当前版本 v{}，你提供的版本 v{}", app.current_version, current_version),
+            attempted_version: current_version,
+            new_version: None,
+            performer_role: Some(role_str),
+            performer_name: performer,
+            status_from: status_from_str.clone(),
+            status_to: status_from_str.clone(),
+            remarks: remarks_owned,
+            evidence_store_replenishment: ev_store,
+            evidence_delivery_confirmation: ev_delivery,
+            evidence_registration: ev_reg,
+            items_count: items_cnt,
         };
     }
 
@@ -673,6 +705,17 @@ fn do_review_single(
                     success: false,
                     status: app.status.as_str().to_string(),
                     message: format!("状态「{}」不允许审核", app.status.display_name()),
+                    attempted_version: current_version,
+                    new_version: None,
+                    performer_role: Some(role_str),
+                    performer_name: performer,
+                    status_from: status_from_str.clone(),
+                    status_to: status_from_str.clone(),
+                    remarks: remarks_owned,
+                    evidence_store_replenishment: ev_store,
+                    evidence_delivery_confirmation: ev_delivery,
+                    evidence_registration: ev_reg,
+                    items_count: items_cnt,
                 };
             }
         }
@@ -684,6 +727,17 @@ fn do_review_single(
                     success: false,
                     status: app.status.as_str().to_string(),
                     message: format!("状态「{}」不允许复核", app.status.display_name()),
+                    attempted_version: current_version,
+                    new_version: None,
+                    performer_role: Some(role_str),
+                    performer_name: performer,
+                    status_from: status_from_str.clone(),
+                    status_to: status_from_str.clone(),
+                    remarks: remarks_owned,
+                    evidence_store_replenishment: ev_store,
+                    evidence_delivery_confirmation: ev_delivery,
+                    evidence_registration: ev_reg,
+                    items_count: items_cnt,
                 };
             }
         }
@@ -694,6 +748,17 @@ fn do_review_single(
                 success: false,
                 status: app.status.as_str().to_string(),
                 message: "角色无权审核".to_string(),
+                attempted_version: current_version,
+                new_version: None,
+                performer_role: Some(role_str),
+                performer_name: performer,
+                status_from: status_from_str.clone(),
+                status_to: status_from_str.clone(),
+                remarks: remarks_owned,
+                evidence_store_replenishment: ev_store,
+                evidence_delivery_confirmation: ev_delivery,
+                evidence_registration: ev_reg,
+                items_count: items_cnt,
             };
         }
     }
@@ -736,6 +801,17 @@ fn do_review_single(
             success: false,
             status: app.status.as_str().to_string(),
             message: "更新失败，请重试".to_string(),
+            attempted_version: current_version,
+            new_version: None,
+            performer_role: Some(role_str),
+            performer_name: performer,
+            status_from: status_from_str.clone(),
+            status_to: status_from_str.clone(),
+            remarks: remarks_owned,
+            evidence_store_replenishment: ev_store,
+            evidence_delivery_confirmation: ev_delivery,
+            evidence_registration: ev_reg,
+            items_count: items_cnt,
         };
     }
 
@@ -776,6 +852,17 @@ fn do_review_single(
         success: true,
         status: new_status.as_str().to_string(),
         message: msg.to_string(),
+        attempted_version: current_version,
+        new_version: Some(new_version),
+        performer_role: Some(role_str),
+        performer_name: performer,
+        status_from: status_from_str,
+        status_to: Some(new_status.as_str().to_string()),
+        remarks: remarks_owned.or(app.remarks),
+        evidence_store_replenishment: ev_store,
+        evidence_delivery_confirmation: ev_delivery,
+        evidence_registration: ev_reg,
+        items_count: items_cnt,
     }
 }
 
@@ -809,6 +896,7 @@ pub fn batch_review_applications(
 
     let remarks = req.remarks.as_deref();
     let mut results = Vec::new();
+    let performer_display = auth.user.display_name.as_str();
 
     for item in &req.applications {
         let result = do_review_single(
@@ -818,6 +906,7 @@ pub fn batch_review_applications(
             remarks,
             auth.user.id,
             &auth.user.role,
+            performer_display,
         );
         results.push(result);
     }

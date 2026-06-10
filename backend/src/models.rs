@@ -269,6 +269,17 @@ pub struct BatchResultItem {
     pub success: bool,
     pub status: String,
     pub message: String,
+    pub attempted_version: i32,
+    pub new_version: Option<i32>,
+    pub performer_role: Option<String>,
+    pub performer_name: Option<String>,
+    pub status_from: Option<String>,
+    pub status_to: Option<String>,
+    pub remarks: Option<String>,
+    pub evidence_store_replenishment: Option<String>,
+    pub evidence_delivery_confirmation: Option<String>,
+    pub evidence_registration: Option<String>,
+    pub items_count: Option<usize>,
 }
 
 #[derive(Debug, Serialize)]

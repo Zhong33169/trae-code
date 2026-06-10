@@ -75,6 +75,17 @@ export interface BatchResultItem {
   success: boolean;
   status: string;
   message: string;
+  attempted_version: number;
+  new_version: number | null;
+  performer_role: string | null;
+  performer_name: string | null;
+  status_from: string | null;
+  status_to: string | null;
+  remarks: string | null;
+  evidence_store_replenishment: string | null;
+  evidence_delivery_confirmation: string | null;
+  evidence_registration: string | null;
+  items_count: number | null;
 }
 
 export interface BatchReviewResponse {
