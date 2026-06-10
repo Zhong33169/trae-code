@@ -35,6 +35,88 @@ db.get = promisify(db.get.bind(db));
 db.all = promisify(db.all.bind(db));
 db.exec = promisify(db.exec.bind(db));
 
+async function columnExists(tableName, columnName) {
+  const rows = await db.all(`PRAGMA table_info(${tableName})`);
+  return rows.some(row => row.name === columnName);
+}
+
+async function tableExists(tableName) {
+  const row = await db.get(`SELECT name FROM sqlite_master WHERE type='table' AND name=?`, tableName);
+  return !!row;
+}
+
+async function upgradeDatabase() {
+  console.log('检查数据库结构...');
+
+  const hasAbnormalBy = await columnExists('morning_check_records', 'abnormal_by');
+  if (!hasAbnormalBy) {
+    await db.run(`ALTER TABLE morning_check_records ADD COLUMN abnormal_by INTEGER`);
+    console.log('  ✓ 新增 morning_check_records.abnormal_by');
+  }
+
+  const hasBatchId = await columnExists('operation_logs', 'batch_id');
+  if (!hasBatchId) {
+    await db.run(`ALTER TABLE operation_logs ADD COLUMN batch_id INTEGER`);
+    console.log('  ✓ 新增 operation_logs.batch_id');
+  }
+
+  const hasBatchBatches = await tableExists('batch_batches');
+  if (!hasBatchBatches) {
+    await db.run(`
+      CREATE TABLE batch_batches (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        batch_no TEXT UNIQUE NOT NULL,
+        batch_type TEXT NOT NULL,
+        total_count INTEGER NOT NULL DEFAULT 0,
+        success_count INTEGER NOT NULL DEFAULT 0,
+        fail_count INTEGER NOT NULL DEFAULT 0,
+        operator_id INTEGER NOT NULL,
+        operator_name TEXT NOT NULL,
+        operator_role TEXT NOT NULL,
+        remark TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    console.log('  ✓ 新增 batch_batches 表');
+  }
+
+  const hasBatchDetails = await tableExists('batch_details');
+  if (!hasBatchDetails) {
+    await db.run(`
+      CREATE TABLE batch_details (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        batch_id INTEGER NOT NULL,
+        record_id INTEGER NOT NULL,
+        child_id INTEGER,
+        child_name TEXT,
+        result TEXT NOT NULL,
+        error_message TEXT,
+        from_status TEXT,
+        to_status TEXT,
+        abnormal_reason TEXT,
+        responsible_role TEXT,
+        remark TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    console.log('  ✓ 新增 batch_details 表');
+  }
+
+  const hasBatchNoIdx = await db.get(`SELECT name FROM sqlite_master WHERE type='index' AND name='idx_batch_no'`);
+  if (!hasBatchNoIdx) {
+    await db.run(`CREATE INDEX IF NOT EXISTS idx_batch_no ON batch_batches(batch_no)`);
+    console.log('  ✓ 新增 idx_batch_no 索引');
+  }
+
+  const hasLogsBatchIdx = await db.get(`SELECT name FROM sqlite_master WHERE type='index' AND name='idx_logs_batch'`);
+  if (!hasLogsBatchIdx) {
+    await db.run(`CREATE INDEX IF NOT EXISTS idx_logs_batch ON operation_logs(batch_id)`);
+    console.log('  ✓ 新增 idx_logs_batch 索引');
+  }
+
+  console.log('数据库结构检查完成。');
+}
+
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -720,23 +802,37 @@ app.put('/api/records/batch/audit-pass', authenticate, requireRole('auditor'), a
     const now = nowIso();
     let successCount = 0;
     let failCount = 0;
-    const successRecords = [];
-    const failedItems = [];
+    const details = [];
 
     for (const record of records) {
+      const detail = {
+        id: record.id,
+        record_id: record.id,
+        child_id: record.child_id,
+        child_name: record.child_name,
+        result: 'fail',
+        from_status: record.status,
+        from_status_name: STATUS_NAMES[record.status] || record.status,
+        to_status: null,
+        to_status_name: null,
+        error: null,
+        abnormal_reason: null,
+        responsible_role: 'auditor',
+        responsible_role_name: ROLE_NAMES['auditor'],
+        remark: audit_note || '',
+      };
+
       try {
         if (!canPerformAction(req.user.role, record.status, 'audit_pass')) {
-          const errorMsg = `当前状态为「${STATUS_NAMES[record.status]}」，不能审核通过`;
-          failedItems.push({
-            id: record.id,
-            child_id: record.child_id,
-            child_name: record.child_name,
-            error: errorMsg,
-          });
+          detail.error = `当前状态为「${STATUS_NAMES[record.status]}」，不能审核通过`;
+          detail.remark = '状态校验失败：' + detail.error;
           failCount++;
-          await addBatchDetail(batchId, record.id, record.child_id, record.child_name, 'fail', errorMsg, record.status, null, null, 'auditor', audit_note || '');
+          details.push(detail);
+          await addBatchDetail(batchId, record.id, record.child_id, record.child_name, 'fail', detail.error, record.status, null, null, 'auditor', audit_note || '');
           continue;
         }
+
+        await db.exec('BEGIN');
 
         await db.run(
           `UPDATE morning_check_records
@@ -746,25 +842,27 @@ app.put('/api/records/batch/audit-pass', authenticate, requireRole('auditor'), a
         );
 
         await addOperationLog(record.id, req.user.id, req.user.name, req.user.role, '批量审核通过', record.status, 'pending_review', audit_note || '', batchId);
+
         await addBatchDetail(batchId, record.id, record.child_id, record.child_name, 'success', null, record.status, 'pending_review', null, 'auditor', audit_note || '');
 
+        await db.exec('COMMIT');
+
+        detail.result = 'success';
+        detail.to_status = 'pending_review';
+        detail.to_status_name = STATUS_NAMES['pending_review'];
+        detail.error = null;
         successCount++;
-        successRecords.push({
-          id: record.id,
-          child_id: record.child_id,
-          child_name: record.child_name,
-          status: 'pending_review',
-          status_name: STATUS_NAMES['pending_review'],
-        });
+        details.push(detail);
       } catch (err) {
+        try { await db.exec('ROLLBACK'); } catch (e) { /* ignore */ }
+        detail.result = 'fail';
+        detail.error = err.message;
+        detail.remark = '处理异常：' + err.message;
         failCount++;
-        failedItems.push({
-          id: record.id,
-          child_id: record.child_id,
-          child_name: record.child_name,
-          error: err.message,
-        });
-        await addBatchDetail(batchId, record.id, record.child_id, record.child_name, 'fail', err.message, record.status, null, null, 'auditor', audit_note || '');
+        details.push(detail);
+        try {
+          await addBatchDetail(batchId, record.id, record.child_id, record.child_name, 'fail', err.message, record.status, null, null, 'auditor', audit_note || '');
+        } catch (e) { /* ignore */ }
       }
     }
 
@@ -773,11 +871,17 @@ app.put('/api/records/batch/audit-pass', authenticate, requireRole('auditor'), a
     res.json({
       batch_no: batchNo,
       batch_id: batchId,
+      batch_type: 'audit',
+      batch_type_name: '批量审核',
+      operator_name: req.user.name,
+      operator_role: req.user.role,
       message: `批量审核完成：成功 ${successCount} 条，失败 ${failCount} 条`,
+      total_count: records.length,
       success_count: successCount,
       fail_count: failCount,
-      success_records: successRecords,
-      failed_items: failedItems,
+      details,
+      success_records: details.filter(d => d.result === 'success'),
+      failed_items: details.filter(d => d.result === 'fail'),
     });
   } catch (err) {
     res.status(500).json({ error: '批量审核失败：' + err.message });
@@ -1077,9 +1181,21 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', message: '晨检记录系统后端运行正常' });
 });
 
-app.listen(PORT, () => {
-  console.log(`晨检记录系统后端运行在 http://localhost:${PORT}`);
-  if (!dbExists) {
-    console.log('提示：数据库文件不存在，请先运行 npm run init-db 初始化数据库');
+async function startServer() {
+  try {
+    if (dbExists) {
+      await upgradeDatabase();
+    }
+    app.listen(PORT, () => {
+      console.log(`晨检记录系统后端运行在 http://localhost:${PORT}`);
+      if (!dbExists) {
+        console.log('提示：数据库文件不存在，请先运行 npm run init-db 初始化数据库');
+      }
+    });
+  } catch (err) {
+    console.error('启动失败:', err.message);
+    process.exit(1);
   }
-});
+}
+
+startServer();

@@ -366,7 +366,8 @@ export default function Records({ user }) {
               </div>
             </>
           )}
-          </>
+            </>
+          )}
 
           {activeTab === 'batch' && (
             <div className="batch-history-section">
