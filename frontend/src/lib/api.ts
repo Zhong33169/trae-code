@@ -19,6 +19,10 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
     headers['Authorization'] = `Bearer ${token}`;
   }
 
+  if (options.body instanceof FormData) {
+    delete headers['Content-Type'];
+  }
+
   const response = await fetch(`${API_BASE}${path}`, {
     ...options,
     headers,
@@ -96,7 +100,6 @@ export const api = {
     request<any>(`/attachments/enrollment/${enrollmentId}`, {
       method: 'POST',
       body: formData as any,
-      headers: {},
     }),
 
   approveAttachment: (id: number) =>

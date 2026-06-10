@@ -94,7 +94,7 @@ export default function EnrollmentDetail({ id, onBack }: EnrollmentDetailProps) 
     const formData = new FormData();
     formData.append('file', file);
     formData.append('name', file.name);
-    formData.append('type', attachType || file.type);
+    formData.append('type', attachType || 'other');
 
     setUploading(true);
     try {
@@ -292,7 +292,7 @@ export default function EnrollmentDetail({ id, onBack }: EnrollmentDetailProps) 
 
               <div className="material-list">
                 {materialStatus.materials.map((mat) => {
-                  const attachment = enrollment.attachments?.find(a => a.type === mat.type);
+                  const attachment = enrollment.attachments?.find(a => a.type === mat.type && a.is_active);
                   const isMissing = mat.required && !mat.has_attachment;
                   const isRejected = mat.is_rejected;
                   const isPending = mat.has_attachment && mat.status === 'pending';

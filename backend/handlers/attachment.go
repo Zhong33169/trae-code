@@ -58,6 +58,12 @@ func UploadAttachment(c *gin.Context) {
 	var user models.User
 	database.DB.First(&user, userID)
 
+	if attachType != "" && attachType != "other" {
+		database.DB.Model(&models.Attachment{}).
+			Where("enrollment_id = ? AND type = ? AND is_active = ?", uint(id), attachType, true).
+			Update("is_active", false)
+	}
+
 	attachment := models.Attachment{
 		EnrollmentID:   uint(id),
 		Name:           attachName,
@@ -66,12 +72,13 @@ func UploadAttachment(c *gin.Context) {
 		Status:         models.AttachPending,
 		UploadedBy:     user.ID,
 		UploadedByName: user.Name,
+		IsActive:       true,
 	}
 
 	database.DB.Create(&attachment)
 
 	addAuditLog(uint(id), userID.(uint), userName.(string), userRole.(string),
-		"上传附件: "+attachName, "", "", "")
+		"上传附件: "+attachName+" ("+attachType+")", "", "", "")
 
 	c.JSON(http.StatusOK, attachment)
 }

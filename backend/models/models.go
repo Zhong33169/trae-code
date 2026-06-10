@@ -93,17 +93,18 @@ type Enrollment struct {
 }
 
 type Attachment struct {
-	ID           uint             `gorm:"primaryKey" json:"id"`
-	EnrollmentID uint             `json:"enrollment_id"`
-	Name         string           `json:"name"`
-	Type         string           `json:"type"`
-	FileKey      string           `json:"file_key"`
-	Status       AttachmentStatus `json:"status"`
-	RejectReason string           `json:"reject_reason"`
-	UploadedBy   uint             `json:"uploaded_by"`
-	UploadedByName string         `json:"uploaded_by_name"`
-	CreatedAt    time.Time        `json:"created_at"`
-	UpdatedAt    time.Time        `json:"updated_at"`
+	ID             uint             `gorm:"primaryKey" json:"id"`
+	EnrollmentID   uint             `json:"enrollment_id"`
+	Name           string           `json:"name"`
+	Type           string           `json:"type"`
+	FileKey        string           `json:"file_key"`
+	Status         AttachmentStatus `json:"status"`
+	RejectReason   string           `json:"reject_reason"`
+	UploadedBy     uint             `json:"uploaded_by"`
+	UploadedByName string           `json:"uploaded_by_name"`
+	IsActive       bool             `gorm:"default:true" json:"is_active"`
+	CreatedAt      time.Time        `json:"created_at"`
+	UpdatedAt      time.Time        `json:"updated_at"`
 }
 
 type AuditLog struct {

@@ -43,6 +43,7 @@ export interface Attachment {
   reject_reason: string;
   uploaded_by: number;
   uploaded_by_name: string;
+  is_active: boolean;
   created_at: string;
   updated_at: string;
 }

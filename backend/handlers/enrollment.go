@@ -139,6 +139,10 @@ func SubmitEnrollment(c *gin.Context) {
 		} else if materialStatus.RejectedCount > 0 {
 			errMsg = fmt.Sprintf("还有 %d 项材料被驳回，请修改后再提交", materialStatus.RejectedCount)
 		}
+
+		addAuditLog(uint(id), userID.(uint), userName.(string), userRole.(string),
+			"提交核验失败", errMsg, string(enrollment.Status), string(enrollment.Status))
+
 		c.JSON(http.StatusBadRequest, gin.H{"error": errMsg, "material_status": materialStatus})
 		return
 	}
@@ -355,7 +359,7 @@ func CheckMaterialStatus(c *gin.Context) {
 
 func checkMaterialStatus(enrollmentID uint) models.EnrollmentMaterialStatus {
 	var attachments []models.Attachment
-	database.DB.Where("enrollment_id = ?", enrollmentID).Find(&attachments)
+	database.DB.Where("enrollment_id = ? AND is_active = ?", enrollmentID, true).Find(&attachments)
 
 	attachMap := make(map[string]models.Attachment)
 	for _, att := range attachments {
