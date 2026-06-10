@@ -36,8 +36,10 @@ def queue():
         return jsonify({'error': '未登录'}), 401
 
     status_list = get_role_queue_status(user.role)
-    orders = TeamOrder.query.filter(TeamOrder.status.in_(status_list)) \
-        .order_by(TeamOrder.created_at.desc()).all()
+    orders = TeamOrder.query.filter(
+        TeamOrder.status.in_(status_list),
+        TeamOrder.current_handler_role == user.role
+    ).order_by(TeamOrder.created_at.desc()).all()
 
     stats = {
         'total': len(orders),

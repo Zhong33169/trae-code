@@ -18,6 +18,20 @@ def list_to_evidence(evidence_list):
     return json.dumps(evidence_list, ensure_ascii=False)
 
 
+def _format_snapshot(obj):
+    if hasattr(obj, 'evidence'):
+        evidence_names = []
+        for e in evidence_to_list(obj.evidence or ''):
+            evidence_names.append(Config.EVIDENCE_NAMES.get(e, e))
+        evidence_str = '、'.join(evidence_names) if evidence_names else '(无)'
+        status_name = Config.ORDER_STATUS_NAMES.get(obj.status, obj.status)
+        handler_name = Config.ROLE_NAMES.get(obj.current_handler_role, obj.current_handler_role)
+        return f'[状态={status_name} 版本=v{obj.version} 证据={evidence_str} 处理岗位={handler_name}]'
+    else:
+        status_name = Config.APPEAL_STATUS_NAMES.get(obj.status, obj.status)
+        return f'[申诉状态={status_name} 版本=v{obj.version}]'
+
+
 def get_next_handler_role(status):
     mapping = {
         'pending_verification': 'ticket_specialist',
@@ -56,10 +70,11 @@ class ValidationError(Exception):
 
 def validate_version(order, submitted_version):
     if submitted_version is not None and submitted_version != order.version:
+        snapshot = _format_snapshot(order)
         raise ValidationError(
             f'版本冲突，数据已被其他人修改，请刷新后重试（当前版本 v{order.version}，提交版本 v{submitted_version}）',
             error_code=409,
-            audit_note=f'版本校验失败：当前版本 v{order.version}，提交版本 v{submitted_version}，操作被拒绝，订单状态和证据保持不变'
+            audit_note=f'版本校验失败：当前版本 v{order.version}，提交版本 v{submitted_version}，操作被拒绝。失败前快照：{snapshot}'
         )
 
 
@@ -67,10 +82,11 @@ def validate_handler_role(order, user):
     if order.current_handler_role and user.role != order.current_handler_role:
         user_role_name = Config.ROLE_NAMES.get(user.role, user.role)
         handler_role_name = Config.ROLE_NAMES.get(order.current_handler_role, order.current_handler_role)
+        snapshot = _format_snapshot(order)
         raise ValidationError(
             f'当前处理岗位为「{handler_role_name}」，您的角色「{user_role_name}」无权操作此预约单',
             error_code=403,
-            audit_note=f'处理岗位校验失败：{user_role_name}({user.name})尝试操作，但当前处理岗位为{handler_role_name}，权限不足，订单状态和证据保持不变'
+            audit_note=f'处理岗位校验失败：{user_role_name}({user.name})尝试操作，但当前处理岗位为{handler_role_name}，权限不足。失败前快照：{snapshot}'
         )
 
 
@@ -85,10 +101,11 @@ def validate_role_transition(order, target_status, user):
         role_name = Config.ROLE_NAMES.get(role, role)
         from_name = Config.ORDER_STATUS_NAMES.get(order.status, order.status)
         to_name = Config.ORDER_STATUS_NAMES.get(target_status, target_status)
+        snapshot = _format_snapshot(order)
         raise ValidationError(
             f'{role_name}无权从「{from_name}」推进到「{to_name}」',
             error_code=403,
-            audit_note=f'角色校验失败：{role_name}({user.name})尝试从「{from_name}」流转到「{to_name}」，权限不足，订单状态和证据保持不变'
+            audit_note=f'角色校验失败：{role_name}({user.name})尝试从「{from_name}」流转到「{to_name}」，权限不足。失败前快照：{snapshot}'
         )
 
 
@@ -102,10 +119,11 @@ def validate_evidence(order, target_status):
 
     if missing:
         missing_names = [Config.EVIDENCE_NAMES.get(e, e) for e in missing]
+        snapshot = _format_snapshot(order)
         raise ValidationError(
             f'缺少必填证据：{", ".join(missing_names)}',
             error_code=400,
-            audit_note=f'证据校验失败：目标状态「{Config.ORDER_STATUS_NAMES.get(target_status, target_status)}」缺少证据 {", ".join(missing_names)}，订单状态和证据保持不变'
+            audit_note=f'证据校验失败：目标状态「{Config.ORDER_STATUS_NAMES.get(target_status, target_status)}」缺少证据 {", ".join(missing_names)}。失败前快照：{snapshot}'
         )
 
 
@@ -113,17 +131,19 @@ def validate_appeal_submission(order, user):
     validate_handler_role(order, user)
 
     if order.status == 'appeal_pending':
+        snapshot = _format_snapshot(order)
         raise ValidationError(
             '该预约单已有申诉正在处理中',
             error_code=400,
-            audit_note=f'申诉提交校验失败：订单当前已处于申诉中状态，重复提交被拒绝'
+            audit_note=f'申诉提交校验失败：订单当前已处于申诉中状态，重复提交被拒绝。失败前快照：{snapshot}'
         )
 
     if order.status == 'archived':
+        snapshot = _format_snapshot(order)
         raise ValidationError(
             '已归档的预约单不能申诉',
             error_code=400,
-            audit_note=f'申诉提交校验失败：订单已归档，不允许申诉，订单状态和证据保持不变'
+            audit_note=f'申诉提交校验失败：订单已归档，不允许申诉。失败前快照：{snapshot}'
         )
 
     allowed_submitter = Config.APPEAL_ALLOWED_SUBMITTERS.get(order.status)
@@ -131,48 +151,78 @@ def validate_appeal_submission(order, user):
         role_name = Config.ROLE_NAMES.get(user.role, user.role)
         allowed_name = Config.ROLE_NAMES.get(allowed_submitter, allowed_submitter)
         status_name = Config.ORDER_STATUS_NAMES.get(order.status, order.status)
+        snapshot = _format_snapshot(order)
         raise ValidationError(
             f'{role_name}无权对「{status_name}」状态的预约单提交申诉，应由{allowed_name}提交',
             error_code=403,
-            audit_note=f'申诉角色校验失败：{role_name}({user.name})尝试对「{status_name}」订单提交申诉，应由{allowed_name}操作，订单状态和证据保持不变'
+            audit_note=f'申诉角色校验失败：{role_name}({user.name})尝试对「{status_name}」订单提交申诉，应由{allowed_name}操作。失败前快照：{snapshot}'
         )
 
+    if order.status in Config.REQUIRED_EVIDENCE:
+        required = Config.REQUIRED_EVIDENCE[order.status]
+        current_evidence = evidence_to_list(order.evidence)
+        missing = [e for e in required if e not in current_evidence]
+        if missing:
+            missing_names = [Config.EVIDENCE_NAMES.get(e, e) for e in missing]
+            snapshot = _format_snapshot(order)
+            raise ValidationError(
+                f'当前状态「{Config.ORDER_STATUS_NAMES.get(order.status, order.status)}」缺少必填证据：{"、".join(missing_names)}，请先补齐证据再提交申诉',
+                error_code=400,
+                audit_note=f'申诉提交证据校验失败：当前状态缺少证据 {"、".join(missing_names)}。失败前快照：{snapshot}'
+            )
 
-def validate_appeal_review(appeal, user, allowed_statuses, action_name):
+
+def validate_appeal_review(appeal, user, allowed_statuses, action_name, order=None):
     if user.role not in Config.APPEAL_ALLOWED_REVIEWERS:
         role_name = Config.ROLE_NAMES.get(user.role, user.role)
+        snapshot = _format_snapshot(order) if order else ''
+        audit = f'申诉复核角色校验失败：{role_name}({user.name})尝试{action_name}，权限不足。'
+        if snapshot:
+            audit += f'失败前快照：{snapshot}'
         raise ValidationError(
             f'{role_name}无权{action_name}',
             error_code=403,
-            audit_note=f'申诉复核角色校验失败：{role_name}({user.name})尝试{action_name}，权限不足，订单状态和证据保持不变'
+            audit_note=audit
         )
 
     if appeal.status not in allowed_statuses:
         status_name = Config.APPEAL_STATUS_NAMES.get(appeal.status, appeal.status)
         allowed_names = '、'.join(Config.APPEAL_STATUS_NAMES.get(s, s) for s in allowed_statuses)
+        snapshot = _format_snapshot(order) if order else ''
+        audit = f'申诉状态校验失败：当前「{status_name}」不允许{action_name}，允许的状态：{allowed_names}。'
+        if snapshot:
+            audit += f'失败前快照：{snapshot}'
         raise ValidationError(
             f'当前申诉状态「{status_name}」不能{action_name}，允许的状态：{allowed_names}',
             error_code=400,
-            audit_note=f'申诉状态校验失败：当前「{status_name}」不允许{action_name}，订单状态和证据保持不变'
+            audit_note=audit
         )
 
 
-def validate_appeal_resubmit(appeal, user):
+def validate_appeal_resubmit(appeal, user, order=None):
     if appeal.status not in Config.APPEAL_RESUBMIT_ALLOWED_STATUSES:
         status_name = Config.APPEAL_STATUS_NAMES.get(appeal.status, appeal.status)
+        snapshot = _format_snapshot(order) if order else ''
+        audit = f'申诉再次提交校验失败：当前状态「{status_name}」不允许再次提交。'
+        if snapshot:
+            audit += f'失败前快照：{snapshot}'
         raise ValidationError(
             f'当前申诉状态「{status_name}」不能再次提交',
             error_code=400,
-            audit_note=f'申诉再次提交校验失败：当前状态「{status_name}」不允许再次提交，订单状态和证据保持不变'
+            audit_note=audit
         )
 
     if appeal.submitter_role != user.role:
         role_name = Config.ROLE_NAMES.get(user.role, user.role)
         submitter_name = Config.ROLE_NAMES.get(appeal.submitter_role, appeal.submitter_role)
+        snapshot = _format_snapshot(order) if order else ''
+        audit = f'申诉再次提交角色校验失败：{role_name}({user.name})尝试再次提交，原提交角色为{submitter_name}。'
+        if snapshot:
+            audit += f'失败前快照：{snapshot}'
         raise ValidationError(
             f'{role_name}无权再次提交该申诉，应由原提交人角色（{submitter_name}）操作',
             error_code=403,
-            audit_note=f'申诉再次提交角色校验失败：{role_name}({user.name})尝试再次提交，原提交角色为{submitter_name}，订单状态和证据保持不变'
+            audit_note=audit
         )
 
 

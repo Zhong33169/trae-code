@@ -580,6 +580,14 @@ export default function OrderDetail() {
                   </div>
                 )}
 
+                {isCurrentHandler() && missingEvidence.length > 0 && (
+                  <div className="alert alert-error" style={{ marginBottom: '12px' }}>
+                    ⚠️ 当前状态缺少必填证据：
+                    <strong>{missingEvidence.map(e => evidenceNameMap[e] || e).join('、')}</strong>
+                    ，请先补齐证据再推进流程或提交申诉
+                  </div>
+                )}
+
                 {availableTransitions.length > 0 && (
                   <div className="action-buttons">
                     {availableTransitions.map((target) => {
@@ -782,6 +790,14 @@ export default function OrderDetail() {
           </>
         }
       >
+        {missingEvidence.length > 0 && (
+          <div className="alert alert-error" style={{ marginBottom: '16px' }}>
+            <strong>⚠️ 证据缺失警告：</strong>
+            当前「{statusNameMap[order.status]}」状态缺少必填证据：
+            {missingEvidence.map(e => evidenceNameMap[e] || e).join('、')}。
+            建议先补齐证据再提交申诉。
+          </div>
+        )}
         <div className="form-item">
           <label className="form-label">申诉理由</label>
           <textarea
