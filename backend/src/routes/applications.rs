@@ -280,6 +280,17 @@ pub fn update_application(
         .map(|items| serde_json::to_string(items).unwrap())
         .unwrap_or_else(|| serde_json::to_string(&app.items).unwrap());
 
+    let new_ev_store = req.evidence_store_replenishment
+        .as_deref()
+        .or(app.evidence_store_replenishment.as_deref());
+    let new_ev_delivery = req.evidence_delivery_confirmation
+        .as_deref()
+        .or(app.evidence_delivery_confirmation.as_deref());
+    let new_ev_reg = req.evidence_registration
+        .as_deref()
+        .or(app.evidence_registration.as_deref());
+    let new_remarks = req.remarks.as_deref().or(app.remarks.as_deref());
+
     let conn = DB_CONN.lock().unwrap();
 
     conn.execute(
@@ -320,10 +331,10 @@ pub fn update_application(
             new_version,
             app.status.as_str(),
             items_json,
-            req.evidence_store_replenishment.as_deref().unwrap_or(""),
-            req.evidence_delivery_confirmation.as_deref().unwrap_or(""),
-            req.evidence_registration.as_deref().unwrap_or(""),
-            req.remarks,
+            new_ev_store,
+            new_ev_delivery,
+            new_ev_reg,
+            new_remarks,
             auth.user.id
         ],
     ).unwrap();

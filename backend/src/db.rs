@@ -117,98 +117,29 @@ fn seed_data(conn: &Connection) -> Result<()> {
         )?;
     }
 
-    let sample_apps = vec![
-        (
-            "RP2026060100001", 1, "draft", 1,
-            serde_json::json!([
-                {"sku": "SKU001", "name": "矿泉水550ml", "quantity": 100, "unit": "瓶"},
-                {"sku": "SKU002", "name": "方便面红烧牛肉", "quantity": 50, "unit": "袋"}
-            ]).to_string(),
-            None, None, None,
-            Some("草稿状态，尚未提交".to_string()),
-            1,
-        ),
-        (
-            "RP2026060100002", 2, "pending_review", 2,
-            serde_json::json!([
-                {"sku": "SKU003", "name": "牛奶250ml", "quantity": 80, "unit": "盒"},
-                {"sku": "SKU004", "name": "面包全麦", "quantity": 30, "unit": "个"}
-            ]).to_string(),
-            Some("门店补货单-BJ002-0601.jpg"),
-            Some("配送确认单-PS20260601001.pdf"),
-            Some("补货申请登记-BJ002-0601.png"),
-            Some("中关村店日常补货".to_string()),
-            1,
-        ),
-        (
-            "RP2026060100003", 1, "reviewed", 3,
-            serde_json::json!([
-                {"sku": "SKU005", "name": "薯片原味", "quantity": 60, "unit": "袋"},
-                {"sku": "SKU006", "name": "巧克力牛奶", "quantity": 40, "unit": "块"}
-            ]).to_string(),
-            Some("门店补货单-BJ001-0601.jpg"),
-            Some("配送确认单-PS20260601002.pdf"),
-            Some("补货申请登记-BJ001-0601.png"),
-            Some("朝阳路店周末促销补货".to_string()),
-            1,
-        ),
-        (
-            "RP2026060100004", 3, "needs_correction", 3,
-            serde_json::json!([
-                {"sku": "SKU007", "name": "可乐330ml", "quantity": 120, "unit": "罐"},
-                {"sku": "SKU008", "name": "雪碧330ml", "quantity": 100, "unit": "罐"}
-            ]).to_string(),
-            Some("门店补货单-BJ003-0531.jpg"),
-            None,
-            Some("补货申请登记-BJ003-0531.png"),
-            Some("缺少配送确认单，请补正后重新提交".to_string()),
-            1,
-        ),
-        (
-            "RP2026060100005", 4, "archived", 5,
-            serde_json::json!([
-                {"sku": "SKU009", "name": "纸巾抽式", "quantity": 50, "unit": "包"},
-                {"sku": "SKU010", "name": "洗衣液500ml", "quantity": 25, "unit": "瓶"}
-            ]).to_string(),
-            Some("门店补货单-SH001-0530.jpg"),
-            Some("配送确认单-PS20260530001.pdf"),
-            Some("补货申请登记-SH001-0530.png"),
-            Some("南京路店月度常规补货，已归档".to_string()),
-            1,
-        ),
-        (
-            "RP2026060100006", 5, "pending_review", 2,
-            serde_json::json!([
-                {"sku": "SKU011", "name": "口香糖薄荷", "quantity": 200, "unit": "条"},
-                {"sku": "SKU012", "name": "薄荷糖", "quantity": 150, "unit": "盒"}
-            ]).to_string(),
-            Some("门店补货单-SH002-0601.jpg"),
-            Some("配送确认单-PS20260601003.pdf"),
-            Some("补货申请登记-SH002-0601.png"),
-            Some("陆家嘴店糖果类补货".to_string()),
-            1,
-        ),
-        (
-            "RP2026060100007", 2, "draft", 1,
-            serde_json::json!([
-                {"sku": "SKU013", "name": "酸奶原味", "quantity": 60, "unit": "杯"}
-            ]).to_string(),
-            None, None, None,
-            Some("未完成的草稿，缺少凭证".to_string()),
-            1,
-        ),
-    ];
+    // 样例申请数据
+    // ============================================================
+    // 1. 草稿（朝阳路店，缺全部凭证，v1）
+    // ============================================================
+    {
+        let app_no = "RP2026060100001";
+        let items = serde_json::json!([
+            {"sku": "SKU001", "name": "矿泉水550ml", "quantity": 100, "unit": "瓶"},
+            {"sku": "SKU002", "name": "方便面红烧牛肉", "quantity": 50, "unit": "袋"}
+        ]).to_string();
+        let ev_store: Option<&str> = None;
+        let ev_delivery: Option<&str> = None;
+        let ev_reg: Option<&str> = None;
+        let remarks = Some("草稿状态，尚未填写凭证。登记员中途保存，待补全。".to_string());
 
-    for (app_no, store_id, status, version, items, ev_store, ev_delivery, ev_reg, remarks, created_by) in sample_apps {
         conn.execute(
             "INSERT INTO replenishment_applications 
              (application_no, store_id, status, current_version, items, 
               evidence_store_replenishment, evidence_delivery_confirmation, evidence_registration,
               remarks, created_by, updated_by)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10)",
-            params![app_no, store_id, status, version, items, ev_store, ev_delivery, ev_reg, remarks, created_by],
+             VALUES (?1, 1, 'draft', 1, ?2, ?3, ?4, ?5, ?6, 1, 1)",
+            params![app_no, items, ev_store, ev_delivery, ev_reg, remarks],
         )?;
-
         let app_id = conn.last_insert_rowid();
 
         conn.execute(
@@ -216,80 +147,370 @@ fn seed_data(conn: &Connection) -> Result<()> {
              (application_id, version, status_from, status_to, items, 
               evidence_store_replenishment, evidence_delivery_confirmation, evidence_registration,
               remarks, action, performed_by)
-             VALUES (?1, 1, NULL, 'draft', ?2, ?3, ?4, ?5, ?6, 'create', ?7)",
-            params![app_id, items, ev_store, ev_delivery, ev_reg, remarks, created_by],
+             VALUES (?1, 1, NULL, 'draft', ?2, ?3, ?4, ?5, ?6, 'create', 1)",
+            params![app_id, items, ev_store, ev_delivery, ev_reg, remarks],
+        )?;
+    }
+
+    // ============================================================
+    // 2. 完整补正重提流程（中关村店，v5 reviewed状态，完整历史）
+    //    v1 创建(draft) → v2 提交 → v3 审核驳回(needs_correction) 
+    //    → v4 补正(保留needs_correction) → v5 重提 → v6 审核通过
+    // ============================================================
+    {
+        let app_no = "RP2026060100002";
+        let items_v1 = serde_json::json!([
+            {"sku": "SKU003", "name": "牛奶250ml", "quantity": 80, "unit": "盒"},
+            {"sku": "SKU004", "name": "面包全麦", "quantity": 30, "unit": "个"}
+        ]).to_string();
+        let items_v4 = serde_json::json!([
+            {"sku": "SKU003", "name": "牛奶250ml", "quantity": 100, "unit": "盒"},
+            {"sku": "SKU004", "name": "面包全麦", "quantity": 40, "unit": "个"},
+            {"sku": "SKU004A", "name": "酸奶原味", "quantity": 50, "unit": "杯"}
+        ]).to_string();
+
+        let ev_store_v1: Option<&str> = Some("门店补货单-BJ002-0601-初版.jpg");
+        let ev_delivery_v1: Option<&str> = None; // 故意缺失
+        let ev_reg_v1: Option<&str> = Some("补货申请登记-BJ002-0601.png");
+
+        let ev_store_v4: Option<&str> = Some("门店补货单-BJ002-0601-修正版.jpg");
+        let ev_delivery_v4: Option<&str> = Some("配送确认单-PS20260601001.pdf");
+        let ev_reg_v4: Option<&str> = Some("补货申请登记-BJ002-0601-更新版.png");
+
+        let remarks_v1 = Some("中关村店日常补货，初版登记。".to_string());
+        let remarks_v3 = Some("缺少配送确认单，请补正；商品数量建议调整并补充酸奶品类。".to_string());
+        let remarks_v4 = Some("已补充配送确认单，牛奶数量调整为100盒，新增酸奶品类。".to_string());
+        let remarks_v6 = Some("补正内容完整，审核通过。".to_string());
+
+        // 当前状态 reviewed，版本 6
+        conn.execute(
+            "INSERT INTO replenishment_applications 
+             (application_no, store_id, status, current_version, items, 
+              evidence_store_replenishment, evidence_delivery_confirmation, evidence_registration,
+              remarks, created_by, updated_by)
+             VALUES (?1, 2, 'reviewed', 6, ?2, ?3, ?4, ?5, ?6, 1, 2)",
+            params![app_no, items_v4, ev_store_v4, ev_delivery_v4, ev_reg_v4, remarks_v6],
+        )?;
+        let app_id = conn.last_insert_rowid();
+
+        // v1: 创建 draft
+        conn.execute(
+            "INSERT INTO application_versions 
+             (application_id, version, status_from, status_to, items, 
+              evidence_store_replenishment, evidence_delivery_confirmation, evidence_registration,
+              remarks, action, performed_by)
+             VALUES (?1, 1, NULL, 'draft', ?2, ?3, ?4, ?5, ?6, 'create', 1)",
+            params![app_id, items_v1, ev_store_v1, ev_delivery_v1, ev_reg_v1, remarks_v1],
         )?;
 
-        if status != "draft" {
-            let action = match status {
-                "pending_review" => "submit",
-                "reviewed" => "review_approve",
-                "needs_correction" => "review_reject",
-                "archived" => "final_approve",
-                _ => "create",
-            };
-            let performed_by = match status {
-                "pending_review" => created_by,
-                "reviewed" => 2,
-                "needs_correction" => 2,
-                "archived" => 3,
-                _ => created_by,
-            };
+        // v2: 提交 pending_review
+        conn.execute(
+            "INSERT INTO application_versions 
+             (application_id, version, status_from, status_to, items, 
+              evidence_store_replenishment, evidence_delivery_confirmation, evidence_registration,
+              remarks, action, performed_by)
+             VALUES (?1, 2, 'draft', 'pending_review', ?2, ?3, ?4, ?5, ?6, 'submit', 1)",
+            params![app_id, items_v1, ev_store_v1, ev_delivery_v1, ev_reg_v1, remarks_v1],
+        )?;
 
-            if version >= 2 {
-                conn.execute(
-                    "INSERT INTO application_versions 
-                     (application_id, version, status_from, status_to, items, 
-                      evidence_store_replenishment, evidence_delivery_confirmation, evidence_registration,
-                      remarks, action, performed_by)
-                     VALUES (?1, 2, 'draft', 'pending_review', ?2, ?3, ?4, ?5, ?6, 'submit', ?7)",
-                    params![app_id, items, ev_store, ev_delivery, ev_reg, remarks, created_by],
-                )?;
-            }
+        // v3: 审核驳回 needs_correction
+        conn.execute(
+            "INSERT INTO application_versions 
+             (application_id, version, status_from, status_to, items, 
+              evidence_store_replenishment, evidence_delivery_confirmation, evidence_registration,
+              remarks, action, performed_by)
+             VALUES (?1, 3, 'pending_review', 'needs_correction', ?2, ?3, ?4, ?5, ?6, 'review_reject', 2)",
+            params![app_id, items_v1, ev_store_v1, ev_delivery_v1, ev_reg_v1, remarks_v3],
+        )?;
 
-            if version >= 3 && (status == "reviewed" || status == "needs_correction") {
-                let new_status = if status == "reviewed" { "reviewed" } else { "needs_correction" };
-                let act = if status == "reviewed" { "review_approve" } else { "review_reject" };
-                conn.execute(
-                    "INSERT INTO application_versions 
-                     (application_id, version, status_from, status_to, items, 
-                      evidence_store_replenishment, evidence_delivery_confirmation, evidence_registration,
-                      remarks, action, performed_by)
-                     VALUES (?1, 3, 'pending_review', ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-                    params![app_id, new_status, items, ev_store, ev_delivery, ev_reg, remarks, act, 2],
-                )?;
-            }
+        // v4: 补正（状态保持 needs_correction）
+        conn.execute(
+            "INSERT INTO application_versions 
+             (application_id, version, status_from, status_to, items, 
+              evidence_store_replenishment, evidence_delivery_confirmation, evidence_registration,
+              remarks, action, performed_by)
+             VALUES (?1, 4, 'needs_correction', 'needs_correction', ?2, ?3, ?4, ?5, ?6, 'correct', 1)",
+            params![app_id, items_v4, ev_store_v4, ev_delivery_v4, ev_reg_v4, remarks_v4],
+        )?;
 
-            if version >= 4 && status == "needs_correction" {
-                conn.execute(
-                    "INSERT INTO application_versions 
-                     (application_id, version, status_from, status_to, items, 
-                      evidence_store_replenishment, evidence_delivery_confirmation, evidence_registration,
-                      remarks, action, performed_by)
-                     VALUES (?1, 4, 'needs_correction', 'pending_review', ?2, ?3, ?4, ?5, ?6, 'correct', ?7)",
-                    params![app_id, items, ev_store, ev_delivery, ev_reg, remarks, created_by],
-                )?;
-            }
+        // v5: 重新提交 pending_review
+        conn.execute(
+            "INSERT INTO application_versions 
+             (application_id, version, status_from, status_to, items, 
+              evidence_store_replenishment, evidence_delivery_confirmation, evidence_registration,
+              remarks, action, performed_by)
+             VALUES (?1, 5, 'needs_correction', 'pending_review', ?2, ?3, ?4, ?5, ?6, 'submit', 1)",
+            params![app_id, items_v4, ev_store_v4, ev_delivery_v4, ev_reg_v4, remarks_v4],
+        )?;
 
-            if version >= 5 && status == "archived" {
-                conn.execute(
-                    "INSERT INTO application_versions 
-                     (application_id, version, status_from, status_to, items, 
-                      evidence_store_replenishment, evidence_delivery_confirmation, evidence_registration,
-                      remarks, action, performed_by)
-                     VALUES (?1, 3, 'pending_review', 'reviewed', ?2, ?3, ?4, ?5, ?6, 'review_approve', ?7)",
-                    params![app_id, items, ev_store, ev_delivery, ev_reg, remarks, 2],
-                )?;
-                conn.execute(
-                    "INSERT INTO application_versions 
-                     (application_id, version, status_from, status_to, items, 
-                      evidence_store_replenishment, evidence_delivery_confirmation, evidence_registration,
-                      remarks, action, performed_by)
-                     VALUES (?1, 5, 'reviewed', 'archived', ?2, ?3, ?4, ?5, ?6, 'final_approve', ?7)",
-                    params![app_id, items, ev_store, ev_delivery, ev_reg, remarks, 3],
-                )?;
-            }
-        }
+        // v6: 审核通过 reviewed
+        conn.execute(
+            "INSERT INTO application_versions 
+             (application_id, version, status_from, status_to, items, 
+              evidence_store_replenishment, evidence_delivery_confirmation, evidence_registration,
+              remarks, action, performed_by)
+             VALUES (?1, 6, 'pending_review', 'reviewed', ?2, ?3, ?4, ?5, ?6, 'review_approve', 2)",
+            params![app_id, items_v4, ev_store_v4, ev_delivery_v4, ev_reg_v4, remarks_v6],
+        )?;
+    }
+
+    // ============================================================
+    // 3. 已归档完整流程（南京路店，v5 archived）
+    //    v1 创建 → v2 提交 → v3 审核通过 → v4？不，v3→v5应该是 v3 reviewed → v5？不对，应该连续。
+    //    让我们用正确的版本: v1(创建), v2(提交), v3(审核通过reviewed), v4(复核归档archived)
+    //    不过样例要求 current_version = 5，所以我们在中间加个补正？
+    //    实际上让它完整流程就好，版本号设为4就够了，但是原例子用的是5。
+    //    好的用：v1(创建), v2(提交), v3(审核驳回→补正), v4(重提→审核通过), v5(复核归档)
+    // ============================================================
+    {
+        let app_no = "RP2026060100003";
+        let items = serde_json::json!([
+            {"sku": "SKU009", "name": "纸巾抽式", "quantity": 50, "unit": "包"},
+            {"sku": "SKU010", "name": "洗衣液500ml", "quantity": 25, "unit": "瓶"}
+        ]).to_string();
+        let ev_store = Some("门店补货单-SH001-0530.jpg");
+        let ev_delivery = Some("配送确认单-PS20260530001.pdf");
+        let ev_reg = Some("补货申请登记-SH001-0530.png");
+        let remarks_create = Some("南京路店月度常规补货。".to_string());
+        let remarks_reject = Some("洗衣液数量偏大，请确认是否误填。".to_string());
+        let remarks_correct = Some("已与门店确认，数量准确。".to_string());
+        let remarks_review = Some("复核确认，审核通过。".to_string());
+        let remarks_final = Some("流程合规，已归档。".to_string());
+
+        conn.execute(
+            "INSERT INTO replenishment_applications 
+             (application_no, store_id, status, current_version, items, 
+              evidence_store_replenishment, evidence_delivery_confirmation, evidence_registration,
+              remarks, created_by, updated_by)
+             VALUES (?1, 4, 'archived', 5, ?2, ?3, ?4, ?5, ?6, 1, 3)",
+            params![app_no, items, ev_store, ev_delivery, ev_reg, remarks_final],
+        )?;
+        let app_id = conn.last_insert_rowid();
+
+        conn.execute(
+            "INSERT INTO application_versions 
+             (application_id, version, status_from, status_to, items, 
+              evidence_store_replenishment, evidence_delivery_confirmation, evidence_registration,
+              remarks, action, performed_by)
+             VALUES (?1, 1, NULL, 'draft', ?2, ?3, ?4, ?5, ?6, 'create', 1)",
+            params![app_id, items, ev_store, ev_delivery, ev_reg, remarks_create],
+        )?;
+        conn.execute(
+            "INSERT INTO application_versions 
+             (application_id, version, status_from, status_to, items, 
+              evidence_store_replenishment, evidence_delivery_confirmation, evidence_registration,
+              remarks, action, performed_by)
+             VALUES (?1, 2, 'draft', 'pending_review', ?2, ?3, ?4, ?5, ?6, 'submit', 1)",
+            params![app_id, items, ev_store, ev_delivery, ev_reg, remarks_create],
+        )?;
+        conn.execute(
+            "INSERT INTO application_versions 
+             (application_id, version, status_from, status_to, items, 
+              evidence_store_replenishment, evidence_delivery_confirmation, evidence_registration,
+              remarks, action, performed_by)
+             VALUES (?1, 3, 'pending_review', 'needs_correction', ?2, ?3, ?4, ?5, ?6, 'review_reject', 2)",
+            params![app_id, items, ev_store, ev_delivery, ev_reg, remarks_reject],
+        )?;
+        conn.execute(
+            "INSERT INTO application_versions 
+             (application_id, version, status_from, status_to, items, 
+              evidence_store_replenishment, evidence_delivery_confirmation, evidence_registration,
+              remarks, action, performed_by)
+             VALUES (?1, 4, 'needs_correction', 'reviewed', ?2, ?3, ?4, ?5, ?6, 'review_approve', 2)",
+            params![app_id, items, ev_store, ev_delivery, ev_reg, remarks_review],
+        )?;
+        conn.execute(
+            "INSERT INTO application_versions 
+             (application_id, version, status_from, status_to, items, 
+              evidence_store_replenishment, evidence_delivery_confirmation, evidence_registration,
+              remarks, action, performed_by)
+             VALUES (?1, 5, 'reviewed', 'archived', ?2, ?3, ?4, ?5, ?6, 'final_approve', 3)",
+            params![app_id, items, ev_store, ev_delivery, ev_reg, remarks_final],
+        )?;
+    }
+
+    // ============================================================
+    // 4. 需补正状态（国贸店，v4，被连锁复核驳回）
+    // ============================================================
+    {
+        let app_no = "RP2026060100004";
+        let items = serde_json::json!([
+            {"sku": "SKU005", "name": "薯片原味", "quantity": 60, "unit": "袋"},
+            {"sku": "SKU006", "name": "巧克力牛奶", "quantity": 40, "unit": "块"}
+        ]).to_string();
+        let ev_store = Some("门店补货单-BJ003-0601.jpg");
+        let ev_delivery: Option<&str> = None; // 复核后发现配送确认单过期
+        let ev_reg = Some("补货申请登记-BJ003-0601.png");
+        let remarks_final = Some("连锁复核发现配送确认单已过期，需重新提供最新版。".to_string());
+
+        conn.execute(
+            "INSERT INTO replenishment_applications 
+             (application_no, store_id, status, current_version, items, 
+              evidence_store_replenishment, evidence_delivery_confirmation, evidence_registration,
+              remarks, created_by, updated_by)
+             VALUES (?1, 3, 'needs_correction', 4, ?2, ?3, ?4, ?5, ?6, 1, 3)",
+            params![app_no, items, ev_store, ev_delivery, ev_reg, remarks_final],
+        )?;
+        let app_id = conn.last_insert_rowid();
+
+        conn.execute(
+            "INSERT INTO application_versions 
+             (application_id, version, status_from, status_to, items, 
+              evidence_store_replenishment, evidence_delivery_confirmation, evidence_registration,
+              remarks, action, performed_by)
+             VALUES (?1, 1, NULL, 'draft', ?2, ?3, ?4, ?5, ?6, 'create', 1)",
+            params![app_id, items, ev_store, Some("旧配送单-过期.pdf"), ev_reg, Some("周末促销补货".to_string())],
+        )?;
+        conn.execute(
+            "INSERT INTO application_versions 
+             (application_id, version, status_from, status_to, items, 
+              evidence_store_replenishment, evidence_delivery_confirmation, evidence_registration,
+              remarks, action, performed_by)
+             VALUES (?1, 2, 'draft', 'pending_review', ?2, ?3, ?4, ?5, ?6, 'submit', 1)",
+            params![app_id, items, ev_store, Some("旧配送单-过期.pdf"), ev_reg, Some("周末促销补货".to_string())],
+        )?;
+        conn.execute(
+            "INSERT INTO application_versions 
+             (application_id, version, status_from, status_to, items, 
+              evidence_store_replenishment, evidence_delivery_confirmation, evidence_registration,
+              remarks, action, performed_by)
+             VALUES (?1, 3, 'pending_review', 'reviewed', ?2, ?3, ?4, ?5, ?6, 'review_approve', 2)",
+            params![app_id, items, ev_store, Some("旧配送单-过期.pdf"), ev_reg, Some("材料齐全，审核通过。".to_string())],
+        )?;
+        conn.execute(
+            "INSERT INTO application_versions 
+             (application_id, version, status_from, status_to, items, 
+              evidence_store_replenishment, evidence_delivery_confirmation, evidence_registration,
+              remarks, action, performed_by)
+             VALUES (?1, 4, 'reviewed', 'needs_correction', ?2, ?3, ?4, ?5, ?6, 'final_reject', 3)",
+            params![app_id, items, ev_store, ev_delivery, ev_reg, remarks_final],
+        )?;
+    }
+
+    // ============================================================
+    // 5. 待审核（陆家嘴店，v2 pending_review）
+    // ============================================================
+    {
+        let app_no = "RP2026060100005";
+        let items = serde_json::json!([
+            {"sku": "SKU011", "name": "口香糖薄荷", "quantity": 200, "unit": "条"},
+            {"sku": "SKU012", "name": "薄荷糖", "quantity": 150, "unit": "盒"}
+        ]).to_string();
+        let ev_store = Some("门店补货单-SH002-0601.jpg");
+        let ev_delivery = Some("配送确认单-PS20260601003.pdf");
+        let ev_reg = Some("补货申请登记-SH002-0601.png");
+        let remarks = Some("陆家嘴店糖果类补货，夏季促销备货。".to_string());
+
+        conn.execute(
+            "INSERT INTO replenishment_applications 
+             (application_no, store_id, status, current_version, items, 
+              evidence_store_replenishment, evidence_delivery_confirmation, evidence_registration,
+              remarks, created_by, updated_by)
+             VALUES (?1, 5, 'pending_review', 2, ?2, ?3, ?4, ?5, ?6, 1, 1)",
+            params![app_no, items, ev_store, ev_delivery, ev_reg, remarks],
+        )?;
+        let app_id = conn.last_insert_rowid();
+
+        conn.execute(
+            "INSERT INTO application_versions 
+             (application_id, version, status_from, status_to, items, 
+              evidence_store_replenishment, evidence_delivery_confirmation, evidence_registration,
+              remarks, action, performed_by)
+             VALUES (?1, 1, NULL, 'draft', ?2, ?3, ?4, ?5, ?6, 'create', 1)",
+            params![app_id, items, ev_store, ev_delivery, ev_reg, remarks],
+        )?;
+        conn.execute(
+            "INSERT INTO application_versions 
+             (application_id, version, status_from, status_to, items, 
+              evidence_store_replenishment, evidence_delivery_confirmation, evidence_registration,
+              remarks, action, performed_by)
+             VALUES (?1, 2, 'draft', 'pending_review', ?2, ?3, ?4, ?5, ?6, 'submit', 1)",
+            params![app_id, items, ev_store, ev_delivery, ev_reg, remarks],
+        )?;
+    }
+
+    // ============================================================
+    // 6. 审核通过待复核（五道口店不存在，用朝阳路店？不，只有5个门店。
+    //    用 SH001 的另外一个？不，SH001 已归档了。让我用 BJ003（国贸店）做第二条。
+    // ============================================================
+    {
+        let app_no = "RP2026060100006";
+        let items = serde_json::json!([
+            {"sku": "SKU014", "name": "冰淇淋香草味", "quantity": 80, "unit": "杯"},
+            {"sku": "SKU015", "name": "冰淇淋巧克力味", "quantity": 70, "unit": "杯"}
+        ]).to_string();
+        let ev_store = Some("门店补货单-BJ003-0601-冰淇淋.jpg");
+        let ev_delivery = Some("冷链配送确认-PS20260601002.pdf");
+        let ev_reg = Some("补货登记-夏季冷饮备货.png");
+        let remarks = Some("国贸店夏季冷饮集中补货，已审核通过，待连锁复核归档。".to_string());
+
+        conn.execute(
+            "INSERT INTO replenishment_applications 
+             (application_no, store_id, status, current_version, items, 
+              evidence_store_replenishment, evidence_delivery_confirmation, evidence_registration,
+              remarks, created_by, updated_by)
+             VALUES (?1, 3, 'reviewed', 3, ?2, ?3, ?4, ?5, ?6, 1, 2)",
+            params![app_no, items, ev_store, ev_delivery, ev_reg, remarks],
+        )?;
+        let app_id = conn.last_insert_rowid();
+
+        conn.execute(
+            "INSERT INTO application_versions 
+             (application_id, version, status_from, status_to, items, 
+              evidence_store_replenishment, evidence_delivery_confirmation, evidence_registration,
+              remarks, action, performed_by)
+             VALUES (?1, 1, NULL, 'draft', ?2, ?3, ?4, ?5, ?6, 'create', 1)",
+            params![app_id, items, ev_store, ev_delivery, ev_reg, Some("国贸店夏季冷饮备货-草稿。".to_string())],
+        )?;
+        conn.execute(
+            "INSERT INTO application_versions 
+             (application_id, version, status_from, status_to, items, 
+              evidence_store_replenishment, evidence_delivery_confirmation, evidence_registration,
+              remarks, action, performed_by)
+             VALUES (?1, 2, 'draft', 'pending_review', ?2, ?3, ?4, ?5, ?6, 'submit', 1)",
+            params![app_id, items, ev_store, ev_delivery, ev_reg, Some("已补齐冷链凭证，提交审核。".to_string())],
+        )?;
+        conn.execute(
+            "INSERT INTO application_versions 
+             (application_id, version, status_from, status_to, items, 
+              evidence_store_replenishment, evidence_delivery_confirmation, evidence_registration,
+              remarks, action, performed_by)
+             VALUES (?1, 3, 'pending_review', 'reviewed', ?2, ?3, ?4, ?5, ?6, 'review_approve', 2)",
+            params![app_id, items, ev_store, ev_delivery, ev_reg, remarks],
+        )?;
+    }
+
+    // ============================================================
+    // 7. 草稿（中关村店第二条，v1，缺部分凭证）
+    // ============================================================
+    {
+        let app_no = "RP2026060100007";
+        let items = serde_json::json!([
+            {"sku": "SKU013", "name": "酸奶原味", "quantity": 60, "unit": "杯"}
+        ]).to_string();
+        let ev_store = Some("门店补货单-BJ002-0602.jpg");
+        let ev_delivery: Option<&str> = None;
+        let ev_reg: Option<&str> = None;
+        let remarks = Some("未完成草稿：仅填写门店补货凭证，配送和登记待补。".to_string());
+
+        conn.execute(
+            "INSERT INTO replenishment_applications 
+             (application_no, store_id, status, current_version, items, 
+              evidence_store_replenishment, evidence_delivery_confirmation, evidence_registration,
+              remarks, created_by, updated_by)
+             VALUES (?1, 2, 'draft', 1, ?2, ?3, ?4, ?5, ?6, 1, 1)",
+            params![app_no, items, ev_store, ev_delivery, ev_reg, remarks],
+        )?;
+        let app_id = conn.last_insert_rowid();
+
+        conn.execute(
+            "INSERT INTO application_versions 
+             (application_id, version, status_from, status_to, items, 
+              evidence_store_replenishment, evidence_delivery_confirmation, evidence_registration,
+              remarks, action, performed_by)
+             VALUES (?1, 1, NULL, 'draft', ?2, ?3, ?4, ?5, ?6, 'create', 1)",
+            params![app_id, items, ev_store, ev_delivery, ev_reg, remarks],
+        )?;
     }
 
     Ok(())

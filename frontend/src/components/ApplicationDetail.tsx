@@ -697,12 +697,12 @@ export default function ApplicationDetail({
                   width: '2px',
                   background: '#e5e7eb',
                 }} />
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
                   {history.map((version, idx) => (
                     <div key={version.id} style={{
                       position: 'relative',
                       paddingLeft: '28px',
-                      paddingBottom: idx === history.length - 1 ? 0 : '8px',
+                      paddingBottom: idx === history.length - 1 ? 0 : '4px',
                     }}>
                       <div style={{
                         position: 'absolute',
@@ -716,53 +716,212 @@ export default function ApplicationDetail({
                         boxShadow: '0 0 0 1px #d1d5db',
                       }} />
                       <div style={{
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'flex-start',
+                        background: idx === 0 ? '#eef2ff' : '#f9fafb',
+                        border: `1px solid ${idx === 0 ? '#c7d2fe' : '#e5e7eb'}`,
+                        borderRadius: '10px',
+                        padding: '14px',
                       }}>
-                        <div>
-                          <div style={{
-                            fontSize: '14px',
-                            color: '#1f2937',
-                            fontWeight: 600,
-                          }}>
-                            {actionDisplayMap[version.action]}
+                        <div style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'flex-start',
+                          flexWrap: 'wrap',
+                          gap: '8px',
+                          marginBottom: '10px',
+                        }}>
+                          <div>
+                            <div style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '8px',
+                              flexWrap: 'wrap',
+                            }}>
+                              <span style={{
+                                fontSize: '14px',
+                                fontWeight: 600,
+                                color: '#1f2937',
+                              }}>
+                                {actionDisplayMap[version.action]}
+                              </span>
+                              <span style={{
+                                display: 'inline-block',
+                                padding: '2px 8px',
+                                borderRadius: '10px',
+                                fontSize: '11px',
+                                fontWeight: 600,
+                                background: '#4f46e5',
+                                color: 'white',
+                                fontFamily: 'monospace',
+                              }}>
+                                v{version.version}
+                              </span>
+                              {idx === 0 && (
+                                <span style={{
+                                  display: 'inline-block',
+                                  padding: '2px 8px',
+                                  borderRadius: '10px',
+                                  fontSize: '11px',
+                                  background: '#fef3c7',
+                                  color: '#92400e',
+                                  fontWeight: 500,
+                                }}>
+                                  当前
+                                </span>
+                              )}
+                            </div>
+                            <div style={{
+                              fontSize: '12px',
+                              color: '#6b7280',
+                              marginTop: '4px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '6px',
+                              flexWrap: 'wrap',
+                            }}>
+                              <span>办理人：<b style={{ color: '#374151' }}>{version.performed_by_name}</b></span>
+                              <span style={{ color: '#d1d5db' }}>|</span>
+                              {version.status_from && (
+                                <>
+                                  <span>
+                                    <span style={{
+                                      display: 'inline-block',
+                                      padding: '1px 6px',
+                                      borderRadius: '8px',
+                                      fontSize: '10px',
+                                      background: '#e5e7eb',
+                                      color: '#6b7280',
+                                    }}>
+                                      {statusDisplayMap[version.status_from as ApplicationStatus] || version.status_from}
+                                    </span>
+                                  </span>
+                                  <span style={{ color: '#9ca3af' }}>→</span>
+                                </>
+                              )}
+                              <span style={{
+                                display: 'inline-block',
+                                padding: '1px 6px',
+                                borderRadius: '8px',
+                                fontSize: '10px',
+                                fontWeight: 500,
+                                background: `${statusColorMap[version.status_to as ApplicationStatus]}15`,
+                                color: statusColorMap[version.status_to as ApplicationStatus] || '#6b7280',
+                              }}>
+                                {statusDisplayMap[version.status_to as ApplicationStatus] || version.status_to}
+                              </span>
+                            </div>
                           </div>
                           <div style={{
+                            fontSize: '11px',
+                            color: '#9ca3af',
+                            fontFamily: 'monospace',
+                          }}>
+                            {new Date(version.performed_at).toLocaleString('zh-CN', {
+                              month: '2-digit',
+                              day: '2-digit',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                              second: '2-digit',
+                            })}
+                          </div>
+                        </div>
+
+                        {version.remarks && (
+                          <div style={{
+                            marginBottom: '10px',
+                            padding: '8px 10px',
+                            background: 'white',
+                            borderRadius: '6px',
                             fontSize: '12px',
-                            color: '#6b7280',
-                            marginTop: '2px',
+                            color: '#4b5563',
+                            borderLeft: '3px solid #f59e0b',
                           }}>
-                            v{version.version} · {version.performed_by_name}
+                            <span style={{ fontWeight: 600, color: '#92400e' }}>办理备注：</span>
+                            {version.remarks}
                           </div>
-                        </div>
+                        )}
+
                         <div style={{
+                          display: 'grid',
+                          gridTemplateColumns: '1fr 1fr 1fr',
+                          gap: '6px',
                           fontSize: '11px',
-                          color: '#9ca3af',
-                          fontFamily: 'monospace',
                         }}>
-                          {new Date(version.performed_at).toLocaleString('zh-CN', {
-                            month: '2-digit',
-                            day: '2-digit',
-                            hour: '2-digit',
-                            minute: '2-digit',
-                            second: '2-digit',
-                          })}
+                          {[
+                            { label: '门店补货凭证', value: version.evidence_store_replenishment },
+                            { label: '配送确认单', value: version.evidence_delivery_confirmation },
+                            { label: '补货登记凭证', value: version.evidence_registration },
+                          ].map((ev, eIdx) => (
+                            <div key={eIdx} style={{
+                              padding: '6px 8px',
+                              background: ev.value ? '#ecfdf5' : '#fef2f2',
+                              border: `1px solid ${ev.value ? '#a7f3d0' : '#fecaca'}`,
+                              borderRadius: '6px',
+                            }}>
+                              <div style={{
+                                fontSize: '10px',
+                                color: '#9ca3af',
+                                marginBottom: '2px',
+                              }}>{ev.label}</div>
+                              <div style={{
+                                fontSize: '11px',
+                                fontWeight: 500,
+                                color: ev.value ? '#065f46' : '#991b1b',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                              }} title={ev.value || ''}>
+                                {ev.value || '未上传'}
+                              </div>
+                            </div>
+                          ))}
                         </div>
+
+                        {version.items && version.items.length > 0 && (
+                          <div style={{
+                            marginTop: '10px',
+                            padding: '8px 10px',
+                            background: 'white',
+                            border: '1px solid #e5e7eb',
+                            borderRadius: '6px',
+                          }}>
+                            <div style={{
+                              fontSize: '11px',
+                              color: '#6b7280',
+                              marginBottom: '6px',
+                              fontWeight: 500,
+                            }}>
+                              商品明细（{version.items.length} 种）
+                            </div>
+                            <div style={{
+                              display: 'flex',
+                              flexWrap: 'wrap',
+                              gap: '6px',
+                            }}>
+                              {version.items.slice(0, 5).map((item, iIdx) => (
+                                <span key={iIdx} style={{
+                                  display: 'inline-block',
+                                  padding: '3px 8px',
+                                  background: '#f3f4f6',
+                                  borderRadius: '4px',
+                                  fontSize: '11px',
+                                  color: '#4b5563',
+                                }}>
+                                  {item.name} × {item.quantity}{item.unit}
+                                </span>
+                              ))}
+                              {version.items.length > 5 && (
+                                <span style={{
+                                  fontSize: '11px',
+                                  color: '#9ca3af',
+                                  alignSelf: 'center',
+                                }}>
+                                  等 {version.items.length} 项
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        )}
                       </div>
-                      {version.remarks && (
-                        <div style={{
-                          marginTop: '8px',
-                          padding: '8px 10px',
-                          background: '#f9fafb',
-                          borderRadius: '6px',
-                          fontSize: '12px',
-                          color: '#4b5563',
-                          borderLeft: '3px solid #e5e7eb',
-                        }}>
-                          {version.remarks}
-                        </div>
-                      )}
                     </div>
                   ))}
                 </div>
