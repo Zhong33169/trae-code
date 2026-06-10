@@ -49,17 +49,20 @@ export const updateOrder = (orderId, data, userId, version) => {
   });
 };
 
-export const addEvidence = (orderId, type, name, userId) => {
+export const addEvidence = (orderId, type, name, userId, version) => {
   return request(`/orders/${orderId}/evidences`, {
     method: 'POST',
-    body: { userId, type, name }
+    body: { userId, type, name, version }
   });
 };
 
-export const deleteEvidence = (evidenceId, userId) => {
-  return request(`/evidences/${evidenceId}`, {
-    method: 'DELETE',
-    body: { userId }
+export const deleteEvidence = (evidenceId, userId, version) => {
+  const params = new URLSearchParams({ userId });
+  if (version !== undefined) {
+    params.append('version', version);
+  }
+  return request(`/evidences/${evidenceId}?${params.toString()}`, {
+    method: 'DELETE'
   });
 };
 

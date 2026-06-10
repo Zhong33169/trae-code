@@ -149,7 +149,7 @@ export default function OrderDetail({ orderId, userId, userRole, onBack, onActio
   const handleAddEvidence = async (type, name) => {
     setEvidenceSubmitting(true);
     try {
-      const res = await addEvidence(orderId, type, name, userId);
+      const res = await addEvidence(orderId, type, name, userId, detail.order.version);
       if (res.success) {
         showToast('证据添加成功', 'success');
         setDetail(prev => ({
@@ -158,7 +158,8 @@ export default function OrderDetail({ orderId, userId, userRole, onBack, onActio
           evidenceCheck: res.evidenceCheck,
           order: res.order,
           logs: res.logs,
-          evidenceChanges: res.evidenceChanges
+          evidenceChanges: res.evidenceChanges,
+          fieldChanges: res.fieldChanges || prev.fieldChanges
         }));
         triggerRefresh();
         return true;
@@ -177,7 +178,7 @@ export default function OrderDetail({ orderId, userId, userRole, onBack, onActio
   const handleDeleteEvidence = async (evidenceId) => {
     setEvidenceSubmitting(true);
     try {
-      const res = await deleteEvidence(evidenceId, userId);
+      const res = await deleteEvidence(evidenceId, userId, detail.order.version);
       if (res.success) {
         showToast('证据删除成功', 'success');
         setDetail(prev => ({
@@ -186,7 +187,8 @@ export default function OrderDetail({ orderId, userId, userRole, onBack, onActio
           evidenceCheck: res.evidenceCheck,
           order: res.order,
           logs: res.logs,
-          evidenceChanges: res.evidenceChanges
+          evidenceChanges: res.evidenceChanges,
+          fieldChanges: res.fieldChanges || prev.fieldChanges
         }));
         triggerRefresh();
       } else {

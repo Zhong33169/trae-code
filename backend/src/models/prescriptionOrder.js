@@ -490,7 +490,7 @@ const performAction = async (orderId, userId, userRole, action, opinion, version
   }
 };
 
-const addEvidence = async (orderId, type, name, userId) => {
+const addEvidence = async (orderId, type, name, userId, version = undefined) => {
   const db = await getDb();
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
   if (!user) {
@@ -512,6 +512,11 @@ const addEvidence = async (orderId, type, name, userId) => {
   if (!['draft', 'returned'].includes(order.status)) {
     await logAuditFailure(orderId, 'add_evidence', userId, user.role, 'status_invalid', `当前状态【${order.statusLabel}】不可添加证据`, { type, name });
     return { success: false, message: `当前状态【${order.statusLabel}】不可添加证据` };
+  }
+
+  if (version !== undefined && version !== order.version) {
+    await logAuditFailure(orderId, 'add_evidence', userId, user.role, 'version_conflict', '版本冲突，数据已被修改', { type, name });
+    return { success: false, message: '版本冲突，数据已被修改，请刷新后重试' };
   }
 
   if (!type || !EVIDENCE_TYPE_LABELS[type]) {
@@ -586,7 +591,7 @@ const addEvidence = async (orderId, type, name, userId) => {
   }
 };
 
-const deleteEvidence = async (evidenceId, userId) => {
+const deleteEvidence = async (evidenceId, userId, version = undefined) => {
   const db = await getDb();
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
   if (!user) {
@@ -614,6 +619,11 @@ const deleteEvidence = async (evidenceId, userId) => {
   if (!['draft', 'returned'].includes(order.status)) {
     await logAuditFailure(evidence.order_id, 'delete_evidence', userId, user.role, 'status_invalid', `当前状态【${order.statusLabel}】不可删除证据`, { evidenceId });
     return { success: false, message: `当前状态【${order.statusLabel}】不可删除证据` };
+  }
+
+  if (version !== undefined && version !== order.version) {
+    await logAuditFailure(evidence.order_id, 'delete_evidence', userId, user.role, 'version_conflict', '版本冲突，数据已被修改', { evidenceId });
+    return { success: false, message: '版本冲突，数据已被修改，请刷新后重试' };
   }
 
   try {
