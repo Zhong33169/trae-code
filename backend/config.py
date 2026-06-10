@@ -1,4 +1,8 @@
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
 
 class Config:
     SECRET_KEY = os.environ.get('SECRET_KEY', 'scenic-area-dev-secret-key')
@@ -8,6 +12,16 @@ class Config:
     )
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     PORT = int(os.environ.get('BACKEND_PORT', 8004))
+
+    FRONTEND_PORT = os.environ.get('FRONTEND_PORT', '3004')
+
+    @staticmethod
+    def get_cors_origins():
+        port = Config.FRONTEND_PORT
+        return [
+            f'http://localhost:{port}',
+            f'http://127.0.0.1:{port}'
+        ]
 
     ROLES = ['ticket_specialist', 'site_dispatcher', 'scenic_manager']
     ROLE_NAMES = {
@@ -67,3 +81,20 @@ class Config:
         'entered': ['booking_sheet', 'ticket_voucher', 'entry_record'],
         'archived': ['booking_sheet', 'ticket_voucher', 'entry_record', 'settlement_note']
     }
+
+    EVIDENCE_NAMES = {
+        'booking_sheet': '预约单',
+        'ticket_voucher': '票务凭证',
+        'entry_record': '入园记录',
+        'settlement_note': '结算单'
+    }
+
+    APPEAL_ALLOWED_SUBMITTERS = {
+        'pending_verification': 'ticket_specialist',
+        'verified': 'site_dispatcher',
+        'entered': 'site_dispatcher'
+    }
+
+    APPEAL_ALLOWED_REVIEWERS = ['scenic_manager']
+
+    APPEAL_RESUBMIT_ALLOWED_STATUSES = ['rejected_correction']

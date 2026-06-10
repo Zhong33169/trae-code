@@ -10,7 +10,7 @@ def create_app():
     app = Flask(__name__)
     app.config.from_object(Config)
 
-    CORS(app, supports_credentials=True, origins=['http://localhost:3004', 'http://127.0.0.1:3004'])
+    CORS(app, supports_credentials=True, origins=Config.get_cors_origins())
 
     db.init_app(app)
 
@@ -20,12 +20,21 @@ def create_app():
 
     @app.route('/api/health')
     def health():
-        return {'status': 'ok', 'message': '景区运营团队预约单系统 API 运行正常'}
+        return {
+            'status': 'ok',
+            'message': '景区运营团队预约单系统 API 运行正常',
+            'backend_port': Config.PORT,
+            'frontend_port': Config.FRONTEND_PORT,
+            'cors_origins': Config.get_cors_origins()
+        }
 
     return app
 
 
 if __name__ == '__main__':
     app = create_app()
-    port = int(os.environ.get('BACKEND_PORT', 8004))
+    port = Config.PORT
+    print(f'后端端口: {port}')
+    print(f'前端端口: {Config.FRONTEND_PORT}')
+    print(f'CORS origins: {Config.get_cors_origins()}')
     app.run(host='0.0.0.0', port=port, debug=True)

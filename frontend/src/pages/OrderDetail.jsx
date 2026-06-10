@@ -202,7 +202,7 @@ export default function OrderDetail() {
     }
     setProcessing(true)
     try {
-      await api.submitAppeal(order.id, appealReason)
+      await api.submitAppeal(order.id, appealReason, order.version)
       setAppealModal(false)
       setAppealReason('')
       loadOrder()
@@ -218,7 +218,7 @@ export default function OrderDetail() {
     if (!appeal) return
     setProcessing(true)
     try {
-      await api.acceptAppeal(appeal.id, appealText)
+      await api.acceptAppeal(appeal.id, appealText, appeal.version)
       setAcceptAppealModal(false)
       setAppealText('')
       loadOrder()
@@ -238,7 +238,7 @@ export default function OrderDetail() {
     }
     setProcessing(true)
     try {
-      await api.rejectAppeal(appeal.id, appealText)
+      await api.rejectAppeal(appeal.id, appealText, appeal.version)
       setRejectAppealModal(false)
       setAppealText('')
       loadOrder()
@@ -258,7 +258,7 @@ export default function OrderDetail() {
     }
     setProcessing(true)
     try {
-      await api.resubmitAppeal(appeal.id, appealText)
+      await api.resubmitAppeal(appeal.id, appealText, appeal.version)
       setResubmitAppealModal(false)
       setAppealText('')
       loadOrder()
@@ -278,7 +278,7 @@ export default function OrderDetail() {
     }
     setProcessing(true)
     try {
-      await api.approveAppeal(appeal.id, appealText, targetOrderStatus)
+      await api.approveAppeal(appeal.id, appealText, targetOrderStatus, appeal.version)
       setApproveAppealModal(false)
       setAppealText('')
       setTargetOrderStatus('')
@@ -299,7 +299,7 @@ export default function OrderDetail() {
     }
     setProcessing(true)
     try {
-      await api.denyAppeal(appeal.id, appealText)
+      await api.denyAppeal(appeal.id, appealText, appeal.version)
       setDenyAppealModal(false)
       setAppealText('')
       loadOrder()

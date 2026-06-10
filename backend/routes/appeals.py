@@ -1,6 +1,12 @@
 from flask import Blueprint, request, jsonify, session
-from models import db, Appeal, AppealLog, TeamOrder, OrderLog, User
+from models import db, Appeal, AppealLog, TeamOrder, User
 from config import Config
+from validators import (
+    validate_version, validate_appeal_submission,
+    validate_appeal_review, validate_appeal_resubmit,
+    handle_validation_failure, ValidationError,
+    add_order_log, get_next_handler_role
+)
 
 appeals_bp = Blueprint('appeals', __name__, url_prefix='/api/appeals')
 
@@ -12,7 +18,7 @@ def get_current_user():
     return User.query.get(user_id)
 
 
-def add_appeal_log(appeal, action, user, from_status, to_status, remark=''):
+def add_appeal_log(appeal, action, user, from_status, to_status, remark='', audit_note=''):
     log = AppealLog(
         appeal_id=appeal.id,
         action=action,
@@ -23,21 +29,10 @@ def add_appeal_log(appeal, action, user, from_status, to_status, remark=''):
         to_status=to_status,
         remark=remark
     )
+    if audit_note:
+        log.remark = f'{remark} | 审计备注：{audit_note}' if remark else f'审计备注：{audit_note}'
     db.session.add(log)
-
-
-def add_order_log(order, action, user, from_status, to_status, remark=''):
-    log = OrderLog(
-        order_id=order.id,
-        action=action,
-        operator_id=user.id if user else None,
-        operator_name=user.name if user else None,
-        operator_role=user.role if user else None,
-        from_status=from_status,
-        to_status=to_status,
-        remark=remark
-    )
-    db.session.add(log)
+    return log
 
 
 @appeals_bp.route('', methods=['POST'])
@@ -49,6 +44,7 @@ def submit_appeal():
     data = request.get_json() or {}
     order_id = data.get('order_id')
     reason = data.get('reason', '')
+    version = data.get('version')
 
     if not order_id:
         return jsonify({'error': '请指定预约单ID'}), 400
@@ -60,11 +56,12 @@ def submit_appeal():
     if not order:
         return jsonify({'error': '预约单不存在'}), 404
 
-    if order.status == 'appeal_pending':
-        return jsonify({'error': '该预约单已有申诉正在处理中'}), 400
-
-    if order.status == 'archived':
-        return jsonify({'error': '已归档的预约单不能申诉'}), 400
+    try:
+        validate_version(order, version)
+        validate_appeal_submission(order, user)
+    except ValidationError as err:
+        handle_validation_failure(order, user, '申诉提交', err)
+        return jsonify({'error': str(err), 'current_version': order.version}), err.error_code
 
     original_status = order.status
     order.status = 'appeal_pending'
@@ -138,18 +135,22 @@ def accept_appeal(appeal_id):
     if not user:
         return jsonify({'error': '未登录'}), 401
 
-    if user.role != 'scenic_manager':
-        return jsonify({'error': '只有景区经理可以受理申诉'}), 403
-
     appeal = Appeal.query.get(appeal_id)
     if not appeal:
         return jsonify({'error': '申诉不存在'}), 404
 
-    if appeal.status not in ['submitted', 'resubmitted']:
-        return jsonify({'error': f'当前状态「{Config.APPEAL_STATUS_NAMES.get(appeal.status, appeal.status)}」不能受理'}), 400
-
     data = request.get_json() or {}
     review_opinion = data.get('review_opinion', '')
+    version = data.get('version')
+
+    try:
+        validate_version(appeal, version)
+        validate_appeal_review(appeal, user, ['submitted', 'resubmitted'], '受理申诉')
+    except ValidationError as err:
+        order = TeamOrder.query.get(appeal.order_id)
+        if order:
+            handle_validation_failure(order, user, '申诉受理', err)
+        return jsonify({'error': str(err), 'current_version': appeal.version}), err.error_code
 
     from_status = appeal.status
     appeal.status = 'accepted'
@@ -186,20 +187,25 @@ def reject_appeal(appeal_id):
     if not user:
         return jsonify({'error': '未登录'}), 401
 
-    if user.role != 'scenic_manager':
-        return jsonify({'error': '只有景区经理可以驳回申诉'}), 403
-
     appeal = Appeal.query.get(appeal_id)
     if not appeal:
         return jsonify({'error': '申诉不存在'}), 404
 
-    if appeal.status not in ['submitted', 'accepted', 'resubmitted']:
-        return jsonify({'error': f'当前状态「{Config.APPEAL_STATUS_NAMES.get(appeal.status, appeal.status)}」不能驳回补正'}), 400
-
     data = request.get_json() or {}
     reject_reason = data.get('reject_reason', '')
+    version = data.get('version')
+
     if not reject_reason:
         return jsonify({'error': '请填写驳回原因'}), 400
+
+    try:
+        validate_version(appeal, version)
+        validate_appeal_review(appeal, user, ['submitted', 'accepted', 'resubmitted'], '驳回补正')
+    except ValidationError as err:
+        order = TeamOrder.query.get(appeal.order_id)
+        if order:
+            handle_validation_failure(order, user, '申诉驳回补正', err)
+        return jsonify({'error': str(err), 'current_version': appeal.version}), err.error_code
 
     from_status = appeal.status
     appeal.status = 'rejected_correction'
@@ -240,16 +246,21 @@ def resubmit_appeal(appeal_id):
     if not appeal:
         return jsonify({'error': '申诉不存在'}), 404
 
-    if appeal.status != 'rejected_correction':
-        return jsonify({'error': f'当前状态「{Config.APPEAL_STATUS_NAMES.get(appeal.status, appeal.status)}」不能再次提交'}), 400
-
-    if appeal.submitter_role != user.role and user.role != appeal.submitter_role:
-        return jsonify({'error': '只有原申诉提交人角色可以再次提交'}), 403
-
     data = request.get_json() or {}
     reason = data.get('reason', '')
+    version = data.get('version')
+
     if not reason:
         return jsonify({'error': '请填写补充申诉理由'}), 400
+
+    try:
+        validate_version(appeal, version)
+        validate_appeal_resubmit(appeal, user)
+    except ValidationError as err:
+        order = TeamOrder.query.get(appeal.order_id)
+        if order:
+            handle_validation_failure(order, user, '申诉再次提交', err)
+        return jsonify({'error': str(err), 'current_version': appeal.version}), err.error_code
 
     from_status = appeal.status
     appeal.status = 'resubmitted'
@@ -285,19 +296,14 @@ def approve_appeal(appeal_id):
     if not user:
         return jsonify({'error': '未登录'}), 401
 
-    if user.role != 'scenic_manager':
-        return jsonify({'error': '只有景区经理可以审批申诉'}), 403
-
     appeal = Appeal.query.get(appeal_id)
     if not appeal:
         return jsonify({'error': '申诉不存在'}), 404
 
-    if appeal.status not in ['submitted', 'accepted', 'resubmitted']:
-        return jsonify({'error': f'当前状态「{Config.APPEAL_STATUS_NAMES.get(appeal.status, appeal.status)}」不能审批通过'}), 400
-
     data = request.get_json() or {}
     review_opinion = data.get('review_opinion', '')
     target_order_status = data.get('target_order_status')
+    version = data.get('version')
 
     if not target_order_status:
         return jsonify({'error': '请指定申诉通过后预约单的目标状态'}), 400
@@ -305,6 +311,15 @@ def approve_appeal(appeal_id):
     valid_targets = ['pending_verification', 'verified', 'entered', 'archived']
     if target_order_status not in valid_targets:
         return jsonify({'error': '无效的目标状态'}), 400
+
+    try:
+        validate_version(appeal, version)
+        validate_appeal_review(appeal, user, ['submitted', 'accepted', 'resubmitted'], '审批通过申诉')
+    except ValidationError as err:
+        order = TeamOrder.query.get(appeal.order_id)
+        if order:
+            handle_validation_failure(order, user, '申诉审批', err)
+        return jsonify({'error': str(err), 'current_version': appeal.version}), err.error_code
 
     from_status = appeal.status
     appeal.status = 'approved'
@@ -323,12 +338,7 @@ def approve_appeal(appeal_id):
     if order:
         order_from = order.status
         order.status = target_order_status
-        if target_order_status == 'pending_verification':
-            order.current_handler_role = 'ticket_specialist'
-        elif target_order_status == 'verified':
-            order.current_handler_role = 'site_dispatcher'
-        elif target_order_status in ['entered', 'archived']:
-            order.current_handler_role = 'scenic_manager'
+        order.current_handler_role = get_next_handler_role(target_order_status)
         order.version += 1
 
         add_order_log(
@@ -352,20 +362,25 @@ def deny_appeal(appeal_id):
     if not user:
         return jsonify({'error': '未登录'}), 401
 
-    if user.role != 'scenic_manager':
-        return jsonify({'error': '只有景区经理可以驳回申诉'}), 403
-
     appeal = Appeal.query.get(appeal_id)
     if not appeal:
         return jsonify({'error': '申诉不存在'}), 404
 
-    if appeal.status not in ['submitted', 'accepted', 'resubmitted']:
-        return jsonify({'error': f'当前状态「{Config.APPEAL_STATUS_NAMES.get(appeal.status, appeal.status)}」不能驳回'}), 400
-
     data = request.get_json() or {}
     reject_reason = data.get('reject_reason', '')
+    version = data.get('version')
+
     if not reject_reason:
         return jsonify({'error': '请填写驳回原因'}), 400
+
+    try:
+        validate_version(appeal, version)
+        validate_appeal_review(appeal, user, ['submitted', 'accepted', 'resubmitted'], '驳回申诉')
+    except ValidationError as err:
+        order = TeamOrder.query.get(appeal.order_id)
+        if order:
+            handle_validation_failure(order, user, '申诉驳回', err)
+        return jsonify({'error': str(err), 'current_version': appeal.version}), err.error_code
 
     from_status = appeal.status
     appeal.status = 'denied'
@@ -384,12 +399,7 @@ def deny_appeal(appeal_id):
     if order:
         order_from = order.status
         order.status = appeal.original_status
-        if appeal.original_status == 'pending_verification':
-            order.current_handler_role = 'ticket_specialist'
-        elif appeal.original_status == 'verified':
-            order.current_handler_role = 'site_dispatcher'
-        elif appeal.original_status in ['entered', 'archived']:
-            order.current_handler_role = 'scenic_manager'
+        order.current_handler_role = get_next_handler_role(appeal.original_status)
         order.version += 1
 
         add_order_log(

@@ -2,7 +2,12 @@ from flask import Blueprint, request, jsonify, session
 from datetime import datetime
 from models import db, TeamOrder, OrderLog, User
 from config import Config
-import json
+from validators import (
+    validate_order_transition, validate_appeal_submission,
+    handle_validation_failure, ValidationError,
+    evidence_to_list, list_to_evidence, get_next_handler_role,
+    add_order_log
+)
 
 orders_bp = Blueprint('orders', __name__, url_prefix='/api/orders')
 
@@ -22,81 +27,6 @@ def get_role_queue_status(role):
     elif role == 'scenic_manager':
         return ['entered', 'appeal_pending']
     return []
-
-
-def evidence_to_list(evidence_str):
-    if not evidence_str:
-        return []
-    try:
-        return json.loads(evidence_str)
-    except (json.JSONDecodeError, TypeError):
-        return [evidence_str]
-
-
-def list_to_evidence(evidence_list):
-    if not evidence_list:
-        return ''
-    return json.dumps(evidence_list, ensure_ascii=False)
-
-
-def validate_status_transition(order, target_status, user):
-    role = user.role
-    transitions = Config.STATUS_TRANSITIONS.get(role, {})
-    allowed_targets = transitions.get(order.status, [])
-
-    if target_status not in allowed_targets:
-        return False, f'{Config.ROLE_NAMES.get(role, role)}无权从「{Config.ORDER_STATUS_NAMES.get(order.status, order.status)}」推进到「{Config.ORDER_STATUS_NAMES.get(target_status, target_status)}」'
-
-    return True, None
-
-
-def validate_evidence(order, target_status):
-    if target_status not in Config.REQUIRED_EVIDENCE:
-        return True, None
-
-    required = Config.REQUIRED_EVIDENCE[target_status]
-    current_evidence = evidence_to_list(order.evidence)
-    missing = [e for e in required if e not in current_evidence]
-
-    if missing:
-        evidence_names = {
-            'booking_sheet': '预约单',
-            'ticket_voucher': '票务凭证',
-            'entry_record': '入园记录',
-            'settlement_note': '结算单'
-        }
-        missing_names = [evidence_names.get(e, e) for e in missing]
-        return False, f'缺少必填证据：{", ".join(missing_names)}'
-
-    return True, None
-
-
-def get_next_handler_role(status):
-    if status == 'pending_verification':
-        return 'ticket_specialist'
-    elif status == 'verified':
-        return 'site_dispatcher'
-    elif status == 'entered':
-        return 'scenic_manager'
-    elif status == 'archived':
-        return 'scenic_manager'
-    elif status == 'appeal_pending':
-        return 'scenic_manager'
-    return 'ticket_specialist'
-
-
-def add_order_log(order, action, user, from_status, to_status, remark=''):
-    log = OrderLog(
-        order_id=order.id,
-        action=action,
-        operator_id=user.id if user else None,
-        operator_name=user.name if user else None,
-        operator_role=user.role if user else None,
-        from_status=from_status,
-        to_status=to_status,
-        remark=remark
-    )
-    db.session.add(log)
 
 
 @orders_bp.route('/queue', methods=['GET'])
@@ -199,32 +129,16 @@ def transition(order_id):
     if not target_status:
         return jsonify({'error': '请指定目标状态'}), 400
 
-    if version is not None and version != order.version:
-        add_order_log(
-            order, '版本冲突', user,
-            order.status, order.status,
-            f'操作失败：当前版本为 {order.version}，提交版本为 {version}'
-        )
-        db.session.commit()
-        return jsonify({
-            'error': '版本冲突，数据已被其他人修改，请刷新后重试',
-            'current_version': order.version
-        }), 409
-
-    valid, err_msg = validate_status_transition(order, target_status, user)
-    if not valid:
-        add_order_log(order, '状态流转失败', user, order.status, order.status, err_msg)
-        db.session.commit()
-        return jsonify({'error': err_msg}), 403
-
+    original_evidence = order.evidence
     if evidence:
         order.evidence = list_to_evidence(evidence)
 
-    ev_valid, ev_err = validate_evidence(order, target_status)
-    if not ev_valid:
-        add_order_log(order, '证据校验失败', user, order.status, order.status, ev_err)
-        db.session.commit()
-        return jsonify({'error': ev_err}), 400
+    try:
+        validate_order_transition(order, target_status, user, version)
+    except ValidationError as err:
+        order.evidence = original_evidence
+        handle_validation_failure(order, user, '状态流转', err)
+        return jsonify({'error': str(err), 'current_version': order.version}), err.error_code
 
     from_status = order.status
     order.status = target_status
@@ -289,17 +203,7 @@ def create_order():
     db.session.add(order)
     db.session.flush()
 
-    log = OrderLog(
-        order_id=order.id,
-        action='创建预约单',
-        operator_id=user.id,
-        operator_name=user.name,
-        operator_role=user.role,
-        from_status=None,
-        to_status='pending_verification',
-        remark='团队预约单创建成功'
-    )
-    db.session.add(log)
+    add_order_log(order, '创建预约单', user, None, 'pending_verification', '团队预约单创建成功')
 
     db.session.commit()
 

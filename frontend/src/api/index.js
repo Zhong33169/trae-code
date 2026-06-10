@@ -1,10 +1,17 @@
+const appConfig = {
+  apiBaseUrl: import.meta.env.VITE_API_BASE_URL || 'http://localhost:8004',
+  frontendPort: import.meta.env.VITE_PORT || '3004'
+}
+
 const API_BASE = '/api'
 
 async function request(url, options = {}) {
   const defaultOptions = {
     credentials: 'include',
     headers: {
-      'Content-Type': 'application/json'
+      'Content-Type': 'application/json',
+      'X-Api-Base-Url': appConfig.apiBaseUrl,
+      'X-Frontend-Port': appConfig.frontendPort
     }
   }
 
@@ -29,6 +36,10 @@ async function request(url, options = {}) {
   }
 
   return data
+}
+
+export function getAppConfig() {
+  return appConfig
 }
 
 export const api = {
@@ -61,40 +72,43 @@ export const api = {
   getStats: () =>
     request('/orders/stats'),
 
-  submitAppeal: (orderId, reason) =>
-    request('/appeals', { method: 'POST', body: { order_id: orderId, reason } }),
+  submitAppeal: (orderId, reason, version) =>
+    request('/appeals', {
+      method: 'POST',
+      body: { order_id: orderId, reason, version }
+    }),
 
   getAppealDetail: (appealId) =>
     request(`/appeals/${appealId}`),
 
-  acceptAppeal: (appealId, reviewOpinion) =>
+  acceptAppeal: (appealId, reviewOpinion, version) =>
     request(`/appeals/${appealId}/accept`, {
       method: 'POST',
-      body: { review_opinion: reviewOpinion }
+      body: { review_opinion: reviewOpinion, version }
     }),
 
-  rejectAppeal: (appealId, rejectReason) =>
+  rejectAppeal: (appealId, rejectReason, version) =>
     request(`/appeals/${appealId}/reject`, {
       method: 'POST',
-      body: { reject_reason: rejectReason }
+      body: { reject_reason: rejectReason, version }
     }),
 
-  resubmitAppeal: (appealId, reason) =>
+  resubmitAppeal: (appealId, reason, version) =>
     request(`/appeals/${appealId}/resubmit`, {
       method: 'POST',
-      body: { reason }
+      body: { reason, version }
     }),
 
-  approveAppeal: (appealId, reviewOpinion, targetOrderStatus) =>
+  approveAppeal: (appealId, reviewOpinion, targetOrderStatus, version) =>
     request(`/appeals/${appealId}/approve`, {
       method: 'POST',
-      body: { review_opinion: reviewOpinion, target_order_status: targetOrderStatus }
+      body: { review_opinion: reviewOpinion, target_order_status: targetOrderStatus, version }
     }),
 
-  denyAppeal: (appealId, rejectReason) =>
+  denyAppeal: (appealId, rejectReason, version) =>
     request(`/appeals/${appealId}/deny`, {
       method: 'POST',
-      body: { reject_reason: rejectReason }
+      body: { reject_reason: rejectReason, version }
     }),
 
   listAppeals: (status, orderId) => {

@@ -81,21 +81,53 @@ npm run dev
 
 前端访问地址: http://localhost:3004
 
-### 4. 修改端口
+### 4. 环境变量配置（端口与 API 地址）
 
-**修改后端端口**:
+前后端均通过 `.env` 文件管理端口和连接配置，修改端口时只需编辑对应 `.env` 即可，无需改动源码。
+
+**后端 `.env`**（位于 `backend/.env`）：
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `BACKEND_PORT` | 8004 | 后端服务端口 |
+| `FRONTEND_PORT` | 3004 | 前端开发端口，后端 CORS 据此自动生成白名单 |
+| `SECRET_KEY` | scenic-area-dev-secret-key | Flask 会话密钥 |
+| `DATABASE_URL` | sqlite:///data/scenic.db | 数据库连接（默认本地 SQLite） |
+
 ```bash
-# 方式一：环境变量
-BACKEND_PORT=8004 python app.py
-
-# 方式二：修改 config.py 中的默认值
+# 示例：切换到 8005/3005 端口
+cd backend
+cat > .env << EOF
+BACKEND_PORT=8005
+FRONTEND_PORT=3005
+SECRET_KEY=scenic-area-dev-secret-key
+EOF
+python app.py
 ```
 
-**修改前端端口**:
+**前端 `.env`**（位于 `frontend/.env`）：
 
-编辑 `frontend/vite.config.js` 中的 `server.port`。
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `VITE_PORT` | 3004 | Vite 开发服务器端口 |
+| `VITE_API_BASE_URL` | http://localhost:8004 | 后端 API 地址，同时用于代理和页面状态显示 |
 
-同时需要修改 `backend/app.py` 中 CORS 的 origins 配置。
+```bash
+# 示例：切换到 3005/8005 端口
+cd frontend
+cat > .env << EOF
+VITE_PORT=3005
+VITE_API_BASE_URL=http://localhost:8005
+EOF
+npm run dev
+```
+
+**端口联动说明**：
+- 后端 CORS 白名单由 `FRONTEND_PORT` 自动生成（`http://localhost:{端口}` + `http://127.0.0.1:{端口}`）
+- 前端代理由 `VITE_API_BASE_URL` 驱动，请求 `/api/*` 自动转发到后端
+- 前端页面头部显示当前连接配置（前端端口 → 后端地址），便于验证端口是否生效
+- 后端 `/api/health` 接口返回当前 `backend_port`、`frontend_port` 和 `cors_origins`
+- 两边 `.env.example` 提供了端口 8005/3005 的示例，可直接复制使用
 
 ## 样例数据说明
 
@@ -173,7 +205,7 @@ BACKEND_PORT=8004 python app.py
 2. **状态流转合法性** - 当前状态是否允许流转到目标状态
 3. **版本号** - 乐观锁，防止并发修改冲突
 4. **必填证据** - 目标状态所需的证据是否齐全
-5. 校验不通过时**保留原状态**并写入操作记录
+5. 校验不通过时**保留原状态和证据**，写入操作记录和审计备注
 
 ## 项目结构
 
