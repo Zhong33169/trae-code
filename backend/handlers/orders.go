@@ -263,6 +263,8 @@ func SubmitOrder(c *fiber.Ctx) error {
 		})
 	}
 
+	store.GetStore().CheckAndUpdateOverdue()
+
 	order := store.GetStore().GetOrder(id)
 	if order == nil {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
@@ -274,36 +276,38 @@ func SubmitOrder(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
 			"error":        "订单已被修改，请刷新后重试",
 			"blockReasons": order.BlockReasons,
+			"nextStep":     "刷新页面获取最新订单状态后再提交",
 		})
 	}
 
 	if order.RegistrarID != user.ID {
 		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
-			"error": "只能提交自己登记的订单",
+			"error":    "只能提交自己登记的订单",
+			"nextStep": "请联系订单登记员操作",
 		})
 	}
 
 	if order.Status != models.StatusDraft && order.Status != models.StatusReturned {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "当前状态无法提交审核",
+			"error":        "当前状态无法提交审核",
+			"blockReasons": order.BlockReasons,
+			"nextStep":     "请检查订单状态，仅草稿或已退回状态可提交",
 		})
 	}
 
 	blockReasons := store.ComputeBlockReasons(order)
-	warnMaterials := make([]string, 0)
-	for _, r := range blockReasons {
-		if r.Field == "materials" {
-			warnMaterials = append(warnMaterials, r.Reason)
-		}
+	hasHardBlocks := store.HasHardBlocks(order)
+
+	if hasHardBlocks {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error":        "存在阻断项，无法提交：" + summarizeBlockReasons(blockReasons),
+			"blockReasons": blockReasons,
+			"nextStep":     "请先解除阻断（补全材料/修复刊登/补库存/等非逾期状态）后再提交；如为逾期订单，请由复核负责人执行人工处置",
+		})
 	}
 
 	oldStatus := order.Status
 	order.Status = models.StatusPending
-	if order.IsOverdue {
-		order.IsOverdue = false
-		order.OverdueReason = ""
-		order.NextAction = ""
-	}
 
 	now := time.Now()
 	order.Opinions = append(order.Opinions, models.OrderOpinion{
@@ -318,20 +322,12 @@ func SubmitOrder(c *fiber.Ctx) error {
 	store.GetStore().SaveOrder(order)
 
 	detail := "提交订单至审核"
-	if len(warnMaterials) > 0 {
-		detail += "（注意：存在未上传的必需材料）"
-	}
 	addAuditLog(order.ID, order.OrderNo, user, "提交审核", detail, oldStatus, order.Status, c.IP())
 
-	result := fiber.Map{
+	return c.JSON(fiber.Map{
 		"order":        order,
 		"blockReasons": order.BlockReasons,
-	}
-	if len(warnMaterials) > 0 {
-		result["warning"] = "存在阻断项：" + joinStrings(warnMaterials, "；") + "。审核可能会被退回。"
-	}
-
-	return c.JSON(result)
+	})
 }
 
 func SupervisorProcess(c *fiber.Ctx) error {
@@ -345,6 +341,8 @@ func SupervisorProcess(c *fiber.Ctx) error {
 		})
 	}
 
+	store.GetStore().CheckAndUpdateOverdue()
+
 	order := store.GetStore().GetOrder(id)
 	if order == nil {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
@@ -356,36 +354,41 @@ func SupervisorProcess(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
 			"error":        "订单已被修改，请刷新后重试",
 			"blockReasons": order.BlockReasons,
+			"nextStep":     "刷新页面获取最新订单状态后再操作；两个页面同时操作会导致版本冲突",
 		})
 	}
 
 	if order.Status != models.StatusPending {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "当前状态无法进行审核",
+			"error":        "当前状态无法进行审核",
+			"blockReasons": order.BlockReasons,
+			"nextStep":     "请检查订单状态，仅待审核状态可执行此操作",
 		})
 	}
 
-	if req.Opinion == "" {
+	if !req.Pass && req.Opinion == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "审核意见不能为空",
+			"error":    "退回必须填写处理意见",
+			"nextStep": "请在下方填写退回原因和补正要求后再提交",
 		})
 	}
 
-	hasHardBlocks := store.HasHardBlocks(order)
+	blockReasons := store.ComputeBlockReasons(order)
+	hasHardBlocks := store.HasHardBlockReasons(blockReasons)
 
 	if req.Pass {
 		if order.IsOverdue {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 				"error":        "订单已逾期，主管无法直接通过，请退回登记员补正或联系复核负责人人工处置",
-				"blockReasons": order.BlockReasons,
-				"nextStep":     "退回登记员补正材料/刊登/库存；如属紧急订单，由复核负责人执行人工处置流程",
+				"blockReasons": blockReasons,
+				"nextStep":     "退回登记员补正材料/刊登/库存；如属紧急订单，由复核负责人执行人工处置流程并记录审批文件",
 			})
 		}
 		if hasHardBlocks {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-				"error":        "存在阻断项，不能审核通过：" + summarizeBlockReasons(order.BlockReasons),
-				"blockReasons": order.BlockReasons,
-				"nextStep":     "请退回登记员补正或解除阻断后再审核通过",
+				"error":        "存在阻断项，不能审核通过：" + summarizeBlockReasons(blockReasons),
+				"blockReasons": blockReasons,
+				"nextStep":     "退回登记员补正或解除阻断后再审核通过；如属特殊情况，由复核负责人执行人工处置",
 			})
 		}
 	}
@@ -435,6 +438,8 @@ func ReviewerProcess(c *fiber.Ctx) error {
 		})
 	}
 
+	store.GetStore().CheckAndUpdateOverdue()
+
 	order := store.GetStore().GetOrder(id)
 	if order == nil {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
@@ -446,29 +451,34 @@ func ReviewerProcess(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
 			"error":        "订单已被修改，请刷新后重试",
 			"blockReasons": order.BlockReasons,
+			"nextStep":     "刷新页面获取最新订单状态后再操作；两个页面同时操作会导致版本冲突",
 		})
 	}
 
 	if order.Status != models.StatusProcessing {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "当前状态无法进行复核",
+			"error":        "当前状态无法进行复核",
+			"blockReasons": order.BlockReasons,
+			"nextStep":     "请检查订单状态，仅待复核状态可执行此操作",
 		})
 	}
 
-	if req.Opinion == "" {
+	if !req.Pass && req.Opinion == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "复核意见不能为空",
+			"error":    "退回必须填写处理意见",
+			"nextStep": "请在下方填写退回原因和补正要求后再提交",
 		})
 	}
 
-	hasHardBlocks := store.HasHardBlocks(order)
+	blockReasons := store.ComputeBlockReasons(order)
+	hasHardBlocks := store.HasHardBlockReasons(blockReasons)
 
 	if req.Pass {
 		if hasHardBlocks {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-				"error":        "存在阻断项，不能直接复核通过：" + summarizeBlockReasons(order.BlockReasons),
-				"blockReasons": order.BlockReasons,
-				"nextStep":     "请退回登记员补正；若为逾期订单需走人工处置流程记录审批文件后归档",
+				"error":        "存在阻断项，不能直接复核通过：" + summarizeBlockReasons(blockReasons),
+				"blockReasons": blockReasons,
+				"nextStep":     "退回登记员补正；如为逾期或特殊订单，请使用人工处置流程并记录审批文件后归档",
 			})
 		}
 	}
@@ -481,7 +491,6 @@ func ReviewerProcess(c *fiber.Ctx) error {
 		order.Status = models.StatusArchived
 		order.IsOverdue = false
 		order.OverdueReason = ""
-		order.NextAction = ""
 	} else {
 		order.Status = models.StatusReturned
 		order.ReturnReason = req.Opinion
@@ -514,7 +523,8 @@ func ManualDisposition(c *fiber.Ctx) error {
 	user := middleware.GetCurrentUser(c)
 	if user.Role != models.RoleReviewer {
 		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
-			"error": "只有跨境电商复核负责人可以执行人工处置",
+			"error":    "只有跨境电商复核负责人可以执行人工处置",
+			"nextStep": "请联系跨境电商复核负责人操作",
 		})
 	}
 
@@ -525,6 +535,8 @@ func ManualDisposition(c *fiber.Ctx) error {
 			"error": "请求格式错误",
 		})
 	}
+
+	store.GetStore().CheckAndUpdateOverdue()
 
 	order := store.GetStore().GetOrder(id)
 	if order == nil {
@@ -537,30 +549,41 @@ func ManualDisposition(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
 			"error":        "订单已被修改，请刷新后重试",
 			"blockReasons": order.BlockReasons,
+			"nextStep":     "刷新页面获取最新订单状态后再操作；两个页面同时操作会导致版本冲突",
 		})
 	}
 
 	if order.Status != models.StatusProcessing {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "只有待复核的订单可以进行人工处置",
+			"error":        "只有待复核的订单可以进行人工处置",
+			"blockReasons": order.BlockReasons,
+			"nextStep":     "请检查订单状态，仅待复核状态可执行人工处置",
 		})
 	}
 
+	blockReasons := store.ComputeBlockReasons(order)
+
 	if req.Action == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "请选择处置动作（归档或退回）",
+			"error":        "请选择处置动作（归档或退回）",
+			"blockReasons": blockReasons,
+			"nextStep":     "选择归档（需审批文件）或退回补正",
 		})
 	}
 
 	if req.Reason == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "请填写处置原因",
+			"error":        "请填写处置原因",
+			"blockReasons": blockReasons,
+			"nextStep":     "详细说明人工处置的原因和背景",
 		})
 	}
 
 	if req.Action == "archive" && req.ApprovalDoc == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "逾期阻断订单人工归档必须上传审批文件编号",
+			"error":        "人工归档必须上传审批文件编号",
+			"blockReasons": blockReasons,
+			"nextStep":     "填写审批文件编号（如 CB-APPROVAL-2026-0610）后再提交",
 		})
 	}
 
@@ -588,7 +611,6 @@ func ManualDisposition(c *fiber.Ctx) error {
 		order.Status = models.StatusArchived
 		order.IsOverdue = false
 		order.OverdueReason = ""
-		order.NextAction = ""
 
 		opinionText := req.Reason
 		if req.ApprovalDoc != "" {
@@ -650,6 +672,8 @@ func UpdateListingInventory(c *fiber.Ctx) error {
 		})
 	}
 
+	store.GetStore().CheckAndUpdateOverdue()
+
 	order := store.GetStore().GetOrder(id)
 	if order == nil {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
@@ -659,19 +683,24 @@ func UpdateListingInventory(c *fiber.Ctx) error {
 
 	if order.Version != req.Version {
 		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
-			"error": "订单已被修改，请刷新后重试",
+			"error":        "订单已被修改，请刷新后重试",
+			"blockReasons": order.BlockReasons,
+			"nextStep":     "刷新页面获取最新订单状态后再操作；两个页面同时操作会导致版本冲突",
 		})
 	}
 
 	if order.RegistrarID != user.ID {
 		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
-			"error": "只能修改自己登记的订单",
+			"error":    "只能修改自己登记的订单",
+			"nextStep": "请联系订单登记员操作",
 		})
 	}
 
 	if order.Status != models.StatusDraft && order.Status != models.StatusReturned {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "当前状态无法更新刊登或库存状态",
+			"error":        "当前状态无法更新刊登或库存状态",
+			"blockReasons": order.BlockReasons,
+			"nextStep":     "请检查订单状态，仅草稿或已退回状态可编辑",
 		})
 	}
 
@@ -682,6 +711,9 @@ func UpdateListingInventory(c *fiber.Ctx) error {
 	order.InventoryStatus = models.InventoryStatus(req.InventoryStatus)
 	order.InventoryQuantity = req.InventoryQuantity
 	order.ListingURL = req.ListingURL
+
+	blockReasons := store.ComputeBlockReasons(order)
+	hasHardBlocks := store.HasHardBlockReasons(blockReasons)
 
 	detail := "更新刊登状态：" + string(oldListing) + "→" + string(order.ListingStatus) +
 		"；库存状态：" + string(oldInventory) + "→" + string(order.InventoryStatus)
@@ -699,10 +731,15 @@ func UpdateListingInventory(c *fiber.Ctx) error {
 	store.GetStore().SaveOrder(order)
 	addAuditLog(order.ID, order.OrderNo, user, "更新刊登/库存", detail, order.Status, order.Status, c.IP())
 
-	return c.JSON(fiber.Map{
+	result := fiber.Map{
 		"order":        order,
 		"blockReasons": order.BlockReasons,
-	})
+	}
+	if hasHardBlocks {
+		result["warning"] = "更新成功，但仍存在阻断项：" + summarizeBlockReasons(blockReasons) + "。需要全部解除后才能提交。"
+	}
+
+	return c.JSON(result)
 }
 
 func UpdateMaterials(c *fiber.Ctx) error {
@@ -719,6 +756,8 @@ func UpdateMaterials(c *fiber.Ctx) error {
 		})
 	}
 
+	store.GetStore().CheckAndUpdateOverdue()
+
 	order := store.GetStore().GetOrder(id)
 	if order == nil {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
@@ -728,19 +767,24 @@ func UpdateMaterials(c *fiber.Ctx) error {
 
 	if order.Version != req.Version {
 		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
-			"error": "订单已被修改，请刷新后重试",
+			"error":        "订单已被修改，请刷新后重试",
+			"blockReasons": order.BlockReasons,
+			"nextStep":     "刷新页面获取最新订单状态后再操作；两个页面同时操作会导致版本冲突",
 		})
 	}
 
 	if order.RegistrarID != user.ID {
 		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
-			"error": "只能修改自己登记的订单材料",
+			"error":    "只能修改自己登记的订单材料",
+			"nextStep": "请联系订单登记员操作",
 		})
 	}
 
 	if order.Status != models.StatusDraft && order.Status != models.StatusReturned {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "当前状态无法修改材料",
+			"error":        "当前状态无法修改材料",
+			"blockReasons": order.BlockReasons,
+			"nextStep":     "请检查订单状态，仅草稿或已退回状态可编辑",
 		})
 	}
 
@@ -766,13 +810,21 @@ func UpdateMaterials(c *fiber.Ctx) error {
 		})
 	}
 
+	blockReasons := store.ComputeBlockReasons(order)
+	hasHardBlocks := store.HasHardBlockReasons(blockReasons)
+
 	store.GetStore().SaveOrder(order)
 	addAuditLog(order.ID, order.OrderNo, user, "更新材料", "更新订单材料清单", order.Status, order.Status, c.IP())
 
-	return c.JSON(fiber.Map{
+	result := fiber.Map{
 		"order":        order,
 		"blockReasons": order.BlockReasons,
-	})
+	}
+	if hasHardBlocks {
+		result["warning"] = "材料更新成功，但仍存在阻断项：" + summarizeBlockReasons(blockReasons) + "。需要全部解除后才能提交。"
+	}
+
+	return c.JSON(result)
 }
 
 func addAuditLog(orderID, orderNo string, user *models.User, action, detail string, oldStatus, newStatus models.OrderStatus, ip string) {

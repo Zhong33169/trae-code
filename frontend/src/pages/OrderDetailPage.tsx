@@ -88,8 +88,12 @@ export function OrderDetailPage() {
     return { text: `截止 ${formatDateTime(order.deadline)}`, color: '#333' };
   };
 
+  const hasHardBlock = order && order.blockReasons && order.blockReasons.some(b => b.level === 'error');
+  const hasBlock = order && order.blockReasons && order.blockReasons.length > 0;
+
   const canSubmit = user?.role === 'registrar' &&
-    order && (order.status === 'draft' || order.status === 'returned');
+    order && (order.status === 'draft' || order.status === 'returned') &&
+    !hasHardBlock;
 
   const canEditMaterials = user?.role === 'registrar' &&
     order && (order.status === 'draft' || order.status === 'returned');
@@ -97,18 +101,17 @@ export function OrderDetailPage() {
   const canEditListing = user?.role === 'registrar' &&
     order && (order.status === 'draft' || order.status === 'returned');
 
-  const canSupervisorPass = user?.role === 'supervisor' && order && order.status === 'pending';
+  const canSupervisorPass = user?.role === 'supervisor' && order && order.status === 'pending' &&
+    !order.isOverdue && !hasHardBlock;
   const canSupervisorReturn = user?.role === 'supervisor' && order && order.status === 'pending';
 
   const canReviewerPass = user?.role === 'reviewer' && order && order.status === 'processing' &&
-    !order.isOverdue && !(order.blockReasons && order.blockReasons.some(b => b.level === 'error'));
+    !order.isOverdue && !hasHardBlock;
 
   const canReviewerReturn = user?.role === 'reviewer' && order && order.status === 'processing';
 
   const canManualDisposition = user?.role === 'reviewer' && order && order.status === 'processing' &&
-    (order.isOverdue || (order.blockReasons && order.blockReasons.some(b => b.level === 'error')));
-
-  const hasHardBlock = order && order.blockReasons && order.blockReasons.some(b => b.level === 'error');
+    (order.isOverdue || hasHardBlock);
 
   const handleSubmit = async () => {
     if (!order) return;
@@ -123,9 +126,12 @@ export function OrderDetailPage() {
       setOrder(result.order);
       setMaterials(result.order.materials);
     } catch (e: any) {
+      const blocks: BlockReason[] = e.details?.blockReasons || [];
+      if (blocks.length > 0 && order) {
+        setOrder({ ...order, blockReasons: blocks });
+      }
       const msg = e.details?.error || e.message || '提交失败';
       const detail = e.details?.nextStep ? `\n下一步：${e.details.nextStep}` : '';
-      const blocks: BlockReason[] = e.details?.blockReasons || [];
       const blockMsg = blocks.length > 0
         ? `\n\n阻断原因：\n${blocks.map(b => `· [${BLOCK_FIELD_TEXT[b.field]}] ${b.reason}`).join('\n')}`
         : '';
@@ -190,23 +196,18 @@ export function OrderDetailPage() {
       alert('退回必须填写处理意见');
       return;
     }
-    if (pass && order.isOverdue) {
-      alert('该订单已逾期，不能直接审核通过；请退回补正，或由复核负责人进行人工处置');
-      return;
-    }
-    if (pass && hasHardBlock) {
-      alert('该订单存在硬阻断项，请先退回补正刊登/库存/材料问题，或通知复核负责人进行人工处置');
-      return;
-    }
     setProcessing(true);
     try {
       const result = await api.supervisorProcessOrder(order.id, opinion, pass, order.version);
       setOrder(result.order);
       alert(pass ? '审核通过，已转交复核' : '已退回登记员补正');
     } catch (e: any) {
+      const blocks: BlockReason[] = e.details?.blockReasons || [];
+      if (blocks.length > 0 && order) {
+        setOrder({ ...order, blockReasons: blocks });
+      }
       const msg = e.details?.error || e.message || '操作失败';
       const detail = e.details?.nextStep ? `\n下一步：${e.details.nextStep}` : '';
-      const blocks: BlockReason[] = e.details?.blockReasons || [];
       const blockMsg = blocks.length > 0
         ? `\n\n阻断原因：\n${blocks.map(b => `· [${BLOCK_FIELD_TEXT[b.field]}] ${b.reason}`).join('\n')}`
         : '';
@@ -228,9 +229,12 @@ export function OrderDetailPage() {
       setOrder(result.order);
       alert(pass ? '复核通过，已归档' : '已退回登记员补正');
     } catch (e: any) {
+      const blocks: BlockReason[] = e.details?.blockReasons || [];
+      if (blocks.length > 0 && order) {
+        setOrder({ ...order, blockReasons: blocks });
+      }
       const msg = e.details?.error || e.message || '操作失败';
       const detail = e.details?.nextStep ? `\n下一步：${e.details.nextStep}` : '';
-      const blocks: BlockReason[] = e.details?.blockReasons || [];
       const blockMsg = blocks.length > 0
         ? `\n\n阻断原因：\n${blocks.map(b => `· [${BLOCK_FIELD_TEXT[b.field]}] ${b.reason}`).join('\n')}`
         : '';
@@ -739,8 +743,10 @@ export function OrderDetailPage() {
                   {order.status === 'returned' ? '重新提交（补正后）' : '提交审核'}
                 </button>
                 {!canSubmit && order && (
-                  <span style={{ color: '#999', marginLeft: '8px' }}>
-                    当前状态不支持提交（仅草稿/已退回可提交）
+                  <span style={{ color: order.status !== 'draft' && order.status !== 'returned' ? '#999' : '#cf1322', marginLeft: '8px' }}>
+                    {order.status !== 'draft' && order.status !== 'returned'
+                      ? '当前状态不支持提交（仅草稿/已退回可提交）'
+                      : '存在阻断项（逾期/材料/刊登/库存问题），请先解除后再提交'}
                   </span>
                 )}
               </div>
@@ -757,7 +763,7 @@ export function OrderDetailPage() {
                   placeholder={order.isOverdue || hasHardBlock ? '该订单有阻断，建议填写退回原因' : '同意推进或退回补正的理由'}
                 />
               </div>
-              {!canReviewerPass && canSupervisorPass && (order.isOverdue || hasHardBlock) && (
+              {!canSupervisorPass && canSupervisorReturn && (order.isOverdue || hasHardBlock) && (
                 <div style={{
                   padding: '8px 12px',
                   background: '#fff1f0',
@@ -775,7 +781,7 @@ export function OrderDetailPage() {
                 <button
                   className="btn btn-primary"
                   onClick={() => handleSupervisorProcess(true)}
-                  disabled={processing || !canSupervisorPass || order.isOverdue || !!hasHardBlock}
+                  disabled={processing || !canSupervisorPass}
                 >审核通过</button>
                 <button
                   className="btn btn-danger"

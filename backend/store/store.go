@@ -394,7 +394,7 @@ func (s *Store) initOrders() {
 func ComputeBlockReasons(order *models.CrossBorderOrder) []models.BlockReason {
 	reasons := make([]models.BlockReason, 0)
 	if order.Status == models.StatusArchived {
-		return reasons
+		return order.BlockReasons
 	}
 	if order.IsOverdue {
 		reasons = append(reasons, models.BlockReason{
@@ -474,7 +474,11 @@ func ComputeBlockReasons(order *models.CrossBorderOrder) []models.BlockReason {
 }
 
 func HasHardBlocks(order *models.CrossBorderOrder) bool {
-	for _, r := range order.BlockReasons {
+	return HasHardBlockReasons(order.BlockReasons)
+}
+
+func HasHardBlockReasons(reasons []models.BlockReason) bool {
+	for _, r := range reasons {
 		if r.Level == "error" {
 			return true
 		}
