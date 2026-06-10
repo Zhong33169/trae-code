@@ -1,6 +1,6 @@
 <template>
   <div class="modal-overlay" @click.self="$emit('close')">
-    <div class="modal-content p-6" style="max-width: 500px">
+    <div class="modal-content p-6" style="max-width: 620px">
       <h3 class="text-lg font-bold mb-4">批量处理</h3>
 
       <p class="text-gray-600 mb-4">
@@ -24,12 +24,30 @@
 
       <div v-if="loading" class="text-center py-4 text-gray-500">处理中...</div>
 
-      <div v-if="result" class="mt-4 p-4 bg-gray-50 rounded-md">
-        <p class="text-green-600 font-medium mb-2">成功：{{ result.success.length }} 条</p>
-        <p class="text-red-600 font-medium mb-2">失败：{{ result.failed.length }} 条</p>
-        <div v-if="result.failed.length > 0" class="text-sm text-red-500 space-y-1">
-          <div v-for="(f, idx) in result.failed" :key="idx">
-            {{ f.id }}：{{ f.reason }}
+      <div v-if="result" class="mt-4 p-4 bg-gray-50 rounded-md space-y-3">
+        <div class="flex gap-6 mb-2">
+          <p class="text-green-600 font-medium">成功：{{ result.successCount }} 条</p>
+          <p class="text-red-600 font-medium">失败：{{ result.failedCount }} 条</p>
+        </div>
+
+        <div v-if="result.results && result.results.length > 0" class="space-y-2 max-h-[40vh] overflow-y-auto">
+          <div
+            v-for="(r, idx) in result.results"
+            :key="idx"
+            class="flex items-start gap-2 p-2 rounded text-sm"
+            :class="r.success ? 'bg-green-50' : 'bg-red-50'"
+          >
+            <span
+              class="inline-block w-5 h-5 rounded-full text-center text-white text-xs leading-5 flex-shrink-0 mt-0.5"
+              :class="r.success ? 'bg-green-500' : 'bg-red-500'"
+            >
+              {{ r.success ? '✓' : '✗' }}
+            </span>
+            <div class="flex-1 min-w-0">
+              <span class="font-medium">{{ r.orderNo || r.id }}</span>
+              <span v-if="r.success" class="text-green-700 ml-2">处理成功</span>
+              <span v-else class="text-red-700 ml-2">失败：{{ r.reason }}</span>
+            </div>
           </div>
         </div>
       </div>
@@ -53,6 +71,19 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
 
+interface BatchResultItem {
+  id: string;
+  orderNo: string;
+  success: boolean;
+  reason?: string;
+}
+
+interface BatchResult {
+  successCount: number;
+  failedCount: number;
+  results: BatchResultItem[];
+}
+
 const props = defineProps<{
   selectedIds: string[];
   actionOptions: { value: string; label: string; needReason?: boolean }[];
@@ -66,7 +97,7 @@ const emit = defineEmits<{
 const selectedAction = ref('');
 const reason = ref('');
 const loading = ref(false);
-const result = ref<{ success: string[]; failed: { id: string; reason: string }[] } | null>(null);
+const result = ref<BatchResult | null>(null);
 
 const needReason = computed(() => {
   const opt = props.actionOptions.find(o => o.value === selectedAction.value);
@@ -100,7 +131,7 @@ const handleBatch = async () => {
 
   loading.value = true;
   try {
-    const res = await api.post('/orders/batch', {
+    const res = await api.post<BatchResult>('/orders/batch', {
       ids: props.selectedIds,
       action: selectedAction.value,
       reason: reason.value || undefined,

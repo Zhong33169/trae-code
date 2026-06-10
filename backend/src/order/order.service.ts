@@ -90,14 +90,18 @@ export class OrderService {
         throw new BadRequestException(`商品不存在: ${itemDto.productId}`);
       }
 
-      const subtotal = itemDto.unitPrice * itemDto.quantity;
+      const effectivePrice = source === OrderSource.ONLINE && product
+        ? (product.groupBuyPrice || product.price)
+        : itemDto.unitPrice;
+
+      const subtotal = effectivePrice * itemDto.quantity;
       totalAmount += subtotal;
       totalQuantity += itemDto.quantity;
 
       const orderItem = this.orderItemRepository.create({
         productId: itemDto.productId,
         productName: itemDto.productName || product?.name || '未知商品',
-        unitPrice: itemDto.unitPrice,
+        unitPrice: effectivePrice,
         quantity: itemDto.quantity,
         unit: itemDto.unit || product?.unit,
         subtotal,
@@ -233,7 +237,10 @@ export class OrderService {
 
       for (const itemDto of dto.items) {
         const product = await this.productRepository.findOne({ where: { id: itemDto.productId } });
-        const subtotal = itemDto.unitPrice * itemDto.quantity;
+        const effectivePrice = product
+          ? (product.groupBuyPrice || product.price)
+          : itemDto.unitPrice;
+        const subtotal = effectivePrice * itemDto.quantity;
         totalAmount += subtotal;
         totalQuantity += itemDto.quantity;
 
@@ -241,7 +248,7 @@ export class OrderService {
           orderId: id,
           productId: itemDto.productId,
           productName: itemDto.productName || product?.name || '未知商品',
-          unitPrice: itemDto.unitPrice,
+          unitPrice: effectivePrice,
           quantity: itemDto.quantity,
           unit: itemDto.unit || product?.unit,
           subtotal,

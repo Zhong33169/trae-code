@@ -85,11 +85,11 @@ async function seed() {
   console.log('📦 创建商品...');
 
   const productsData = [
-    { name: '有机西红柿', description: '新鲜有机西红柿，500g/份，当日采摘', price: 8.5, groupPrice: 6.8, stock: 500, minGroupQuantity: 20, unit: '斤', category: '蔬菜' },
-    { name: '土鸡蛋', description: '散养土鸡蛋，30枚/盒，农家直供', price: 45.0, groupPrice: 38.0, stock: 200, minGroupQuantity: 30, unit: '盒', category: '蛋类' },
-    { name: '新鲜牛奶', description: '鲜牛奶，250ml/袋，每日配送', price: 5.0, groupPrice: 4.2, stock: 1000, minGroupQuantity: 100, unit: '袋', category: '乳制品' },
-    { name: '精品苹果', description: '红富士苹果，5斤/箱，脆甜多汁', price: 35.0, groupPrice: 28.0, stock: 300, minGroupQuantity: 50, unit: '箱', category: '水果' },
-    { name: '有机大米', description: '东北有机大米，10kg/袋，当季新米', price: 128.0, groupPrice: 98.0, stock: 150, minGroupQuantity: 20, unit: '袋', category: '粮油' },
+    { name: '有机西红柿', description: '新鲜有机西红柿，500g/份，当日采摘', price: 8.5, groupBuyPrice: 6.8, stock: 500, minGroupQuantity: 20, unit: '斤', category: '蔬菜' },
+    { name: '土鸡蛋', description: '散养土鸡蛋，30枚/盒，农家直供', price: 45.0, groupBuyPrice: 38.0, stock: 200, minGroupQuantity: 30, unit: '盒', category: '蛋类' },
+    { name: '新鲜牛奶', description: '鲜牛奶，250ml/袋，每日配送', price: 5.0, groupBuyPrice: 4.2, stock: 1000, minGroupQuantity: 100, unit: '袋', category: '乳制品' },
+    { name: '精品苹果', description: '红富士苹果，5斤/箱，脆甜多汁', price: 35.0, groupBuyPrice: 28.0, stock: 300, minGroupQuantity: 50, unit: '箱', category: '水果' },
+    { name: '有机大米', description: '东北有机大米，10kg/袋，当季新米', price: 128.0, groupBuyPrice: 98.0, stock: 150, minGroupQuantity: 20, unit: '袋', category: '粮油' },
   ];
 
   const products: Product[] = [];

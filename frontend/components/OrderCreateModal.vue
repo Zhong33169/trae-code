@@ -237,7 +237,7 @@ const onProductSelect = (index: number) => {
   const product = products.value.find(p => p.id === item.productId);
   if (product) {
     item.productName = product.name;
-    item.unitPrice = product.groupPrice;
+    item.unitPrice = product.groupBuyPrice || product.price;
     item.unit = product.unit || '件';
     if (!item.quantity || item.quantity <= 0) {
       item.quantity = 1;
