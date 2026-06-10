@@ -1,1 +1,0 @@
-import{a as e,e as n}from"./chunk-V3TIUKT3.js";import{s as a}from"./chunk-2D3P22FS.js";function l({status:t}){let o=e[t]||t,r=n[t]||"bg-gray-100 text-gray-800";return a("span",{className:`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${r}`,children:o})}export{l as a};

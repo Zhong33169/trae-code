@@ -5,6 +5,7 @@ import type {
   TransferEvidence,
   BatchOperation,
   BatchDetail,
+  BatchAuditDetail,
   AuditLog,
   ListResponse,
 } from "./types.ts";
@@ -185,4 +186,8 @@ export async function getAuditLogs(
   if (params.action) searchParams.set("action", params.action);
   if (params.user_id) searchParams.set("user_id", String(params.user_id));
   return request<ListResponse<AuditLog>>(`/audit?${searchParams.toString()}`);
+}
+
+export async function getBatchAudit(batchNo: string): Promise<BatchAuditDetail> {
+  return request<BatchAuditDetail>(`/audit/batch/${batchNo}`);
 }

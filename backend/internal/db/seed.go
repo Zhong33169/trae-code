@@ -63,7 +63,7 @@ func SeedData(db *sql.DB) error {
 		{"CF20260601002", "李四", "110101199002022345", "外科", "王医师", `{"items":[{"name":"阿莫西林","spec":"0.5g*24粒","qty":1,"price":28.0}]}`, 28.00, "pending_verification", 2},
 		{"CF20260601003", "王五", "110101199003033456", "内科", "赵医师", `{"items":[{"name":"布洛芬","spec":"0.3g*20片","qty":1,"price":12.8}]}`, 12.80, "pending_verification", 2},
 		{"CF20260601004", "赵六", "110101199004044567", "儿科", "王医师", `{"items":[{"name":"小儿氨酚黄那敏","spec":"12袋","qty":2,"price":18.0}]}`, 36.00, "pending_review", 3},
-		{"CF20260601005", "钱七", "110101199005055678", "内科", "王医师", `{"items":[{"name":"奥美拉唑","spec":"20mg*14粒","qty":1,"price":35.5}]}`, 35.50, "pending_verification", 2},
+		{"CF20260601005", "钱七", "110101199005055678", "内科", "王医师", `{"items":[{"name":"奥美拉唑","spec":"20mg*14粒","qty":1,"price":35.5}]}`, 35.50, "archived", 4},
 		{"CF20260601006", "孙八", "110101199006066789", "外科", "李医师", `{"items":[{"name":"云南白药","spec":"4g*6瓶","qty":1,"price":42.0}]}`, 42.00, "archived", 4},
 		{"CF20260601007", "周九", "110101199007077890", "内科", "王医师", `{"items":[{"name":"六味地黄丸","spec":"200丸","qty":2,"price":25.0}]}`, 50.00, "archived", 4},
 		{"CF20260601008", "吴十", "110101199008088901", "皮肤科", "赵医师", `{"items":[{"name":"氯雷他定","spec":"10mg*6片","qty":1,"price":22.0}]}`, 22.00, "draft", 1},
@@ -113,13 +113,15 @@ func SeedData(db *sql.DB) error {
 		{9, "registration", receptionID, "李接待", "reception_assistant", "已核对外科处方与患者信息", "外科登记", -90},
 
 		{3, "verification", physicianID, "王医师", "attending_physician", "已核验处方用药合理性，与诊断一致", "批量核验-午间批次", -30},
+		{4, "verification", physicianID, "王医师", "attending_physician", "处方核验通过，按疗程用药", "补录核验", -15},
 		{5, "verification", physicianID, "王医师", "attending_physician", "处方核验通过，按疗程用药", "主治医生核验", -80},
 		{6, "verification", physicianID, "王医师", "attending_physician", "已核验用药方案，无配伍禁忌", "内科核验", -75},
 		{9, "verification", physicianID, "王医师", "attending_physician", "已核对术后用药方案，无药物相互作用", "外科核验", -70},
 
 		{5, "review", pharmacyID, "张药师", "pharmacy_admin", "已完成药品调配与复核，发药确认", "批量复核-下午批次", -10},
+		{4, "review", pharmacyID, "张药师", "pharmacy_admin", "已完成发药，患者已取药", "重试后复核成功", -8},
 		{6, "review", pharmacyID, "张药师", "pharmacy_admin", "已完成发药并归档", "药房发药归档", -50},
-		{9, "review", pharmacyID, "张药师", "pharmacy_admin", "药品调配完成，患者已取药", "批量复核-下午批次", -10},
+		{9, "review", pharmacyID, "张药师", "pharmacy_admin", "药品调配完成，患者已取药", "外科发药归档", -45},
 	}
 
 	for _, e := range evidences {
@@ -231,7 +233,7 @@ func SeedData(db *sql.DB) error {
 		errorMsg    string
 	}{
 		{5, "success", ""},
-		{9, "success", ""},
+		{4, "success", ""},
 		{2, "failed", "当前状态不允许此操作：待核验状态不能复核归档"},
 	}
 	for _, item := range batch3Items {
@@ -337,7 +339,7 @@ func SeedData(db *sql.DB) error {
 				"total_count":      3,
 				"evidence_content": "批量复核今日处方并发药",
 				"remark":           "下午归档批次",
-				"transfer_ids":     []int64{transferIDs[5], transferIDs[9], transferIDs[2]},
+				"transfer_ids":     []int64{transferIDs[5], transferIDs[4], transferIDs[2]},
 			}), "192.168.1.102", -11},
 
 		{pharmacyID, "张药师", "pharmacy_admin", "batch_complete", "batch", batchIDs[batchNo3],
@@ -345,26 +347,32 @@ func SeedData(db *sql.DB) error {
 			mustJSON(map[string]interface{}{
 				"operation_type": "review",
 				"total_count":    3,
-				"success_count":  2,
-				"fail_count":     1,
+				"success_count":  1,
+				"fail_count":     2,
 				"failed_items": []map[string]interface{}{
+					{"transfer_id": transferIDs[4], "transfer_no": "CF20260601005", "error": "当前状态不允许此操作：待核验状态不能复核归档"},
 					{"transfer_id": transferIDs[2], "transfer_no": "CF20260601003", "error": "当前状态不允许此操作：待核验状态不能复核归档"},
 				},
 			}), "192.168.1.102", -9},
+
+		{physicianID, "王医师", "attending_physician", "verify", "transfer", transferIDs[4],
+			`{"old_status":"pending_verification","version":2}`,
+			`{"new_status":"pending_review","version":3}`, "192.168.1.101", -7},
 
 		{pharmacyID, "张药师", "pharmacy_admin", "batch_retry", "batch", batchIDs[batchNo3],
 			mustJSON(map[string]interface{}{
 				"batch_no":       batchNo3,
 				"operation_type": "review",
-				"retry_count":    1,
-				"prev_success":   2,
-				"prev_fail":      1,
+				"retry_count":    2,
+				"prev_success":   1,
+				"prev_fail":      2,
 			}),
 			mustJSON(map[string]interface{}{
 				"batch_no":       batchNo3,
 				"operation_type": "review",
-				"retry_count":    1,
+				"retry_count":    2,
 				"failed_items": []map[string]interface{}{
+					{"transfer_id": transferIDs[4], "transfer_no": "CF20260601005", "error": "当前状态不允许此操作：待核验状态不能复核归档"},
 					{"transfer_id": transferIDs[2], "transfer_no": "CF20260601003", "error": "当前状态不允许此操作：待核验状态不能复核归档"},
 				},
 			}), "192.168.1.102", -5},

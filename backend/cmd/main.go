@@ -68,6 +68,7 @@ func main() {
 			r.Get("/batch", batchHandler.ListBatches)
 
 			r.Get("/audit", auditHandler.List)
+			r.Get("/audit/batch/{batch_no}", auditHandler.GetByBatchNo)
 		})
 	})
 

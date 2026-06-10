@@ -63,6 +63,14 @@ export interface BatchDetail {
   items: BatchItem[];
 }
 
+export interface BatchAuditDetail {
+  batch_no: string;
+  operation_type: string;
+  operator_name: string;
+  audit_logs: AuditLog[];
+  transfer_logs: AuditLog[];
+}
+
 export interface AuditLog {
   id: number;
   user_id: number;

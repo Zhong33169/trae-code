@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/go-chi/chi/v5"
+
 	"prescription-transfer/internal/service"
 	"prescription-transfer/internal/util"
 )
@@ -48,4 +50,24 @@ func (h *AuditHandler) List(w http.ResponseWriter, r *http.Request) {
 		List:       items,
 		Pagination: util.CalcPagination(total, page, pageSize),
 	})
+}
+
+func (h *AuditHandler) GetByBatchNo(w http.ResponseWriter, r *http.Request) {
+	batchNo := chi.URLParam(r, "batch_no")
+	if batchNo == "" {
+		util.RespondError(w, http.StatusBadRequest, "批次号不能为空")
+		return
+	}
+
+	result, err := h.service.GetByBatchNo(batchNo)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			util.RespondError(w, http.StatusNotFound, "批次不存在")
+			return
+		}
+		util.RespondError(w, http.StatusInternalServerError, "查询失败")
+		return
+	}
+
+	util.RespondJSON(w, http.StatusOK, result)
 }
