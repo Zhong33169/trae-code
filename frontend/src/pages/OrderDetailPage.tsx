@@ -60,8 +60,18 @@ export function OrderDetailPage() {
   const handleApiError = (e: any) => {
     const details = e.details || {};
     const blocks: BlockReason[] = details.blockReasons || [];
-    if (order && blocks.length > 0) {
-      setOrder({ ...order, blockReasons: blocks });
+    if (order) {
+      const updated = { ...order };
+      if (blocks.length > 0) {
+        updated.blockReasons = blocks;
+      }
+      if (details.nextAction) {
+        updated.nextAction = details.nextAction;
+      }
+      if (details.version && details.version > 0) {
+        updated.version = details.version;
+      }
+      setOrder(updated);
     }
     const msg = details.error || e.message || '操作失败';
     const step = details.nextStep || details.nextAction || '';

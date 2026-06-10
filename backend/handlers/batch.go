@@ -67,6 +67,7 @@ func BatchSubmitOrders(c *fiber.Ctx) error {
 			continue
 		}
 		item.OrderNo = order.OrderNo
+		item.Version = order.Version
 
 		if order.RegistrarID != user.ID {
 			item.Success = false
@@ -164,6 +165,7 @@ func BatchSupervisorProcess(c *fiber.Ctx) error {
 			continue
 		}
 		item.OrderNo = order.OrderNo
+		item.Version = order.Version
 
 		if i < len(req.Versions) && order.Version != req.Versions[i] {
 			item.Success = false
@@ -266,6 +268,7 @@ func BatchReviewerProcess(c *fiber.Ctx) error {
 			continue
 		}
 		item.OrderNo = order.OrderNo
+		item.Version = order.Version
 
 		if i < len(req.Versions) && order.Version != req.Versions[i] {
 			item.Success = false

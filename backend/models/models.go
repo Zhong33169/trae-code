@@ -138,6 +138,7 @@ type BatchResultItem struct {
 	Reason        string        `json:"reason"`
 	NextStep      string        `json:"nextStep"`
 	BlockReasons  []BlockReason `json:"blockReasons,omitempty"`
+	Version       int           `json:"version"`
 }
 
 type BatchResult struct {

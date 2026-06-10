@@ -105,6 +105,7 @@ export interface BatchResultItem {
   reason: string;
   nextStep: string;
   blockReasons?: BlockReason[];
+  version: number;
 }
 
 export interface BatchResult {

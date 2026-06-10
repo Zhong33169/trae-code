@@ -756,6 +756,7 @@ func UpdateListingInventory(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(result)
+}
 
 func UpdateMaterials(c *fiber.Ctx) error {
 	user := middleware.GetCurrentUser(c)

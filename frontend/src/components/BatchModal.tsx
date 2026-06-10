@@ -347,6 +347,11 @@ export function BatchModal({ mode, orders, onClose, onSuccess }: BatchModalProps
                               <span style={{ color: '#096dd9' }}>{item.nextStep}</span>
                             </div>
                           )}
+                          {item.version > 0 && (
+                            <div style={{ fontSize: '11px', color: '#999', marginTop: '4px' }}>
+                              当前版本：v{item.version}
+                            </div>
+                          )}
                           {expanded && hasBlocks && (
                             <div style={{ marginTop: '8px' }}>
                               {renderBlockReasons(item.blockReasons)}
