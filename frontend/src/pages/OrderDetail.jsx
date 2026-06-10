@@ -115,8 +115,14 @@ export default function OrderDetail() {
     }
   }
 
+  const isCurrentHandler = () => {
+    if (!order || !user) return false
+    return order.current_handler_role === user.role
+  }
+
   const getAvailableTransitions = () => {
     if (!order || !user) return []
+    if (!isCurrentHandler()) return []
 
     const transitions = {
       ticket_specialist: {
@@ -138,6 +144,7 @@ export default function OrderDetail() {
     if (!order || !user) return false
     if (order.status === 'archived') return false
     if (order.status === 'appeal_pending') return false
+    if (!isCurrentHandler()) return false
 
     const appealSubmitterRoles = {
       pending_verification: 'ticket_specialist',
@@ -151,6 +158,7 @@ export default function OrderDetail() {
   const canHandleAppeal = () => {
     if (!order || !user) return false
     if (order.status !== 'appeal_pending') return false
+    if (!isCurrentHandler()) return false
     return user.role === 'scenic_manager'
   }
 
@@ -165,6 +173,7 @@ export default function OrderDetail() {
     const appeal = getCurrentAppeal()
     if (!appeal || !user) return false
     if (appeal.status !== 'rejected_correction') return false
+    if (!isCurrentHandler()) return false
     return appeal.submitter_role === user.role
   }
 
@@ -565,6 +574,12 @@ export default function OrderDetail() {
             <div className="card-header">操作面板</div>
             <div className="card-body">
               <div className="action-panel">
+                {!isCurrentHandler() && (
+                  <div className="alert alert-warning" style={{ marginBottom: '12px' }}>
+                    当前处理岗位为「{roleNameMap[order.current_handler_role] || order.current_handler_role}」，您的角色「{user?.role_name || roleNameMap[user?.role]}」无权操作此预约单
+                  </div>
+                )}
+
                 {availableTransitions.length > 0 && (
                   <div className="action-buttons">
                     {availableTransitions.map((target) => {

@@ -26,6 +26,12 @@ const evidenceNameMap = {
   settlement_note: '结算单'
 }
 
+const roleNameMap = {
+  ticket_specialist: '票务专员',
+  site_dispatcher: '现场调度',
+  scenic_manager: '景区经理'
+}
+
 export default function Queue() {
   const { user } = useAuth()
   const navigate = useNavigate()
@@ -202,7 +208,8 @@ export default function Queue() {
                         )}
                       </div>
                       <div className="order-card-meta">
-                        {getDaysLabel(order.visit_date)}
+                        <span>处理：{roleNameMap[order.current_handler_role] || order.current_handler_role}</span>
+                        <span style={{ marginLeft: '8px' }}>{getDaysLabel(order.visit_date)}</span>
                       </div>
                     </div>
                   </div>

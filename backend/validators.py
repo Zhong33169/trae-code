@@ -1,5 +1,5 @@
 import json
-from models import db, OrderLog
+from models import db, OrderLog, AppealLog
 from config import Config
 
 
@@ -63,7 +63,20 @@ def validate_version(order, submitted_version):
         )
 
 
+def validate_handler_role(order, user):
+    if order.current_handler_role and user.role != order.current_handler_role:
+        user_role_name = Config.ROLE_NAMES.get(user.role, user.role)
+        handler_role_name = Config.ROLE_NAMES.get(order.current_handler_role, order.current_handler_role)
+        raise ValidationError(
+            f'当前处理岗位为「{handler_role_name}」，您的角色「{user_role_name}」无权操作此预约单',
+            error_code=403,
+            audit_note=f'处理岗位校验失败：{user_role_name}({user.name})尝试操作，但当前处理岗位为{handler_role_name}，权限不足，订单状态和证据保持不变'
+        )
+
+
 def validate_role_transition(order, target_status, user):
+    validate_handler_role(order, user)
+
     role = user.role
     transitions = Config.STATUS_TRANSITIONS.get(role, {})
     allowed_targets = transitions.get(order.status, [])
@@ -97,6 +110,8 @@ def validate_evidence(order, target_status):
 
 
 def validate_appeal_submission(order, user):
+    validate_handler_role(order, user)
+
     if order.status == 'appeal_pending':
         raise ValidationError(
             '该预约单已有申诉正在处理中',
@@ -161,14 +176,31 @@ def validate_appeal_resubmit(appeal, user):
         )
 
 
-def handle_validation_failure(order, user, action, err):
+def handle_validation_failure(order, user, action, err, appeal=None):
     add_order_log(
         order, f'{action}失败', user,
         order.status, order.status,
         remark=str(err),
         audit_note=err.audit_note
     )
+    if appeal:
+        add_appeal_log_on_failure(appeal, action, user, err)
     db.session.commit()
+
+
+def add_appeal_log_on_failure(appeal, action, user, err):
+    log = AppealLog(
+        appeal_id=appeal.id,
+        action=f'{action}失败',
+        operator_id=user.id if user else None,
+        operator_name=user.name if user else None,
+        operator_role=user.role if user else None,
+        from_status=appeal.status,
+        to_status=appeal.status,
+        remark=f'{err} | 审计备注：{err.audit_note}' if err.audit_note else str(err)
+    )
+    db.session.add(log)
+    return log
 
 
 def validate_order_transition(order, target_status, user, submitted_version):

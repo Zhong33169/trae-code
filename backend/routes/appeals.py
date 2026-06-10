@@ -5,7 +5,7 @@ from validators import (
     validate_version, validate_appeal_submission,
     validate_appeal_review, validate_appeal_resubmit,
     handle_validation_failure, ValidationError,
-    add_order_log, get_next_handler_role
+    add_order_log, get_next_handler_role, validate_handler_role
 )
 
 appeals_bp = Blueprint('appeals', __name__, url_prefix='/api/appeals')
@@ -139,17 +139,20 @@ def accept_appeal(appeal_id):
     if not appeal:
         return jsonify({'error': '申诉不存在'}), 404
 
+    order = TeamOrder.query.get(appeal.order_id)
+
     data = request.get_json() or {}
     review_opinion = data.get('review_opinion', '')
     version = data.get('version')
 
     try:
         validate_version(appeal, version)
+        if order:
+            validate_handler_role(order, user)
         validate_appeal_review(appeal, user, ['submitted', 'resubmitted'], '受理申诉')
     except ValidationError as err:
-        order = TeamOrder.query.get(appeal.order_id)
         if order:
-            handle_validation_failure(order, user, '申诉受理', err)
+            handle_validation_failure(order, user, '申诉受理', err, appeal=appeal)
         return jsonify({'error': str(err), 'current_version': appeal.version}), err.error_code
 
     from_status = appeal.status
@@ -165,7 +168,6 @@ def accept_appeal(appeal_id):
         f'复核意见：{review_opinion}' if review_opinion else ''
     )
 
-    order = TeamOrder.query.get(appeal.order_id)
     if order:
         add_order_log(
             order, '申诉已受理', user,
@@ -191,6 +193,8 @@ def reject_appeal(appeal_id):
     if not appeal:
         return jsonify({'error': '申诉不存在'}), 404
 
+    order = TeamOrder.query.get(appeal.order_id)
+
     data = request.get_json() or {}
     reject_reason = data.get('reject_reason', '')
     version = data.get('version')
@@ -200,11 +204,12 @@ def reject_appeal(appeal_id):
 
     try:
         validate_version(appeal, version)
+        if order:
+            validate_handler_role(order, user)
         validate_appeal_review(appeal, user, ['submitted', 'accepted', 'resubmitted'], '驳回补正')
     except ValidationError as err:
-        order = TeamOrder.query.get(appeal.order_id)
         if order:
-            handle_validation_failure(order, user, '申诉驳回补正', err)
+            handle_validation_failure(order, user, '申诉驳回补正', err, appeal=appeal)
         return jsonify({'error': str(err), 'current_version': appeal.version}), err.error_code
 
     from_status = appeal.status
@@ -220,7 +225,6 @@ def reject_appeal(appeal_id):
         f'驳回原因：{reject_reason}'
     )
 
-    order = TeamOrder.query.get(appeal.order_id)
     if order:
         add_order_log(
             order, '申诉驳回补正', user,
@@ -246,6 +250,8 @@ def resubmit_appeal(appeal_id):
     if not appeal:
         return jsonify({'error': '申诉不存在'}), 404
 
+    order = TeamOrder.query.get(appeal.order_id)
+
     data = request.get_json() or {}
     reason = data.get('reason', '')
     version = data.get('version')
@@ -255,11 +261,12 @@ def resubmit_appeal(appeal_id):
 
     try:
         validate_version(appeal, version)
+        if order:
+            validate_handler_role(order, user)
         validate_appeal_resubmit(appeal, user)
     except ValidationError as err:
-        order = TeamOrder.query.get(appeal.order_id)
         if order:
-            handle_validation_failure(order, user, '申诉再次提交', err)
+            handle_validation_failure(order, user, '申诉再次提交', err, appeal=appeal)
         return jsonify({'error': str(err), 'current_version': appeal.version}), err.error_code
 
     from_status = appeal.status
@@ -274,7 +281,6 @@ def resubmit_appeal(appeal_id):
         f'补充理由：{reason}'
     )
 
-    order = TeamOrder.query.get(appeal.order_id)
     if order:
         add_order_log(
             order, '申诉再次提交', user,
@@ -300,6 +306,8 @@ def approve_appeal(appeal_id):
     if not appeal:
         return jsonify({'error': '申诉不存在'}), 404
 
+    order = TeamOrder.query.get(appeal.order_id)
+
     data = request.get_json() or {}
     review_opinion = data.get('review_opinion', '')
     target_order_status = data.get('target_order_status')
@@ -314,11 +322,12 @@ def approve_appeal(appeal_id):
 
     try:
         validate_version(appeal, version)
+        if order:
+            validate_handler_role(order, user)
         validate_appeal_review(appeal, user, ['submitted', 'accepted', 'resubmitted'], '审批通过申诉')
     except ValidationError as err:
-        order = TeamOrder.query.get(appeal.order_id)
         if order:
-            handle_validation_failure(order, user, '申诉审批', err)
+            handle_validation_failure(order, user, '申诉审批', err, appeal=appeal)
         return jsonify({'error': str(err), 'current_version': appeal.version}), err.error_code
 
     from_status = appeal.status
@@ -334,7 +343,6 @@ def approve_appeal(appeal_id):
         f'复核意见：{review_opinion}，预约单回到：{Config.ORDER_STATUS_NAMES.get(target_order_status, target_order_status)}'
     )
 
-    order = TeamOrder.query.get(appeal.order_id)
     if order:
         order_from = order.status
         order.status = target_order_status
@@ -366,6 +374,8 @@ def deny_appeal(appeal_id):
     if not appeal:
         return jsonify({'error': '申诉不存在'}), 404
 
+    order = TeamOrder.query.get(appeal.order_id)
+
     data = request.get_json() or {}
     reject_reason = data.get('reject_reason', '')
     version = data.get('version')
@@ -375,11 +385,12 @@ def deny_appeal(appeal_id):
 
     try:
         validate_version(appeal, version)
+        if order:
+            validate_handler_role(order, user)
         validate_appeal_review(appeal, user, ['submitted', 'accepted', 'resubmitted'], '驳回申诉')
     except ValidationError as err:
-        order = TeamOrder.query.get(appeal.order_id)
         if order:
-            handle_validation_failure(order, user, '申诉驳回', err)
+            handle_validation_failure(order, user, '申诉驳回', err, appeal=appeal)
         return jsonify({'error': str(err), 'current_version': appeal.version}), err.error_code
 
     from_status = appeal.status
@@ -395,7 +406,6 @@ def deny_appeal(appeal_id):
         f'驳回原因：{reject_reason}'
     )
 
-    order = TeamOrder.query.get(appeal.order_id)
     if order:
         order_from = order.status
         order.status = appeal.original_status
