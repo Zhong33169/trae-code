@@ -121,9 +121,17 @@ async def seed_service_orders(db):
             "status": "draft",
             "current_handler": "registrar1",
             "register_by": "registrar1",
-            "version": 0,
+            "time_limit_hours": 24,
+            "version": 2,
+            "register_opinion": "学生因病请假，申请补下周同一时段课程",
             "materials": [
-                ("document", "补课申请单", None, "registrar1"),
+                ("application", "补课申请单", None, "registrar1"),
+                ("certificate", "医院诊断证明", None, "registrar1"),
+            ],
+            "audit_logs": [
+                ("create", "registrar1", "registrar", None, "draft", "创建补课服务单（v0）"),
+                ("add_material", "registrar1", "registrar", "draft", "draft", "添加材料：补课申请单（v0→v1）"),
+                ("add_material", "registrar1", "registrar", "draft", "draft", "添加材料：医院诊断证明（v1→v2）"),
             ]
         },
         {
@@ -137,13 +145,22 @@ async def seed_service_orders(db):
             "current_handler": None,
             "register_by": "registrar1",
             "register_time": "2026-06-08 10:00:00",
-            "register_opinion": "材料齐全，申请试听",
+            "register_opinion": "新生预约试听英语基础班，家长已确认时间",
             "material_complete": 1,
-            "version": 1,
+            "time_limit_hours": 48,
+            "version": 4,
             "materials": [
-                ("document", "试听申请单", None, "registrar1"),
+                ("application", "试听申请单", None, "registrar1"),
                 ("document", "学员信息表", None, "registrar1"),
-                ("document", "课程安排", None, "registrar1"),
+                ("schedule", "课程安排", None, "registrar1"),
+                ("certificate", "家长知情同意书", None, "registrar1"),
+            ],
+            "audit_logs": [
+                ("create", "registrar1", "registrar", None, "draft", "创建试听服务单（v0）"),
+                ("add_material", "registrar1", "registrar", "draft", "draft", "添加材料：试听申请单（v0→v1）"),
+                ("add_material", "registrar1", "registrar", "draft", "draft", "添加材料：学员信息表（v1→v2）"),
+                ("add_material", "registrar1", "registrar", "draft", "draft", "添加材料：课程安排（v2→v3）"),
+                ("submit", "registrar1", "registrar", "draft", "pending_review", "材料齐全，提交审核。时限48小时（v3→v4）"),
             ]
         },
         {
@@ -159,14 +176,25 @@ async def seed_service_orders(db):
             "reviewer_by": "reviewer1",
             "register_time": "2026-06-07 09:00:00",
             "review_time": "2026-06-08 14:00:00",
-            "register_opinion": "家长申请退课",
-            "review_opinion": "情况属实，同意退课",
+            "register_opinion": "家长因学生升学压力大，申请退还剩余课程费用",
+            "review_opinion": "情况属实，按协议扣除已上课时费后退还。审核时限24小时，实际耗时5小时",
             "material_complete": 1,
-            "version": 2,
+            "time_limit_hours": 24,
+            "version": 6,
             "materials": [
-                ("document", "退课申请单", None, "registrar1"),
-                ("document", "缴费凭证", None, "registrar1"),
+                ("application", "退课申请单", None, "registrar1"),
+                ("certificate", "缴费凭证", None, "registrar1"),
                 ("document", "学员档案", None, "registrar1"),
+                ("certificate", "家长身份证复印件", None, "registrar1"),
+            ],
+            "audit_logs": [
+                ("create", "registrar1", "registrar", None, "draft", "创建退课服务单（v0）"),
+                ("add_material", "registrar1", "registrar", "draft", "draft", "添加材料：退课申请单（v0→v1）"),
+                ("add_material", "registrar1", "registrar", "draft", "draft", "添加材料：缴费凭证（v1→v2）"),
+                ("add_material", "registrar1", "registrar", "draft", "draft", "添加材料：学员档案（v2→v3）"),
+                ("submit", "registrar1", "registrar", "draft", "pending_review", "提交审核（v3→v4）"),
+                ("review_pass", "reviewer1", "reviewer", "pending_review", "pending_finalize", "审核通过，同意退课（v4→v5）"),
+                ("add_material", "reviewer1", "reviewer", "pending_finalize", "pending_finalize", "补充材料：家长身份证复印件（v5→v6）"),
             ]
         },
         {
@@ -184,23 +212,36 @@ async def seed_service_orders(db):
             "register_time": "2026-06-05 08:00:00",
             "review_time": "2026-06-06 10:00:00",
             "finalize_time": "2026-06-07 16:00:00",
-            "register_opinion": "申请转班",
-            "review_opinion": "同意转班",
-            "finalize_opinion": "复核通过",
+            "register_opinion": "学生程度较好，申请从基础班转入提高班",
+            "review_opinion": "经测评确认学生水平达标，同意转班",
+            "finalize_opinion": "复核通过，已通知学员下周起进入新班上课",
             "material_complete": 1,
-            "version": 3,
+            "time_limit_hours": 72,
+            "version": 8,
             "materials": [
-                ("document", "转课申请单", None, "registrar1"),
-                ("document", "原课程证明", None, "registrar1"),
-                ("document", "新课程排班", None, "registrar1"),
+                ("application", "转课申请单", None, "registrar1"),
+                ("certificate", "原课程证明", None, "registrar1"),
+                ("schedule", "新课程排班", None, "registrar1"),
+                ("certificate", "水平测试成绩单", None, "reviewer1"),
             ],
             "feedback": {
                 "attendance": "attended",
                 "performance": "good",
                 "homework": "completed",
-                "teacher_comment": "学生表现良好，适应新环境",
+                "teacher_comment": "学生表现良好，适应新环境，能跟上课程进度",
                 "feedback_by": "reviewer1",
-            }
+            },
+            "audit_logs": [
+                ("create", "registrar1", "registrar", None, "draft", "创建转班服务单（v0）"),
+                ("add_material", "registrar1", "registrar", "draft", "draft", "添加材料：转课申请单（v0→v1）"),
+                ("add_material", "registrar1", "registrar", "draft", "draft", "添加材料：原课程证明（v1→v2）"),
+                ("add_material", "registrar1", "registrar", "draft", "draft", "添加材料：新课程排班（v2→v3）"),
+                ("submit", "registrar1", "registrar", "draft", "pending_review", "提交审核（v3→v4）"),
+                ("review_pass", "reviewer1", "reviewer", "pending_review", "pending_finalize", "审核通过，附水平测试成绩单（v4→v5）"),
+                ("add_material", "reviewer1", "reviewer", "pending_finalize", "pending_finalize", "补充材料：水平测试成绩单（v5→v6）"),
+                ("finalize_pass", "finalizer1", "finalizer", "pending_finalize", "completed", "复核通过，服务单完成（v6→v7）"),
+                ("add_feedback", "reviewer1", "reviewer", "completed", "completed", "录入课后反馈，学生表现良好（v7→v8）"),
+            ]
         },
         {
             "order_no": "SO202606090005",
@@ -215,12 +256,46 @@ async def seed_service_orders(db):
             "reviewer_by": "reviewer1",
             "register_time": "2026-06-08 11:00:00",
             "review_time": "2026-06-08 15:00:00",
-            "register_opinion": "申请补课",
-            "review_opinion": "材料不全，缺少原课程考勤记录",
+            "register_opinion": "学生请假申请补课，已初步核实",
+            "review_opinion": "材料不全，缺少原课程考勤记录。请补充后重新提交",
             "material_complete": 0,
-            "version": 2,
+            "time_limit_hours": 24,
+            "version": 3,
             "materials": [
-                ("document", "补课申请单", None, "registrar1"),
+                ("application", "补课申请单", None, "registrar1"),
+            ],
+            "audit_logs": [
+                ("create", "registrar1", "registrar", None, "draft", "创建补课服务单（v0）"),
+                ("add_material", "registrar1", "registrar", "draft", "draft", "添加材料：补课申请单（v0→v1）"),
+                ("submit", "registrar1", "registrar", "draft", "pending_review", "提交审核（v1→v2）"),
+                ("review_reject", "reviewer1", "reviewer", "pending_review", "returned", "审核退回：材料不全，缺少考勤记录（v2→v3）"),
+            ]
+        },
+        {
+            "order_no": "SO202606090006",
+            "qr_code": "QRF6G7H8I9J0K1L2",
+            "student_id": 2,
+            "course_id": 1,
+            "schedule_id": 3,
+            "service_type": "makeup_class",
+            "status": "draft",
+            "current_handler": "registrar1",
+            "register_by": "registrar1",
+            "time_limit_hours": 24,
+            "version": 4,
+            "register_opinion": "并发冲突演示单：登记员与审核主管同时操作",
+            "materials": [
+                ("application", "补课申请单", None, "registrar1"),
+                ("certificate", "请假证明", None, "registrar1"),
+                ("document", "原课程考勤记录", None, "registrar1"),
+            ],
+            "audit_logs": [
+                ("create", "registrar1", "registrar", None, "draft", "创建服务单（v0）"),
+                ("add_material", "registrar1", "registrar", "draft", "draft", "添加材料：补课申请单（v0→v1）"),
+                ("add_material", "registrar1", "registrar", "draft", "draft", "添加材料：请假证明（v1→v2）"),
+                ("add_material", "registrar1", "registrar", "draft", "draft", "添加材料：原课程考勤记录（v2→v3）"),
+                ("version_conflict_note", "system", "system", "draft", "draft", "【演示】并发冲突场景：两用户同时基于 v2 提交，后提交者返回 409，材料未写入，版本未变更（v3→v4 为正常操作递增）"),
+                ("submit_attempt", "registrar1", "registrar", "draft", "draft", "【演示】尝试基于 v2 提交审核，检测到版本冲突（当前 v3），返回 409，请刷新后重试"),
             ]
         },
     ]
@@ -228,6 +303,7 @@ async def seed_service_orders(db):
     for order_data in orders:
         materials = order_data.pop("materials", [])
         feedback = order_data.pop("feedback", None)
+        audit_logs = order_data.pop("audit_logs", [])
         
         columns = list(order_data.keys())
         placeholders = ", ".join(["?"] * len(columns))
@@ -254,73 +330,9 @@ async def seed_service_orders(db):
                  feedback["homework"], feedback["teacher_comment"], feedback["feedback_by"])
             )
         
-        if order_data["status"] == "completed":
+        for action, operator, operator_role, from_status, to_status, remark in audit_logs:
             await db.execute(
                 """INSERT INTO audit_logs (order_id, action, operator, operator_role, from_status, to_status, remark)
-                   VALUES (?, 'create', ?, 'registrar', NULL, 'draft', '创建服务单')""",
-                (order_id, order_data["register_by"])
-            )
-            await db.execute(
-                """INSERT INTO audit_logs (order_id, action, operator, operator_role, from_status, to_status, remark)
-                   VALUES (?, 'submit', ?, 'registrar', 'draft', 'pending_review', ?)""",
-                (order_id, order_data["register_by"], order_data.get("register_opinion", ""))
-            )
-            await db.execute(
-                """INSERT INTO audit_logs (order_id, action, operator, operator_role, from_status, to_status, remark)
-                   VALUES (?, 'review_pass', ?, 'reviewer', 'pending_review', 'pending_finalize', ?)""",
-                (order_id, order_data["reviewer_by"], order_data.get("review_opinion", ""))
-            )
-            await db.execute(
-                """INSERT INTO audit_logs (order_id, action, operator, operator_role, from_status, to_status, remark)
-                   VALUES (?, 'finalize_pass', ?, 'finalizer', 'pending_finalize', 'completed', ?)""",
-                (order_id, order_data["finalizer_by"], order_data.get("finalize_opinion", ""))
-            )
-        elif order_data["status"] == "pending_finalize":
-            await db.execute(
-                """INSERT INTO audit_logs (order_id, action, operator, operator_role, from_status, to_status, remark)
-                   VALUES (?, 'create', ?, 'registrar', NULL, 'draft', '创建服务单')""",
-                (order_id, order_data["register_by"])
-            )
-            await db.execute(
-                """INSERT INTO audit_logs (order_id, action, operator, operator_role, from_status, to_status, remark)
-                   VALUES (?, 'submit', ?, 'registrar', 'draft', 'pending_review', ?)""",
-                (order_id, order_data["register_by"], order_data.get("register_opinion", ""))
-            )
-            await db.execute(
-                """INSERT INTO audit_logs (order_id, action, operator, operator_role, from_status, to_status, remark)
-                   VALUES (?, 'review_pass', ?, 'reviewer', 'pending_review', 'pending_finalize', ?)""",
-                (order_id, order_data["reviewer_by"], order_data.get("review_opinion", ""))
-            )
-        elif order_data["status"] == "pending_review":
-            await db.execute(
-                """INSERT INTO audit_logs (order_id, action, operator, operator_role, from_status, to_status, remark)
-                   VALUES (?, 'create', ?, 'registrar', NULL, 'draft', '创建服务单')""",
-                (order_id, order_data["register_by"])
-            )
-            await db.execute(
-                """INSERT INTO audit_logs (order_id, action, operator, operator_role, from_status, to_status, remark)
-                   VALUES (?, 'submit', ?, 'registrar', 'draft', 'pending_review', ?)""",
-                (order_id, order_data["register_by"], order_data.get("register_opinion", ""))
-            )
-        elif order_data["status"] == "returned":
-            await db.execute(
-                """INSERT INTO audit_logs (order_id, action, operator, operator_role, from_status, to_status, remark)
-                   VALUES (?, 'create', ?, 'registrar', NULL, 'draft', '创建服务单')""",
-                (order_id, order_data["register_by"])
-            )
-            await db.execute(
-                """INSERT INTO audit_logs (order_id, action, operator, operator_role, from_status, to_status, remark)
-                   VALUES (?, 'submit', ?, 'registrar', 'draft', 'pending_review', ?)""",
-                (order_id, order_data["register_by"], order_data.get("register_opinion", ""))
-            )
-            await db.execute(
-                """INSERT INTO audit_logs (order_id, action, operator, operator_role, from_status, to_status, remark)
-                   VALUES (?, 'review_reject', ?, 'reviewer', 'pending_review', 'returned', ?)""",
-                (order_id, order_data["reviewer_by"], order_data.get("review_opinion", ""))
-            )
-        else:
-            await db.execute(
-                """INSERT INTO audit_logs (order_id, action, operator, operator_role, from_status, to_status, remark)
-                   VALUES (?, 'create', ?, 'registrar', NULL, 'draft', '创建服务单')""",
-                (order_id, order_data["register_by"])
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (order_id, action, operator, operator_role, from_status, to_status, remark)
             )

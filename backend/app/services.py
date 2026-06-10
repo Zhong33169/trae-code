@@ -255,11 +255,17 @@ async def get_order_detail(db, order_id):
     
     return order_dict
 
-async def add_material(db, order_id, material_data: MaterialCreate, user):
+async def add_material(db, order_id, material_data: MaterialCreate, user, expected_version=None):
     cursor = await db.execute("SELECT * FROM service_orders WHERE id = ?", (order_id,))
     order = await cursor.fetchone()
     if not order:
         raise HTTPException(status_code=404, detail="服务单不存在")
+    
+    if expected_version is not None and order["version"] != expected_version:
+        raise HTTPException(
+            status_code=409, 
+            detail=f"并发冲突：服务单版本已更新（当前 v{order['version']}，您的版本 v{expected_version}），请刷新后重试"
+        )
     
     if order["status"] not in ["draft", "returned"]:
         raise HTTPException(status_code=400, detail=f"当前状态「{ORDER_STATUSES.get(order['status'])}」不可添加材料")
@@ -276,11 +282,11 @@ async def add_material(db, order_id, material_data: MaterialCreate, user):
         """INSERT INTO service_materials (order_id, material_type, material_name, file_url, uploaded_by)
            VALUES (?, ?, ?, ?, ?)""",
         (order_id, material_data.material_type, material_data.material_name, 
-         material_data.file_url, user["username"])
+         material_data.file_url or "", user["username"])
     )
     material_id = cursor.lastrowid
     
-    await db.execute(
+    cursor = await db.execute(
         "UPDATE service_orders SET version = version + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND version = ?",
         (order_id, current_version)
     )
@@ -288,7 +294,13 @@ async def add_material(db, order_id, material_data: MaterialCreate, user):
     cursor = await db.execute("SELECT changes() as cnt")
     result = await cursor.fetchone()
     if result["cnt"] == 0:
-        raise HTTPException(status_code=409, detail="并发冲突：服务单已被他人修改，请刷新后重试")
+        await db.rollback()
+        cursor = await db.execute("SELECT version FROM service_orders WHERE id = ?", (order_id,))
+        latest = await cursor.fetchone()
+        raise HTTPException(
+            status_code=409, 
+            detail=f"并发冲突：服务单已被他人修改（当前 v{latest['version'] if latest else '?'}），请刷新后重试"
+        )
     
     await add_audit_log(db, order_id, "add_material", user["username"], user["role"],
                        order["status"], order["status"], f"添加材料：{material_data.material_name}")
@@ -296,11 +308,17 @@ async def add_material(db, order_id, material_data: MaterialCreate, user):
     await db.commit()
     return await get_order_detail(db, order_id)
 
-async def delete_material(db, order_id, material_id, user):
+async def delete_material(db, order_id, material_id, user, expected_version=None):
     cursor = await db.execute("SELECT * FROM service_orders WHERE id = ?", (order_id,))
     order = await cursor.fetchone()
     if not order:
         raise HTTPException(status_code=404, detail="服务单不存在")
+    
+    if expected_version is not None and order["version"] != expected_version:
+        raise HTTPException(
+            status_code=409, 
+            detail=f"并发冲突：服务单版本已更新（当前 v{order['version']}，您的版本 v{expected_version}），请刷新后重试"
+        )
     
     if order["status"] not in ["draft", "returned"]:
         raise HTTPException(status_code=400, detail=f"当前状态「{ORDER_STATUSES.get(order['status'])}」不可删除材料")
@@ -314,10 +332,11 @@ async def delete_material(db, order_id, material_id, user):
         raise HTTPException(status_code=404, detail="材料不存在")
     
     current_version = order["version"]
+    material_name = material["material_name"]
     
     await db.execute("DELETE FROM service_materials WHERE id = ? AND order_id = ?", (material_id, order_id))
     
-    await db.execute(
+    cursor = await db.execute(
         "UPDATE service_orders SET version = version + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND version = ?",
         (order_id, current_version)
     )
@@ -325,10 +344,16 @@ async def delete_material(db, order_id, material_id, user):
     cursor = await db.execute("SELECT changes() as cnt")
     result = await cursor.fetchone()
     if result["cnt"] == 0:
-        raise HTTPException(status_code=409, detail="并发冲突：服务单已被他人修改，请刷新后重试")
+        await db.rollback()
+        cursor = await db.execute("SELECT version FROM service_orders WHERE id = ?", (order_id,))
+        latest = await cursor.fetchone()
+        raise HTTPException(
+            status_code=409, 
+            detail=f"并发冲突：服务单已被他人修改（当前 v{latest['version'] if latest else '?'}），请刷新后重试"
+        )
     
     await add_audit_log(db, order_id, "delete_material", user["username"], user["role"],
-                       order["status"], order["status"], f"删除材料：{material['material_name']}")
+                       order["status"], order["status"], f"删除材料：{material_name}")
     
     await db.commit()
     return await get_order_detail(db, order_id)
@@ -375,11 +400,17 @@ async def create_service_order(db, order_data: ServiceOrderCreate, user):
     await db.commit()
     return await get_order_detail(db, order_id)
 
-async def submit_for_review(db, order_id, user, opinion=None, materials=None):
+async def submit_for_review(db, order_id, user, opinion=None, materials=None, expected_version=None):
     cursor = await db.execute("SELECT * FROM service_orders WHERE id = ?", (order_id,))
     order = await cursor.fetchone()
     if not order:
         raise HTTPException(status_code=404, detail="服务单不存在")
+    
+    if expected_version is not None and order["version"] != expected_version:
+        raise HTTPException(
+            status_code=409, 
+            detail=f"并发冲突：服务单版本已更新（当前 v{order['version']}，您的版本 v{expected_version}），请刷新后重试"
+        )
     
     if order["status"] not in ["draft", "returned"]:
         raise HTTPException(status_code=400, detail=f"当前状态「{ORDER_STATUSES.get(order['status'])}」不可提交审核")
@@ -388,17 +419,19 @@ async def submit_for_review(db, order_id, user, opinion=None, materials=None):
         raise HTTPException(status_code=403, detail="只有登记人本人可以提交审核")
     
     current_version = order["version"]
+    from_status = order["status"]
     
     if materials:
         for mat in materials:
             await db.execute(
                 """INSERT INTO service_materials (order_id, material_type, material_name, file_url, uploaded_by)
                    VALUES (?, ?, ?, ?, ?)""",
-                (order_id, mat.material_type, mat.material_name, mat.file_url, user["username"])
+                (order_id, mat.material_type, mat.material_name, mat.file_url or "", user["username"])
             )
     
     missing = await get_missing_materials(db, order_id)
     if missing:
+        await db.rollback()
         raise HTTPException(
             status_code=400, 
             detail=f"材料不完整，缺少：{', '.join(missing)}"
@@ -406,7 +439,7 @@ async def submit_for_review(db, order_id, user, opinion=None, materials=None):
     
     time_info = await check_time_limit(db, order_id)
     
-    await db.execute(
+    cursor = await db.execute(
         """UPDATE service_orders 
            SET status = 'pending_review', current_handler = NULL, 
                register_opinion = ?, register_time = CURRENT_TIMESTAMP,
@@ -419,19 +452,31 @@ async def submit_for_review(db, order_id, user, opinion=None, materials=None):
     cursor = await db.execute("SELECT changes() as cnt")
     result = await cursor.fetchone()
     if result["cnt"] == 0:
-        raise HTTPException(status_code=409, detail="并发冲突：服务单已被他人修改，请刷新后重试")
+        await db.rollback()
+        cursor = await db.execute("SELECT version FROM service_orders WHERE id = ?", (order_id,))
+        latest = await cursor.fetchone()
+        raise HTTPException(
+            status_code=409, 
+            detail=f"并发冲突：服务单已被他人修改（当前 v{latest['version'] if latest else '?'}），请刷新后重试"
+        )
     
     await add_audit_log(db, order_id, "submit", user["username"], user["role"],
-                       order["status"], "pending_review", opinion or "提交审核")
+                       from_status, "pending_review", opinion or "提交审核")
     
     await db.commit()
     return await get_order_detail(db, order_id)
 
-async def review_order(db, order_id, user, approved=True, opinion=None):
+async def review_order(db, order_id, user, approved=True, opinion=None, expected_version=None):
     cursor = await db.execute("SELECT * FROM service_orders WHERE id = ?", (order_id,))
     order = await cursor.fetchone()
     if not order:
         raise HTTPException(status_code=404, detail="服务单不存在")
+    
+    if expected_version is not None and order["version"] != expected_version:
+        raise HTTPException(
+            status_code=409, 
+            detail=f"并发冲突：服务单版本已更新（当前 v{order['version']}，您的版本 v{expected_version}），请刷新后重试"
+        )
     
     if order["status"] not in ["pending_review", "reviewing"]:
         raise HTTPException(status_code=400, detail=f"当前状态「{ORDER_STATUSES.get(order['status'])}」不可审核")
@@ -444,6 +489,7 @@ async def review_order(db, order_id, user, approved=True, opinion=None):
         )
     
     current_version = order["version"]
+    from_status = order["status"]
     
     if approved:
         new_status = "pending_finalize"
@@ -456,7 +502,7 @@ async def review_order(db, order_id, user, approved=True, opinion=None):
         action = "review_reject"
         remark = opinion or "审核驳回"
     
-    await db.execute(
+    cursor = await db.execute(
         """UPDATE service_orders 
            SET status = ?, current_handler = ?, 
                reviewer_by = ?, review_opinion = ?, review_time = CURRENT_TIMESTAMP,
@@ -468,19 +514,31 @@ async def review_order(db, order_id, user, approved=True, opinion=None):
     cursor = await db.execute("SELECT changes() as cnt")
     result = await cursor.fetchone()
     if result["cnt"] == 0:
-        raise HTTPException(status_code=409, detail="并发冲突：服务单已被他人修改，请刷新后重试")
+        await db.rollback()
+        cursor = await db.execute("SELECT version FROM service_orders WHERE id = ?", (order_id,))
+        latest = await cursor.fetchone()
+        raise HTTPException(
+            status_code=409, 
+            detail=f"并发冲突：服务单已被他人修改（当前 v{latest['version'] if latest else '?'}），请刷新后重试"
+        )
     
     await add_audit_log(db, order_id, action, user["username"], user["role"],
-                       order["status"], new_status, remark)
+                       from_status, new_status, remark)
     
     await db.commit()
     return await get_order_detail(db, order_id)
 
-async def finalize_order(db, order_id, user, approved=True, opinion=None):
+async def finalize_order(db, order_id, user, approved=True, opinion=None, expected_version=None):
     cursor = await db.execute("SELECT * FROM service_orders WHERE id = ?", (order_id,))
     order = await cursor.fetchone()
     if not order:
         raise HTTPException(status_code=404, detail="服务单不存在")
+    
+    if expected_version is not None and order["version"] != expected_version:
+        raise HTTPException(
+            status_code=409, 
+            detail=f"并发冲突：服务单版本已更新（当前 v{order['version']}，您的版本 v{expected_version}），请刷新后重试"
+        )
     
     if order["status"] not in ["pending_finalize", "finalizing"]:
         raise HTTPException(status_code=400, detail=f"当前状态「{ORDER_STATUSES.get(order['status'])}」不可复核")
@@ -493,6 +551,7 @@ async def finalize_order(db, order_id, user, approved=True, opinion=None):
         )
     
     current_version = order["version"]
+    from_status = order["status"]
     
     if approved:
         cursor = await db.execute("SELECT COUNT(*) as cnt FROM feedbacks WHERE order_id = ?", (order_id,))
@@ -510,7 +569,7 @@ async def finalize_order(db, order_id, user, approved=True, opinion=None):
         action = "finalize_reject"
         remark = opinion or "复核驳回"
     
-    await db.execute(
+    cursor = await db.execute(
         """UPDATE service_orders 
            SET status = ?, current_handler = ?, 
                finalizer_by = ?, finalize_opinion = ?, finalize_time = CURRENT_TIMESTAMP,
@@ -522,19 +581,31 @@ async def finalize_order(db, order_id, user, approved=True, opinion=None):
     cursor = await db.execute("SELECT changes() as cnt")
     result = await cursor.fetchone()
     if result["cnt"] == 0:
-        raise HTTPException(status_code=409, detail="并发冲突：服务单已被他人修改，请刷新后重试")
+        await db.rollback()
+        cursor = await db.execute("SELECT version FROM service_orders WHERE id = ?", (order_id,))
+        latest = await cursor.fetchone()
+        raise HTTPException(
+            status_code=409, 
+            detail=f"并发冲突：服务单已被他人修改（当前 v{latest['version'] if latest else '?'}），请刷新后重试"
+        )
     
     await add_audit_log(db, order_id, action, user["username"], user["role"],
-                       order["status"], new_status, remark)
+                       from_status, new_status, remark)
     
     await db.commit()
     return await get_order_detail(db, order_id)
 
-async def add_feedback(db, order_id, feedback_data: FeedbackCreate, user):
+async def add_feedback(db, order_id, feedback_data: FeedbackCreate, user, expected_version=None):
     cursor = await db.execute("SELECT * FROM service_orders WHERE id = ?", (order_id,))
     order = await cursor.fetchone()
     if not order:
         raise HTTPException(status_code=404, detail="服务单不存在")
+    
+    if expected_version is not None and order["version"] != expected_version:
+        raise HTTPException(
+            status_code=409, 
+            detail=f"并发冲突：服务单版本已更新（当前 v{order['version']}，您的版本 v{expected_version}），请刷新后重试"
+        )
     
     if order["status"] not in ["pending_review", "pending_finalize", "reviewing", "finalizing"]:
         raise HTTPException(status_code=400, detail=f"当前状态「{ORDER_STATUSES.get(order['status'])}」不可添加反馈")
@@ -544,14 +615,14 @@ async def add_feedback(db, order_id, feedback_data: FeedbackCreate, user):
     
     current_version = order["version"]
     
-    await db.execute(
+    cursor = await db.execute(
         """INSERT INTO feedbacks (order_id, attendance, performance, homework, teacher_comment, feedback_time, feedback_by)
            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)""",
         (order_id, feedback_data.attendance, feedback_data.performance, 
          feedback_data.homework, feedback_data.teacher_comment, user["username"])
     )
     
-    await db.execute(
+    cursor = await db.execute(
         "UPDATE service_orders SET version = version + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND version = ?",
         (order_id, current_version)
     )
@@ -559,7 +630,13 @@ async def add_feedback(db, order_id, feedback_data: FeedbackCreate, user):
     cursor = await db.execute("SELECT changes() as cnt")
     result = await cursor.fetchone()
     if result["cnt"] == 0:
-        raise HTTPException(status_code=409, detail="并发冲突：服务单已被他人修改，请刷新后重试")
+        await db.rollback()
+        cursor = await db.execute("SELECT version FROM service_orders WHERE id = ?", (order_id,))
+        latest = await cursor.fetchone()
+        raise HTTPException(
+            status_code=409, 
+            detail=f"并发冲突：服务单已被他人修改（当前 v{latest['version'] if latest else '?'}），请刷新后重试"
+        )
     
     await add_audit_log(db, order_id, "add_feedback", user["username"], user["role"],
                        order["status"], order["status"], "添加课后反馈")
@@ -598,22 +675,40 @@ async def get_statistics(db, user):
     
     return stats
 
-async def batch_review(db, order_ids, user, approved=True, opinion=None):
-    results = {"success": [], "failed": []}
+async def batch_review(db, order_ids, user, approved=True, opinion=None, versions=None):
+    results = {"success": [], "failed": [], "skipped": []}
+    versions = versions or {}
     for oid in order_ids:
         try:
-            result = await review_order(db, oid, user, approved, opinion)
+            expected_version = versions.get(str(oid)) or versions.get(oid)
+            result = await review_order(db, oid, user, approved, opinion, expected_version)
             results["success"].append(oid)
+        except HTTPException as e:
+            if e.status_code == 409:
+                results["failed"].append({"id": oid, "error": e.detail, "error_code": "VERSION_CONFLICT"})
+            elif e.status_code == 400:
+                results["skipped"].append({"id": oid, "error": e.detail, "error_code": "STATUS_MISMATCH"})
+            else:
+                results["failed"].append({"id": oid, "error": e.detail, "error_code": str(e.status_code)})
         except Exception as e:
-            results["failed"].append({"id": oid, "error": str(e)})
+            results["failed"].append({"id": oid, "error": str(e), "error_code": "UNKNOWN"})
     return results
 
-async def batch_finalize(db, order_ids, user, approved=True, opinion=None):
-    results = {"success": [], "failed": []}
+async def batch_finalize(db, order_ids, user, approved=True, opinion=None, versions=None):
+    results = {"success": [], "failed": [], "skipped": []}
+    versions = versions or {}
     for oid in order_ids:
         try:
-            result = await finalize_order(db, oid, user, approved, opinion)
+            expected_version = versions.get(str(oid)) or versions.get(oid)
+            result = await finalize_order(db, oid, user, approved, opinion, expected_version)
             results["success"].append(oid)
+        except HTTPException as e:
+            if e.status_code == 409:
+                results["failed"].append({"id": oid, "error": e.detail, "error_code": "VERSION_CONFLICT"})
+            elif e.status_code == 400:
+                results["skipped"].append({"id": oid, "error": e.detail, "error_code": "STATUS_MISMATCH"})
+            else:
+                results["failed"].append({"id": oid, "error": e.detail, "error_code": str(e.status_code)})
         except Exception as e:
-            results["failed"].append({"id": oid, "error": str(e)})
+            results["failed"].append({"id": oid, "error": str(e), "error_code": "UNKNOWN"})
     return results

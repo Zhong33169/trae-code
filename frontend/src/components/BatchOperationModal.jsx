@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import api from '../api';
 
-function BatchOperationModal({ visible, onClose, selectedIds, role, onSuccess }) {
+function BatchOperationModal({ visible, onClose, selectedIds, versions, role, onSuccess }) {
   const [opinion, setOpinion] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState(null);
@@ -22,22 +22,17 @@ function BatchOperationModal({ visible, onClose, selectedIds, role, onSuccess })
     try {
       const res = await api.post(endpoint, {
         order_ids: selectedIds,
+        versions: versions,
         approved,
         opinion,
       });
       setResult(res.data);
       if (res.data.failed.length === 0) {
         setTimeout(() => {
-          onSuccess && onSuccess({
-            success_count: res.data.success.length,
-            skipped_count: res.data.failed.length,
-          });
+          onSuccess && onSuccess(res.data);
         }, 1500);
       } else {
-        onSuccess && onSuccess({
-          success_count: res.data.success.length,
-          skipped_count: res.data.failed.length,
-        });
+        onSuccess && onSuccess(res.data);
       }
     } catch (err) {
       alert(err.response?.data?.detail || '操作失败');
@@ -69,19 +64,34 @@ function BatchOperationModal({ visible, onClose, selectedIds, role, onSuccess })
           </div>
 
           {result && (
-            <div>
-              {result.success.length > 0 && (
-                <div className="alert alert-success">
+            <div style={{ marginBottom: '16px' }}>
+              {result.success && result.success.length > 0 && (
+                <div className="alert alert-success" style={{ marginBottom: '8px' }}>
                   ✅ 成功 {result.success.length} 条
                 </div>
               )}
-              {result.failed.length > 0 && (
+              {result.skipped && result.skipped.length > 0 && (
+                <div className="alert alert-warning" style={{ marginBottom: '8px' }}>
+                  ⚠️ 跳过 {result.skipped.length} 条
+                  <ul style={{ marginTop: '8px', paddingLeft: '20px' }}>
+                    {result.skipped.map((f, i) => (
+                      <li key={i} style={{ fontSize: '12px' }}>
+                        ID {f.id}: {f.error}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {result.failed && result.failed.length > 0 && (
                 <div className="alert alert-error">
                   ❌ 失败 {result.failed.length} 条
                   <ul style={{ marginTop: '8px', paddingLeft: '20px' }}>
                     {result.failed.map((f, i) => (
                       <li key={i} style={{ fontSize: '12px' }}>
                         ID {f.id}: {f.error}
+                        {f.error_code === 'VERSION_CONFLICT' && 
+                          <span style={{ color: '#ff4d4f' }}>（版本冲突，请刷新后重试）</span>
+                        }
                       </li>
                     ))}
                   </ul>
@@ -91,7 +101,7 @@ function BatchOperationModal({ visible, onClose, selectedIds, role, onSuccess })
           )}
 
           <div style={{ color: '#888', fontSize: '13px', marginTop: '12px' }}>
-            ⚠️ 只有状态匹配的服务单才会被处理，状态不对或材料不全的会跳过
+            ⚠️ 只有状态匹配且版本一致的服务单才会被处理，状态不对、材料不全或版本冲突的会跳过
           </div>
         </div>
         <div className="modal-footer">

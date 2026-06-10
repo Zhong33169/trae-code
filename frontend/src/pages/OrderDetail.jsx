@@ -96,12 +96,21 @@ function OrderDetail() {
   const handleSubmit = async () => {
     setProcessing(true);
     try {
-      const res = await api.post(`/orders/${id}/submit`, { opinion, materials: [] });
+      const res = await api.post(`/orders/${id}/submit`, { 
+        opinion, 
+        materials: [],
+        version: order.version
+      });
       setOrder(res.data);
       setOpinion('');
       showToast('success', '提交审核成功！');
     } catch (err) {
-      showToast('error', err.response?.data?.detail || '操作失败');
+      const detail = err.response?.data?.detail || '操作失败';
+      if (err.response?.status === 409) {
+        showToast('error', `并发冲突：${detail}（保留输入，请刷新后重试）`);
+      } else {
+        showToast('error', detail);
+      }
     } finally {
       setProcessing(false);
     }
@@ -110,12 +119,21 @@ function OrderDetail() {
   const handleReview = async (approved) => {
     setProcessing(true);
     try {
-      const res = await api.post(`/orders/${id}/review`, { approved, opinion });
+      const res = await api.post(`/orders/${id}/review`, { 
+        approved, 
+        opinion,
+        version: order.version
+      });
       setOrder(res.data);
       setOpinion('');
       showToast('success', approved ? '审核通过成功！' : '已驳回');
     } catch (err) {
-      showToast('error', err.response?.data?.detail || '操作失败');
+      const detail = err.response?.data?.detail || '操作失败';
+      if (err.response?.status === 409) {
+        showToast('error', `并发冲突：${detail}（保留输入，请刷新后重试）`);
+      } else {
+        showToast('error', detail);
+      }
     } finally {
       setProcessing(false);
     }
@@ -124,12 +142,21 @@ function OrderDetail() {
   const handleFinalize = async (approved) => {
     setProcessing(true);
     try {
-      const res = await api.post(`/orders/${id}/finalize`, { approved, opinion });
+      const res = await api.post(`/orders/${id}/finalize`, { 
+        approved, 
+        opinion,
+        version: order.version
+      });
       setOrder(res.data);
       setOpinion('');
       showToast('success', approved ? '复核归档成功！' : '已驳回');
     } catch (err) {
-      showToast('error', err.response?.data?.detail || '操作失败');
+      const detail = err.response?.data?.detail || '操作失败';
+      if (err.response?.status === 409) {
+        showToast('error', `并发冲突：${detail}（保留输入，请刷新后重试）`);
+      } else {
+        showToast('error', detail);
+      }
     } finally {
       setProcessing(false);
     }
@@ -138,11 +165,16 @@ function OrderDetail() {
   const handleDeleteMaterial = async (materialId) => {
     if (!confirm('确定要删除这份材料吗？')) return;
     try {
-      const res = await api.delete(`/orders/${id}/materials/${materialId}`);
+      const res = await api.delete(`/orders/${id}/materials/${materialId}?version=${order.version}`);
       setOrder(res.data);
       showToast('success', '材料已删除');
     } catch (err) {
-      showToast('error', err.response?.data?.detail || '删除失败');
+      const detail = err.response?.data?.detail || '删除失败';
+      if (err.response?.status === 409) {
+        showToast('error', `并发冲突：${detail}（请刷新后重试）`);
+      } else {
+        showToast('error', detail);
+      }
     }
   };
 
@@ -625,6 +657,7 @@ function OrderDetail() {
           visible={addMaterialVisible}
           onClose={() => setAddMaterialVisible(false)}
           orderId={order.id}
+          version={order.version}
           onSuccess={handleMaterialAdded}
         />
       )}
@@ -634,6 +667,7 @@ function OrderDetail() {
           visible={feedbackVisible}
           onClose={() => setFeedbackVisible(false)}
           orderId={order.id}
+          version={order.version}
           onSuccess={handleFeedbackSubmitted}
         />
       )}

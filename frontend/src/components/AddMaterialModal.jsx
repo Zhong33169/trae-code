@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import api from '../api';
 
 const materialTypes = [
@@ -9,10 +9,19 @@ const materialTypes = [
   { value: 'other', label: '其他材料' },
 ];
 
-function AddMaterialModal({ visible, onClose, orderId, onSuccess }) {
+function AddMaterialModal({ visible, onClose, orderId, version, onSuccess }) {
   const [materialType, setMaterialType] = useState('application');
   const [materialName, setMaterialName] = useState('');
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (visible) {
+      setMaterialType('application');
+      setMaterialName('');
+      setError('');
+    }
+  }, [visible]);
 
   if (!visible) return null;
 
@@ -20,14 +29,20 @@ function AddMaterialModal({ visible, onClose, orderId, onSuccess }) {
     e.preventDefault();
     if (!materialName.trim()) return;
     setLoading(true);
+    setError('');
     try {
       const res = await api.post(`/orders/${orderId}/materials`, {
         material_type: materialType,
         material_name: materialName.trim(),
+        version: version,
       });
       onSuccess(res.data);
     } catch (err) {
-      alert(err.response?.data?.detail || '添加材料失败');
+      const detail = err.response?.data?.detail || '添加材料失败';
+      setError(detail);
+      if (err.response?.status === 409) {
+        setError(`并发冲突：${detail}（输入已保留，请刷新后重试）`);
+      }
     } finally {
       setLoading(false);
     }
@@ -41,12 +56,18 @@ function AddMaterialModal({ visible, onClose, orderId, onSuccess }) {
           <span className="modal-close" onClick={onClose}>&times;</span>
         </div>
         <div className="modal-body">
+          {error && (
+            <div className="alert alert-error" style={{ marginBottom: '16px' }}>
+              {error}
+            </div>
+          )}
           <form onSubmit={handleSubmit}>
             <div className="form-group">
               <label>材料类型</label>
               <select 
                 value={materialType} 
                 onChange={(e) => setMaterialType(e.target.value)}
+                disabled={loading}
               >
                 {materialTypes.map((type) => (
                   <option key={type.value} value={type.value}>{type.label}</option>
@@ -60,11 +81,14 @@ function AddMaterialModal({ visible, onClose, orderId, onSuccess }) {
                 placeholder="请输入材料名称"
                 value={materialName}
                 onChange={(e) => setMaterialName(e.target.value)}
+                disabled={loading}
                 autoFocus
               />
             </div>
             <div style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
-              <button type="button" className="btn" onClick={onClose}>取消</button>
+              <button type="button" className="btn" onClick={onClose} disabled={loading}>
+                取消
+              </button>
               <button type="submit" className="btn btn-success" disabled={loading || !materialName.trim()}>
                 {loading ? '添加中...' : '确认添加'}
               </button>

@@ -187,6 +187,7 @@ async def submit_order(request: Request):
     body = await request.json()
     opinion = body.get("opinion")
     materials = body.get("materials", [])
+    version = body.get("version")
     
     material_objs = [MaterialCreate(**m) for m in materials]
     
@@ -194,7 +195,7 @@ async def submit_order(request: Request):
     db.row_factory = aiosqlite.Row
     
     try:
-        result = await submit_for_review(db, order_id, user, opinion, material_objs)
+        result = await submit_for_review(db, order_id, user, opinion, material_objs, version)
         await db.close()
         return JSONResponse(result)
     except Exception as e:
@@ -210,12 +211,13 @@ async def review_order_endpoint(request: Request):
     body = await request.json()
     approved = body.get("approved", True)
     opinion = body.get("opinion")
+    version = body.get("version")
     
     db = await aiosqlite.connect(DB_PATH)
     db.row_factory = aiosqlite.Row
     
     try:
-        result = await review_order(db, order_id, user, approved, opinion)
+        result = await review_order(db, order_id, user, approved, opinion, version)
         await db.close()
         return JSONResponse(result)
     except Exception as e:
@@ -231,12 +233,13 @@ async def finalize_order_endpoint(request: Request):
     body = await request.json()
     approved = body.get("approved", True)
     opinion = body.get("opinion")
+    version = body.get("version")
     
     db = await aiosqlite.connect(DB_PATH)
     db.row_factory = aiosqlite.Row
     
     try:
-        result = await finalize_order(db, order_id, user, approved, opinion)
+        result = await finalize_order(db, order_id, user, approved, opinion, version)
         await db.close()
         return JSONResponse(result)
     except Exception as e:
@@ -254,7 +257,7 @@ async def add_feedback_endpoint(request: Request):
     db.row_factory = aiosqlite.Row
     
     try:
-        result = await add_feedback(db, order_id, feedback_data, user)
+        result = await add_feedback(db, order_id, feedback_data, user, feedback_data.version)
         await db.close()
         return JSONResponse(result)
     except Exception as e:
@@ -272,7 +275,7 @@ async def add_material_endpoint(request: Request):
     db.row_factory = aiosqlite.Row
     
     try:
-        result = await add_material(db, order_id, material_data, user)
+        result = await add_material(db, order_id, material_data, user, material_data.version)
         await db.close()
         return JSONResponse(result)
     except Exception as e:
@@ -283,12 +286,15 @@ async def delete_material_endpoint(request: Request):
     user = await get_current_user(request)
     order_id = int(request.path_params["order_id"])
     material_id = int(request.path_params["material_id"])
+    version = request.query_params.get("version")
+    if version is not None:
+        version = int(version)
     
     db = await aiosqlite.connect(DB_PATH)
     db.row_factory = aiosqlite.Row
     
     try:
-        result = await delete_material(db, order_id, material_id, user)
+        result = await delete_material(db, order_id, material_id, user, version)
         await db.close()
         return JSONResponse(result)
     except Exception as e:
@@ -315,11 +321,12 @@ async def batch_review_endpoint(request: Request):
     order_ids = body.get("order_ids", [])
     approved = body.get("approved", True)
     opinion = body.get("opinion")
+    versions = body.get("versions")
     
     db = await aiosqlite.connect(DB_PATH)
     db.row_factory = aiosqlite.Row
     
-    result = await batch_review(db, order_ids, user, approved, opinion)
+    result = await batch_review(db, order_ids, user, approved, opinion, versions)
     await db.close()
     
     return JSONResponse(result)
@@ -333,11 +340,12 @@ async def batch_finalize_endpoint(request: Request):
     order_ids = body.get("order_ids", [])
     approved = body.get("approved", True)
     opinion = body.get("opinion")
+    versions = body.get("versions")
     
     db = await aiosqlite.connect(DB_PATH)
     db.row_factory = aiosqlite.Row
     
-    result = await batch_finalize(db, order_ids, user, approved, opinion)
+    result = await batch_finalize(db, order_ids, user, approved, opinion, versions)
     await db.close()
     
     return JSONResponse(result)

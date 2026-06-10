@@ -42,6 +42,7 @@ function OrderList() {
   const [createModalVisible, setCreateModalVisible] = useState(false);
   const [batchModalVisible, setBatchModalVisible] = useState(false);
   const [selectedIds, setSelectedIds] = useState([]);
+  const [selectedVersions, setSelectedVersions] = useState({});
   const [toast, setToast] = useState({ visible: false, type: 'info', message: '' });
 
   const showToast = (type, message) => {
@@ -99,21 +100,31 @@ function OrderList() {
     fetchOrders();
     fetchStats();
     setSelectedIds([]);
+    setSelectedVersions({});
   };
 
   const handleSelectAll = (e) => {
     if (e.target.checked) {
       setSelectedIds(orders.map(o => o.id));
+      const versions = {};
+      orders.forEach(o => { versions[o.id] = o.version; });
+      setSelectedVersions(versions);
     } else {
       setSelectedIds([]);
+      setSelectedVersions({});
     }
   };
 
   const handleSelect = (id, checked) => {
     if (checked) {
       setSelectedIds([...selectedIds, id]);
+      const order = orders.find(o => o.id === id);
+      setSelectedVersions({ ...selectedVersions, [id]: order?.version });
     } else {
       setSelectedIds(selectedIds.filter(i => i !== id));
+      const newVersions = { ...selectedVersions };
+      delete newVersions[id];
+      setSelectedVersions(newVersions);
     }
   };
 
@@ -335,13 +346,20 @@ function OrderList() {
           visible={batchModalVisible}
           onClose={() => setBatchModalVisible(false)}
           selectedIds={selectedIds}
+          versions={selectedVersions}
           role={user?.role}
           onSuccess={(result) => {
             setBatchModalVisible(false);
             setSelectedIds([]);
+            setSelectedVersions({});
             handleRefresh();
             const msg = user?.role === 'reviewer' ? '批量审核' : '批量复核';
-            showToast('success', `${msg}完成：成功 ${result?.success_count || 0} 条，跳过 ${result?.skipped_count || 0} 条`);
+            const successCount = result?.success?.length || result?.success_count || 0;
+            const skippedCount = result?.skipped?.length || result?.skipped_count || 0;
+            const failedCount = result?.failed?.length || 0;
+            showToast('success', 
+              `${msg}完成：成功 ${successCount} 条，跳过 ${skippedCount} 条${failedCount ? `，失败 ${failedCount} 条` : ''}`
+            );
           }}
         />
       )}
