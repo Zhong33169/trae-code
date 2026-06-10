@@ -7,6 +7,7 @@ export default function RecordDetail({ user, id }) {
   const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState(false)
   const [actionType, setActionType] = useState('')
+  const [recordBatches, setRecordBatches] = useState([])
   const [formData, setFormData] = useState({
     temperature: '',
     mental_status: '',
@@ -37,10 +38,20 @@ export default function RecordDetail({ user, id }) {
         review_note: res.review_note || '',
         abnormal_reason: '',
       })
+      loadBatches()
     } catch (err) {
       alert(err.message || '加载失败')
     } finally {
       setLoading(false)
+    }
+  }
+
+  const loadBatches = async () => {
+    try {
+      const res = await api.getRecordBatches(id)
+      setRecordBatches(res.list || [])
+    } catch (err) {
+      console.error('加载批次历史失败:', err)
     }
   }
 
@@ -592,6 +603,74 @@ export default function RecordDetail({ user, id }) {
                 </div>
               )}
             </div>
+
+            {record.status !== 'archived' && (
+              <div className="card">
+                <h3 className="section-title">责任信息</h3>
+                <div className="detail-item" style={{ marginBottom: '8px' }}>
+                  <span className="label">责任岗位</span>
+                  <span className="value">
+                    <span className={`role-badge role-${record.responsible_role}`}>
+                      {record.responsible_role_name || '-'}
+                    </span>
+                  </span>
+                </div>
+                {record.responsible_user_name && (
+                  <div className="detail-item" style={{ marginBottom: '8px' }}>
+                    <span className="label">责任人</span>
+                    <span className="value">{record.responsible_user_name}</span>
+                  </div>
+                )}
+                {record.responsible_action_tip && (
+                  <div className="detail-item">
+                    <span className="label">补正提示</span>
+                    <span className="value" style={{ color: '#e6a23c' }}>
+                      {record.responsible_action_tip}
+                    </span>
+                  </div>
+                )}
+                {record.timeout?.isTimeout && (
+                  <div style={{ marginTop: '12px', padding: '8px 12px', background: '#fef0f0', borderRadius: '4px', fontSize: '13px', color: '#f56c6c' }}>
+                    ⚠️ 当前节点已超时 {formatDuration(record.timeout.overdueMs)}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {recordBatches.length > 0 && (
+              <div className="card">
+                <h3 className="section-title">批量处理历史</h3>
+                {recordBatches.map(b => (
+                  <div key={b.id} className="log-item">
+                    <div className="log-header">
+                      <span className={`batch-result ${b.result}`}>
+                        {b.result_name}
+                      </span>
+                      <span className="log-time">{formatDateTime(b.batch_created_at)}</span>
+                    </div>
+                    <div className="log-user">
+                      {b.batch_type_name} · {b.operator_name}
+                    </div>
+                    <div className="log-status" style={{ fontSize: '12px', color: '#909399' }}>
+                      批次号：{b.batch_no}
+                    </div>
+                    {b.from_status && b.to_status && (
+                      <div className="log-status">
+                        {b.from_status_name} → {b.to_status_name}
+                      </div>
+                    )}
+                    {b.error_message && (
+                      <div className="log-note" style={{ color: '#f56c6c' }}>
+                        失败原因：{b.error_message}
+                      </div>
+                    )}
+                    {b.remark && (
+                      <div className="log-note">备注：{b.remark}</div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
 
             <div className="card">
               <h3 className="section-title">操作记录</h3>

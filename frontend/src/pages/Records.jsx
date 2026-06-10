@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'preact/hooks'
 import { route } from 'preact-router'
-import { api, formatDuration, todayStr } from '../utils/api.js'
+import { api, formatDuration, formatDateTime, todayStr } from '../utils/api.js'
 import CreateRecordModal from '../components/CreateRecordModal.jsx'
 import BatchResultModal from '../components/BatchResultModal.jsx'
 
@@ -19,6 +19,15 @@ export default function Records({ user }) {
   const [batchLoading, setBatchLoading] = useState(false)
   const [batchResult, setBatchResult] = useState(null)
   const [batchType, setBatchType] = useState('audit')
+
+  const [batches, setBatches] = useState([])
+  const [batchTotal, setBatchTotal] = useState(0)
+  const [batchPage, setBatchPage] = useState(1)
+  const [batchPageSize] = useState(10)
+  const [batchTab, setBatchTab] = useState('all')
+  const [batchesLoading, setBatchesLoading] = useState(false)
+  const [expandedBatchId, setExpandedBatchId] = useState(null)
+  const [batchDetail, setBatchDetail] = useState(null)
 
   const loadData = async () => {
     setLoading(true)
@@ -45,6 +54,44 @@ export default function Records({ user }) {
   useEffect(() => {
     loadData()
   }, [page, status, childName, checkDate, activeTab])
+
+  const loadBatches = async () => {
+    setBatchesLoading(true)
+    try {
+      const params = { page: batchPage, pageSize: batchPageSize }
+      if (batchTab !== 'all') {
+        params.batch_type = batchTab
+      }
+      const res = await api.getBatches(params)
+      setBatches(res.list)
+      setBatchTotal(res.total)
+    } catch (err) {
+      console.error('加载批量历史失败:', err)
+    } finally {
+      setBatchesLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (activeTab === 'batch') {
+      loadBatches()
+    }
+  }, [batchPage, batchTab, activeTab])
+
+  const toggleBatchExpand = async (batchId) => {
+    if (expandedBatchId === batchId) {
+      setExpandedBatchId(null)
+      setBatchDetail(null)
+    } else {
+      setExpandedBatchId(batchId)
+      try {
+        const res = await api.getBatch(batchId)
+        setBatchDetail(res)
+      } catch (err) {
+        console.error('加载批次详情失败:', err)
+      }
+    }
+  }
 
   const handleSearch = () => {
     setPage(1)
@@ -169,9 +216,17 @@ export default function Records({ user }) {
             >
               全部记录
             </div>
+            <div
+              className={`tab ${activeTab === 'batch' ? 'active' : ''}`}
+              onClick={() => { setActiveTab('batch'); setBatchPage(1) }}
+            >
+              批量历史
+            </div>
           </div>
 
-          <div className="filter-bar">
+          {activeTab !== 'batch' && (
+            <>
+            <div className="filter-bar">
             <div className="form-item">
               <label>幼儿姓名</label>
               <input
@@ -310,6 +365,135 @@ export default function Records({ user }) {
                 </button>
               </div>
             </>
+          )}
+          </>
+
+          {activeTab === 'batch' && (
+            <div className="batch-history-section">
+              <div className="batch-tabs">
+                <div
+                  className={`batch-tab ${batchTab === 'all' ? 'active' : ''}`}
+                  onClick={() => { setBatchTab('all'); setBatchPage(1) }}
+                >
+                  全部
+                </div>
+                <div
+                  className={`batch-tab ${batchTab === 'audit' ? 'active' : ''}`}
+                  onClick={() => { setBatchTab('audit'); setBatchPage(1) }}
+                >
+                  批量审核
+                </div>
+                <div
+                  className={`batch-tab ${batchTab === 'review' ? 'active' : ''}`}
+                  onClick={() => { setBatchTab('review'); setBatchPage(1) }}
+                >
+                  批量复核
+                </div>
+              </div>
+
+              {batchesLoading ? (
+                <div className="batch-empty">加载中...</div>
+              ) : batches.length === 0 ? (
+                <div className="batch-empty">暂无批量处理记录</div>
+              ) : (
+                <>
+                  {batches.map(batch => (
+                    <div key={batch.id} className="batch-card">
+                      <div className="batch-card-header">
+                        <div className="batch-card-title">
+                          <span className={`role-badge role-${batch.operator_role}`}>
+                            {batch.batch_type_name}
+                          </span>
+                          <span style={{ color: '#303133' }}>{batch.batch_no}</span>
+                        </div>
+                        <span style={{ fontSize: '12px', color: '#909399' }}>
+                          {formatDateTime(batch.created_at)}
+                        </span>
+                      </div>
+                      <div className="batch-card-stats">
+                        <div className="batch-stat-item">
+                          <span className="batch-stat-num">{batch.total_count}</span>
+                          <span className="batch-stat-label">总数</span>
+                        </div>
+                        <div className="batch-stat-item">
+                          <span className="batch-stat-num" style={{ color: '#67c23a' }}>{batch.success_count}</span>
+                          <span className="batch-stat-label">成功</span>
+                        </div>
+                        <div className="batch-stat-item">
+                          <span className="batch-stat-num" style={{ color: '#f56c6c' }}>{batch.fail_count}</span>
+                          <span className="batch-stat-label">失败</span>
+                        </div>
+                        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
+                          <span style={{ fontSize: '12px', color: '#909399', marginRight: '8px' }}>
+                            操作人：{batch.operator_name}
+                          </span>
+                          <button
+                            className="btn btn-small"
+                            onClick={() => toggleBatchExpand(batch.id)}
+                          >
+                            {expandedBatchId === batch.id ? '收起明细' : '查看明细'}
+                          </button>
+                        </div>
+                      </div>
+                      {batch.remark && (
+                        <div style={{ fontSize: '12px', color: '#909399', marginBottom: '8px' }}>
+                          备注：{batch.remark}
+                        </div>
+                      )}
+                      {expandedBatchId === batch.id && batchDetail && batchDetail.id === batch.id && (
+                        <div className="batch-detail-list">
+                          <div style={{ fontSize: '13px', fontWeight: 500, marginBottom: '8px', color: '#606266' }}>
+                            处理明细
+                          </div>
+                          {batchDetail.details?.map(detail => (
+                            <div key={detail.id} className="batch-detail-item">
+                              <div className="batch-detail-name">
+                                <span className={`batch-result ${detail.result}`}>
+                                  {detail.result_name}
+                                </span>
+                                <span style={{ marginLeft: '8px' }}>
+                                  {detail.child_name}（#{detail.record_id}）
+                                </span>
+                              </div>
+                              <div className="batch-detail-status">
+                                {detail.from_status && detail.to_status && (
+                                  <span>{detail.from_status_name} → {detail.to_status_name}</span>
+                                )}
+                              </div>
+                              <button
+                                className="btn btn-small"
+                                onClick={() => route(`/records/${detail.record_id}`)}
+                              >
+                                详情
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+
+                  <div className="pagination">
+                    <span className="page-info">共 {batchTotal} 条</span>
+                    <button
+                      onClick={() => setBatchPage(p => Math.max(1, p - 1))}
+                      disabled={batchPage <= 1}
+                    >
+                      上一页
+                    </button>
+                    <span className="page-info">
+                      {batchPage} / {Math.ceil(batchTotal / batchPageSize) || 1}
+                    </span>
+                    <button
+                      onClick={() => setBatchPage(p => Math.min(Math.ceil(batchTotal / batchPageSize), p + 1))}
+                      disabled={batchPage >= Math.ceil(batchTotal / batchPageSize)}
+                    >
+                      下一页
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
           )}
         </div>
       </div>

@@ -59,8 +59,14 @@ export const api = {
   auditReject: (id, data) => request('PUT', `/records/${id}/audit-reject`, data),
   reviewPass: (id, data) => request('PUT', `/records/${id}/review-pass`, data),
   reviewReject: (id, data) => request('PUT', `/records/${id}/review-reject`, data),
-  batchAuditPass: (ids, audit_note) => request('PUT', '/records/batch/audit-pass', { ids, audit_note }),
-  batchReviewPass: (ids, review_note) => request('PUT', '/records/batch/review-pass', { ids, review_note }),
+  batchAuditPass: (ids, audit_note, remark) => request('PUT', '/records/batch/audit-pass', { ids, audit_note, remark }),
+  batchReviewPass: (ids, review_note, remark) => request('PUT', '/records/batch/review-pass', { ids, review_note, remark }),
+  getBatches: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return request('GET', `/batches${qs ? '?' + qs : ''}`);
+  },
+  getBatch: (id) => request('GET', `/batches/${id}`),
+  getRecordBatches: (id) => request('GET', `/records/${id}/batches`),
 
   getChildren: (params = {}) => {
     const qs = new URLSearchParams(params).toString();

@@ -67,7 +67,7 @@ const ROLE_NAMES = {
 };
 
 const RECORD_FIELDS_WHITELIST = {
-  base: ['id', 'child_id', 'child_name', 'child_gender', 'birth_date', 'class_name', 'guardian_name', 'guardian_phone', 'child_health_status', 'check_date', 'status', 'status_name', 'current_node', 'current_node_name', 'timeout', 'abnormal_reason', 'abnormal_by_name', 'available_actions', 'operation_logs', 'created_at', 'updated_at'],
+  base: ['id', 'child_id', 'child_name', 'child_gender', 'birth_date', 'class_name', 'guardian_name', 'guardian_phone', 'child_health_status', 'check_date', 'status', 'status_name', 'current_node', 'current_node_name', 'timeout', 'abnormal_reason', 'abnormal_by_name', 'available_actions', 'operation_logs', 'responsible_role', 'responsible_role_name', 'responsible_user_name', 'responsible_action_tip', 'created_at', 'updated_at'],
   registrar: ['temperature', 'mental_status', 'skin_condition', 'throat_condition', 'hand_foot_condition', 'other_symptoms', 'registration_note', 'registered_by', 'registered_at'],
   auditor: ['temperature', 'mental_status', 'skin_condition', 'throat_condition', 'hand_foot_condition', 'other_symptoms', 'registration_note', 'audit_note', 'registered_by', 'audited_by', 'registered_at', 'audit_submitted_at', 'audit_completed_at'],
   reviewer: ['temperature', 'mental_status', 'skin_condition', 'throat_condition', 'hand_foot_condition', 'other_symptoms', 'registration_note', 'audit_note', 'review_note', 'registered_by', 'audited_by', 'reviewed_by', 'registered_at', 'audit_submitted_at', 'audit_completed_at', 'review_submitted_at', 'review_completed_at'],
@@ -170,17 +170,62 @@ function requireRole(...roles) {
   };
 }
 
-async function addOperationLog(recordId, userId, userName, userRole, action, fromStatus, toStatus, note) {
+async function addOperationLog(recordId, userId, userName, userRole, action, fromStatus, toStatus, note, batchId = null) {
   await db.run(
-    `INSERT INTO operation_logs (record_id, user_id, user_name, user_role, action, from_status, to_status, note)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    recordId, userId, userName, userRole, action, fromStatus, toStatus, note || ''
+    `INSERT INTO operation_logs (record_id, batch_id, user_id, user_name, user_role, action, from_status, to_status, note)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    recordId, batchId, userId, userName, userRole, action, fromStatus, toStatus, note || ''
   );
 }
 
 function nowIso() {
   return new Date().toISOString();
 }
+
+function generateBatchNo(type) {
+  const prefix = type === 'audit' ? 'BATCH-AUD' : 'BATCH-REV';
+  const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+  const random = Math.floor(Math.random() * 900 + 100);
+  return `${prefix}-${dateStr}-${random}`;
+}
+
+async function createBatch(batchNo, batchType, totalCount, operatorId, operatorName, operatorRole, remark = '') {
+  const result = await db.run(
+    `INSERT INTO batch_batches (batch_no, batch_type, total_count, success_count, fail_count, operator_id, operator_name, operator_role, remark)
+     VALUES (?, ?, ?, 0, 0, ?, ?, ?, ?)`,
+    batchNo, batchType, totalCount, operatorId, operatorName, operatorRole, remark || ''
+  );
+  return result.lastID;
+}
+
+async function addBatchDetail(batchId, recordId, childId, childName, result, errorMessage, fromStatus, toStatus, abnormalReason, responsibleRole, remark) {
+  await db.run(
+    `INSERT INTO batch_details (batch_id, record_id, child_id, child_name, result, error_message, from_status, to_status, abnormal_reason, responsible_role, remark)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    batchId, recordId, childId, childName, result, errorMessage || null, fromStatus || null, toStatus || null, abnormalReason || null, responsibleRole || null, remark || ''
+  );
+}
+
+async function updateBatchCounts(batchId, successCount, failCount) {
+  await db.run(
+    `UPDATE batch_batches SET success_count = ?, fail_count = ? WHERE id = ?`,
+    successCount, failCount, batchId
+  );
+}
+
+function getResponsibleRole(currentNode, status) {
+  if (status === 'pending_correction') return 'registrar';
+  if (currentNode === 'registration') return 'registrar';
+  if (currentNode === 'audit') return 'auditor';
+  if (currentNode === 'review') return 'reviewer';
+  return null;
+}
+
+const RESPONSIBLE_ACTION_TIPS = {
+  registrar: '请及时完成晨检登记或补正',
+  auditor: '请及时完成审核',
+  reviewer: '请及时完成复核归档',
+};
 
 app.post('/api/login', async (req, res) => {
   try {
@@ -414,6 +459,19 @@ app.get('/api/records/:id', authenticate, async (req, res) => {
       if (abUser) abnormalByName = abUser.name;
     }
 
+    const responsibleRole = getResponsibleRole(record.current_node, record.status);
+    let responsibleUserName = null;
+    if (responsibleRole === 'registrar' && record.registered_by) {
+      const u = await db.get('SELECT name FROM users WHERE id = ?', record.registered_by);
+      if (u) responsibleUserName = u.name;
+    } else if (responsibleRole === 'auditor' && record.audited_by) {
+      const u = await db.get('SELECT name FROM users WHERE id = ?', record.audited_by);
+      if (u) responsibleUserName = u.name;
+    } else if (responsibleRole === 'reviewer' && record.reviewed_by) {
+      const u = await db.get('SELECT name FROM users WHERE id = ?', record.reviewed_by);
+      if (u) responsibleUserName = u.name;
+    }
+
     const fullRecord = {
       ...record,
       status_name: STATUS_NAMES[record.status] || record.status,
@@ -422,6 +480,10 @@ app.get('/api/records/:id', authenticate, async (req, res) => {
       operation_logs: logs,
       available_actions: availableActions,
       abnormal_by_name: abnormalByName,
+      responsible_role: responsibleRole,
+      responsible_role_name: ROLE_NAMES[responsibleRole] || responsibleRole,
+      responsible_user_name: responsibleUserName,
+      responsible_action_tip: RESPONSIBLE_ACTION_TIPS[responsibleRole] || '',
     };
 
     const filteredRecord = filterRecordFields(fullRecord, userRole);
@@ -632,7 +694,7 @@ app.put('/api/records/:id/review-reject', authenticate, requireRole('reviewer'),
 
 app.put('/api/records/batch/audit-pass', authenticate, requireRole('auditor'), async (req, res) => {
   try {
-    const { ids, audit_note } = req.body;
+    const { ids, audit_note, remark } = req.body;
     if (!ids || !Array.isArray(ids) || ids.length === 0) {
       return res.status(400).json({ error: '请选择要审核的记录' });
     }
@@ -642,7 +704,9 @@ app.put('/api/records/batch/audit-pass', authenticate, requireRole('auditor'), a
 
     const placeholders = ids.map(() => '?').join(',');
     const records = await db.all(
-      `SELECT * FROM morning_check_records WHERE id IN (${placeholders})`,
+      `SELECT r.*, c.name as child_name FROM morning_check_records r
+       JOIN children c ON r.child_id = c.id
+       WHERE r.id IN (${placeholders})`,
       ...ids
     );
 
@@ -650,18 +714,27 @@ app.put('/api/records/batch/audit-pass', authenticate, requireRole('auditor'), a
       return res.status(404).json({ error: '未找到选中的记录' });
     }
 
+    const batchNo = generateBatchNo('audit');
+    const batchId = await createBatch(batchNo, 'audit', records.length, req.user.id, req.user.name, req.user.role, remark || '');
+
     const now = nowIso();
-    const successIds = [];
+    let successCount = 0;
+    let failCount = 0;
+    const successRecords = [];
     const failedItems = [];
 
     for (const record of records) {
       try {
         if (!canPerformAction(req.user.role, record.status, 'audit_pass')) {
+          const errorMsg = `当前状态为「${STATUS_NAMES[record.status]}」，不能审核通过`;
           failedItems.push({
             id: record.id,
             child_id: record.child_id,
-            error: `当前状态为「${STATUS_NAMES[record.status]}」，不能审核通过`,
+            child_name: record.child_name,
+            error: errorMsg,
           });
+          failCount++;
+          await addBatchDetail(batchId, record.id, record.child_id, record.child_name, 'fail', errorMsg, record.status, null, null, 'auditor', audit_note || '');
           continue;
         }
 
@@ -672,34 +745,37 @@ app.put('/api/records/batch/audit-pass', authenticate, requireRole('auditor'), a
           audit_note || null, req.user.id, now, now, now, record.id
         );
 
-        await addOperationLog(record.id, req.user.id, req.user.name, req.user.role, '批量审核通过', record.status, 'pending_review', audit_note || '');
-        successIds.push(record.id);
+        await addOperationLog(record.id, req.user.id, req.user.name, req.user.role, '批量审核通过', record.status, 'pending_review', audit_note || '', batchId);
+        await addBatchDetail(batchId, record.id, record.child_id, record.child_name, 'success', null, record.status, 'pending_review', null, 'auditor', audit_note || '');
+
+        successCount++;
+        successRecords.push({
+          id: record.id,
+          child_id: record.child_id,
+          child_name: record.child_name,
+          status: 'pending_review',
+          status_name: STATUS_NAMES['pending_review'],
+        });
       } catch (err) {
+        failCount++;
         failedItems.push({
           id: record.id,
           child_id: record.child_id,
+          child_name: record.child_name,
           error: err.message,
         });
+        await addBatchDetail(batchId, record.id, record.child_id, record.child_name, 'fail', err.message, record.status, null, null, 'auditor', audit_note || '');
       }
     }
 
-    const successRecordsRaw = await db.all(
-      `SELECT r.id, r.child_id, c.name as child_name, r.status
-       FROM morning_check_records r
-       JOIN children c ON r.child_id = c.id
-       WHERE r.id IN (${successIds.map(() => '?').join(',')})`,
-      ...successIds
-    );
-
-    const successRecords = successRecordsRaw.map(r => ({
-      ...r,
-      status_name: STATUS_NAMES[r.status] || r.status,
-    }));
+    await updateBatchCounts(batchId, successCount, failCount);
 
     res.json({
-      message: `批量审核完成：成功 ${successIds.length} 条，失败 ${failedItems.length} 条`,
-      success_count: successIds.length,
-      fail_count: failedItems.length,
+      batch_no: batchNo,
+      batch_id: batchId,
+      message: `批量审核完成：成功 ${successCount} 条，失败 ${failCount} 条`,
+      success_count: successCount,
+      fail_count: failCount,
       success_records: successRecords,
       failed_items: failedItems,
     });
@@ -710,7 +786,7 @@ app.put('/api/records/batch/audit-pass', authenticate, requireRole('auditor'), a
 
 app.put('/api/records/batch/review-pass', authenticate, requireRole('reviewer'), async (req, res) => {
   try {
-    const { ids, review_note } = req.body;
+    const { ids, review_note, remark } = req.body;
     if (!ids || !Array.isArray(ids) || ids.length === 0) {
       return res.status(400).json({ error: '请选择要复核的记录' });
     }
@@ -720,7 +796,9 @@ app.put('/api/records/batch/review-pass', authenticate, requireRole('reviewer'),
 
     const placeholders = ids.map(() => '?').join(',');
     const records = await db.all(
-      `SELECT * FROM morning_check_records WHERE id IN (${placeholders})`,
+      `SELECT r.*, c.name as child_name FROM morning_check_records r
+       JOIN children c ON r.child_id = c.id
+       WHERE r.id IN (${placeholders})`,
       ...ids
     );
 
@@ -728,18 +806,27 @@ app.put('/api/records/batch/review-pass', authenticate, requireRole('reviewer'),
       return res.status(404).json({ error: '未找到选中的记录' });
     }
 
+    const batchNo = generateBatchNo('review');
+    const batchId = await createBatch(batchNo, 'review', records.length, req.user.id, req.user.name, req.user.role, remark || '');
+
     const now = nowIso();
-    const successIds = [];
+    let successCount = 0;
+    let failCount = 0;
+    const successRecords = [];
     const failedItems = [];
 
     for (const record of records) {
       try {
         if (!canPerformAction(req.user.role, record.status, 'review_pass')) {
+          const errorMsg = `当前状态为「${STATUS_NAMES[record.status]}」，不能复核归档`;
           failedItems.push({
             id: record.id,
             child_id: record.child_id,
-            error: `当前状态为「${STATUS_NAMES[record.status]}」，不能复核归档`,
+            child_name: record.child_name,
+            error: errorMsg,
           });
+          failCount++;
+          await addBatchDetail(batchId, record.id, record.child_id, record.child_name, 'fail', errorMsg, record.status, null, null, 'reviewer', review_note || '');
           continue;
         }
 
@@ -750,34 +837,37 @@ app.put('/api/records/batch/review-pass', authenticate, requireRole('reviewer'),
           review_note || null, req.user.id, now, now, record.id
         );
 
-        await addOperationLog(record.id, req.user.id, req.user.name, req.user.role, '批量复核归档', record.status, 'archived', review_note || '');
-        successIds.push(record.id);
+        await addOperationLog(record.id, req.user.id, req.user.name, req.user.role, '批量复核归档', record.status, 'archived', review_note || '', batchId);
+        await addBatchDetail(batchId, record.id, record.child_id, record.child_name, 'success', null, record.status, 'archived', null, 'reviewer', review_note || '');
+
+        successCount++;
+        successRecords.push({
+          id: record.id,
+          child_id: record.child_id,
+          child_name: record.child_name,
+          status: 'archived',
+          status_name: STATUS_NAMES['archived'],
+        });
       } catch (err) {
+        failCount++;
         failedItems.push({
           id: record.id,
           child_id: record.child_id,
+          child_name: record.child_name,
           error: err.message,
         });
+        await addBatchDetail(batchId, record.id, record.child_id, record.child_name, 'fail', err.message, record.status, null, null, 'reviewer', review_note || '');
       }
     }
 
-    const successRecordsRaw = await db.all(
-      `SELECT r.id, r.child_id, c.name as child_name, r.status
-       FROM morning_check_records r
-       JOIN children c ON r.child_id = c.id
-       WHERE r.id IN (${successIds.map(() => '?').join(',')})`,
-      ...successIds
-    );
-
-    const successRecords = successRecordsRaw.map(r => ({
-      ...r,
-      status_name: STATUS_NAMES[r.status] || r.status,
-    }));
+    await updateBatchCounts(batchId, successCount, failCount);
 
     res.json({
-      message: `批量复核完成：成功 ${successIds.length} 条，失败 ${failedItems.length} 条`,
-      success_count: successIds.length,
-      fail_count: failedItems.length,
+      batch_no: batchNo,
+      batch_id: batchId,
+      message: `批量复核完成：成功 ${successCount} 条，失败 ${failCount} 条`,
+      success_count: successCount,
+      fail_count: failCount,
       success_records: successRecords,
       failed_items: failedItems,
     });
@@ -889,6 +979,97 @@ app.get('/api/logs', authenticate, async (req, res) => {
     res.json({ list, total: totalRow.count, page: parseInt(page), pageSize: parseInt(pageSize) });
   } catch (err) {
     res.status(500).json({ error: '获取操作记录失败：' + err.message });
+  }
+});
+
+app.get('/api/batches', authenticate, async (req, res) => {
+  try {
+    const { batch_type, page = 1, pageSize = 10 } = req.query;
+    const offset = (page - 1) * pageSize;
+
+    let whereClauses = [];
+    let params = [];
+
+    if (batch_type) {
+      whereClauses.push('batch_type = ?');
+      params.push(batch_type);
+    }
+
+    const whereSql = whereClauses.length > 0 ? 'WHERE ' + whereClauses.join(' AND ') : '';
+
+    const totalRow = await db.get(`SELECT COUNT(*) as count FROM batch_batches ${whereSql}`, ...params);
+    const list = await db.all(
+      `SELECT * FROM batch_batches ${whereSql} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+      ...params, parseInt(pageSize), offset
+    );
+
+    const listWithNames = list.map(b => ({
+      ...b,
+      batch_type_name: b.batch_type === 'audit' ? '批量审核' : '批量复核',
+      operator_role_name: ROLE_NAMES[b.operator_role] || b.operator_role,
+    }));
+
+    res.json({ list: listWithNames, total: totalRow.count, page: parseInt(page), pageSize: parseInt(pageSize) });
+  } catch (err) {
+    res.status(500).json({ error: '获取批量处理列表失败：' + err.message });
+  }
+});
+
+app.get('/api/batches/:id', authenticate, async (req, res) => {
+  try {
+    const batch = await db.get('SELECT * FROM batch_batches WHERE id = ?', req.params.id);
+    if (!batch) {
+      return res.status(404).json({ error: '批次不存在' });
+    }
+
+    const details = await db.all(
+      'SELECT * FROM batch_details WHERE batch_id = ? ORDER BY id ASC',
+      req.params.id
+    );
+
+    const detailsWithNames = details.map(d => ({
+      ...d,
+      from_status_name: STATUS_NAMES[d.from_status] || d.from_status,
+      to_status_name: STATUS_NAMES[d.to_status] || d.to_status,
+      result_name: d.result === 'success' ? '成功' : '失败',
+      responsible_role_name: ROLE_NAMES[d.responsible_role] || d.responsible_role,
+    }));
+
+    res.json({
+      ...batch,
+      batch_type_name: batch.batch_type === 'audit' ? '批量审核' : '批量复核',
+      operator_role_name: ROLE_NAMES[batch.operator_role] || batch.operator_role,
+      details: detailsWithNames,
+    });
+  } catch (err) {
+    res.status(500).json({ error: '获取批次详情失败：' + err.message });
+  }
+});
+
+app.get('/api/records/:id/batches', authenticate, async (req, res) => {
+  try {
+    const details = await db.all(
+      `SELECT bd.*, bb.batch_no, bb.batch_type, bb.operator_name, bb.operator_role, bb.created_at as batch_created_at
+       FROM batch_details bd
+       JOIN batch_batches bb ON bd.batch_id = bb.id
+       WHERE bd.record_id = ?
+       ORDER BY bb.created_at DESC`,
+      req.params.id
+    );
+
+    const list = details.map(d => ({
+      ...d,
+      batch_type_name: d.batch_type === 'audit' ? '批量审核' : '批量复核',
+      result_name: d.result === 'success' ? '成功' : '失败',
+      from_status_name: STATUS_NAMES[d.from_status] || d.from_status,
+      to_status_name: STATUS_NAMES[d.to_status] || d.to_status,
+      operator_role_name: ROLE_NAMES[d.operator_role] || d.operator_role,
+      responsible_role_name: ROLE_NAMES[d.responsible_role] || d.responsible_role,
+    }));
+
+    res.json({ list });
+  } catch (err) {
+    res.status(500).json({ error: '获取记录批次历史失败：' + err.message });
   }
 });
 
