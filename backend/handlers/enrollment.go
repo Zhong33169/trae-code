@@ -211,25 +211,51 @@ func VerifyEnrollment(c *gin.Context) {
 
 	fromStatus := string(enrollment.Status)
 	action := ""
+	detailReason := ""
 
 	if req.Pass {
 		enrollment.Status = models.StatusPendingReview
 		action = "核验通过"
 	} else {
-		if isMaterialMissing(&enrollment) {
+		materialStatus := checkMaterialStatus(uint(id))
+		hasMaterialIssue := materialStatus.MissingCount > 0 || materialStatus.RejectedCount > 0
+
+		if hasMaterialIssue {
 			enrollment.Status = models.StatusPendingCorrection
 			enrollment.RejectReason = req.Reason
 			action = "退回补正"
+
+			var missingNames []string
+			var rejectedNames []string
+			for _, m := range materialStatus.Materials {
+				if m.Required && !m.HasAttachment {
+					missingNames = append(missingNames, m.Name)
+				}
+				if m.IsRejected {
+					rejectedNames = append(rejectedNames, fmt.Sprintf("%s（%s）", m.Name, m.RejectReason))
+				}
+			}
+			if len(missingNames) > 0 || len(rejectedNames) > 0 {
+				detailParts := []string{}
+				if len(missingNames) > 0 {
+					detailParts = append(detailParts, fmt.Sprintf("缺失%d项：%s", len(missingNames), strings.Join(missingNames, "、")))
+				}
+				if len(rejectedNames) > 0 {
+					detailParts = append(detailParts, fmt.Sprintf("驳回%d项：%s", len(rejectedNames), strings.Join(rejectedNames, "、")))
+				}
+				detailReason = fmt.Sprintf("%s。材料问题：%s", req.Reason, strings.Join(detailParts, "；"))
+			}
 		} else {
 			enrollment.Status = models.StatusRejected
 			enrollment.RejectReason = req.Reason
 			action = "核验不通过"
+			detailReason = req.Reason
 		}
 	}
 
 	database.DB.Save(&enrollment)
 
-	addAuditLog(enrollment.ID, userID.(uint), userName.(string), userRole.(string), action, req.Reason, fromStatus, string(enrollment.Status))
+	addAuditLog(enrollment.ID, userID.(uint), userName.(string), userRole.(string), action, detailReason, fromStatus, string(enrollment.Status))
 
 	c.JSON(http.StatusOK, enrollment)
 }
