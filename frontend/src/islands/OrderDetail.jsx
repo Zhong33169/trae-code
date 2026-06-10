@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
-import { getOrderDetail, performAction } from '../lib/api';
+import { getOrderDetail, performAction, updateOrder, addEvidence, deleteEvidence } from '../lib/api';
+import OrderForm from './OrderForm';
+import EvidenceManager from './EvidenceManager';
 
 export default function OrderDetail({ orderId, userId, userRole, onBack, onActionComplete }) {
   const [detail, setDetail] = useState(null);
@@ -8,6 +10,8 @@ export default function OrderDetail({ orderId, userId, userRole, onBack, onActio
   const [opinion, setOpinion] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [toast, setToast] = useState(null);
+  const [isEditing, setIsEditing] = useState(false);
+  const [evidenceSubmitting, setEvidenceSubmitting] = useState(false);
 
   const loadDetail = () => {
     if (!orderId || !userId) return;
@@ -94,6 +98,70 @@ export default function OrderDetail({ orderId, userId, userRole, onBack, onActio
     }
   };
 
+  const handleEditSubmit = async (formData) => {
+    setSubmitting(true);
+    try {
+      const res = await updateOrder(orderId, formData, userId, detail.order.version);
+      if (res.success) {
+        showToast('保存成功', 'success');
+        setIsEditing(false);
+        loadDetail();
+        onActionComplete && onActionComplete();
+      } else {
+        showToast(res.message || '保存失败', 'error');
+      }
+    } catch (e) {
+      showToast('保存失败', 'error');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleAddEvidence = async (type, name) => {
+    setEvidenceSubmitting(true);
+    try {
+      const res = await addEvidence(orderId, type, name, userId);
+      if (res.success) {
+        showToast('证据添加成功', 'success');
+        setDetail(prev => ({
+          ...prev,
+          evidences: res.evidences,
+          evidenceCheck: res.evidenceCheck
+        }));
+        return true;
+      } else {
+        showToast(res.message || '添加失败', 'error');
+        return false;
+      }
+    } catch (e) {
+      showToast('添加失败', 'error');
+      return false;
+    } finally {
+      setEvidenceSubmitting(false);
+    }
+  };
+
+  const handleDeleteEvidence = async (evidenceId) => {
+    setEvidenceSubmitting(true);
+    try {
+      const res = await deleteEvidence(evidenceId, userId);
+      if (res.success) {
+        showToast('证据删除成功', 'success');
+        setDetail(prev => ({
+          ...prev,
+          evidences: res.evidences,
+          evidenceCheck: res.evidenceCheck
+        }));
+      } else {
+        showToast(res.message || '删除失败', 'error');
+      }
+    } catch (e) {
+      showToast('删除失败', 'error');
+    } finally {
+      setEvidenceSubmitting(false);
+    }
+  };
+
   const getLogClass = (action) => {
     if (action.includes('pass') || action === 'review_archive') return 'log-pass';
     if (action.includes('return') || action === 'resubmit') return 'log-return';
@@ -136,7 +204,7 @@ export default function OrderDetail({ orderId, userId, userRole, onBack, onActio
     );
   }
 
-  const { order, evidences, logs, availableActions, evidenceCheck } = detail;
+  const { order, evidences, logs, availableActions, evidenceCheck, canEdit } = detail;
 
   return (
     <div>
@@ -166,108 +234,119 @@ export default function OrderDetail({ orderId, userId, userRole, onBack, onActio
             </div>
           )}
 
-          <div className="detail-card">
-            <h3>基本信息</h3>
-            <div className="detail-row">
-              <div className="detail-label">订单编号</div>
-              <div className="detail-value">
-                <span className="order-no">{order.order_no}</span>
-              </div>
+          {isEditing ? (
+            <div className="detail-card">
+              <h3>编辑订单</h3>
+              <OrderForm
+                initialData={order}
+                mode="edit"
+                onSubmit={handleEditSubmit}
+                onCancel={() => setIsEditing(false)}
+                submitting={submitting}
+              />
             </div>
-            <div className="detail-row">
-              <div className="detail-label">风险等级</div>
-              <div className="detail-value">
-                <span className={`risk-badge risk-${order.risk_level}`}>
-                  {order.riskLabel}
-                </span>
-                {order.risk_level === 'high' && (
-                  <span className="order-priority-tag">高优先级</span>
+          ) : (
+            <>
+              <div className="detail-card">
+                <div className="detail-header">
+                  <h3>基本信息</h3>
+                  {canEdit && (
+                    <button className="btn btn-sm btn-primary" onClick={() => setIsEditing(true)}>
+                      编辑
+                    </button>
+                  )}
+                </div>
+                <div className="detail-row">
+                  <div className="detail-label">订单编号</div>
+                  <div className="detail-value">
+                    <span className="order-no">{order.order_no}</span>
+                  </div>
+                </div>
+                <div className="detail-row">
+                  <div className="detail-label">风险等级</div>
+                  <div className="detail-value">
+                    <span className={`risk-badge risk-${order.risk_level}`}>
+                      {order.riskLabel}
+                    </span>
+                    {order.risk_level === 'high' && (
+                      <span className="order-priority-tag">高优先级</span>
+                    )}
+                  </div>
+                </div>
+                <div className="detail-row">
+                  <div className="detail-label">当前状态</div>
+                  <div className="detail-value">
+                    <span className={`status-badge status-${order.status}`}>
+                      {order.statusLabel}
+                    </span>
+                  </div>
+                </div>
+                <div className="detail-row">
+                  <div className="detail-label">当前处理人</div>
+                  <div className="detail-value">
+                    {order.current_handler ? (
+                      `${order.current_handler || '待分配'}（${order.currentHandlerRoleLabel || ''}）`
+                    ) : '无'}
+                  </div>
+                </div>
+                <div className="detail-row">
+                  <div className="detail-label">所属门店</div>
+                  <div className="detail-value">{order.store_name || '-'}</div>
+                </div>
+                <div className="detail-row">
+                  <div className="detail-label">版本号</div>
+                  <div className="detail-value">v{order.version}</div>
+                </div>
+                {order.deadline && (
+                  <div className="detail-row">
+                    <div className="detail-label">截止时间</div>
+                    <div className="detail-value" style={{ color: order.status === 'overdue' ? '#c62828' : 'inherit' }}>
+                      {order.deadline}
+                    </div>
+                  </div>
                 )}
               </div>
-            </div>
-            <div className="detail-row">
-              <div className="detail-label">当前状态</div>
-              <div className="detail-value">
-                <span className={`status-badge status-${order.status}`}>
-                  {order.statusLabel}
-                </span>
-              </div>
-            </div>
-            <div className="detail-row">
-              <div className="detail-label">当前处理人</div>
-              <div className="detail-value">
-                {order.current_handler ? (
-                  `${order.current_handler || '待分配'}（${order.currentHandlerRoleLabel || ''}）`
-                ) : '无'}
-              </div>
-            </div>
-            <div className="detail-row">
-              <div className="detail-label">所属门店</div>
-              <div className="detail-value">{order.store_name || '-'}</div>
-            </div>
-            <div className="detail-row">
-              <div className="detail-label">版本号</div>
-              <div className="detail-value">v{order.version}</div>
-            </div>
-            {order.deadline && (
-              <div className="detail-row">
-                <div className="detail-label">截止时间</div>
-                <div className="detail-value" style={{ color: order.status === 'overdue' ? '#c62828' : 'inherit' }}>
-                  {order.deadline}
+
+              <div className="detail-card">
+                <h3>患者信息</h3>
+                <div className="detail-row">
+                  <div className="detail-label">患者姓名</div>
+                  <div className="detail-value">{order.patient_name}</div>
+                </div>
+                <div className="detail-row">
+                  <div className="detail-label">联系电话</div>
+                  <div className="detail-value">{order.patient_phone || '-'}</div>
                 </div>
               </div>
-            )}
-          </div>
 
-          <div className="detail-card">
-            <h3>患者信息</h3>
-            <div className="detail-row">
-              <div className="detail-label">患者姓名</div>
-              <div className="detail-value">{order.patient_name}</div>
-            </div>
-            <div className="detail-row">
-              <div className="detail-label">联系电话</div>
-              <div className="detail-value">{order.patient_phone || '-'}</div>
-            </div>
-          </div>
-
-          <div className="detail-card">
-            <h3>药品信息</h3>
-            <div className="detail-row">
-              <div className="detail-label">药品名称</div>
-              <div className="detail-value"><strong>{order.drug_name}</strong></div>
-            </div>
-            <div className="detail-row">
-              <div className="detail-label">规格</div>
-              <div className="detail-value">{order.drug_spec || '-'}</div>
-            </div>
-            <div className="detail-row">
-              <div className="detail-label">数量</div>
-              <div className="detail-value">{order.quantity} 盒/瓶</div>
-            </div>
-          </div>
+              <div className="detail-card">
+                <h3>药品信息</h3>
+                <div className="detail-row">
+                  <div className="detail-label">药品名称</div>
+                  <div className="detail-value"><strong>{order.drug_name}</strong></div>
+                </div>
+                <div className="detail-row">
+                  <div className="detail-label">规格</div>
+                  <div className="detail-value">{order.drug_spec || '-'}</div>
+                </div>
+                <div className="detail-row">
+                  <div className="detail-label">数量</div>
+                  <div className="detail-value">{order.quantity} 盒/瓶</div>
+                </div>
+              </div>
+            </>
+          )}
 
           <div className="detail-card">
             <h3>证据附件</h3>
-            {evidenceCheck && !evidenceCheck.valid && (
-              <div className="evidence-missing">
-                ⚠️ 缺少必填证据：{evidenceCheck.missingLabels.join('、')}
-              </div>
-            )}
-            <div className="evidence-list">
-              {evidences.length === 0 ? (
-                <div className="empty-state">暂无证据附件</div>
-              ) : (
-                evidences.map(ev => (
-                  <div key={ev.id} className="evidence-item">
-                    <div className="ev-info">
-                      <span className="ev-type">{ev.typeLabel}</span>
-                      <span className="ev-name">{ev.name}</span>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
+            <EvidenceManager
+              evidences={evidences}
+              evidenceCheck={evidenceCheck}
+              canEdit={canEdit && !isEditing}
+              onAdd={handleAddEvidence}
+              onDelete={handleDeleteEvidence}
+              submitting={evidenceSubmitting}
+            />
           </div>
 
           <div className="detail-card">
@@ -325,7 +404,7 @@ export default function OrderDetail({ orderId, userId, userRole, onBack, onActio
                     key={action.key}
                     className={`btn ${getActionBtnClass(action.key)}`}
                     onClick={() => handleAction(action.key)}
-                    disabled={submitting}
+                    disabled={submitting || isEditing}
                   >
                     {action.label}
                   </button>

@@ -52,6 +52,52 @@ const formatOrder = (order) => {
   };
 };
 
+const logAuditFailure = async (orderId, action, userId, userRole, failureType, failureReason, requestData = null) => {
+  const db = await getDb();
+  const order = orderId ? await getOrderById(orderId) : null;
+  const id = uuidv4();
+  db.prepare(`
+    INSERT INTO audit_failures
+    (id, order_id, action, operator_id, operator_role, failure_type, failure_reason,
+     request_data, version_at_time, status_at_time)
+    VALUES
+    (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    id, orderId, action, userId, userRole, failureType, failureReason,
+    requestData ? JSON.stringify(requestData) : null,
+    order?.version || null,
+    order?.status || null
+  );
+  db.saveToDisk();
+};
+
+const logFieldChange = async (db, orderId, fieldName, oldValue, newValue, userId, userRole, reason = null, versionFrom = null, versionTo = null) => {
+  const id = uuidv4();
+  db.prepare(`
+    INSERT INTO field_changes
+    (id, order_id, field_name, old_value, new_value, changed_by, changed_by_role,
+     change_reason, version_from, version_to)
+    VALUES
+    (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    id, orderId, fieldName,
+    oldValue !== undefined && oldValue !== null ? String(oldValue) : null,
+    newValue !== undefined && newValue !== null ? String(newValue) : null,
+    userId, userRole, reason, versionFrom, versionTo
+  );
+};
+
+const logEvidenceChange = async (db, orderId, evidenceId, changeType, evidenceType, evidenceName, userId, userRole) => {
+  const id = uuidv4();
+  db.prepare(`
+    INSERT INTO evidence_changes
+    (id, order_id, evidence_id, change_type, evidence_type, evidence_name,
+     changed_by, changed_by_role)
+    VALUES
+    (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, orderId, evidenceId, changeType, evidenceType, evidenceName, userId, userRole);
+};
+
 const getOrdersByRole = async (userId, userRole, options = {}) => {
   const db = await getDb();
   const { status, riskLevel, storeId, keyword } = options;
@@ -315,16 +361,19 @@ const performAction = async (orderId, userId, userRole, action, opinion, version
 
   const check = checkCanPerformAction(order, userId, userRole, action);
   if (!check.can) {
+    await logAuditFailure(orderId, action, userId, userRole, 'permission_denied', check.reason, { opinion, version });
     return { success: false, message: check.reason };
   }
 
   if (version !== undefined && version !== order.version) {
+    await logAuditFailure(orderId, action, userId, userRole, 'version_conflict', '版本冲突，数据已被修改', { opinion, version });
     return { success: false, message: '版本冲突，数据已被修改，请刷新后重试' };
   }
 
   if (action === 'submit' || action === 'resubmit') {
     const evCheck = await validateRequiredEvidences(orderId, order.risk_level);
     if (!evCheck.valid) {
+      await logAuditFailure(orderId, action, userId, userRole, 'evidence_missing', `缺少必填证据：${evCheck.missingLabels.join('、')}`, { opinion, version, missing: evCheck.missing });
       return {
         success: false,
         message: `缺少必填证据：${evCheck.missingLabels.join('、')}`,
@@ -443,49 +492,150 @@ const performAction = async (orderId, userId, userRole, action, opinion, version
 
 const addEvidence = async (orderId, type, name, userId) => {
   const db = await getDb();
+  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
+  if (!user) {
+    await logAuditFailure(orderId, 'add_evidence', userId, 'unknown', 'user_not_found', '用户不存在', { type, name });
+    return { success: false, message: '用户不存在' };
+  }
+
   const order = await getOrderById(orderId);
-  if (!order) return { success: false, message: '订单不存在' };
+  if (!order) {
+    await logAuditFailure(orderId, 'add_evidence', userId, user.role, 'order_not_found', '订单不存在', { type, name });
+    return { success: false, message: '订单不存在' };
+  }
 
   if (order.registrar_id !== userId && order.current_handler !== userId) {
+    await logAuditFailure(orderId, 'add_evidence', userId, user.role, 'permission_denied', '无权限添加证据', { type, name });
     return { success: false, message: '无权限添加证据' };
   }
 
-  const id = uuidv4();
-  db.prepare(`
-    INSERT INTO evidences (id, order_id, type, name, uploaded_by)
-    VALUES (?, ?, ?, ?, ?)
-  `).run(id, orderId, type, name, userId);
-  db.saveToDisk();
+  if (!['draft', 'returned'].includes(order.status)) {
+    await logAuditFailure(orderId, 'add_evidence', userId, user.role, 'status_invalid', `当前状态【${order.statusLabel}】不可添加证据`, { type, name });
+    return { success: false, message: `当前状态【${order.statusLabel}】不可添加证据` };
+  }
 
-  const evidence = db.prepare('SELECT * FROM evidences WHERE id = ?').get(id);
-  return {
-    success: true,
-    evidence: { ...evidence, typeLabel: getEvidenceTypeLabel(evidence.type) }
-  };
+  if (!type || !EVIDENCE_TYPE_LABELS[type]) {
+    await logAuditFailure(orderId, 'add_evidence', userId, user.role, 'validation_failed', '无效的证据类型', { type, name });
+    return { success: false, message: '无效的证据类型' };
+  }
+  if (!name || !name.trim()) {
+    await logAuditFailure(orderId, 'add_evidence', userId, user.role, 'validation_failed', '证据名称不能为空', { type, name });
+    return { success: false, message: '证据名称不能为空' };
+  }
+
+  try {
+    db.run('BEGIN');
+    const id = uuidv4();
+    db.prepare(`
+      INSERT INTO evidences (id, order_id, type, name, uploaded_by)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(id, orderId, type, name.trim(), userId);
+
+    await logEvidenceChange(db, orderId, id, 'add', type, name.trim(), userId, user.role);
+
+    db.prepare(`UPDATE prescription_orders SET updated_at = datetime('now', 'localtime') WHERE id = ?`).run(orderId);
+
+    db.run('COMMIT');
+    db.saveToDisk();
+
+    const evidence = db.prepare('SELECT * FROM evidences WHERE id = ?').get(id);
+    const evidences = await getOrderEvidences(orderId);
+    const evidenceCheck = await validateRequiredEvidences(orderId, order.risk_level);
+
+    return {
+      success: true,
+      evidence: { ...evidence, typeLabel: getEvidenceTypeLabel(evidence.type) },
+      evidences,
+      evidenceCheck
+    };
+  } catch (e) {
+    try { db.run('ROLLBACK'); } catch (_) {}
+    await logAuditFailure(orderId, 'add_evidence', userId, user.role, 'db_error', e.message, { type, name });
+    return { success: false, message: e.message };
+  }
 };
 
 const deleteEvidence = async (evidenceId, userId) => {
   const db = await getDb();
+  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
+  if (!user) {
+    await logAuditFailure(null, 'delete_evidence', userId, 'unknown', 'user_not_found', '用户不存在', { evidenceId });
+    return { success: false, message: '用户不存在' };
+  }
+
   const evidence = db.prepare('SELECT * FROM evidences WHERE id = ?').get(evidenceId);
-  if (!evidence) return { success: false, message: '证据不存在' };
+  if (!evidence) {
+    await logAuditFailure(null, 'delete_evidence', userId, user.role, 'evidence_not_found', '证据不存在', { evidenceId });
+    return { success: false, message: '证据不存在' };
+  }
 
   const order = await getOrderById(evidence.order_id);
-  if (!order) return { success: false, message: '订单不存在' };
+  if (!order) {
+    await logAuditFailure(evidence.order_id, 'delete_evidence', userId, user.role, 'order_not_found', '订单不存在', { evidenceId });
+    return { success: false, message: '订单不存在' };
+  }
 
   if (order.registrar_id !== userId && order.current_handler !== userId) {
+    await logAuditFailure(evidence.order_id, 'delete_evidence', userId, user.role, 'permission_denied', '无权限删除证据', { evidenceId });
     return { success: false, message: '无权限删除证据' };
   }
 
-  db.prepare('DELETE FROM evidences WHERE id = ?').run(evidenceId);
-  db.saveToDisk();
-  return { success: true };
+  if (!['draft', 'returned'].includes(order.status)) {
+    await logAuditFailure(evidence.order_id, 'delete_evidence', userId, user.role, 'status_invalid', `当前状态【${order.statusLabel}】不可删除证据`, { evidenceId });
+    return { success: false, message: `当前状态【${order.statusLabel}】不可删除证据` };
+  }
+
+  try {
+    db.run('BEGIN');
+
+    await logEvidenceChange(db, evidence.order_id, evidenceId, 'delete', evidence.type, evidence.name, userId, user.role);
+
+    db.prepare('DELETE FROM evidences WHERE id = ?').run(evidenceId);
+
+    db.prepare(`UPDATE prescription_orders SET updated_at = datetime('now', 'localtime') WHERE id = ?`).run(evidence.order_id);
+
+    db.run('COMMIT');
+    db.saveToDisk();
+
+    const evidences = await getOrderEvidences(evidence.order_id);
+    const evidenceCheck = await validateRequiredEvidences(evidence.order_id, order.risk_level);
+
+    return { success: true, evidences, evidenceCheck };
+  } catch (e) {
+    try { db.run('ROLLBACK'); } catch (_) {}
+    await logAuditFailure(evidence.order_id, 'delete_evidence', userId, user.role, 'db_error', e.message, { evidenceId });
+    return { success: false, message: e.message };
+  }
 };
 
 const createOrder = async (data, userId) => {
   const db = await getDb();
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
-  if (!user) return { success: false, message: '用户不存在' };
-  if (user.role !== 'registrar') return { success: false, message: '只有登记员可以创建订单' };
+  if (!user) {
+    await logAuditFailure(null, 'create', userId, 'unknown', 'user_not_found', '用户不存在', data);
+    return { success: false, message: '用户不存在' };
+  }
+  if (user.role !== 'registrar') {
+    await logAuditFailure(null, 'create', userId, user.role, 'permission_denied', '只有登记员可以创建订单', data);
+    return { success: false, message: '只有登记员可以创建订单' };
+  }
+
+  if (!data.patient_name || !data.patient_name.trim()) {
+    await logAuditFailure(null, 'create', userId, user.role, 'validation_failed', '患者姓名不能为空', data);
+    return { success: false, message: '患者姓名不能为空' };
+  }
+  if (!data.drug_name || !data.drug_name.trim()) {
+    await logAuditFailure(null, 'create', userId, user.role, 'validation_failed', '药品名称不能为空', data);
+    return { success: false, message: '药品名称不能为空' };
+  }
+  if (!data.quantity || data.quantity < 1) {
+    await logAuditFailure(null, 'create', userId, user.role, 'validation_failed', '数量必须大于0', data);
+    return { success: false, message: '数量必须大于0' };
+  }
+  if (!['low', 'medium', 'high'].includes(data.risk_level)) {
+    await logAuditFailure(null, 'create', userId, user.role, 'validation_failed', '无效的风险等级', data);
+    return { success: false, message: '无效的风险等级' };
+  }
 
   const id = uuidv4();
   const orderNo = `RX${dayjs().format('YYYYMMDDHHmmss')}`;
@@ -498,8 +648,8 @@ const createOrder = async (data, userId) => {
     VALUES
     (?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, 'registrar', ?, ?, 1, ?, 'registrar')
   `).run(
-    id, orderNo, data.patient_name, data.patient_phone, data.drug_name,
-    data.drug_spec || '', data.quantity, data.risk_level || 'low',
+    id, orderNo, data.patient_name.trim(), data.patient_phone || null, data.drug_name.trim(),
+    data.drug_spec || '', data.quantity, data.risk_level,
     userId, user.store_id, userId, user.name
   );
   db.saveToDisk();
@@ -507,41 +657,122 @@ const createOrder = async (data, userId) => {
   return { success: true, orderId: id, orderNo };
 };
 
-const updateOrderBasic = async (orderId, data, userId) => {
+const updateOrderBasic = async (orderId, data, userId, version = undefined) => {
   const db = await getDb();
+  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
+  if (!user) {
+    await logAuditFailure(orderId, 'update', userId, 'unknown', 'user_not_found', '用户不存在', data);
+    return { success: false, message: '用户不存在' };
+  }
+
   const order = await getOrderById(orderId);
-  if (!order) return { success: false, message: '订单不存在' };
+  if (!order) {
+    await logAuditFailure(orderId, 'update', userId, user.role, 'order_not_found', '订单不存在', data);
+    return { success: false, message: '订单不存在' };
+  }
 
   if (order.registrar_id !== userId) {
+    await logAuditFailure(orderId, 'update', userId, user.role, 'permission_denied', '只有登记员本人可以编辑', data);
     return { success: false, message: '只有登记员本人可以编辑' };
   }
 
   if (!['draft', 'returned'].includes(order.status)) {
-    return { success: false, message: '当前状态不可编辑' };
+    await logAuditFailure(orderId, 'update', userId, user.role, 'status_invalid', `当前状态【${order.statusLabel}】不可编辑`, data);
+    return { success: false, message: `当前状态【${order.statusLabel}】不可编辑` };
   }
 
-  db.prepare(`
-    UPDATE prescription_orders SET
-      patient_name = COALESCE(?, patient_name),
-      patient_phone = COALESCE(?, patient_phone),
-      drug_name = COALESCE(?, drug_name),
-      drug_spec = COALESCE(?, drug_spec),
-      quantity = COALESCE(?, quantity),
-      risk_level = COALESCE(?, risk_level),
-      updated_at = datetime('now', 'localtime')
-    WHERE id = ?
-  `).run(
-    data.patient_name ?? null,
-    data.patient_phone ?? null,
-    data.drug_name ?? null,
-    data.drug_spec ?? null,
-    data.quantity ?? null,
-    data.risk_level ?? null,
-    orderId
-  );
-  db.saveToDisk();
+  if (version !== undefined && version !== order.version) {
+    await logAuditFailure(orderId, 'update', userId, user.role, 'version_conflict', '版本冲突，数据已被修改', data);
+    return { success: false, message: '版本冲突，数据已被修改，请刷新后重试' };
+  }
 
-  return { success: true };
+  const fieldMap = {
+    patient_name: '患者姓名',
+    patient_phone: '联系电话',
+    drug_name: '药品名称',
+    drug_spec: '药品规格',
+    quantity: '数量',
+    risk_level: '风险等级'
+  };
+
+  const updateFields = [];
+  const updateValues = [];
+  const changedFields = [];
+
+  Object.keys(fieldMap).forEach(field => {
+    if (data[field] !== undefined) {
+      const oldVal = order[field];
+      const newVal = data[field];
+      if (String(oldVal) !== String(newVal)) {
+        updateFields.push(`${field} = ?`);
+        updateValues.push(newVal);
+        changedFields.push({ field, label: fieldMap[field], oldVal, newVal });
+      }
+    }
+  });
+
+  if (updateFields.length === 0) {
+    return { success: true, changed: false };
+  }
+
+  try {
+    db.run('BEGIN');
+
+    updateFields.push(`updated_at = datetime('now', 'localtime')`);
+    const sql = `UPDATE prescription_orders SET ${updateFields.join(', ')} WHERE id = ?`;
+    updateValues.push(orderId);
+    db.prepare(sql).run(...updateValues);
+
+    for (const cf of changedFields) {
+      await logFieldChange(db, orderId, cf.label, cf.oldVal, cf.newVal, userId, user.role, '补正修改', order.version, order.version);
+    }
+
+    db.run('COMMIT');
+    db.saveToDisk();
+
+    const updatedOrder = await getOrderById(orderId);
+    return { success: true, changed: true, order: updatedOrder };
+  } catch (e) {
+    try { db.run('ROLLBACK'); } catch (_) {}
+    await logAuditFailure(orderId, 'update', userId, user.role, 'db_error', e.message, data);
+    return { success: false, message: e.message };
+  }
+};
+
+const getFieldChanges = async (orderId) => {
+  const db = await getDb();
+  const changes = db.prepare(`
+    SELECT * FROM field_changes 
+    WHERE order_id = ? 
+    ORDER BY created_at DESC, id DESC
+  `).all(orderId);
+  return changes;
+};
+
+const getEvidenceChanges = async (orderId) => {
+  const db = await getDb();
+  const changes = db.prepare(`
+    SELECT * FROM evidence_changes 
+    WHERE order_id = ? 
+    ORDER BY created_at DESC, id DESC
+  `).all(orderId);
+  return changes.map(c => ({
+    ...c,
+    evidenceTypeLabel: c.evidence_type ? getEvidenceTypeLabel(c.evidence_type) : null,
+    changeTypeLabel: c.change_type === 'add' ? '添加' : c.change_type === 'delete' ? '删除' : c.change_type
+  }));
+};
+
+const getAuditFailures = async (orderId = null) => {
+  const db = await getDb();
+  let sql = `SELECT * FROM audit_failures WHERE 1=1`;
+  const params = [];
+  if (orderId) {
+    sql += ' AND order_id = ?';
+    params.push(orderId);
+  }
+  sql += ' ORDER BY created_at DESC, id DESC LIMIT 50';
+  return db.prepare(sql).all(...params);
 };
 
 module.exports = {
@@ -549,6 +780,9 @@ module.exports = {
   getOrderById,
   getOrderEvidences,
   getOrderLogs,
+  getFieldChanges,
+  getEvidenceChanges,
+  getAuditFailures,
   getStats,
   getAvailableActions,
   checkCanPerformAction,

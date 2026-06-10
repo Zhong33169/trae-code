@@ -68,6 +68,8 @@ router.get('/orders/:id', async (ctx) => {
   const logs = await orderModel.getOrderLogs(id);
   const availableActions = orderModel.getAvailableActions(order, userId, user.role);
   const evidenceCheck = await orderModel.validateRequiredEvidences(id, order.risk_level);
+  const fieldChanges = await orderModel.getFieldChanges(id);
+  const evidenceChanges = await orderModel.getEvidenceChanges(id);
 
   ctx.body = {
     success: true,
@@ -76,6 +78,8 @@ router.get('/orders/:id', async (ctx) => {
     logs,
     availableActions,
     evidenceCheck,
+    fieldChanges,
+    evidenceChanges,
     canEdit: order.registrar_id === userId && ['draft', 'returned'].includes(order.status)
   };
 });
@@ -143,7 +147,7 @@ router.post('/orders', async (ctx) => {
 
 router.put('/orders/:id', async (ctx) => {
   const { id } = ctx.params;
-  const { userId, ...data } = ctx.request.body;
+  const { userId, version, ...data } = ctx.request.body;
 
   if (!userId) {
     ctx.status = 400;
@@ -151,7 +155,7 @@ router.put('/orders/:id', async (ctx) => {
     return;
   }
 
-  const result = await orderModel.updateOrderBasic(id, data, userId);
+  const result = await orderModel.updateOrderBasic(id, data, userId, version);
   if (!result.success) {
     ctx.status = 400;
   }

@@ -3,6 +3,8 @@ import UserSelector from './UserSelector';
 import StatsPanel from './StatsPanel';
 import OrderList from './OrderList';
 import OrderDetail from './OrderDetail';
+import OrderForm from './OrderForm';
+import { createOrder } from '../lib/api';
 
 const STATUS_OPTIONS = [
   { value: 'all', label: '全部状态' },
@@ -38,20 +40,25 @@ export default function App() {
     riskLevel: 'all',
     keyword: ''
   });
+  const [showCreate, setShowCreate] = useState(false);
+  const [creating, setCreating] = useState(false);
 
   const handleUserChange = (user) => {
     setCurrentUser(user);
     setSelectedOrderId(null);
+    setShowCreate(false);
     setFilters({ status: 'all', riskLevel: 'all', keyword: '' });
     setRefreshKey(k => k + 1);
   };
 
   const handleOrderClick = (order) => {
     setSelectedOrderId(order.id);
+    setShowCreate(false);
   };
 
   const handleBack = () => {
     setSelectedOrderId(null);
+    setShowCreate(false);
   };
 
   const handleActionComplete = () => {
@@ -60,6 +67,25 @@ export default function App() {
 
   const handleFilterChange = (key, value) => {
     setFilters(prev => ({ ...prev, [key]: value }));
+  };
+
+  const handleCreateSubmit = async (formData) => {
+    setCreating(true);
+    try {
+      const res = await createOrder(formData, currentUser.id);
+      if (res.success) {
+        alert(`订单创建成功！订单号：${res.orderNo}`);
+        setShowCreate(false);
+        setSelectedOrderId(res.orderId);
+        setRefreshKey(k => k + 1);
+      } else {
+        alert(res.message || '创建失败');
+      }
+    } catch (e) {
+      alert('创建失败');
+    } finally {
+      setCreating(false);
+    }
   };
 
   return (
@@ -77,6 +103,21 @@ export default function App() {
           onBack={handleBack}
           onActionComplete={handleActionComplete}
         />
+      ) : showCreate ? (
+        <div className="create-form-container">
+          <div className="back-link" onClick={() => setShowCreate(false)}>
+            ← 返回列表
+          </div>
+          <div className="detail-card">
+            <h3>新建处方订单</h3>
+            <OrderForm
+              mode="create"
+              onSubmit={handleCreateSubmit}
+              onCancel={() => setShowCreate(false)}
+              submitting={creating}
+            />
+          </div>
+        </div>
       ) : (
         <>
           <StatsPanel
@@ -116,6 +157,13 @@ export default function App() {
                 onChange={e => handleFilterChange('keyword', e.target.value)}
               />
             </div>
+            {currentUser.role === 'registrar' && (
+              <div className="filter-item filter-action">
+                <button className="btn btn-primary" onClick={() => setShowCreate(true)}>
+                  + 新建订单
+                </button>
+              </div>
+            )}
           </div>
 
           <OrderList

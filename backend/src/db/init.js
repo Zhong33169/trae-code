@@ -73,11 +73,54 @@ const init = async () => {
       created_at TEXT DEFAULT (datetime('now', 'localtime'))
     );
 
+    CREATE TABLE IF NOT EXISTS audit_failures (
+      id TEXT PRIMARY KEY,
+      order_id TEXT,
+      action TEXT NOT NULL,
+      operator_id TEXT NOT NULL,
+      operator_role TEXT NOT NULL,
+      failure_type TEXT NOT NULL,
+      failure_reason TEXT NOT NULL,
+      request_data TEXT,
+      version_at_time INTEGER,
+      status_at_time TEXT,
+      created_at TEXT DEFAULT (datetime('now', 'localtime'))
+    );
+
+    CREATE TABLE IF NOT EXISTS field_changes (
+      id TEXT PRIMARY KEY,
+      order_id TEXT NOT NULL,
+      field_name TEXT NOT NULL,
+      old_value TEXT,
+      new_value TEXT,
+      changed_by TEXT NOT NULL,
+      changed_by_role TEXT NOT NULL,
+      change_reason TEXT,
+      version_from INTEGER,
+      version_to INTEGER,
+      created_at TEXT DEFAULT (datetime('now', 'localtime'))
+    );
+
+    CREATE TABLE IF NOT EXISTS evidence_changes (
+      id TEXT PRIMARY KEY,
+      order_id TEXT NOT NULL,
+      evidence_id TEXT,
+      change_type TEXT NOT NULL,
+      evidence_type TEXT,
+      evidence_name TEXT,
+      changed_by TEXT NOT NULL,
+      changed_by_role TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now', 'localtime'))
+    );
+
     CREATE INDEX IF NOT EXISTS idx_orders_status ON prescription_orders(status);
     CREATE INDEX IF NOT EXISTS idx_orders_risk ON prescription_orders(risk_level);
     CREATE INDEX IF NOT EXISTS idx_orders_store ON prescription_orders(store_id);
     CREATE INDEX IF NOT EXISTS idx_logs_order ON operation_logs(order_id);
     CREATE INDEX IF NOT EXISTS idx_evidences_order ON evidences(order_id);
+    CREATE INDEX IF NOT EXISTS idx_audit_failures_order ON audit_failures(order_id);
+    CREATE INDEX IF NOT EXISTS idx_field_changes_order ON field_changes(order_id);
+    CREATE INDEX IF NOT EXISTS idx_evidence_changes_order ON evidence_changes(order_id);
   `;
 
   db.exec(createTables);

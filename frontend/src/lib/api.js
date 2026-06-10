@@ -35,12 +35,18 @@ export const performAction = (orderId, action, payload) => {
   });
 };
 
-export const getCurrentUser = (userId) => {
-  return request(`/users/current?userId=${userId}`);
+export const createOrder = (data, userId) => {
+  return request('/orders', {
+    method: 'POST',
+    body: { userId, ...data }
+  });
 };
 
-export const getStores = () => {
-  return request('/stores');
+export const updateOrder = (orderId, data, userId, version) => {
+  return request(`/orders/${orderId}`, {
+    method: 'PUT',
+    body: { userId, version, ...data }
+  });
 };
 
 export const addEvidence = (orderId, type, name, userId) => {
@@ -57,18 +63,12 @@ export const deleteEvidence = (evidenceId, userId) => {
   });
 };
 
-export const createOrder = (data, userId) => {
-  return request('/orders', {
-    method: 'POST',
-    body: { userId, ...data }
-  });
+export const getCurrentUser = (userId) => {
+  return request(`/users/current?userId=${userId}`);
 };
 
-export const updateOrder = (orderId, data, userId) => {
-  return request(`/orders/${orderId}`, {
-    method: 'PUT',
-    body: { userId, ...data }
-  });
+export const getStores = () => {
+  return request('/stores');
 };
 
 export const API_PORT_VALUE = API_PORT;
