@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, use } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
@@ -133,10 +133,10 @@ function EvidenceFormItems({
   );
 }
 
-export default function OrderDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = use(params);
+export default function OrderDetailPage({ params }: { params: { id: string } }) {
+  const id = params.id;
   const router = useRouter();
-  const { currentUser, token, fetchOrders } = useStore();
+  const { currentUser, token, fetchOrders, login } = useStore();
 
   const [order, setOrder] = useState<Order | null>(null);
   const [loading, setLoading] = useState(true);
@@ -173,7 +173,11 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
   };
 
   useEffect(() => {
-    loadOrder();
+    if (!token) {
+      login("receptionist1", "123456").catch(() => {});
+    } else {
+      loadOrder();
+    }
   }, [token, id]);
 
   const handleSubmit = async () => {

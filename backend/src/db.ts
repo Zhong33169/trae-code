@@ -133,6 +133,9 @@ function seedData(): void {
   db.run("INSERT INTO orders (id, order_no, guest_name, guest_phone, room_number, supplement_reason, status, version, created_by) VALUES ('o4', 'ORD-20260611-004', '赵六', NULL, '2105', '团队入住补录', 'archived', 4, 'u1')");
   db.run("INSERT INTO orders (id, order_no, guest_name, guest_phone, room_number, supplement_reason, status, version, created_by) VALUES ('o5', 'ORD-20260611-005', '孙七', NULL, '0902', '换房补录', 'pending_verification', 2, 'u1')");
   db.run("INSERT INTO orders (id, order_no, guest_name, guest_phone, room_number, supplement_reason, status, version, created_by) VALUES ('o6', 'ORD-20260611-006', '周八', NULL, '0611', NULL, 'pending_supplement', 1, 'u1')");
+  db.run("INSERT INTO orders (id, order_no, guest_name, guest_phone, room_number, supplement_reason, status, version, created_by) VALUES ('o7', 'ORD-20260611-007', '钱九', NULL, '1107', '会议团队补录', 'pending_supplement', 3, 'u1')");
+  db.run("INSERT INTO orders (id, order_no, guest_name, guest_phone, room_number, supplement_reason, status, version, created_by) VALUES ('o8', 'ORD-20260611-008', '吴十', NULL, '1415', '长住客续住补录', 'pending_verification', 2, 'u1')");
+  db.run("INSERT INTO orders (id, order_no, guest_name, guest_phone, room_number, supplement_reason, status, version, created_by) VALUES ('o9', 'ORD-20260611-009', '郑十一', NULL, '2002', '促销活动补录', 'pending_verification', 4, 'u1')");
 
   db.run("INSERT INTO evidence_items (id, order_id, stage, type, description) VALUES ('e1', 'o2', 'registration', '身份证扫描', '住客身份证正面扫描件')");
   db.run("INSERT INTO evidence_items (id, order_id, stage, type, description) VALUES ('e2', 'o3', 'registration', '身份证扫描', '住客身份证正面扫描件')");
@@ -141,6 +144,9 @@ function seedData(): void {
   db.run("INSERT INTO evidence_items (id, order_id, stage, type, description) VALUES ('e5', 'o4', 'verification', '客房检查记录', '客房设施检查确认单')");
   db.run("INSERT INTO evidence_items (id, order_id, stage, type, description) VALUES ('e6', 'o4', 'archive', '归档确认书', '值班经理归档确认签字')");
   db.run("INSERT INTO evidence_items (id, order_id, stage, type, description) VALUES ('e7', 'o5', 'registration', '身份证扫描', '住客身份证正面扫描件')");
+  db.run("INSERT INTO evidence_items (id, order_id, stage, type, description) VALUES ('e8', 'o7', 'registration', '身份证扫描', '住客身份证正面扫描件')");
+  db.run("INSERT INTO evidence_items (id, order_id, stage, type, description) VALUES ('e9', 'o8', 'registration', '入住登记表', '纸质入住登记表')");
+  db.run("INSERT INTO evidence_items (id, order_id, stage, type, description) VALUES ('e10', 'o9', 'registration', '身份证扫描', '住客身份证正面扫描件')");
 
   db.run("INSERT INTO audit_logs (id, order_id, action, operator_id, operator_role, detail) VALUES ('a1', 'o4', 'supplement', 'u1', 'receptionist', '补录登记完成')");
   db.run("INSERT INTO audit_logs (id, order_id, action, operator_id, operator_role, detail) VALUES ('a2', 'o4', 'verify', 'u2', 'room_supervisor', '核验通过')");
@@ -149,4 +155,10 @@ function seedData(): void {
   db.run("INSERT INTO audit_logs (id, order_id, action, operator_id, operator_role, detail) VALUES ('a5', 'o3', 'verify', 'u2', 'room_supervisor', '核验通过')");
   db.run("INSERT INTO audit_logs (id, order_id, action, operator_id, operator_role, detail) VALUES ('a6', 'o2', 'supplement', 'u1', 'receptionist', '补录登记完成')");
   db.run("INSERT INTO audit_logs (id, order_id, action, operator_id, operator_role, detail) VALUES ('a7', 'o5', 'supplement', 'u1', 'receptionist', '补录登记完成')");
+  db.run("INSERT INTO audit_logs (id, order_id, action, operator_id, operator_role, detail) VALUES ('a8', 'o7', 'supplement', 'u1', 'receptionist', '补录登记完成')");
+  db.run("INSERT INTO audit_logs (id, order_id, action, operator_id, operator_role, detail) VALUES ('a9', 'o7', 'verify', 'u2', 'room_supervisor', '核验退回：证据不完整')");
+  db.run("INSERT INTO audit_logs (id, order_id, action, operator_id, operator_role, detail) VALUES ('a10', 'o8', 'supplement', 'u1', 'receptionist', '补录登记完成')");
+  db.run("INSERT INTO audit_logs (id, order_id, action, operator_id, operator_role, detail) VALUES ('a11', 'o9', 'supplement', 'u1', 'receptionist', '补录登记完成')");
+  db.run("INSERT INTO audit_logs (id, order_id, action, operator_id, operator_role, detail) VALUES ('a12', 'o9', 'verify', 'u2', 'room_supervisor', '核验通过')");
+  db.run("INSERT INTO audit_logs (id, order_id, action, operator_id, operator_role, detail) VALUES ('a13', 'o9', 'review', 'u3', 'duty_manager', '复核退回：信息有误')");
 }

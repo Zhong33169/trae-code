@@ -76,18 +76,29 @@ export interface ReviewData {
 }
 
 export interface BatchActionData {
-  orderIds: string[]
+  orders: { id: string; version: number }[]
   action: 'supplement' | 'verify' | 'review'
-  version: number
   evidenceItems?: { type: string; description: string }[]
   verified?: boolean
   approved?: boolean
   remark?: string
 }
 
+export interface BatchSuccessItem {
+  id: string
+  order_no: string
+}
+
+export interface BatchFailureItem {
+  id: string
+  order_no?: string
+  reason: string
+  code: string
+}
+
 export interface BatchActionResult {
-  successes: string[]
-  failures: { id: string; reason: string }[]
+  successes: BatchSuccessItem[]
+  failures: BatchFailureItem[]
 }
 
 export interface ApiError {

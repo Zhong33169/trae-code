@@ -24,6 +24,7 @@ import {
   type Order,
   type EvidenceItem,
   type ApiError,
+  type BatchActionResult,
 } from "@/lib/api";
 
 const ROLE_CONFIG = {
@@ -140,10 +141,10 @@ function EvidencePanel({ order }: { order: Order }) {
   );
 }
 
-function BatchActionBar() {
-  const { selectedOrderIds, currentUser, token, clearSelection, fetchOrders } = useStore();
+function BatchActionBar({ onShowDetail }: { onShowDetail: (result: BatchActionResult) => void }) {
+  const { selectedOrderIds, currentUser, token, clearSelection, fetchOrders, orders } = useStore();
   const [processing, setProcessing] = useState(false);
-  const [result, setResult] = useState<{ successes: string[]; failures: { id: string; reason: string }[] } | null>(null);
+  const [result, setResult] = useState<BatchActionResult | null>(null);
 
   if (selectedOrderIds.length === 0) return null;
 
@@ -153,15 +154,17 @@ function BatchActionBar() {
   const actionType =
     role === "receptionist" ? "supplement" as const : role === "room_supervisor" ? "verify" as const : "review" as const;
 
+  const selectedOrders = orders.filter((o) => selectedOrderIds.includes(o.id));
+
   const handleBatchAction = async () => {
     if (!token) return;
     setProcessing(true);
     setResult(null);
     try {
+      const batchOrders = selectedOrders.map((o) => ({ id: o.id, version: o.version }));
       const res = await batchAction(token, {
-        orderIds: selectedOrderIds,
+        orders: batchOrders,
         action: actionType,
-        version: 1,
         evidenceItems: [{ type: "其他", description: "批量操作证据" }],
         verified: true,
         approved: true,
@@ -169,9 +172,16 @@ function BatchActionBar() {
       setResult(res);
       clearSelection();
       await fetchOrders();
+      if (res.failures.length > 0) {
+        onShowDetail(res);
+      }
     } catch (err) {
       const apiErr = err as ApiError;
-      setResult({ successes: [], failures: selectedOrderIds.map((id) => ({ id, reason: apiErr.reason || apiErr.error })) });
+      const failResult: BatchActionResult = {
+        successes: [],
+        failures: selectedOrders.map((o) => ({ id: o.id, order_no: o.order_no, reason: apiErr.reason || apiErr.error || "操作失败", code: "unknown" })),
+      };
+      setResult(failResult);
     } finally {
       setProcessing(false);
     }
@@ -185,10 +195,19 @@ function BatchActionBar() {
       </div>
       <div className="flex items-center gap-3">
         {result && (
-          <span className="text-xs">
-            {result.successes.length > 0 && <span className="text-green-300 mr-2">成功 {result.successes.length}</span>}
-            {result.failures.length > 0 && <span className="text-red-300">失败 {result.failures.length}</span>}
-          </span>
+          <div className="flex items-center gap-3 text-xs">
+            {result.successes.length > 0 && (
+              <span className="text-green-300 font-medium">成功 {result.successes.length}</span>
+            )}
+            {result.failures.length > 0 && (
+              <button
+                onClick={() => onShowDetail(result)}
+                className="text-red-300 font-medium hover:text-red-200 underline underline-offset-2"
+              >
+                失败 {result.failures.length}（点击查看详情）
+              </button>
+            )}
+          </div>
         )}
         <button
           onClick={clearSelection}
@@ -244,6 +263,7 @@ export default function HomePage() {
 
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const [initialized, setInitialized] = useState(false);
+  const [batchFailDetail, setBatchFailDetail] = useState<BatchActionResult | null>(null);
 
   useEffect(() => {
     if (!token) {
@@ -420,7 +440,48 @@ export default function HomePage() {
         </div>
       </div>
 
-      <BatchActionBar />
+      <BatchActionBar onShowDetail={setBatchFailDetail} />
+
+      {batchFailDetail && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100]" onClick={() => setBatchFailDetail(null)}>
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="bg-navy-700 text-white px-6 py-4 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="w-5 h-5 text-red-300" />
+                <span className="font-semibold">批量操作失败详情</span>
+              </div>
+              <button onClick={() => setBatchFailDetail(null)} className="text-white/70 hover:text-white">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-5 max-h-96 overflow-y-auto space-y-3">
+              <div className="text-sm text-gray-600 mb-3">
+                成功 <span className="font-semibold text-green-600">{batchFailDetail.successes.length}</span> 条，
+                失败 <span className="font-semibold text-red-600">{batchFailDetail.failures.length}</span> 条
+              </div>
+              {batchFailDetail.failures.map((f) => (
+                <div key={f.id} className="border border-red-200 bg-red-50 rounded-lg p-3">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="font-medium text-sm text-navy-900">{f.order_no || f.id}</span>
+                    <span className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded-full">
+                      {f.code}
+                    </span>
+                  </div>
+                  <p className="text-sm text-red-700">{f.reason}</p>
+                </div>
+              ))}
+            </div>
+            <div className="px-6 py-3 bg-gray-50 border-t border-gray-200 flex justify-end">
+              <button
+                onClick={() => setBatchFailDetail(null)}
+                className="px-4 py-2 text-sm rounded-lg bg-navy-700 text-white hover:bg-navy-800 transition-colors"
+              >
+                知道了
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
