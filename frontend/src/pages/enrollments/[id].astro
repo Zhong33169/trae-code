@@ -1,0 +1,10 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import App from '../../components/App';
+
+const { id } = Astro.params;
+---
+
+<BaseLayout title="报名单详情 - 职技报名管理系统">
+  <App client:load initialPage="detail" initialParams={{ id: Number(id) }} />
+</BaseLayout>
