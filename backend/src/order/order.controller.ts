@@ -63,7 +63,7 @@ export class OrderController {
   }
 
   @Put(':id')
-  @Roles(UserRole.REGISTRAR, UserRole.SUPERVISOR)
+  @Roles(UserRole.REGISTRAR)
   async update(
     @Param('id') id: string,
     @Body() dto: UpdateOrderDto,
@@ -137,13 +137,13 @@ export class OrderController {
   }
 
   @Post(':id/deliver')
-  @Roles(UserRole.SUPERVISOR, UserRole.REGISTRAR)
+  @Roles(UserRole.SUPERVISOR)
   async deliver(@Param('id') id: string, @CurrentUser() user: User) {
     return this.orderService.deliver(id, user);
   }
 
   @Post(':id/sign')
-  @Roles(UserRole.REGISTRAR, UserRole.SUPERVISOR)
+  @Roles(UserRole.REGISTRAR)
   async sign(@Param('id') id: string, @CurrentUser() user: User) {
     return this.orderService.sign(id, user);
   }
@@ -155,7 +155,7 @@ export class OrderController {
   }
 
   @Post(':id/exception')
-  @Roles(UserRole.SUPERVISOR, UserRole.REVIEWER)
+  @Roles(UserRole.SUPERVISOR)
   async markException(
     @Param('id') id: string,
     @Body() body: { reason: string },
@@ -194,7 +194,7 @@ export class OrderController {
   }
 
   @Post(':id/return')
-  @Roles(UserRole.SUPERVISOR, UserRole.REVIEWER)
+  @Roles(UserRole.SUPERVISOR)
   async returnOrder(
     @Param('id') id: string,
     @Body() body: { reason: string },
@@ -207,7 +207,7 @@ export class OrderController {
   }
 
   @Post(':id/rectify')
-  @Roles(UserRole.REGISTRAR, UserRole.SUPERVISOR)
+  @Roles(UserRole.REGISTRAR)
   async rectify(@Param('id') id: string, @CurrentUser() user: User) {
     return this.orderService.rectify(id, user);
   }
@@ -225,23 +225,21 @@ export class OrderController {
       throw new BadRequestException('请指定操作类型');
     }
 
-    const registrarActions = ['submit', 'sign', 'rectify', 'deliver'];
+    const registrarActions = ['submit', 'sign', 'rectify'];
     const supervisorActions = [
       'review_approve', 'review_reject', 'submit_final',
-      'ship', 'exception', 'materials_missing', 'timeout', 'return',
+      'ship', 'deliver', 'exception', 'materials_missing', 'timeout', 'return',
     ];
     const reviewerActions = ['final_approve', 'final_reject', 'archive'];
 
-    if (registrarActions.includes(body.action) && user.role !== UserRole.REGISTRAR
-        && user.role !== UserRole.SUPERVISOR && user.role !== UserRole.REVIEWER) {
-      throw new ForbiddenException('权限不足：该操作仅登记员/主管/复核员可执行');
+    if (registrarActions.includes(body.action) && user.role !== UserRole.REGISTRAR) {
+      throw new ForbiddenException('权限不足：该操作仅登记员可执行');
     }
-    if (supervisorActions.includes(body.action) && user.role !== UserRole.SUPERVISOR
-        && user.role !== UserRole.REVIEWER) {
-      throw new ForbiddenException('权限不足：该操作仅主管/复核员可执行');
+    if (supervisorActions.includes(body.action) && user.role !== UserRole.SUPERVISOR) {
+      throw new ForbiddenException('权限不足：该操作仅主管可执行');
     }
     if (reviewerActions.includes(body.action) && user.role !== UserRole.REVIEWER) {
-      throw new ForbiddenException('权限不足：该操作仅复核员可执行');
+      throw new ForbiddenException('权限不足：该操作仅复核负责人可执行');
     }
 
     return this.orderService.batchProcess(body.ids, body.action, user, body.reason);

@@ -611,11 +611,12 @@ async function seed() {
     if (odata.status === OrderStatus.EXCEPTION) {
       await auditLogRepository.save({
         orderId: savedOrder.id,
-        userId: reviewer.id,
+        userId: supervisor.id,
         action: AuditAction.EXCEPTION,
-        description: `复核员${reviewer.name}标记订单 ${savedOrder.orderNo} 为异常`,
+        description: `主管${supervisor.name}标记订单 ${savedOrder.orderNo} 为异常`,
         success: false,
         failReason: odata.rejectReason || '供应商临时缺货',
+        beforeData: { status: OrderStatus.PENDING_REVIEW },
         createdAt: minusHours(Math.max(0, (odata.createHoursAgo || 0) - 8)),
       });
     }
@@ -887,6 +888,99 @@ async function seed() {
 
   console.log(`✅ 2个导入批次创建完成（1个正常批次，1个冲突+失败批次）`);
 
+  console.log('🔒 创建跨角色失败审计样例...');
+
+  const draftOrder = createdOrders.find(o => o.status === OrderStatus.DRAFT);
+  const pendingReviewOrder = createdOrders.find(o => o.status === OrderStatus.PENDING_REVIEW);
+  const signedOrder = createdOrders.find(o => o.status === OrderStatus.SIGNED);
+  const shippedOrder = createdOrders.find(o => o.status === OrderStatus.SHIPPED);
+
+  if (pendingReviewOrder) {
+    await auditLogRepository.save({
+      orderId: pendingReviewOrder.id,
+      userId: registrar.id,
+      action: AuditAction.REVIEW_APPROVE,
+      description: `尝试审核通过订单 ${pendingReviewOrder.orderNo} 失败：权限不足`,
+      success: false,
+      failReason: '权限不足：该操作仅主管可执行，登记员无权审核',
+      beforeData: { status: pendingReviewOrder.status },
+      afterData: { operatorRole: 'registrar', attemptedAction: 'review_approve' },
+      createdAt: minusHours(1),
+    });
+  }
+
+  if (draftOrder) {
+    await auditLogRepository.save({
+      orderId: draftOrder.id,
+      userId: supervisor.id,
+      action: AuditAction.REVIEW_APPROVE,
+      description: `尝试审核通过订单 ${draftOrder.orderNo} 失败：状态不匹配`,
+      success: false,
+      failReason: `当前状态 ${OrderStatus.DRAFT} 无法审核，仅待审核状态可审核`,
+      beforeData: { status: OrderStatus.DRAFT },
+      afterData: { operatorRole: 'supervisor', attemptedAction: 'review_approve' },
+      createdAt: minusHours(0.5),
+    });
+  }
+
+  if (shippedOrder) {
+    await auditLogRepository.save({
+      orderId: shippedOrder.id,
+      userId: registrar.id,
+      action: AuditAction.DELIVER,
+      description: `尝试配送订单 ${shippedOrder.orderNo} 失败：权限不足`,
+      success: false,
+      failReason: '权限不足：该操作仅主管可执行，登记员无权配送',
+      beforeData: { status: OrderStatus.SHIPPED },
+      afterData: { operatorRole: 'registrar', attemptedAction: 'deliver' },
+      createdAt: minusHours(3),
+    });
+  }
+
+  if (signedOrder) {
+    await auditLogRepository.save({
+      orderId: signedOrder.id,
+      userId: supervisor.id,
+      action: AuditAction.ARCHIVE,
+      description: `尝试归档订单 ${signedOrder.orderNo} 失败：权限不足`,
+      success: false,
+      failReason: '权限不足：该操作仅复核负责人可执行，主管无权归档',
+      beforeData: { status: OrderStatus.SIGNED },
+      afterData: { operatorRole: 'supervisor', attemptedAction: 'archive' },
+      createdAt: minusHours(2),
+    });
+  }
+
+  if (draftOrder) {
+    await auditLogRepository.save({
+      orderId: draftOrder.id,
+      userId: registrar.id,
+      action: AuditAction.REVIEW_REJECT,
+      description: `尝试审核退回订单 ${draftOrder.orderNo} 失败：缺少退回原因`,
+      success: false,
+      failReason: '退回原因不能为空',
+      beforeData: { status: OrderStatus.DRAFT },
+      afterData: { operatorRole: 'registrar', attemptedAction: 'review_reject' },
+      createdAt: minusHours(0.3),
+    });
+  }
+
+  if (pendingReviewOrder) {
+    await auditLogRepository.save({
+      orderId: pendingReviewOrder.id,
+      userId: reviewer.id,
+      action: AuditAction.REVIEW_APPROVE,
+      description: `尝试审核通过订单 ${pendingReviewOrder.orderNo} 失败：权限不足`,
+      success: false,
+      failReason: '权限不足：该操作仅主管可执行，复核负责人无权审核',
+      beforeData: { status: OrderStatus.PENDING_REVIEW },
+      afterData: { operatorRole: 'reviewer', attemptedAction: 'review_approve' },
+      createdAt: minusHours(1.5),
+    });
+  }
+
+  console.log(`✅ 6条跨角色失败审计样例创建完成`);
+
   console.log('');
   console.log('🎉 种子数据初始化完成！');
   console.log('');
@@ -897,7 +991,7 @@ async function seed() {
   console.log(`   3. TG202406100006 - 审核通过 - 可提交复核（主管）`);
   console.log(`   4. TG202406100007 - 待复核单 - 可通过/退回（复核员）`);
   console.log(`   5. TG202406100009 - 已发货单 - 可配送（主管）`);
-  console.log(`   6. TG202406100008 - 已配送单 - 可签收（登记员/主管）`);
+  console.log(`   6. TG202406100008 - 已配送单 - 可签收（登记员）`);
   console.log(`   7. TG202406100015 - 已签收单 - 可归档（复核员）`);
   console.log(`   8. TG202406100001 - 已归档单 - 完整流程（可查看审计）`);
   console.log('');

@@ -477,7 +477,6 @@ const canSubmit = computed(() => {
 
 const canEdit = computed(() => {
   if (!order.value) return false;
-  if (authStore.isSupervisor) return true;
   return authStore.isRegistrar && ['draft', 'review_rejected', 'final_rejected'].includes(order.value.status);
 });
 
@@ -513,12 +512,12 @@ const canShip = computed(() => {
 
 const canDeliver = computed(() => {
   if (!order.value) return false;
-  return (authStore.isSupervisor || authStore.isRegistrar) && order.value.status === 'shipped';
+  return authStore.isSupervisor && order.value.status === 'shipped';
 });
 
 const canSign = computed(() => {
   if (!order.value) return false;
-  return (authStore.isSupervisor || authStore.isRegistrar) && order.value.status === 'delivered';
+  return authStore.isRegistrar && order.value.status === 'delivered';
 });
 
 const canArchive = computed(() => {
@@ -528,17 +527,17 @@ const canArchive = computed(() => {
 
 const canMarkException = computed(() => {
   if (!order.value) return false;
-  return (authStore.isSupervisor || authStore.isReviewer) && !['archived', 'draft'].includes(order.value.status);
+  return authStore.isSupervisor && !['archived', 'draft'].includes(order.value.status);
 });
 
 const canReturn = computed(() => {
   if (!order.value) return false;
-  return (authStore.isSupervisor || authStore.isReviewer) && ['shipped', 'delivered', 'signed'].includes(order.value.status);
+  return authStore.isSupervisor && ['shipped', 'delivered', 'signed'].includes(order.value.status);
 });
 
 const canRectify = computed(() => {
   if (!order.value) return false;
-  return (authStore.isRegistrar || authStore.isSupervisor) && ['exception', 'materials_missing', 'timeout'].includes(order.value.status);
+  return authStore.isRegistrar && ['exception', 'materials_missing', 'timeout'].includes(order.value.status);
 });
 
 const canUploadAttachment = computed(() => {

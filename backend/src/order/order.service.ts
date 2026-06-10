@@ -214,9 +214,29 @@ export class OrderService {
     const beforeData = JSON.parse(JSON.stringify(order));
 
     if (order.status !== OrderStatus.DRAFT && order.status !== OrderStatus.REVIEW_REJECTED && order.status !== OrderStatus.FINAL_REJECTED) {
-      if (user.role === UserRole.REGISTRAR) {
-        throw new ForbiddenException('当前状态下无法编辑订单，请联系审核人员');
-      }
+      await this.auditLogService.create({
+        orderId: id,
+        userId: user.id,
+        action: AuditAction.UPDATE,
+        description: `尝试编辑订单 ${order.orderNo} 失败：当前状态${order.status}不可编辑`,
+        success: false,
+        failReason: `当前状态 ${order.status} 无法编辑订单，仅草稿/审核退回/复核退回状态可编辑`,
+        beforeData: { status: order.status },
+      });
+      throw new ForbiddenException('当前状态下无法编辑订单，仅草稿/审核退回/复核退回状态可编辑');
+    }
+
+    if (user.role !== UserRole.REGISTRAR) {
+      await this.auditLogService.create({
+        orderId: id,
+        userId: user.id,
+        action: AuditAction.UPDATE,
+        description: `尝试编辑订单 ${order.orderNo} 失败：权限不足`,
+        success: false,
+        failReason: '仅登记员可编辑订单',
+        beforeData: { status: order.status },
+      });
+      throw new ForbiddenException('仅登记员可编辑订单');
     }
 
     if (dto.communityName !== undefined) order.communityName = dto.communityName;
@@ -281,10 +301,28 @@ export class OrderService {
     const beforeData = JSON.parse(JSON.stringify(order));
 
     if (order.status !== OrderStatus.DRAFT && order.status !== OrderStatus.REVIEW_REJECTED && order.status !== OrderStatus.FINAL_REJECTED) {
+      await this.auditLogService.create({
+        orderId: id,
+        userId: user.id,
+        action: AuditAction.SUBMIT,
+        description: `尝试提交订单 ${order.orderNo} 审核失败：状态不匹配`,
+        success: false,
+        failReason: `当前状态 ${order.status} 无法提交审核，仅草稿/审核退回/复核退回状态可提交`,
+        beforeData: { status: order.status },
+      });
       throw new BadRequestException('当前状态无法提交审核');
     }
 
     if (order.items.length === 0) {
+      await this.auditLogService.create({
+        orderId: id,
+        userId: user.id,
+        action: AuditAction.SUBMIT,
+        description: `尝试提交订单 ${order.orderNo} 审核失败：订单商品为空`,
+        success: false,
+        failReason: '订单商品不能为空',
+        beforeData: { status: order.status },
+      });
       throw new BadRequestException('订单商品不能为空');
     }
 
@@ -310,6 +348,15 @@ export class OrderService {
     const beforeData = JSON.parse(JSON.stringify(order));
 
     if (order.status !== OrderStatus.PENDING_REVIEW) {
+      await this.auditLogService.create({
+        orderId: id,
+        userId: user.id,
+        action: AuditAction.REVIEW_APPROVE,
+        description: `尝试审核通过订单 ${order.orderNo} 失败：状态不匹配`,
+        success: false,
+        failReason: `当前状态 ${order.status} 无法审核，仅待审核状态可审核`,
+        beforeData: { status: order.status },
+      });
       throw new BadRequestException('当前状态无法审核');
     }
 
@@ -340,10 +387,28 @@ export class OrderService {
     const beforeData = JSON.parse(JSON.stringify(order));
 
     if (order.status !== OrderStatus.PENDING_REVIEW) {
+      await this.auditLogService.create({
+        orderId: id,
+        userId: user.id,
+        action: AuditAction.REVIEW_REJECT,
+        description: `尝试审核退回订单 ${order.orderNo} 失败：状态不匹配`,
+        success: false,
+        failReason: `当前状态 ${order.status} 无法审核，仅待审核状态可审核`,
+        beforeData: { status: order.status },
+      });
       throw new BadRequestException('当前状态无法审核');
     }
 
     if (!rejectReason || rejectReason.trim() === '') {
+      await this.auditLogService.create({
+        orderId: id,
+        userId: user.id,
+        action: AuditAction.REVIEW_REJECT,
+        description: `尝试审核退回订单 ${order.orderNo} 失败：缺少退回原因`,
+        success: false,
+        failReason: '退回原因不能为空',
+        beforeData: { status: order.status },
+      });
       throw new BadRequestException('退回原因不能为空');
     }
 
@@ -372,6 +437,15 @@ export class OrderService {
     const beforeData = JSON.parse(JSON.stringify(order));
 
     if (order.status !== OrderStatus.REVIEW_APPROVED) {
+      await this.auditLogService.create({
+        orderId: id,
+        userId: user.id,
+        action: AuditAction.SUBMIT,
+        description: `尝试提交订单 ${order.orderNo} 复核失败：状态不匹配`,
+        success: false,
+        failReason: `当前状态 ${order.status} 无法提交复核，仅审核通过状态可提交`,
+        beforeData: { status: order.status },
+      });
       throw new BadRequestException('当前状态无法提交复核');
     }
 
@@ -397,6 +471,15 @@ export class OrderService {
     const beforeData = JSON.parse(JSON.stringify(order));
 
     if (order.status !== OrderStatus.PENDING_FINAL_REVIEW) {
+      await this.auditLogService.create({
+        orderId: id,
+        userId: user.id,
+        action: AuditAction.FINAL_APPROVE,
+        description: `尝试复核通过订单 ${order.orderNo} 失败：状态不匹配`,
+        success: false,
+        failReason: `当前状态 ${order.status} 无法复核，仅待复核状态可复核`,
+        beforeData: { status: order.status },
+      });
       throw new BadRequestException('当前状态无法复核');
     }
 
@@ -427,10 +510,28 @@ export class OrderService {
     const beforeData = JSON.parse(JSON.stringify(order));
 
     if (order.status !== OrderStatus.PENDING_FINAL_REVIEW) {
+      await this.auditLogService.create({
+        orderId: id,
+        userId: user.id,
+        action: AuditAction.FINAL_REJECT,
+        description: `尝试复核退回订单 ${order.orderNo} 失败：状态不匹配`,
+        success: false,
+        failReason: `当前状态 ${order.status} 无法复核，仅待复核状态可复核`,
+        beforeData: { status: order.status },
+      });
       throw new BadRequestException('当前状态无法复核');
     }
 
     if (!rejectReason || rejectReason.trim() === '') {
+      await this.auditLogService.create({
+        orderId: id,
+        userId: user.id,
+        action: AuditAction.FINAL_REJECT,
+        description: `尝试复核退回订单 ${order.orderNo} 失败：缺少退回原因`,
+        success: false,
+        failReason: '退回原因不能为空',
+        beforeData: { status: order.status },
+      });
       throw new BadRequestException('退回原因不能为空');
     }
 
@@ -459,6 +560,15 @@ export class OrderService {
     const beforeData = JSON.parse(JSON.stringify(order));
 
     if (order.status !== OrderStatus.FINAL_APPROVED) {
+      await this.auditLogService.create({
+        orderId: id,
+        userId: user.id,
+        action: AuditAction.SHIP,
+        description: `尝试发货订单 ${order.orderNo} 失败：状态不匹配`,
+        success: false,
+        failReason: `当前状态 ${order.status} 无法发货，仅复核通过状态可发货`,
+        beforeData: { status: order.status },
+      });
       throw new BadRequestException('当前状态无法发货');
     }
 
@@ -484,6 +594,15 @@ export class OrderService {
     const beforeData = JSON.parse(JSON.stringify(order));
 
     if (order.status !== OrderStatus.SHIPPED) {
+      await this.auditLogService.create({
+        orderId: id,
+        userId: user.id,
+        action: AuditAction.DELIVER,
+        description: `尝试配送订单 ${order.orderNo} 失败：状态不匹配`,
+        success: false,
+        failReason: `当前状态 ${order.status} 无法配送，仅已发货状态可配送`,
+        beforeData: { status: order.status },
+      });
       throw new BadRequestException('当前状态无法配送');
     }
 
@@ -509,6 +628,15 @@ export class OrderService {
     const beforeData = JSON.parse(JSON.stringify(order));
 
     if (order.status !== OrderStatus.DELIVERED) {
+      await this.auditLogService.create({
+        orderId: id,
+        userId: user.id,
+        action: AuditAction.SIGN,
+        description: `尝试签收订单 ${order.orderNo} 失败：状态不匹配`,
+        success: false,
+        failReason: `当前状态 ${order.status} 无法签收，仅已配送状态可签收`,
+        beforeData: { status: order.status },
+      });
       throw new BadRequestException('当前状态无法签收');
     }
 
@@ -535,6 +663,15 @@ export class OrderService {
     const beforeData = JSON.parse(JSON.stringify(order));
 
     if (order.status !== OrderStatus.SIGNED) {
+      await this.auditLogService.create({
+        orderId: id,
+        userId: user.id,
+        action: AuditAction.ARCHIVE,
+        description: `尝试归档订单 ${order.orderNo} 失败：状态不匹配`,
+        success: false,
+        failReason: `当前状态 ${order.status} 无法归档，仅已签收状态可归档`,
+        beforeData: { status: order.status },
+      });
       throw new BadRequestException('当前状态无法归档');
     }
 
@@ -626,6 +763,15 @@ export class OrderService {
     const beforeData = JSON.parse(JSON.stringify(order));
 
     if (![OrderStatus.SHIPPED, OrderStatus.DELIVERED, OrderStatus.SIGNED].includes(order.status)) {
+      await this.auditLogService.create({
+        orderId: id,
+        userId: user.id,
+        action: AuditAction.RETURN,
+        description: `尝试退回订单 ${order.orderNo} 失败：状态不匹配`,
+        success: false,
+        failReason: `当前状态 ${order.status} 无法退回，仅已发货/已配送/已签收状态可退回`,
+        beforeData: { status: order.status },
+      });
       throw new BadRequestException('当前状态无法退回');
     }
 
@@ -652,6 +798,15 @@ export class OrderService {
     const beforeData = JSON.parse(JSON.stringify(order));
 
     if (![OrderStatus.EXCEPTION, OrderStatus.MATERIALS_MISSING, OrderStatus.TIMEOUT].includes(order.status)) {
+      await this.auditLogService.create({
+        orderId: id,
+        userId: user.id,
+        action: AuditAction.RECTIFY,
+        description: `尝试补正订单 ${order.orderNo} 失败：状态不匹配`,
+        success: false,
+        failReason: `当前状态 ${order.status} 无法补正，仅异常/材料缺失/超时状态可补正`,
+        beforeData: { status: order.status },
+      });
       throw new BadRequestException('当前状态无法补正');
     }
 
@@ -694,11 +849,31 @@ export class OrderService {
       reason?: string;
     }[] = [];
 
+    const actionToAuditAction: Record<string, AuditAction> = {
+      submit: AuditAction.SUBMIT,
+      review_approve: AuditAction.REVIEW_APPROVE,
+      review_reject: AuditAction.REVIEW_REJECT,
+      submit_final: AuditAction.SUBMIT,
+      final_approve: AuditAction.FINAL_APPROVE,
+      final_reject: AuditAction.FINAL_REJECT,
+      ship: AuditAction.SHIP,
+      deliver: AuditAction.DELIVER,
+      sign: AuditAction.SIGN,
+      archive: AuditAction.ARCHIVE,
+      exception: AuditAction.EXCEPTION,
+      materials_missing: AuditAction.EXCEPTION,
+      timeout: AuditAction.EXCEPTION,
+      return: AuditAction.RETURN,
+      rectify: AuditAction.RECTIFY,
+    };
+
     for (const id of ids) {
       let orderNo = '';
+      let beforeStatus = '';
       try {
         const order = await this.orderRepository.findOne({ where: { id } });
         orderNo = order?.orderNo || id;
+        beforeStatus = order?.status || '';
 
         if (!order) {
           throw new NotFoundException('订单不存在');
@@ -761,7 +936,19 @@ export class OrderService {
         }
         results.push({ id, orderNo, success: true });
       } catch (error: any) {
-        results.push({ id, orderNo: orderNo || id, success: false, reason: error.message });
+        const failReasonText = error.message || '操作失败';
+        results.push({ id, orderNo: orderNo || id, success: false, reason: failReasonText });
+
+        await this.auditLogService.create({
+          orderId: id,
+          userId: user.id,
+          action: actionToAuditAction[action] || AuditAction.UPDATE,
+          description: `批量操作失败：对订单 ${orderNo || id} 执行 ${action} 失败`,
+          success: false,
+          failReason: failReasonText,
+          beforeData: beforeStatus ? { status: beforeStatus } : undefined,
+          afterData: { action, operatorRole: user.role, operatorName: user.name },
+        });
       }
     }
 

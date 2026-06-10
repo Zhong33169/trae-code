@@ -219,21 +219,28 @@ const allSelected = computed(() => orders.value.length > 0 && orders.value.every
 const someSelected = computed(() => selectedIds.value.length > 0 && !allSelected.value);
 
 const canBatchAction = computed(() => {
-  return authStore.isSupervisor || authStore.isReviewer;
+  return authStore.isRegistrar || authStore.isSupervisor || authStore.isReviewer;
 });
 
 const batchActionOptions = computed(() => {
   const options: { value: string; label: string; needReason?: boolean }[] = [];
 
+  if (authStore.isRegistrar) {
+    options.push({ value: 'submit', label: '批量提交审核' });
+    options.push({ value: 'sign', label: '批量签收' });
+    options.push({ value: 'rectify', label: '批量补正' });
+  }
+
   if (authStore.isSupervisor) {
     options.push({ value: 'review_approve', label: '批量审核通过' });
     options.push({ value: 'review_reject', label: '批量审核退回', needReason: true });
+    options.push({ value: 'submit_final', label: '批量提交复核' });
     options.push({ value: 'ship', label: '批量发货' });
     options.push({ value: 'deliver', label: '批量配送' });
     options.push({ value: 'materials_missing', label: '标记材料缺失', needReason: true });
     options.push({ value: 'timeout', label: '标记超时', needReason: true });
+    options.push({ value: 'exception', label: '标记异常', needReason: true });
     options.push({ value: 'return', label: '批量退回', needReason: true });
-    options.push({ value: 'rectify', label: '批量补正' });
   }
 
   if (authStore.isReviewer) {
