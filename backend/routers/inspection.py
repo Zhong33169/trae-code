@@ -27,6 +27,7 @@ from schemas.inspection import (
     InspectionOrderResponse,
     InspectionOrderListResponse,
     StatusUpdateRequest,
+    SimpleActionRequest,
     InspectionOrderWithDetails,
 )
 from schemas.fault_report import FaultReportCreate, FaultReportResponse
@@ -270,7 +271,15 @@ async def get_inspections(
 
     if queue == "my_todo":
         role_queues = get_role_queues(current_user.role)
-        query = query.where(InspectionOrder.status.in_(role_queues))
+        if current_user.role == UserRole.REGISTRAR:
+            query = query.where(
+                and_(
+                    InspectionOrder.status.in_(role_queues),
+                    InspectionOrder.created_by == current_user.id
+                )
+            )
+        else:
+            query = query.where(InspectionOrder.status.in_(role_queues))
     elif queue == "my_created":
         query = query.where(InspectionOrder.created_by == current_user.id)
 
@@ -590,6 +599,11 @@ async def update_status(
         action = action_map.get(target_status, AuditAction.UPDATE)
 
         request_id = status_data.request_id or getattr(request.state, "request_id", generate_request_id())
+        is_reject = target_status in [
+            InspectionStatus.REVIEW_REJECTED,
+            InspectionStatus.FINAL_REVIEW_REJECTED,
+            InspectionStatus.ACCEPTANCE_REJECTED,
+        ]
         await create_audit_log(
             db=db,
             inspection_order_id=inspection.id,
@@ -600,6 +614,10 @@ async def update_status(
             detail=status_data.opinion or f"状态从 [{get_status_label(from_status)}] 变更为 [{get_status_label(target_status)}]",
             opinion=status_data.opinion,
             signature=status_data.signature,
+            error_code=status_data.error_code if is_reject else None,
+            error_message=status_data.error_message if is_reject else None,
+            suggestion=status_data.suggestion if is_reject else None,
+            next_step=status_data.next_step if is_reject else None,
             ip_address=request.client.host if request.client else None,
             user_agent=request.headers.get("user-agent"),
             request_id=request_id,
@@ -687,6 +705,8 @@ async def submit_fault_report(
             from_status=from_status,
             to_status=InspectionStatus.FAULT_REPORTED,
             detail=f"提交故障报告，故障代码: {fault_data.fault_code}",
+            opinion=fault_data.opinion or fault_data.report_opinion,
+            signature=fault_data.signature,
             ip_address=request.client.host if request.client else None,
             user_agent=request.headers.get("user-agent"),
             request_id=request_id,
@@ -704,6 +724,7 @@ async def submit_fault_report(
 @router.post("/{order_id}/repair-complete", response_model=InspectionOrderResponse, summary="标记修复完成", description="标记故障修复完成，进入验收阶段")
 async def mark_repair_complete(
     order_id: int,
+    action_data: SimpleActionRequest,
     request: Request,
     current_user: User = Depends(allow_supervisor),
     db: AsyncSession = Depends(get_db)
@@ -735,11 +756,14 @@ async def mark_repair_complete(
                 detail=f"当前状态 [{get_status_label(inspection.status)}] 不允许标记修复完成"
             )
 
+        if action_data.current_version is not None:
+            check_version(inspection, action_data.current_version)
+
         from_status = inspection.status
         inspection.status = InspectionStatus.REPAIR_COMPLETED
         inspection.version += 1
 
-        request_id = generate_request_id()
+        request_id = action_data.request_id or generate_request_id()
         await create_audit_log(
             db=db,
             inspection_order_id=inspection.id,
@@ -747,7 +771,9 @@ async def mark_repair_complete(
             operator=current_user,
             from_status=from_status,
             to_status=InspectionStatus.REPAIR_COMPLETED,
-            detail="标记修复完成，待提交验收",
+            detail=action_data.opinion or "标记修复完成，待提交验收",
+            opinion=action_data.opinion,
+            signature=action_data.signature,
             ip_address=request.client.host if request.client else None,
             user_agent=request.headers.get("user-agent"),
             request_id=request_id,
@@ -834,6 +860,7 @@ async def submit_acceptance(
         inspection.version += 1
 
         request_id = generate_request_id()
+        is_pass = acceptance_data.acceptance_result in ["合格", "pass", "通过"]
         await create_audit_log(
             db=db,
             inspection_order_id=inspection.id,
@@ -842,6 +869,12 @@ async def submit_acceptance(
             from_status=from_status,
             to_status=inspection.status,
             detail=f"修复验收结果: {acceptance_data.acceptance_result}, {acceptance_data.acceptance_opinion or ''}",
+            opinion=acceptance_data.opinion or acceptance_data.acceptance_opinion,
+            signature=acceptance_data.signature,
+            error_code=None if is_pass else (acceptance_data.error_code or "ACCEPTANCE_FAILED"),
+            error_message=None if is_pass else acceptance_data.error_message,
+            suggestion=None if is_pass else acceptance_data.suggestion,
+            next_step=None if is_pass else acceptance_data.next_step,
             ip_address=request.client.host if request.client else None,
             user_agent=request.headers.get("user-agent"),
             request_id=request_id,

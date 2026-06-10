@@ -196,8 +196,11 @@ export async function submitFaultReport(
   return response.data;
 }
 
-export async function submitRepairComplete(inspectionId: number): Promise<any> {
-  const response = await api.post(`/api/inspections/${inspectionId}/repair-complete`);
+export async function submitRepairComplete(
+  inspectionId: number,
+  data?: { opinion?: string; signature?: string; request_id?: string; current_version?: number }
+): Promise<any> {
+  const response = await api.post(`/api/inspections/${inspectionId}/repair-complete`, data || {});
   return response.data;
 }
 

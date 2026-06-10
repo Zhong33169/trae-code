@@ -537,6 +537,86 @@ async def init_demo_data():
                 session.add(audit_accept_reject)
                 audit_count += 1
 
+            if data["status"] == InspectionStatus.FAULT_REPORTED:
+                audit_fault_report = AuditLog(
+                    inspection_order_id=inspection.id,
+                    action=AuditAction.REPORT_FAULT,
+                    operator_id=supervisor_id,
+                    operator_name="李主管",
+                    operator_role=UserRole.SUPERVISOR.value,
+                    from_status=InspectionStatus.PENDING_FAULT_REPORT.value,
+                    to_status=InspectionStatus.FAULT_REPORTED.value,
+                    detail="发现设备故障，已上报并安排维修",
+                    opinion="充电模块输出不稳定，已联系维修单位，预计3天内修复",
+                    signature="李主管",
+                    error_code="E102",
+                    error_message="充电输出电压波动较大，超出正常范围±5%",
+                    suggestion="更换充电控制板，校准输出电压",
+                    next_step="安排维修单位上门检修，预计3个工作日完成",
+                    ip_address="192.168.1.101",
+                    user_agent="Mozilla/5.0",
+                    created_at=inspection.created_at + timedelta(days=2),
+                )
+                session.add(audit_fault_report)
+                audit_count += 1
+
+            if data["status"] == InspectionStatus.REPAIR_COMPLETED:
+                audit_repair_complete = AuditLog(
+                    inspection_order_id=inspection.id,
+                    action=AuditAction.REPAIR_COMPLETE,
+                    operator_id=supervisor_id,
+                    operator_name="李主管",
+                    operator_role=UserRole.SUPERVISOR.value,
+                    from_status=InspectionStatus.PENDING_REPAIR.value,
+                    to_status=InspectionStatus.REPAIR_COMPLETED.value,
+                    detail="故障修复完成，待提交验收",
+                    opinion="已更换充电控制板和滤波电容，输出电压恢复正常范围",
+                    signature="李主管",
+                    ip_address="192.168.1.101",
+                    user_agent="Mozilla/5.0",
+                    created_at=inspection.created_at + timedelta(days=4),
+                )
+                session.add(audit_repair_complete)
+                audit_count += 1
+
+            if data["status"] == InspectionStatus.PENDING_ACCEPTANCE and data.get("with_repair"):
+                audit_repair_complete2 = AuditLog(
+                    inspection_order_id=inspection.id,
+                    action=AuditAction.REPAIR_COMPLETE,
+                    operator_id=supervisor_id,
+                    operator_name="李主管",
+                    operator_role=UserRole.SUPERVISOR.value,
+                    from_status=InspectionStatus.PENDING_REPAIR.value,
+                    to_status=InspectionStatus.PENDING_ACCEPTANCE.value,
+                    detail="故障修复完成，待提交验收",
+                    opinion="已完成故障修复，各项指标恢复正常，申请验收",
+                    signature="李主管",
+                    ip_address="192.168.1.101",
+                    user_agent="Mozilla/5.0",
+                    created_at=inspection.created_at + timedelta(days=4),
+                )
+                session.add(audit_repair_complete2)
+                audit_count += 1
+
+            if data["status"] == InspectionStatus.PENDING_FINAL_REVIEW and data.get("with_repair"):
+                audit_accept_pass = AuditLog(
+                    inspection_order_id=inspection.id,
+                    action=AuditAction.ACCEPT,
+                    operator_id=supervisor_id,
+                    operator_name="李主管",
+                    operator_role=UserRole.SUPERVISOR.value,
+                    from_status=InspectionStatus.PENDING_ACCEPTANCE.value,
+                    to_status=InspectionStatus.PENDING_FINAL_REVIEW.value,
+                    detail="修复验收通过，提请复核归档",
+                    opinion="修复质量合格，各项测试指标均符合标准，同意通过验收",
+                    signature="李主管",
+                    ip_address="192.168.1.101",
+                    user_agent="Mozilla/5.0",
+                    created_at=inspection.created_at + timedelta(days=5),
+                )
+                session.add(audit_accept_pass)
+                audit_count += 1
+
             if data.get("reviewer_opinion"):
                 action = (
                     AuditAction.ARCHIVE

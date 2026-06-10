@@ -23,6 +23,12 @@ class RepairAcceptanceBase(BaseModel):
 
 class RepairAcceptanceCreate(RepairAcceptanceBase):
     inspection_order_id: int
+    opinion: Optional[str] = None
+    signature: Optional[str] = None
+    error_code: Optional[str] = None
+    error_message: Optional[str] = None
+    suggestion: Optional[str] = None
+    next_step: Optional[str] = None
 
 
 class RepairAcceptanceUpdate(RepairAcceptanceBase):

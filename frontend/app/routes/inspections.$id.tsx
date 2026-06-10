@@ -21,7 +21,7 @@ import { FaultReportForm } from "~/components/FaultReportForm";
 import { RepairAcceptanceForm } from "~/components/RepairAcceptanceForm";
 import { QRScanModal } from "~/components/QRScanModal";
 import { AuditTimeline } from "~/components/AuditTimeline";
-import { ConfirmModal } from "~/components/Modal";
+import { ConfirmModal, Modal } from "~/components/Modal";
 import {
   formatDate,
   formatDateOnly,
@@ -67,6 +67,7 @@ function InspectionDetailPage() {
 
   const [acceptanceModalOpen, setAcceptanceModalOpen] = useState(false);
   const [acceptanceLoading, setAcceptanceLoading] = useState(false);
+  const [acceptanceDefaultResult, setAcceptanceDefaultResult] = useState<"pass" | "fail">("pass");
 
   const [qrModalOpen, setQrModalOpen] = useState(false);
   const [qrLoading, setQrLoading] = useState(false);
@@ -76,6 +77,7 @@ function InspectionDetailPage() {
 
   const [repairCompleteModalOpen, setRepairCompleteModalOpen] = useState(false);
   const [repairCompleteLoading, setRepairCompleteLoading] = useState(false);
+  const [repairForm, setRepairForm] = useState({ opinion: "", signature: "" });
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -111,6 +113,7 @@ function InspectionDetailPage() {
                 detail.allowed_actions?.includes("acceptance_pass") ||
                 detail.allowed_actions?.includes("acceptance_reject")
               ) {
+                setAcceptanceDefaultResult(urlAction === "acceptance_reject" ? "fail" : "pass");
                 setAcceptanceModalOpen(true);
               }
               break;
@@ -222,24 +225,31 @@ function InspectionDetailPage() {
     }
   };
 
-  const handleRepairComplete = async (): Promise<void> => {
-    if (!data) return;
+  const handleRepairComplete = async (): Promise<boolean> => {
+    if (!data) return false;
     setRepairCompleteLoading(true);
     try {
-      await submitRepairComplete(data.id);
+      await submitRepairComplete(data.id, {
+        opinion: repairForm.opinion,
+        signature: repairForm.signature,
+        current_version: data.version,
+      });
       success("修复完成，已提交验收");
       setRepairCompleteModalOpen(false);
+      setRepairForm({ opinion: "", signature: "" });
       loadData();
+      return true;
     } catch (err: any) {
       if (err.response?.status === 409) {
         setConflictMessage(
           err.response.data?.detail || "版本冲突，该巡检单已被其他用户修改"
         );
         setVersionConflictModalOpen(true);
-        return;
+        return false;
       }
       const errorMessage = err.response?.data?.detail || "操作失败";
       error(errorMessage);
+      return false;
     } finally {
       setRepairCompleteLoading(false);
     }
@@ -459,7 +469,11 @@ function InspectionDetailPage() {
           setRepairCompleteModalOpen(true);
           break;
         case "acceptance_pass":
+          setAcceptanceDefaultResult("pass");
+          setAcceptanceModalOpen(true);
+          break;
         case "acceptance_reject":
+          setAcceptanceDefaultResult("fail");
           setAcceptanceModalOpen(true);
           break;
         case "submit":
@@ -1332,6 +1346,7 @@ function InspectionDetailPage() {
         onSubmit={handleAcceptanceSubmit}
         loading={acceptanceLoading}
         orderNo={data.order_no}
+        defaultResult={acceptanceDefaultResult}
         existingData={data.repair_acceptance || undefined}
       />
 
@@ -1343,23 +1358,98 @@ function InspectionDetailPage() {
         inspectionOrderId={id}
       />
 
-      <ConfirmModal
+      <Modal
         open={repairCompleteModalOpen}
-        title="确认修复完成"
-        content={
-          <div style={{ fontSize: "14px", color: "#374151", lineHeight: 1.6 }}>
-            您即将将此巡检单标记为"修复完成待验收"。
-            <br />
-            <br />
-            确认修复工作已完成，可以提交验收了吗？
-          </div>
+        title="标记修复完成"
+        width={500}
+        onClose={() => {
+          setRepairCompleteModalOpen(false);
+          setRepairForm({ opinion: "", signature: "" });
+        }}
+        footer={
+          <>
+            <button
+              onClick={() => {
+                setRepairCompleteModalOpen(false);
+                setRepairForm({ opinion: "", signature: "" });
+              }}
+              disabled={repairCompleteLoading}
+              style={{
+                padding: "8px 20px",
+                border: "1px solid #d1d5db",
+                backgroundColor: "#fff",
+                color: "#374151",
+                borderRadius: "4px",
+                cursor: "pointer",
+                fontSize: "14px",
+              }}
+            >
+              取消
+            </button>
+            <button
+              onClick={handleRepairComplete}
+              disabled={repairCompleteLoading}
+              style={{
+                padding: "8px 20px",
+                border: "none",
+                backgroundColor: "#8b5cf6",
+                color: "#fff",
+                borderRadius: "4px",
+                cursor: repairCompleteLoading ? "not-allowed" : "pointer",
+                fontSize: "14px",
+                opacity: repairCompleteLoading ? 0.7 : 1,
+              }}
+            >
+              {repairCompleteLoading ? "提交中..." : "确认完成"}
+            </button>
+          </>
         }
-        okText="确认完成"
-        cancelText="取消"
-        onOk={handleRepairComplete}
-        onClose={() => setRepairCompleteModalOpen(false)}
-        okButtonProps={{ backgroundColor: "#8b5cf6" }}
-      />
+      >
+        <div style={{ fontSize: "14px", color: "#374151", lineHeight: 1.6, marginBottom: "16px" }}>
+          您即将将此巡检单标记为"修复完成待验收"。
+          <br />
+          确认修复工作已完成，可以提交验收了吗？
+        </div>
+        <div style={{ marginBottom: "16px" }}>
+          <label style={{ display: "block", fontSize: "13px", fontWeight: 500, color: "#374151", marginBottom: "6px" }}>
+            办理意见
+          </label>
+          <textarea
+            value={repairForm.opinion}
+            onChange={(e) => setRepairForm((prev) => ({ ...prev, opinion: e.target.value }))}
+            placeholder="请输入办理意见（可选）"
+            rows={3}
+            style={{
+              width: "100%",
+              padding: "10px 12px",
+              border: "1px solid #d1d5db",
+              borderRadius: "4px",
+              fontSize: "14px",
+              boxSizing: "border-box",
+              resize: "vertical",
+            }}
+          />
+        </div>
+        <div>
+          <label style={{ display: "block", fontSize: "13px", fontWeight: 500, color: "#374151", marginBottom: "6px" }}>
+            办理签名 <span style={{ color: "#ef4444" }}>*</span>
+          </label>
+          <input
+            type="text"
+            value={repairForm.signature}
+            onChange={(e) => setRepairForm((prev) => ({ ...prev, signature: e.target.value }))}
+            placeholder="请输入办理人签名"
+            style={{
+              width: "100%",
+              padding: "10px 12px",
+              border: "1px solid #d1d5db",
+              borderRadius: "4px",
+              fontSize: "14px",
+              boxSizing: "border-box",
+            }}
+          />
+        </div>
+      </Modal>
 
       <ConfirmModal
         open={versionConflictModalOpen}

@@ -21,6 +21,8 @@ interface FormData {
   repair_contact: string;
   repair_phone: string;
   report_opinion: string;
+  opinion: string;
+  signature: string;
 }
 
 const initialFormData: FormData = {
@@ -33,6 +35,8 @@ const initialFormData: FormData = {
   repair_contact: "",
   repair_phone: "",
   report_opinion: "",
+  opinion: "",
+  signature: "",
 };
 
 const faultLevels = [
@@ -304,6 +308,38 @@ export function FaultReportForm({
               resize: "vertical",
             }}
           />
+        </div>
+
+        <div style={{ gridColumn: "span 2" }}>
+          <label style={labelStyle("opinion")}>办理意见</label>
+          <textarea
+            value={formData.opinion}
+            onChange={(e) => handleChange("opinion", e.target.value)}
+            placeholder="请输入办理意见（可选）"
+            rows={2}
+            style={{
+              ...inputStyle("opinion"),
+              resize: "vertical",
+            }}
+          />
+        </div>
+
+        <div>
+          <label style={labelStyle("signature")}>
+            办理签名 <span style={{ color: "#ef4444" }}>*</span>
+          </label>
+          <input
+            type="text"
+            value={formData.signature}
+            onChange={(e) => handleChange("signature", e.target.value)}
+            placeholder="请输入办理人签名"
+            style={inputStyle("signature")}
+          />
+          {errors.signature && (
+            <div style={{ fontSize: "12px", color: "#ef4444", marginTop: "4px" }}>
+              {errors.signature}
+            </div>
+          )}
         </div>
       </div>
     </Modal>

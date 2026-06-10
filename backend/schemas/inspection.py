@@ -44,6 +44,17 @@ class StatusUpdateRequest(BaseModel):
     target_status: InspectionStatus
     opinion: Optional[str] = None
     signature: Optional[str] = None
+    error_code: Optional[str] = None
+    error_message: Optional[str] = None
+    suggestion: Optional[str] = None
+    next_step: Optional[str] = None
+    request_id: Optional[str] = None
+    current_version: Optional[int] = None
+
+
+class SimpleActionRequest(BaseModel):
+    opinion: Optional[str] = None
+    signature: Optional[str] = None
     request_id: Optional[str] = None
     current_version: Optional[int] = None
 

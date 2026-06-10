@@ -18,6 +18,8 @@ class FaultReportBase(BaseModel):
 
 class FaultReportCreate(FaultReportBase):
     inspection_order_id: int
+    opinion: Optional[str] = None
+    signature: Optional[str] = None
 
 
 class FaultReportUpdate(FaultReportBase):

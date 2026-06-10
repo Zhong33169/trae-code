@@ -10,6 +10,7 @@ interface RepairAcceptanceFormProps {
   loading: boolean;
   orderNo?: string;
   existingData?: RepairAcceptance;
+  defaultResult?: "pass" | "fail";
 }
 
 interface FormData {
@@ -27,6 +28,11 @@ interface FormData {
   acceptance_opinion: string;
   material_complete: boolean;
   material_note: string;
+  signature: string;
+  error_code: string;
+  error_message: string;
+  suggestion: string;
+  next_step: string;
 }
 
 const initialFormData: FormData = {
@@ -44,6 +50,11 @@ const initialFormData: FormData = {
   acceptance_opinion: "",
   material_complete: true,
   material_note: "",
+  signature: "",
+  error_code: "",
+  error_message: "",
+  suggestion: "",
+  next_step: "",
 };
 
 const acceptanceResults = [
@@ -58,6 +69,7 @@ export function RepairAcceptanceForm({
   loading,
   orderNo,
   existingData,
+  defaultResult,
 }: RepairAcceptanceFormProps) {
   const [formData, setFormData] = useState<FormData>(
     existingData
@@ -77,8 +89,13 @@ export function RepairAcceptanceForm({
           acceptance_opinion: existingData.acceptance_opinion || "",
           material_complete: existingData.material_complete !== false,
           material_note: existingData.material_note || "",
+          signature: (existingData as any)?.signature || "",
+          error_code: (existingData as any)?.error_code || "",
+          error_message: (existingData as any)?.error_message || "",
+          suggestion: (existingData as any)?.suggestion || "",
+          next_step: (existingData as any)?.next_step || "",
         }
-      : initialFormData
+      : { ...initialFormData, acceptance_result: defaultResult || "pass" }
   );
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -440,6 +457,81 @@ export function RepairAcceptanceForm({
             }}
           />
         </div>
+
+        <div>
+          <label style={labelStyle("signature")}>
+            办理签名 <span style={{ color: "#ef4444" }}>*</span>
+          </label>
+          <input
+            type="text"
+            value={formData.signature}
+            onChange={(e) => handleChange("signature", e.target.value)}
+            placeholder="请输入办理人签名"
+            style={inputStyle("signature")}
+          />
+          {errors.signature && (
+            <div style={{ fontSize: "12px", color: "#ef4444", marginTop: "4px" }}>
+              {errors.signature}
+            </div>
+          )}
+        </div>
+
+        {formData.acceptance_result === "fail" && (
+          <>
+            <div>
+              <label style={labelStyle("error_code")}>错误码</label>
+              <input
+                type="text"
+                value={formData.error_code}
+                onChange={(e) => handleChange("error_code", e.target.value)}
+                placeholder="如：ACCEPTANCE_FAILED"
+                style={inputStyle("error_code")}
+              />
+            </div>
+
+            <div style={{ gridColumn: "span 2" }}>
+              <label style={labelStyle("error_message")}>错误原因</label>
+              <textarea
+                value={formData.error_message}
+                onChange={(e) => handleChange("error_message", e.target.value)}
+                placeholder="请详细描述验收不通过的原因..."
+                rows={2}
+                style={{
+                  ...inputStyle("error_message"),
+                  resize: "vertical",
+                }}
+              />
+            </div>
+
+            <div style={{ gridColumn: "span 2" }}>
+              <label style={labelStyle("suggestion")}>整改建议</label>
+              <textarea
+                value={formData.suggestion}
+                onChange={(e) => handleChange("suggestion", e.target.value)}
+                placeholder="请提出整改建议..."
+                rows={2}
+                style={{
+                  ...inputStyle("suggestion"),
+                  resize: "vertical",
+                }}
+              />
+            </div>
+
+            <div style={{ gridColumn: "span 2" }}>
+              <label style={labelStyle("next_step")}>下一步</label>
+              <textarea
+                value={formData.next_step}
+                onChange={(e) => handleChange("next_step", e.target.value)}
+                placeholder="请说明下一步处理计划..."
+                rows={2}
+                style={{
+                  ...inputStyle("next_step"),
+                  resize: "vertical",
+                }}
+              />
+            </div>
+          </>
+        )}
       </div>
     </Modal>
   );
