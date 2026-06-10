@@ -2,6 +2,7 @@ package handler
 
 import (
 	"database/sql"
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -61,7 +62,7 @@ func (h *AuditHandler) GetByBatchNo(w http.ResponseWriter, r *http.Request) {
 
 	result, err := h.service.GetByBatchNo(batchNo)
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			util.RespondError(w, http.StatusNotFound, "批次不存在")
 			return
 		}

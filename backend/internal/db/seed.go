@@ -290,6 +290,13 @@ func SeedData(db *sql.DB) error {
 				"transfer_ids":     []int64{transferIDs[0], transferIDs[1], transferIDs[6]},
 			}), "192.168.1.100", -61},
 
+		{receptionID, "李接待", "reception_assistant", "register", "transfer", transferIDs[0],
+			`{"old_status":"pending_registration","version":1}`,
+			`{"new_status":"pending_verification","version":2}`, "192.168.1.100", -60},
+		{receptionID, "李接待", "reception_assistant", "register", "transfer", transferIDs[1],
+			`{"old_status":"pending_registration","version":1}`,
+			`{"new_status":"pending_verification","version":2}`, "192.168.1.100", -60},
+
 		{receptionID, "李接待", "reception_assistant", "batch_complete", "batch", batchIDs[batchNo1],
 			"",
 			mustJSON(map[string]interface{}{
@@ -316,6 +323,10 @@ func SeedData(db *sql.DB) error {
 				"transfer_ids":     []int64{transferIDs[3], transferIDs[7]},
 			}), "192.168.1.101", -31},
 
+		{physicianID, "王医师", "attending_physician", "verify", "transfer", transferIDs[3],
+			`{"old_status":"pending_verification","version":2}`,
+			`{"new_status":"pending_review","version":3}`, "192.168.1.101", -30},
+
 		{physicianID, "王医师", "attending_physician", "batch_complete", "batch", batchIDs[batchNo2],
 			"",
 			mustJSON(map[string]interface{}{
@@ -341,6 +352,10 @@ func SeedData(db *sql.DB) error {
 				"remark":           "下午归档批次",
 				"transfer_ids":     []int64{transferIDs[5], transferIDs[4], transferIDs[2]},
 			}), "192.168.1.102", -11},
+
+		{pharmacyID, "张药师", "pharmacy_admin", "review", "transfer", transferIDs[5],
+			`{"old_status":"pending_review","version":3}`,
+			`{"new_status":"archived","version":4}`, "192.168.1.102", -10},
 
 		{pharmacyID, "张药师", "pharmacy_admin", "batch_complete", "batch", batchIDs[batchNo3],
 			"",
@@ -376,6 +391,10 @@ func SeedData(db *sql.DB) error {
 					{"transfer_id": transferIDs[2], "transfer_no": "CF20260601003", "error": "当前状态不允许此操作：待核验状态不能复核归档"},
 				},
 			}), "192.168.1.102", -5},
+
+		{pharmacyID, "张药师", "pharmacy_admin", "review", "transfer", transferIDs[4],
+			`{"old_status":"pending_review","version":3}`,
+			`{"new_status":"archived","version":4}`, "192.168.1.102", -4},
 
 		{pharmacyID, "张药师", "pharmacy_admin", "batch_retry_complete", "batch", batchIDs[batchNo3],
 			"",

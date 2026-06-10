@@ -91,11 +91,11 @@ func (s *AuditService) List(filter AuditListFilter) ([]model.AuditLog, int, erro
 }
 
 type BatchAuditDetail struct {
-	BatchNo      string
-	OperationType string
-	OperatorName string
-	AuditLogs    []model.AuditLog
-	TransferLogs []model.AuditLog
+	BatchNo       string          `json:"batch_no"`
+	OperationType string          `json:"operation_type"`
+	OperatorName  string          `json:"operator_name"`
+	AuditLogs     []model.AuditLog `json:"audit_logs"`
+	TransferLogs  []model.AuditLog `json:"transfer_logs"`
 }
 
 func (s *AuditService) GetByBatchNo(batchNo string) (*BatchAuditDetail, error) {
