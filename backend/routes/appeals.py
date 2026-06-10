@@ -149,7 +149,7 @@ def accept_appeal(appeal_id):
         validate_version(appeal, version)
         if order:
             validate_handler_role(order, user)
-        validate_appeal_review(appeal, user, ['submitted', 'resubmitted'], '受理申诉', order=order)
+        validate_appeal_review(appeal, user, ['submitted', 'resubmitted'], '受理申诉')
     except ValidationError as err:
         if order:
             handle_validation_failure(order, user, '申诉受理', err, appeal=appeal)
@@ -206,7 +206,7 @@ def reject_appeal(appeal_id):
         validate_version(appeal, version)
         if order:
             validate_handler_role(order, user)
-        validate_appeal_review(appeal, user, ['submitted', 'accepted', 'resubmitted'], '驳回补正', order=order)
+        validate_appeal_review(appeal, user, ['submitted', 'accepted', 'resubmitted'], '驳回补正')
     except ValidationError as err:
         if order:
             handle_validation_failure(order, user, '申诉驳回补正', err, appeal=appeal)
@@ -263,7 +263,7 @@ def resubmit_appeal(appeal_id):
         validate_version(appeal, version)
         if order:
             validate_handler_role(order, user)
-        validate_appeal_resubmit(appeal, user, order=order)
+        validate_appeal_resubmit(appeal, user)
     except ValidationError as err:
         if order:
             handle_validation_failure(order, user, '申诉再次提交', err, appeal=appeal)
@@ -324,7 +324,7 @@ def approve_appeal(appeal_id):
         validate_version(appeal, version)
         if order:
             validate_handler_role(order, user)
-        validate_appeal_review(appeal, user, ['submitted', 'accepted', 'resubmitted'], '审批通过申诉', order=order)
+        validate_appeal_review(appeal, user, ['submitted', 'accepted', 'resubmitted'], '审批通过申诉')
     except ValidationError as err:
         if order:
             handle_validation_failure(order, user, '申诉审批', err, appeal=appeal)
@@ -387,7 +387,7 @@ def deny_appeal(appeal_id):
         validate_version(appeal, version)
         if order:
             validate_handler_role(order, user)
-        validate_appeal_review(appeal, user, ['submitted', 'accepted', 'resubmitted'], '驳回申诉', order=order)
+        validate_appeal_review(appeal, user, ['submitted', 'accepted', 'resubmitted'], '驳回申诉')
     except ValidationError as err:
         if order:
             handle_validation_failure(order, user, '申诉驳回', err, appeal=appeal)

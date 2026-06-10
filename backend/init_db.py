@@ -63,6 +63,44 @@ def create_order_log(order, action, operator, from_status, to_status, remark='')
     db.session.add(log)
 
 
+def create_failed_transition_log(order, operator, error_msg, audit_note, snapshot_status, snapshot_version, snapshot_evidence, snapshot_handler):
+    evidence_names = []
+    evidence_map = {
+        'booking_sheet': '预约单',
+        'ticket_voucher': '票务凭证',
+        'entry_record': '入园记录',
+        'settlement_note': '结算单'
+    }
+    for e in snapshot_evidence:
+        evidence_names.append(evidence_map.get(e, e))
+    evidence_str = '、'.join(evidence_names) if evidence_names else '(无)'
+    role_map = {
+        'ticket_specialist': '票务专员',
+        'site_dispatcher': '现场调度',
+        'scenic_manager': '景区经理'
+    }
+    status_map = {
+        'pending_verification': '待票务核销',
+        'verified': '已核销待入园',
+        'entered': '已入园待归档',
+        'archived': '已归档',
+        'appeal_pending': '申诉中'
+    }
+    snapshot = f'[状态={status_map.get(snapshot_status, snapshot_status)} 版本=v{snapshot_version} 证据={evidence_str} 处理岗位={role_map.get(snapshot_handler, snapshot_handler)}]'
+    remark = f'{error_msg} | 审计备注：{audit_note} | 失败前订单快照：{snapshot}'
+    log = OrderLog(
+        order_id=order.id,
+        action='状态流转失败',
+        operator_id=operator.id if operator else None,
+        operator_name=operator.name if operator else None,
+        operator_role=operator.role if operator else None,
+        from_status=snapshot_status,
+        to_status=snapshot_status,
+        remark=remark
+    )
+    db.session.add(log)
+
+
 def create_sample_orders():
     zhangsan = User.query.filter_by(username='zhangsan').first()
     lisi = User.query.filter_by(username='lisi').first()
@@ -191,6 +229,12 @@ def create_sample_orders():
     db.session.flush()
     create_order_log(order6, '创建预约单', zhangsan, None, 'pending_verification', '康辉旅行社夕阳红团预约')
     create_order_log(order6, '票务核销', zhangsan, 'pending_verification', 'verified', '已核销（先核销后补凭证）')
+    create_failed_transition_log(
+        order6, lisi,
+        '版本冲突，数据已被其他人修改，请刷新后重试（当前版本 v2，提交版本 v1）',
+        '版本校验失败：当前版本 v2，提交版本 v1，操作被拒绝。已提交新证据：票务凭证、入园记录',
+        'verified', 2, ['booking_sheet'], 'site_dispatcher'
+    )
     orders.append(('缺证据-已核销缺票务凭证', order6))
 
     order7 = TeamOrder(

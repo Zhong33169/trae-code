@@ -542,6 +542,32 @@ body {
   margin-top: 4px;
 }
 
+.audit-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.audit-msg {
+  font-weight: 500;
+  color: #ff4d4f;
+}
+
+.audit-note {
+  font-size: 12px;
+  color: #8c8c8c;
+  padding-left: 4px;
+}
+
+.audit-snapshot {
+  font-size: 12px;
+  color: #595959;
+  background: #e6f7ff;
+  padding: 4px 8px;
+  border-radius: 3px;
+  border-left: 3px solid #1890ff;
+}
+
 .action-panel {
   display: flex;
   flex-direction: column;

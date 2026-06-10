@@ -21,12 +21,35 @@ const statusNameMap = {
 }
 
 const appealStatusNameMap = {
-  submitted: '已提交',
+  submitted: '已提交待受理',
   accepted: '已受理',
-  rejected_correction: '驳回补正',
-  resubmitted: '再次提交',
+  rejected_correction: '已驳回补正',
+  resubmitted: '已再次提交',
   approved: '申诉通过',
   denied: '申诉驳回'
+}
+
+const parseLogRemark = (remark) => {
+  if (!remark) return { message: '', audit: '', orderSnapshot: '', appealSnapshot: '' }
+  const parts = remark.split(' | ')
+  const result = { message: '', audit: '', orderSnapshot: '', appealSnapshot: '', hasAudit: false }
+  const messageParts = []
+  for (const p of parts) {
+    if (p.startsWith('审计备注：')) {
+      result.audit = p.replace('审计备注：', '')
+      result.hasAudit = true
+    } else if (p.startsWith('失败前订单快照：')) {
+      result.orderSnapshot = p.replace('失败前订单快照：', '')
+      result.hasAudit = true
+    } else if (p.startsWith('失败前申诉快照：')) {
+      result.appealSnapshot = p.replace('失败前申诉快照：', '')
+      result.hasAudit = true
+    } else {
+      messageParts.push(p)
+    }
+  }
+  result.message = messageParts.join(' | ')
+  return result
 }
 
 const appealStatusColorMap = {
@@ -526,7 +549,30 @@ export default function OrderDetail() {
                             : ''}
                         </div>
                       )}
-                      {log.remark && <div className="remark">{log.remark}</div>}
+                      {log.remark && (
+                        <div className="remark">
+                          {(() => {
+                            const parsed = parseLogRemark(log.remark)
+                            if (!parsed.hasAudit) return <span>{log.remark}</span>
+                            return (
+                              <div className="audit-block">
+                                {parsed.message && <div className="audit-msg">{parsed.message}</div>}
+                                {parsed.audit && <div className="audit-note">🔍 {parsed.audit}</div>}
+                                {parsed.orderSnapshot && (
+                                  <div className="audit-snapshot">
+                                    📷 失败前订单快照：{parsed.orderSnapshot}
+                                  </div>
+                                )}
+                                {parsed.appealSnapshot && (
+                                  <div className="audit-snapshot">
+                                    📷 失败前申诉快照：{parsed.appealSnapshot}
+                                  </div>
+                                )}
+                              </div>
+                            )
+                          })()}
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -557,7 +603,30 @@ export default function OrderDetail() {
                                   : ''}
                               </div>
                             )}
-                            {log.remark && <div className="remark">{log.remark}</div>}
+                            {log.remark && (
+                              <div className="remark">
+                                {(() => {
+                                  const parsed = parseLogRemark(log.remark)
+                                  if (!parsed.hasAudit) return <span>{log.remark}</span>
+                                  return (
+                                    <div className="audit-block">
+                                      {parsed.message && <div className="audit-msg">{parsed.message}</div>}
+                                      {parsed.audit && <div className="audit-note">🔍 {parsed.audit}</div>}
+                                      {parsed.orderSnapshot && (
+                                        <div className="audit-snapshot">
+                                          📷 失败前订单快照：{parsed.orderSnapshot}
+                                        </div>
+                                      )}
+                                      {parsed.appealSnapshot && (
+                                        <div className="audit-snapshot">
+                                          📷 失败前申诉快照：{parsed.appealSnapshot}
+                                        </div>
+                                      )}
+                                    </div>
+                                  )
+                                })()}
+                              </div>
+                            )}
                           </div>
                         ))
                       )}
