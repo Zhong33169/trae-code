@@ -1,0 +1,23 @@
+{
+  "name": "community-group-buy-frontend",
+  "version": "1.0.0",
+  "description": "社区团购平台-离线台账回填团购订单系统 - 前端",
+  "private": true,
+  "scripts": {
+    "dev": "nuxt dev",
+    "build": "nuxt build",
+    "generate": "nuxt generate",
+    "preview": "nuxt preview",
+    "start": "nuxt start"
+  },
+  "devDependencies": {
+    "nuxt": "^3.10.0",
+    "@nuxtjs/tailwindcss": "^6.11.0",
+    "typescript": "^5.3.0"
+  },
+  "dependencies": {
+    "@pinia/nuxt": "^0.5.1",
+    "pinia": "^2.1.7",
+    "dayjs": "^1.11.10"
+  }
+}
