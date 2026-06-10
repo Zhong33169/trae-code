@@ -1,0 +1,32 @@
+---
+import App from '../components/App';
+---
+
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>便利店连锁补货申请系统</title>
+    <style is:global>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+      }
+      #react-root {
+        min-height: 100vh;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="react-root">
+      <App client:load />
+    </div>
+  </body>
+</html>
