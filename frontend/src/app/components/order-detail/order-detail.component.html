@@ -158,16 +158,34 @@
         🎯 可用操作
         <span *ngIf="canEdit()" class="badge badge-success" style="margin-left: 8px;">可编辑</span>
       </div>
+
+      <div *ngIf="!canSubmitEvidence && (order.status === 'draft' || order.status === 'returned_to_registrar')" class="evidence-warning-bar">
+        ⚠️ 证据不满足提交条件：{{ evidenceWarningMsg }}，请先在上方勾选证据资料
+      </div>
+
       <div class="action-buttons">
         <button
           *ngFor="let act of availableActions"
           class="btn"
           [ngClass]="act.cls"
           (click)="openAction(act.key)"
-          [disabled]="activeAction !== null"
+          [disabled]="activeAction !== null || (act.key === 'submit' && !canSubmitEvidence)"
         >
           {{ act.label }}
         </button>
+      </div>
+
+      <div *ngIf="lastFailure" class="failure-detail">
+        <div class="failure-title">❌ 操作失败</div>
+        <div class="failure-error">{{ lastFailure.error }}</div>
+        <div class="failure-meta">
+          <span>当前版本：<strong>v{{ lastFailure.current_version }}</strong></span>
+          <span>当前处理人：<strong>{{ ROLE_NAMES[lastFailure.current_handler as UserRole] || lastFailure.current_handler || '-' }}</strong></span>
+          <span>当前状态：<strong>{{ STATUS_NAMES[lastFailure.current_status as OrderStatus] || lastFailure.current_status }}</strong></span>
+        </div>
+        <div *ngIf="lastFailure.evidence_check" class="failure-evidence">
+          证据校验：{{ lastFailure.evidence_check }}
+        </div>
       </div>
 
       <div *ngIf="activeAction" class="action-form">
@@ -233,7 +251,10 @@
               </div>
             </div>
             <div class="form-group">
-              <label class="form-label" style="margin-bottom: 12px;">📎 勾选证据资料（evidence_submitted: true）</label>
+              <label class="form-label" style="margin-bottom: 12px;">📎 勾选证据资料（evidence_submitted: true，至少勾选一项）</label>
+              <div *ngIf="resubmitEvidenceChecked.length === 0" class="evidence-warning-inline">
+                ⚠️ 未勾选任何证据项，提交将被后端拒绝
+              </div>
               <div class="evidence-checklist">
                 <label
                   class="evidence-option"
@@ -280,6 +301,9 @@
               </select>
               <div *ngIf="riskForm.get('to_level')?.touched && riskForm.get('to_level')?.invalid" class="form-error">
                 请选择目标风险等级
+              </div>
+              <div *ngIf="riskToLevelInvalid" class="form-error">
+                目标风险等级不能与当前等级相同，请选择不同的等级
               </div>
             </div>
           </div>
@@ -373,7 +397,7 @@
             type="button"
             class="btn btn-primary"
             (click)="performAction()"
-            [disabled]="submitting"
+            [disabled]="submitting || (activeAction === 'submit' && !canSubmitEvidence) || (activeAction === 'resubmit' && !canResubmitEvidence) || (activeAction === 'change_risk' && riskToLevelInvalid)"
           >
             {{ submitting ? '处理中...' : '确认提交' }}
           </button>

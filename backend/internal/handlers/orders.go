@@ -301,7 +301,7 @@ func SubmitOrder(w http.ResponseWriter, r *http.Request) {
 		op.Result = "失败"
 		op.Opinion = fmt.Sprintf("状态错误：当前状态%s不允许提交", order.Status)
 		database.DB.Create(op)
-		http.Error(w, `{"error": "当前状态不允许提交"}`, http.StatusBadRequest)
+		writeOperationFailure(w, http.StatusBadRequest, "当前状态不允许提交", &order, "")
 		return
 	}
 
@@ -310,17 +310,28 @@ func SubmitOrder(w http.ResponseWriter, r *http.Request) {
 		op.Result = "失败"
 		op.Opinion = fmt.Sprintf("版本冲突：期望%d，当前%d", req.Version, order.Version)
 		database.DB.Create(op)
-		http.Error(w, fmt.Sprintf(`{"error": "版本冲突：期望%d，当前%d"}`, req.Version, order.Version), http.StatusConflict)
+		writeOperationFailure(w, http.StatusConflict,
+			fmt.Sprintf("版本冲突：期望%d，当前%d", req.Version, order.Version), &order, "")
 		return
 	}
 
+	evidenceListStr := strings.Trim(order.EvidenceList, " []\"\",")
 	if !order.EvidenceSubmitted {
 		op.ToStatus = fromStatus
 		op.Result = "失败"
-		op.EvidenceCheck = "未提交必填证据"
-		op.Opinion = "未提交必填证据"
+		op.EvidenceCheck = "evidence_submitted=false"
+		op.Opinion = "未提交必填证据标记"
 		database.DB.Create(op)
-		http.Error(w, `{"error": "请先提交必填证据"}`, http.StatusBadRequest)
+		writeOperationFailure(w, http.StatusBadRequest, "请先勾选必填证据标记(evidence_submitted=false)", &order, "evidence_submitted=false")
+		return
+	}
+	if evidenceListStr == "" {
+		op.ToStatus = fromStatus
+		op.Result = "失败"
+		op.EvidenceCheck = "evidence_list=[]"
+		op.Opinion = "证据清单为空，请至少勾选一项必填证据"
+		database.DB.Create(op)
+		writeOperationFailure(w, http.StatusBadRequest, "证据清单为空，请至少勾选一项必填证据(evidence_list=[])", &order, "evidence_list=[]")
 		return
 	}
 
@@ -416,7 +427,7 @@ func SupervisorReview(w http.ResponseWriter, r *http.Request) {
 		op.Result = "失败"
 		op.Opinion = fmt.Sprintf("状态错误：当前状态%s不允许主管审核", order.Status)
 		database.DB.Create(op)
-		http.Error(w, `{"error": "当前状态不允许主管审核"}`, http.StatusBadRequest)
+		writeOperationFailure(w, http.StatusBadRequest, "当前状态不允许主管审核", &order, "")
 		return
 	}
 
@@ -425,7 +436,8 @@ func SupervisorReview(w http.ResponseWriter, r *http.Request) {
 		op.Result = "失败"
 		op.Opinion = fmt.Sprintf("版本冲突：期望%d，当前%d", req.Version, order.Version)
 		database.DB.Create(op)
-		http.Error(w, fmt.Sprintf(`{"error": "版本冲突：期望%d，当前%d"}`, req.Version, order.Version), http.StatusConflict)
+		writeOperationFailure(w, http.StatusConflict,
+			fmt.Sprintf("版本冲突：期望%d，当前%d", req.Version, order.Version), &order, "")
 		return
 	}
 
@@ -546,7 +558,7 @@ func ReviewerReview(w http.ResponseWriter, r *http.Request) {
 		op.Result = "失败"
 		op.Opinion = fmt.Sprintf("状态错误：当前状态%s不允许复核归档", order.Status)
 		database.DB.Create(op)
-		http.Error(w, `{"error": "当前状态不允许复核归档"}`, http.StatusBadRequest)
+		writeOperationFailure(w, http.StatusBadRequest, "当前状态不允许复核归档", &order, "")
 		return
 	}
 
@@ -555,7 +567,8 @@ func ReviewerReview(w http.ResponseWriter, r *http.Request) {
 		op.Result = "失败"
 		op.Opinion = fmt.Sprintf("版本冲突：期望%d，当前%d", req.Version, order.Version)
 		database.DB.Create(op)
-		http.Error(w, fmt.Sprintf(`{"error": "版本冲突：期望%d，当前%d"}`, req.Version, order.Version), http.StatusConflict)
+		writeOperationFailure(w, http.StatusConflict,
+			fmt.Sprintf("版本冲突：期望%d，当前%d", req.Version, order.Version), &order, "")
 		return
 	}
 
@@ -653,7 +666,7 @@ func RectifyOrder(w http.ResponseWriter, r *http.Request) {
 		op.Result = "失败"
 		op.Opinion = fmt.Sprintf("状态错误：当前状态%s不允许补正", order.Status)
 		database.DB.Create(op)
-		http.Error(w, `{"error": "当前状态不允许补正"}`, http.StatusBadRequest)
+		writeOperationFailure(w, http.StatusBadRequest, "当前状态不允许补正", &order, "")
 		return
 	}
 
@@ -662,7 +675,8 @@ func RectifyOrder(w http.ResponseWriter, r *http.Request) {
 		op.Result = "失败"
 		op.Opinion = fmt.Sprintf("版本冲突：期望%d，当前%d", req.Version, order.Version)
 		database.DB.Create(op)
-		http.Error(w, fmt.Sprintf(`{"error": "版本冲突：期望%d，当前%d"}`, req.Version, order.Version), http.StatusConflict)
+		writeOperationFailure(w, http.StatusConflict,
+			fmt.Sprintf("版本冲突：期望%d，当前%d", req.Version, order.Version), &order, "")
 		return
 	}
 
@@ -700,19 +714,19 @@ func RectifyOrder(w http.ResponseWriter, r *http.Request) {
 	if !order.EvidenceSubmitted {
 		op.ToStatus = fromStatus
 		op.Result = "失败"
-		op.EvidenceCheck = "未提交必填证据(evidence_submitted=false)"
+		op.EvidenceCheck = "evidence_submitted=false"
 		op.Opinion = "补正时未勾选必填证据标记"
 		database.DB.Create(op)
-		http.Error(w, `{"error": "请先勾选必填证据"}`, http.StatusBadRequest)
+		writeOperationFailure(w, http.StatusBadRequest, "请先勾选必填证据标记(evidence_submitted=false)", &order, "evidence_submitted=false")
 		return
 	}
 	if evidenceListStr == "" {
 		op.ToStatus = fromStatus
 		op.Result = "失败"
-		op.EvidenceCheck = "证据清单为空(evidence_list=[])"
+		op.EvidenceCheck = "evidence_list=[]"
 		op.Opinion = "补正时证据清单为空，请至少勾选一项必填证据"
 		database.DB.Create(op)
-		http.Error(w, `{"error": "证据清单为空，请至少勾选一项必填证据"}`, http.StatusBadRequest)
+		writeOperationFailure(w, http.StatusBadRequest, "证据清单为空，请至少勾选一项必填证据(evidence_list=[])", &order, "evidence_list=[]")
 		return
 	}
 
@@ -786,7 +800,7 @@ func RiskChange(w http.ResponseWriter, r *http.Request) {
 		op.Result = "失败"
 		op.Opinion = fmt.Sprintf("角色%s无权限调整风险等级", currentUser.Role)
 		database.DB.Create(op)
-		http.Error(w, `{"error": "只有主管和复核员可以调整风险等级"}`, http.StatusForbidden)
+		writeOperationFailure(w, http.StatusForbidden, "只有主管和复核员可以调整风险等级", &order, "")
 		return
 	}
 
@@ -795,7 +809,8 @@ func RiskChange(w http.ResponseWriter, r *http.Request) {
 		op.Result = "失败"
 		op.Opinion = fmt.Sprintf("当前处理人是%s，角色%s无权调整", order.CurrentHandler, currentUser.Role)
 		database.DB.Create(op)
-		http.Error(w, fmt.Sprintf(`{"error": "当前工单由%s办理，请切换到对应角色操作"}`, order.CurrentHandler), http.StatusForbidden)
+		writeOperationFailure(w, http.StatusForbidden,
+			fmt.Sprintf("当前工单由%s办理，请切换到对应角色操作", order.CurrentHandler), &order, "")
 		return
 	}
 
@@ -804,7 +819,7 @@ func RiskChange(w http.ResponseWriter, r *http.Request) {
 		op.Result = "失败"
 		op.Opinion = "已归档工单不可调整风险"
 		database.DB.Create(op)
-		http.Error(w, `{"error": "已归档工单不可调整风险"}`, http.StatusBadRequest)
+		writeOperationFailure(w, http.StatusBadRequest, "已归档工单不可调整风险", &order, "")
 		return
 	}
 
@@ -813,7 +828,8 @@ func RiskChange(w http.ResponseWriter, r *http.Request) {
 		op.Result = "失败"
 		op.Opinion = fmt.Sprintf("版本冲突：期望%d，当前%d", req.Version, order.Version)
 		database.DB.Create(op)
-		http.Error(w, fmt.Sprintf(`{"error": "版本冲突：期望%d，当前%d"}`, req.Version, order.Version), http.StatusConflict)
+		writeOperationFailure(w, http.StatusConflict,
+			fmt.Sprintf("版本冲突：期望%d，当前%d", req.Version, order.Version), &order, "")
 		return
 	}
 
@@ -822,7 +838,7 @@ func RiskChange(w http.ResponseWriter, r *http.Request) {
 		op.Result = "失败"
 		op.Opinion = "风险调整原因不能为空"
 		database.DB.Create(op)
-		http.Error(w, `{"error": "请填写风险调整原因"}`, http.StatusBadRequest)
+		writeOperationFailure(w, http.StatusBadRequest, "请填写风险调整原因", &order, "")
 		return
 	}
 
@@ -831,7 +847,7 @@ func RiskChange(w http.ResponseWriter, r *http.Request) {
 		op.Result = "失败"
 		op.Opinion = fmt.Sprintf("无效的风险等级: %s", req.ToLevel)
 		database.DB.Create(op)
-		http.Error(w, `{"error": "无效的目标风险等级"}`, http.StatusBadRequest)
+		writeOperationFailure(w, http.StatusBadRequest, "无效的目标风险等级", &order, "")
 		return
 	}
 
@@ -839,7 +855,8 @@ func RiskChange(w http.ResponseWriter, r *http.Request) {
 		op.Result = "失败"
 		op.Opinion = fmt.Sprintf("源风险等级不匹配：期望%s，当前%s", req.FromLevel, fromRisk)
 		database.DB.Create(op)
-		http.Error(w, `{"error": "源风险等级不匹配"}`, http.StatusBadRequest)
+		writeOperationFailure(w, http.StatusBadRequest,
+			fmt.Sprintf("源风险等级不匹配：期望%s，当前%s", req.FromLevel, fromRisk), &order, "")
 		return
 	}
 
@@ -947,3 +964,24 @@ func DeleteOrder(w http.ResponseWriter, r *http.Request) {
 }
 
 var _ = errors.New
+
+type OperationFailureResponse struct {
+	Error           string `json:"error"`
+	CurrentVersion  int    `json:"current_version"`
+	CurrentHandler  string `json:"current_handler"`
+	CurrentStatus   string `json:"current_status"`
+	EvidenceCheck   string `json:"evidence_check,omitempty"`
+}
+
+func writeOperationFailure(w http.ResponseWriter, statusCode int, msg string, order *models.RepairOrder, evidenceCheck string) {
+	resp := OperationFailureResponse{
+		Error:          msg,
+		CurrentVersion: order.Version,
+		CurrentHandler: order.CurrentHandler,
+		CurrentStatus:  order.Status,
+		EvidenceCheck:  evidenceCheck,
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
+	json.NewEncoder(w).Encode(resp)
+}

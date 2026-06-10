@@ -29,6 +29,14 @@ type ActionKey =
   | 'archive'
   | null;
 
+interface OperationFailureDetail {
+  error: string;
+  current_version: number;
+  current_handler: string;
+  current_status: string;
+  evidence_check?: string;
+}
+
 @Component({
   selector: 'app-order-detail',
   templateUrl: './order-detail.component.html',
@@ -44,6 +52,7 @@ export class OrderDetailComponent implements OnInit {
 
   activeAction: ActionKey = null;
   submitting = false;
+  lastFailure: OperationFailureDetail | null = null;
 
   opinionForm: FormGroup;
   rectifyForm: FormGroup;
@@ -141,7 +150,7 @@ export class OrderDetailComponent implements OnInit {
   get lastOpinionClass(): string {
     if (!this.order || !this.order.last_result) return '';
     const r = this.order.last_result || '';
-    if (r.includes('退回') || r.includes('拒绝') || r.includes('不通过')) return 'danger';
+    if (r.includes('退回') || r.includes('拒绝') || r.includes('不通过') || r.includes('失败')) return 'danger';
     if (r.includes('通过') || r.includes('同意')) return 'success';
     if (r.includes('升级') || r.includes('风险')) return 'warning';
     return '';
@@ -149,6 +158,33 @@ export class OrderDetailComponent implements OnInit {
 
   hasLastOpinion(): boolean {
     return !!(this.order?.last_opinion || this.order?.last_result);
+  }
+
+  get canSubmitEvidence(): boolean {
+    if (!this.order) return false;
+    return this.order.evidence_submitted && this.getEvidenceList().length > 0;
+  }
+
+  get evidenceWarningMsg(): string {
+    if (!this.order) return '';
+    const warnings: string[] = [];
+    if (!this.order.evidence_submitted) {
+      warnings.push('证据标记未勾选(evidence_submitted=false)');
+    }
+    if (this.getEvidenceList().length === 0) {
+      warnings.push('证据清单为空(evidence_list=[])');
+    }
+    return warnings.join('；');
+  }
+
+  get canResubmitEvidence(): boolean {
+    return this.resubmitEvidenceChecked.length > 0;
+  }
+
+  get riskToLevelInvalid(): boolean {
+    const to = this.riskForm.get('to_level')?.value;
+    const from = this.riskForm.get('from_level')?.value;
+    return to === from;
   }
 
   get availableActions(): { key: ActionKey; label: string; cls: string }[] {
@@ -197,7 +233,6 @@ export class OrderDetailComponent implements OnInit {
       }
     }
 
-    // 风险调整入口严格按角色+状态控制：只有主管/复核员 + 非归档 + 当前是处理人才能显示
     const hasRiskAction = actions.some((a) => a.key === 'change_risk');
     if (!hasRiskAction && !['archived', 'draft'].includes(s)) {
       const canAdjustRisk =
@@ -222,6 +257,7 @@ export class OrderDetailComponent implements OnInit {
 
   openAction(key: ActionKey): void {
     this.activeAction = key;
+    this.lastFailure = null;
     this.opinionForm.reset({
       opinion: '',
       result: '',
@@ -230,8 +266,13 @@ export class OrderDetailComponent implements OnInit {
     });
 
     if (key === 'resubmit' && this.order) {
-      const evList = this.order.evidence_list || '';
-      this.resubmitEvidenceChecked = evList.split(',').filter(Boolean);
+      const evList = this.order.evidence_list || '[]';
+      try {
+        const parsed = JSON.parse(evList);
+        this.resubmitEvidenceChecked = Array.isArray(parsed) ? [...parsed] : [];
+      } catch {
+        this.resubmitEvidenceChecked = evList.split(',').filter(Boolean);
+      }
       this.rectifyForm.reset({
         customer_name: this.order.customer_name || '',
         phone: this.order.phone || '',
@@ -257,6 +298,7 @@ export class OrderDetailComponent implements OnInit {
   cancelAction(): void {
     this.activeAction = null;
     this.resubmitEvidenceChecked = [];
+    this.lastFailure = null;
   }
 
   toggleResubmitEvidence(item: string): void {
@@ -274,11 +316,18 @@ export class OrderDetailComponent implements OnInit {
 
   performAction(): void {
     const version = this.order?.version ?? 0;
+    this.lastFailure = null;
 
     switch (this.activeAction) {
       case 'submit': {
-        if (this.opinionForm.get('opinion')?.invalid) {
-          this.opinionForm.markAllAsTouched();
+        if (!this.canSubmitEvidence) {
+          this.lastFailure = {
+            error: this.evidenceWarningMsg || '证据不满足提交条件',
+            current_version: this.order.version,
+            current_handler: this.order.current_handler,
+            current_status: this.order.status,
+            evidence_check: this.evidenceWarningMsg,
+          };
           return;
         }
         this.submitting = true;
@@ -294,12 +343,23 @@ export class OrderDetailComponent implements OnInit {
           this.rectifyForm.markAllAsTouched();
           return;
         }
+        if (!this.canResubmitEvidence) {
+          this.lastFailure = {
+            error: '请至少勾选一项证据资料(evidence_list不能为空)',
+            current_version: this.order.version,
+            current_handler: this.order.current_handler,
+            current_status: this.order.status,
+            evidence_check: 'evidence_list=[]',
+          };
+          return;
+        }
         this.submitting = true;
         const val = this.rectifyForm.value;
         const payload: any = {
           version,
           opinion: val.opinion,
           evidence_submitted: true,
+          evidence_list: JSON.stringify(this.resubmitEvidenceChecked),
         };
         if (val.customer_name) payload.customer_name = val.customer_name;
         if (val.phone) payload.phone = val.phone;
@@ -309,9 +369,6 @@ export class OrderDetailComponent implements OnInit {
         if (val.problem_description) payload.problem_description = val.problem_description;
         if (val.repair_items) payload.repair_items = val.repair_items;
         if (val.estimated_cost != null) payload.estimated_cost = val.estimated_cost;
-        if (this.resubmitEvidenceChecked.length > 0) {
-          payload.evidence_list = this.resubmitEvidenceChecked.join(',');
-        }
         this.orderService.rectifyOrder(this.order.id, payload).subscribe({
           next: () => this.handleSuccess(),
           error: (e) => this.handleError(e),
@@ -408,6 +465,15 @@ export class OrderDetailComponent implements OnInit {
           this.riskForm.markAllAsTouched();
           return;
         }
+        if (this.riskToLevelInvalid) {
+          this.lastFailure = {
+            error: '目标风险等级不能与当前等级相同，请选择不同的等级',
+            current_version: this.order.version,
+            current_handler: this.order.current_handler,
+            current_status: this.order.status,
+          };
+          return;
+        }
         this.submitting = true;
         const val = this.riskForm.value;
         const from_level = (val.from_level || this.order.risk_level) as RiskLevel;
@@ -461,13 +527,30 @@ export class OrderDetailComponent implements OnInit {
   private handleSuccess(): void {
     this.submitting = false;
     this.activeAction = null;
+    this.lastFailure = null;
     this.resubmitEvidenceChecked = [];
     this.loadOrder(this.order.id);
   }
 
   private handleError(e: any): void {
     this.submitting = false;
-    alert('操作失败：' + (e?.error?.message || e?.message || '请稍后再试'));
+    const errBody = e?.error;
+    if (errBody && typeof errBody === 'object' && errBody.error) {
+      this.lastFailure = {
+        error: errBody.error,
+        current_version: errBody.current_version ?? this.order.version,
+        current_handler: errBody.current_handler ?? this.order.current_handler,
+        current_status: errBody.current_status ?? this.order.status,
+        evidence_check: errBody.evidence_check || '',
+      };
+    } else {
+      this.lastFailure = {
+        error: e?.message || '操作失败，请稍后再试',
+        current_version: this.order.version,
+        current_handler: this.order.current_handler,
+        current_status: this.order.status,
+      };
+    }
   }
 
   formatDate(d: string): string {
@@ -476,8 +559,13 @@ export class OrderDetailComponent implements OnInit {
   }
 
   getEvidenceList(): string[] {
-    const s = this.order?.evidence_list || '';
-    return s.split(',').filter(Boolean);
+    const s = this.order?.evidence_list || '[]';
+    try {
+      const parsed = JSON.parse(s);
+      return Array.isArray(parsed) ? parsed : s.split(',').filter(Boolean);
+    } catch {
+      return s.split(',').filter(Boolean);
+    }
   }
 
   goBack(): void {
