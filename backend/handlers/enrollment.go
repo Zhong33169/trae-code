@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 	"zqzl/backend/database"
 	"zqzl/backend/models"
@@ -130,20 +131,36 @@ func SubmitEnrollment(c *gin.Context) {
 	materialStatus := checkMaterialStatus(uint(id))
 
 	if !materialStatus.CanSubmit {
+		var missingNames []string
+		var rejectedNames []string
+		for _, m := range materialStatus.Materials {
+			if m.Required && !m.HasAttachment {
+				missingNames = append(missingNames, m.Name)
+			}
+			if m.IsRejected {
+				rejectedNames = append(rejectedNames, fmt.Sprintf("%s（%s）", m.Name, m.RejectReason))
+			}
+		}
+
 		var errMsg string
-		if materialStatus.MissingCount > 0 && materialStatus.RejectedCount > 0 {
+		var detailMsg string
+		if len(missingNames) > 0 && len(rejectedNames) > 0 {
 			errMsg = fmt.Sprintf("还有 %d 项必备材料缺失，%d 项材料被驳回，请补齐后再提交",
-				materialStatus.MissingCount, materialStatus.RejectedCount)
-		} else if materialStatus.MissingCount > 0 {
-			errMsg = fmt.Sprintf("还有 %d 项必备材料缺失，请补齐后再提交", materialStatus.MissingCount)
-		} else if materialStatus.RejectedCount > 0 {
-			errMsg = fmt.Sprintf("还有 %d 项材料被驳回，请修改后再提交", materialStatus.RejectedCount)
+				len(missingNames), len(rejectedNames))
+			detailMsg = fmt.Sprintf("缺失材料：%s；驳回材料：%s",
+				strings.Join(missingNames, "、"), strings.Join(rejectedNames, "、"))
+		} else if len(missingNames) > 0 {
+			errMsg = fmt.Sprintf("还有 %d 项必备材料缺失，请补齐后再提交", len(missingNames))
+			detailMsg = fmt.Sprintf("缺失材料：%s", strings.Join(missingNames, "、"))
+		} else if len(rejectedNames) > 0 {
+			errMsg = fmt.Sprintf("还有 %d 项材料被驳回，请修改后再提交", len(rejectedNames))
+			detailMsg = fmt.Sprintf("驳回材料：%s", strings.Join(rejectedNames, "、"))
 		}
 
 		addAuditLog(uint(id), userID.(uint), userName.(string), userRole.(string),
-			"提交核验失败", errMsg, string(enrollment.Status), string(enrollment.Status))
+			"提交核验失败", errMsg+"。"+detailMsg, string(enrollment.Status), string(enrollment.Status))
 
-		c.JSON(http.StatusBadRequest, gin.H{"error": errMsg, "material_status": materialStatus})
+		c.JSON(http.StatusBadRequest, gin.H{"error": errMsg, "detail": detailMsg, "material_status": materialStatus})
 		return
 	}
 
@@ -328,7 +345,7 @@ func BatchVerify(c *gin.Context) {
 
 func isMaterialMissing(e *models.Enrollment) bool {
 	var count int64
-	database.DB.Model(&models.Attachment{}).Where("enrollment_id = ? AND status = ?", e.ID, models.AttachRejected).Count(&count)
+	database.DB.Model(&models.Attachment{}).Where("enrollment_id = ? AND status = ? AND is_active = ?", e.ID, models.AttachRejected, true).Count(&count)
 	return count > 0 || e.Status == models.StatusPendingCorrection
 }
 

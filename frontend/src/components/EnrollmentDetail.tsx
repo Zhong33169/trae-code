@@ -293,6 +293,7 @@ export default function EnrollmentDetail({ id, onBack }: EnrollmentDetailProps) 
               <div className="material-list">
                 {materialStatus.materials.map((mat) => {
                   const attachment = enrollment.attachments?.find(a => a.type === mat.type && a.is_active);
+                  const historyAttachments = enrollment.attachments?.filter(a => a.type === mat.type && !a.is_active).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
                   const isMissing = mat.required && !mat.has_attachment;
                   const isRejected = mat.is_rejected;
                   const isPending = mat.has_attachment && mat.status === 'pending';
@@ -343,6 +344,20 @@ export default function EnrollmentDetail({ id, onBack }: EnrollmentDetailProps) 
                             <div className="attachment-detail">
                               <span>文件名：{attachment.name}</span>
                               <span>上传人：{attachment.uploaded_by_name}</span>
+                              <span>上传时间：{new Date(attachment.created_at).toLocaleString('zh-CN')}</span>
+                            </div>
+                          )}
+                          {historyAttachments && historyAttachments.length > 0 && (
+                            <div className="history-attachments">
+                              <div className="history-title">历史版本（{historyAttachments.length}）</div>
+                              {historyAttachments.map(h => (
+                                <div key={h.id} className="history-item">
+                                  <span className="history-tag">历史</span>
+                                  <span className="history-name">{h.name}</span>
+                                  <span className={`history-status ${h.status}`}>{attachStatusLabel[h.status]}</span>
+                                  {h.reject_reason && <span className="history-reason">驳回：{h.reject_reason}</span>}
+                                </div>
+                              ))}
                             </div>
                           )}
                         </div>
@@ -944,6 +959,46 @@ export default function EnrollmentDetail({ id, onBack }: EnrollmentDetailProps) 
           font-size: 12px;
           color: #6b7280;
           margin-top: 4px;
+          flex-wrap: wrap;
+        }
+        .history-attachments {
+          margin-top: 8px;
+          padding-top: 8px;
+          border-top: 1px dashed #e5e7eb;
+        }
+        .history-title {
+          font-size: 11px;
+          color: #9ca3af;
+          margin-bottom: 6px;
+        }
+        .history-item {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          font-size: 11px;
+          color: #9ca3af;
+          padding: 4px 0;
+        }
+        .history-tag {
+          display: inline-block;
+          padding: 1px 5px;
+          background: #f3f4f6;
+          color: #9ca3af;
+          border-radius: 3px;
+          font-size: 10px;
+        }
+        .history-name {
+          color: #6b7280;
+        }
+        .history-status {
+          font-size: 10px;
+        }
+        .history-status.pending { color: #9ca3af; }
+        .history-status.approved { color: #9ca3af; }
+        .history-status.rejected { color: #f87171; }
+        .history-reason {
+          color: #9ca3af;
+          font-style: italic;
         }
         .material-right {
           display: flex;

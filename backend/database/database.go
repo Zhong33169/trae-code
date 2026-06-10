@@ -91,6 +91,12 @@ func seed() {
 			Major: "汽车维修", Status: models.StatusDraft,
 			CreatedBy: users[1].ID, CreatedByName: users[1].Name,
 		},
+		{
+			StudentName: "郑小芳", IDCard: "110101200008088901", Phone: "13800138008",
+			Major: "会计电算化", Status: models.StatusPendingVerify,
+			CreatedBy: users[0].ID, CreatedByName: users[0].Name,
+			Deadline: &futureDeadline,
+		},
 	}
 	for i := range enrollments {
 		DB.Create(&enrollments[i])
@@ -129,6 +135,12 @@ func seed() {
 
 		{EnrollmentID: 7, Name: "身份证正面.jpg", Type: "id_card_front", FileKey: "attachments/7/id_front.jpg", Status: models.AttachPending, UploadedBy: users[1].ID, UploadedByName: users[1].Name, IsActive: true, CreatedAt: now.AddDate(0, 0, -1)},
 		{EnrollmentID: 7, Name: "身份证背面.jpg", Type: "id_card_back", FileKey: "attachments/7/id_back.jpg", Status: models.AttachPending, UploadedBy: users[1].ID, UploadedByName: users[1].Name, IsActive: true, CreatedAt: now.AddDate(0, 0, -1)},
+
+		{EnrollmentID: 8, Name: "身份证正面.jpg", Type: "id_card_front", FileKey: "attachments/8/id_front.jpg", Status: models.AttachApproved, UploadedBy: users[0].ID, UploadedByName: users[0].Name, IsActive: true, CreatedAt: now.AddDate(0, 0, -6)},
+		{EnrollmentID: 8, Name: "身份证背面.jpg", Type: "id_card_back", FileKey: "attachments/8/id_back.jpg", Status: models.AttachApproved, UploadedBy: users[0].ID, UploadedByName: users[0].Name, IsActive: true, CreatedAt: now.AddDate(0, 0, -6)},
+		{EnrollmentID: 8, Name: "学历证明_旧版.pdf", Type: "education", FileKey: "attachments/8/edu_old.pdf", Status: models.AttachRejected, RejectReason: "学历证明模糊不清，无法核实毕业信息，请重新上传清晰版本", UploadedBy: users[0].ID, UploadedByName: users[0].Name, IsActive: false, CreatedAt: now.AddDate(0, 0, -6)},
+		{EnrollmentID: 8, Name: "学历证明_新版.pdf", Type: "education", FileKey: "attachments/8/edu_new.pdf", Status: models.AttachPending, UploadedBy: users[0].ID, UploadedByName: users[0].Name, IsActive: true, CreatedAt: now.AddDate(0, 0, -2)},
+		{EnrollmentID: 8, Name: "一寸照片.jpg", Type: "photo", FileKey: "attachments/8/photo.jpg", Status: models.AttachApproved, UploadedBy: users[0].ID, UploadedByName: users[0].Name, IsActive: true, CreatedAt: now.AddDate(0, 0, -6)},
 	}
 	for i := range attachments {
 		DB.Create(&attachments[i])
@@ -195,6 +207,20 @@ func seed() {
 		{EnrollmentID: 7, UserID: users[1].ID, UserName: users[1].Name, UserRole: string(users[1].Role), Action: "创建报名单", FromStatus: "", ToStatus: string(models.StatusDraft), CreatedAt: now.AddDate(0, 0, -1)},
 		{EnrollmentID: 7, UserID: users[1].ID, UserName: users[1].Name, UserRole: string(users[1].Role), Action: "上传附件: 身份证正面.jpg (id_card_front)", CreatedAt: now.AddDate(0, 0, -1).Add(time.Hour)},
 		{EnrollmentID: 7, UserID: users[1].ID, UserName: users[1].Name, UserRole: string(users[1].Role), Action: "上传附件: 身份证背面.jpg (id_card_back)", CreatedAt: now.AddDate(0, 0, -1).Add(time.Hour * 2)},
+
+		{EnrollmentID: 8, UserID: users[0].ID, UserName: users[0].Name, UserRole: string(users[0].Role), Action: "创建报名单", FromStatus: "", ToStatus: string(models.StatusDraft), CreatedAt: now.AddDate(0, 0, -6)},
+		{EnrollmentID: 8, UserID: users[0].ID, UserName: users[0].Name, UserRole: string(users[0].Role), Action: "上传附件: 身份证正面.jpg (id_card_front)", CreatedAt: now.AddDate(0, 0, -6).Add(time.Hour)},
+		{EnrollmentID: 8, UserID: users[0].ID, UserName: users[0].Name, UserRole: string(users[0].Role), Action: "上传附件: 身份证背面.jpg (id_card_back)", CreatedAt: now.AddDate(0, 0, -6).Add(time.Hour * 2)},
+		{EnrollmentID: 8, UserID: users[0].ID, UserName: users[0].Name, UserRole: string(users[0].Role), Action: "上传附件: 学历证明_旧版.pdf (education)", CreatedAt: now.AddDate(0, 0, -6).Add(time.Hour * 3)},
+		{EnrollmentID: 8, UserID: users[0].ID, UserName: users[0].Name, UserRole: string(users[0].Role), Action: "上传附件: 一寸照片.jpg (photo)", CreatedAt: now.AddDate(0, 0, -6).Add(time.Hour * 4)},
+		{EnrollmentID: 8, UserID: users[0].ID, UserName: users[0].Name, UserRole: string(users[0].Role), Action: "提交核验", FromStatus: string(models.StatusDraft), ToStatus: string(models.StatusPendingVerify), CreatedAt: now.AddDate(0, 0, -5)},
+		{EnrollmentID: 8, UserID: users[2].ID, UserName: users[2].Name, UserRole: string(users[2].Role), Action: "通过附件: 身份证正面.jpg (id_card_front)", CreatedAt: now.AddDate(0, 0, -5).Add(time.Hour)},
+		{EnrollmentID: 8, UserID: users[2].ID, UserName: users[2].Name, UserRole: string(users[2].Role), Action: "通过附件: 身份证背面.jpg (id_card_back)", CreatedAt: now.AddDate(0, 0, -5).Add(time.Hour + 10*time.Minute)},
+		{EnrollmentID: 8, UserID: users[2].ID, UserName: users[2].Name, UserRole: string(users[2].Role), Action: "驳回附件: 学历证明_旧版.pdf (education)", Reason: "学历证明模糊不清，无法核实毕业信息，请重新上传清晰版本", CreatedAt: now.AddDate(0, 0, -5).Add(time.Hour + 20*time.Minute)},
+		{EnrollmentID: 8, UserID: users[2].ID, UserName: users[2].Name, UserRole: string(users[2].Role), Action: "通过附件: 一寸照片.jpg (photo)", CreatedAt: now.AddDate(0, 0, -5).Add(time.Hour + 30*time.Minute)},
+		{EnrollmentID: 8, UserID: users[2].ID, UserName: users[2].Name, UserRole: string(users[2].Role), Action: "退回补正", Reason: "学历证明不清晰，请重新上传", FromStatus: string(models.StatusPendingVerify), ToStatus: string(models.StatusPendingCorrection), CreatedAt: now.AddDate(0, 0, -5).Add(time.Hour * 2)},
+		{EnrollmentID: 8, UserID: users[0].ID, UserName: users[0].Name, UserRole: string(users[0].Role), Action: "上传附件: 学历证明_新版.pdf (education)", Reason: "替换旧版（已驳回），上传清晰版学历证明", CreatedAt: now.AddDate(0, 0, -2)},
+		{EnrollmentID: 8, UserID: users[0].ID, UserName: users[0].Name, UserRole: string(users[0].Role), Action: "提交核验", FromStatus: string(models.StatusPendingCorrection), ToStatus: string(models.StatusPendingVerify), CreatedAt: now.AddDate(0, 0, -2).Add(time.Hour)},
 
 		{EnrollmentID: 0, UserID: users[2].ID, UserName: users[2].Name, UserRole: string(users[2].Role), Action: "批量核验", Reason: "批量核验 3 份报名单：#1陈小明（通过）、#3王小强（通过）、#4赵小美（通过）", CreatedAt: now.AddDate(0, 0, -6)},
 	}
