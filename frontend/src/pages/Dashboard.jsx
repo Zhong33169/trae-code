@@ -65,6 +65,33 @@ export default function Dashboard({ user }) {
     return '查看'
   }
 
+  const getStatCards = () => {
+    const cards = []
+    cards.push({
+      label: '我的待办',
+      value: stats?.my_queue_count || 0,
+      type: 'primary',
+    })
+    if (user.role === 'auditor' || user.role === 'reviewer') {
+      cards.push({
+        label: '超时记录',
+        value: stats?.timeout_count || 0,
+        type: 'danger',
+      })
+    }
+    cards.push({
+      label: '今日总数',
+      value: stats?.total || 0,
+      type: 'warning',
+    })
+    cards.push({
+      label: '已归档',
+      value: stats?.by_status?.archived || 0,
+      type: 'success',
+    })
+    return cards
+  }
+
   if (loading) {
     return (
       <div className="page-content">
@@ -72,6 +99,8 @@ export default function Dashboard({ user }) {
       </div>
     )
   }
+
+  const statCards = getStatCards()
 
   return (
     <div>
@@ -90,23 +119,13 @@ export default function Dashboard({ user }) {
       </div>
 
       <div className="page-content">
-        <div className="stats-grid">
-          <div className="stat-card primary">
-            <div className="stat-label">我的待办</div>
-            <div className="stat-value">{stats?.my_queue_count || 0}</div>
-          </div>
-          <div className="stat-card danger">
-            <div className="stat-label">超时记录</div>
-            <div className="stat-value">{stats?.timeout_count || 0}</div>
-          </div>
-          <div className="stat-card warning">
-            <div className="stat-label">今日总数</div>
-            <div className="stat-value">{stats?.total || 0}</div>
-          </div>
-          <div className="stat-card success">
-            <div className="stat-label">已归档</div>
-            <div className="stat-value">{stats?.by_status?.archived || 0}</div>
-          </div>
+        <div className="stats-grid" style={{ gridTemplateColumns: `repeat(${statCards.length}, 1fr)` }}>
+          {statCards.map((card, idx) => (
+            <div key={idx} className={`stat-card ${card.type}`}>
+              <div className="stat-label">{card.label}</div>
+              <div className="stat-value">{card.value}</div>
+            </div>
+          ))}
         </div>
 
         <div className="card">
@@ -131,6 +150,7 @@ export default function Dashboard({ user }) {
                   <th>检查日期</th>
                   <th>状态</th>
                   <th>当前节点</th>
+                  {user.role !== 'registrar' && <th>体温</th>}
                   <th>超时情况</th>
                   <th>操作</th>
                 </tr>
@@ -147,6 +167,9 @@ export default function Dashboard({ user }) {
                       </span>
                     </td>
                     <td>{record.current_node_name}</td>
+                    {user.role !== 'registrar' && (
+                      <td>{record.temperature ? record.temperature + '℃' : '-'}</td>
+                    )}
                     <td>
                       {record.timeout?.isTimeout ? (
                         <span className="timeout-tag">
@@ -173,17 +196,66 @@ export default function Dashboard({ user }) {
           )}
         </div>
 
-        {user.role === 'registrar' && (
+        <div className="card">
+          <div className="card-header">
+            <h2>快速操作</h2>
+          </div>
+          <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+            {user.role === 'registrar' && (
+              <>
+                <button className="btn btn-primary" onClick={() => route('/records')}>
+                  晨检记录管理
+                </button>
+                <button className="btn" onClick={() => route('/children')}>
+                  幼儿档案管理
+                </button>
+              </>
+            )}
+            {user.role === 'auditor' && (
+              <>
+                <button className="btn btn-primary" onClick={() => route('/records')}>
+                  审核记录管理
+                </button>
+                <button className="btn" onClick={() => route('/stats')}>
+                  数据统计
+                </button>
+                <button className="btn" onClick={() => route('/logs')}>
+                  操作日志
+                </button>
+              </>
+            )}
+            {user.role === 'reviewer' && (
+              <>
+                <button className="btn btn-primary" onClick={() => route('/records')}>
+                  复核记录管理
+                </button>
+                <button className="btn" onClick={() => route('/children')}>
+                  幼儿档案管理
+                </button>
+                <button className="btn" onClick={() => route('/stats')}>
+                  数据统计
+                </button>
+                <button className="btn" onClick={() => route('/logs')}>
+                  操作日志
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+
+        {user.role !== 'registrar' && stats && (
           <div className="card">
             <div className="card-header">
-              <h2>快速操作</h2>
+              <h2>状态分布</h2>
             </div>
-            <button className="btn btn-primary" onClick={() => route('/records')}>
-              新建晨检记录
-            </button>
-            <button className="btn" style={{ marginLeft: '12px' }} onClick={() => route('/children')}>
-              管理幼儿档案
-            </button>
+            <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap' }}>
+              {Object.entries(stats.by_status_names || {}).map(([name, count]) => (
+                <div key={name} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ color: '#909399', fontSize: '13px' }}>{name}：</span>
+                  <span style={{ fontWeight: 600, fontSize: '16px', color: '#303133' }}>{count}</span>
+                </div>
+              ))}
+            </div>
           </div>
         )}
       </div>

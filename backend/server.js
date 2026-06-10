@@ -66,6 +66,56 @@ const ROLE_NAMES = {
   reviewer: '幼儿园复核负责人',
 };
 
+const RECORD_FIELDS_WHITELIST = {
+  base: ['id', 'child_id', 'child_name', 'child_gender', 'birth_date', 'class_name', 'guardian_name', 'guardian_phone', 'child_health_status', 'check_date', 'status', 'status_name', 'current_node', 'current_node_name', 'timeout', 'abnormal_reason', 'abnormal_by_name', 'available_actions', 'operation_logs', 'created_at', 'updated_at'],
+  registrar: ['temperature', 'mental_status', 'skin_condition', 'throat_condition', 'hand_foot_condition', 'other_symptoms', 'registration_note', 'registered_by', 'registered_at'],
+  auditor: ['temperature', 'mental_status', 'skin_condition', 'throat_condition', 'hand_foot_condition', 'other_symptoms', 'registration_note', 'audit_note', 'registered_by', 'audited_by', 'registered_at', 'audit_submitted_at', 'audit_completed_at'],
+  reviewer: ['temperature', 'mental_status', 'skin_condition', 'throat_condition', 'hand_foot_condition', 'other_symptoms', 'registration_note', 'audit_note', 'review_note', 'registered_by', 'audited_by', 'reviewed_by', 'registered_at', 'audit_submitted_at', 'audit_completed_at', 'review_submitted_at', 'review_completed_at'],
+};
+
+function filterRecordFields(record, role) {
+  const allowedFields = [
+    ...RECORD_FIELDS_WHITELIST.base,
+    ...RECORD_FIELDS_WHITELIST[role] || [],
+  ];
+  const filtered = {};
+  allowedFields.forEach(field => {
+    if (record.hasOwnProperty(field)) {
+      filtered[field] = record[field];
+    }
+  });
+  return filtered;
+}
+
+function filterRecordList(list, role) {
+  return list.map(record => filterRecordFields(record, role));
+}
+
+const VALID_ACTIONS = {
+  registrar: {
+    pending_registration: ['submit_audit'],
+    pending_correction: ['submit_audit'],
+  },
+  auditor: {
+    pending_audit: ['audit_pass', 'audit_reject'],
+  },
+  reviewer: {
+    pending_review: ['review_pass', 'review_reject'],
+  },
+};
+
+function canPerformAction(role, status, action) {
+  return VALID_ACTIONS[role]?.[status]?.includes(action) || false;
+}
+
+const ACTION_NAMES = {
+  submit_audit: '提交审核',
+  audit_pass: '审核通过',
+  audit_reject: '退回补正',
+  review_pass: '复核归档',
+  review_reject: '退回重审',
+};
+
 function calculateTimeout(record) {
   const now = Date.now();
   const { current_node } = record;
@@ -320,7 +370,9 @@ app.get('/api/records', authenticate, async (req, res) => {
       };
     });
 
-    res.json({ list: recordsWithTimeout, total: totalRow.count, page: parseInt(page), pageSize: parseInt(pageSize) });
+    const filteredList = filterRecordList(recordsWithTimeout, userRole);
+
+    res.json({ list: filteredList, total: totalRow.count, page: parseInt(page), pageSize: parseInt(pageSize) });
   } catch (err) {
     res.status(500).json({ error: '获取晨检记录失败：' + err.message });
   }
@@ -341,19 +393,40 @@ app.get('/api/records/:id', authenticate, async (req, res) => {
       return res.status(404).json({ error: '晨检记录不存在' });
     }
 
+    const userRole = req.user.role;
     const timeout = calculateTimeout(record);
     const logs = await db.all(
       `SELECT * FROM operation_logs WHERE record_id = ? ORDER BY created_at DESC`,
       req.params.id
     );
 
-    res.json({
+    let availableActions = [];
+    if (VALID_ACTIONS[userRole]?.[record.status]) {
+      availableActions = VALID_ACTIONS[userRole][record.status].map(action => ({
+        action,
+        name: ACTION_NAMES[action] || action,
+      }));
+    }
+
+    let abnormalByName = null;
+    if (record.abnormal_by) {
+      const abUser = await db.get('SELECT name FROM users WHERE id = ?', record.abnormal_by);
+      if (abUser) abnormalByName = abUser.name;
+    }
+
+    const fullRecord = {
       ...record,
       status_name: STATUS_NAMES[record.status] || record.status,
       current_node_name: NODE_NAMES[record.current_node] || record.current_node,
       timeout,
       operation_logs: logs,
-    });
+      available_actions: availableActions,
+      abnormal_by_name: abnormalByName,
+    };
+
+    const filteredRecord = filterRecordFields(fullRecord, userRole);
+
+    res.json(filteredRecord);
   } catch (err) {
     res.status(500).json({ error: '获取晨检记录详情失败：' + err.message });
   }
@@ -403,7 +476,7 @@ app.put('/api/records/:id/submit-audit', authenticate, requireRole('registrar'),
       return res.status(404).json({ error: '晨检记录不存在' });
     }
 
-    if (record.status !== 'pending_registration' && record.status !== 'pending_correction') {
+    if (!canPerformAction(req.user.role, record.status, 'submit_audit')) {
       return res.status(400).json({ error: `当前状态为「${STATUS_NAMES[record.status]}」，不能提交审核` });
     }
 
@@ -440,7 +513,7 @@ app.put('/api/records/:id/audit-pass', authenticate, requireRole('auditor'), asy
       return res.status(404).json({ error: '晨检记录不存在' });
     }
 
-    if (record.status !== 'pending_audit') {
+    if (!canPerformAction(req.user.role, record.status, 'audit_pass')) {
       return res.status(400).json({ error: `当前状态为「${STATUS_NAMES[record.status]}」，不能执行审核通过` });
     }
 
@@ -469,12 +542,12 @@ app.put('/api/records/:id/audit-reject', authenticate, requireRole('auditor'), a
       return res.status(404).json({ error: '晨检记录不存在' });
     }
 
-    if (record.status !== 'pending_audit') {
+    if (!canPerformAction(req.user.role, record.status, 'audit_reject')) {
       return res.status(400).json({ error: `当前状态为「${STATUS_NAMES[record.status]}」，不能执行退回补正` });
     }
 
     const { audit_note, abnormal_reason } = req.body;
-    if (!abnormal_reason) {
+    if (!abnormal_reason || !abnormal_reason.trim()) {
       return res.status(400).json({ error: '退回补正必须填写异常原因' });
     }
 
@@ -482,14 +555,14 @@ app.put('/api/records/:id/audit-reject', authenticate, requireRole('auditor'), a
 
     await db.run(
       `UPDATE morning_check_records
-       SET status = 'pending_correction', current_node = 'registration', audit_note = ?, abnormal_reason = ?, audited_by = ?, audit_completed_at = ?, updated_at = ?
+       SET status = 'pending_correction', current_node = 'registration', audit_note = ?, abnormal_reason = ?, abnormal_by = ?, audited_by = ?, audit_completed_at = ?, updated_at = ?
        WHERE id = ?`,
-      audit_note || null, abnormal_reason, req.user.id, now, now, req.params.id
+      audit_note || null, abnormal_reason.trim(), req.user.id, req.user.id, now, now, req.params.id
     );
 
-    await addOperationLog(req.params.id, req.user.id, req.user.name, req.user.role, '退回补正', 'pending_audit', 'pending_correction', `异常原因：${abnormal_reason}`);
+    await addOperationLog(req.params.id, req.user.id, req.user.name, req.user.role, '退回补正', record.status, 'pending_correction', `异常原因：${abnormal_reason.trim()}`);
 
-    res.json({ message: '已退回补正，请登记员处理' });
+    res.json({ message: '已退回补正，请登记员尽快处理' });
   } catch (err) {
     res.status(500).json({ error: '退回补正失败：' + err.message });
   }
@@ -502,7 +575,7 @@ app.put('/api/records/:id/review-pass', authenticate, requireRole('reviewer'), a
       return res.status(404).json({ error: '晨检记录不存在' });
     }
 
-    if (record.status !== 'pending_review') {
+    if (!canPerformAction(req.user.role, record.status, 'review_pass')) {
       return res.status(400).json({ error: `当前状态为「${STATUS_NAMES[record.status]}」，不能执行复核归档` });
     }
 
@@ -531,12 +604,12 @@ app.put('/api/records/:id/review-reject', authenticate, requireRole('reviewer'),
       return res.status(404).json({ error: '晨检记录不存在' });
     }
 
-    if (record.status !== 'pending_review') {
+    if (!canPerformAction(req.user.role, record.status, 'review_reject')) {
       return res.status(400).json({ error: `当前状态为「${STATUS_NAMES[record.status]}」，不能执行退回重审` });
     }
 
     const { review_note, abnormal_reason } = req.body;
-    if (!abnormal_reason) {
+    if (!abnormal_reason || !abnormal_reason.trim()) {
       return res.status(400).json({ error: '退回重审必须填写异常原因' });
     }
 
@@ -544,16 +617,172 @@ app.put('/api/records/:id/review-reject', authenticate, requireRole('reviewer'),
 
     await db.run(
       `UPDATE morning_check_records
-       SET status = 'pending_audit', current_node = 'audit', review_note = ?, abnormal_reason = ?, reviewed_by = ?, review_submitted_at = NULL, updated_at = ?
+       SET status = 'pending_audit', current_node = 'audit', review_note = ?, abnormal_reason = ?, abnormal_by = ?, reviewed_by = ?, review_submitted_at = NULL, updated_at = ?
        WHERE id = ?`,
-      review_note || null, abnormal_reason, req.user.id, now, req.params.id
+      review_note || null, abnormal_reason.trim(), req.user.id, req.user.id, now, req.params.id
     );
 
-    await addOperationLog(req.params.id, req.user.id, req.user.name, req.user.role, '退回重审', 'pending_review', 'pending_audit', `异常原因：${abnormal_reason}`);
+    await addOperationLog(req.params.id, req.user.id, req.user.name, req.user.role, '退回重审', record.status, 'pending_audit', `异常原因：${abnormal_reason.trim()}`);
 
     res.json({ message: '已退回重审，请审核主管重新处理' });
   } catch (err) {
     res.status(500).json({ error: '退回重审失败：' + err.message });
+  }
+});
+
+app.put('/api/records/batch/audit-pass', authenticate, requireRole('auditor'), async (req, res) => {
+  try {
+    const { ids, audit_note } = req.body;
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: '请选择要审核的记录' });
+    }
+    if (ids.length > 100) {
+      return res.status(400).json({ error: '批量审核最多处理 100 条记录' });
+    }
+
+    const placeholders = ids.map(() => '?').join(',');
+    const records = await db.all(
+      `SELECT * FROM morning_check_records WHERE id IN (${placeholders})`,
+      ...ids
+    );
+
+    if (records.length === 0) {
+      return res.status(404).json({ error: '未找到选中的记录' });
+    }
+
+    const now = nowIso();
+    const successIds = [];
+    const failedItems = [];
+
+    for (const record of records) {
+      try {
+        if (!canPerformAction(req.user.role, record.status, 'audit_pass')) {
+          failedItems.push({
+            id: record.id,
+            child_id: record.child_id,
+            error: `当前状态为「${STATUS_NAMES[record.status]}」，不能审核通过`,
+          });
+          continue;
+        }
+
+        await db.run(
+          `UPDATE morning_check_records
+           SET status = 'pending_review', current_node = 'review', audit_note = ?, audited_by = ?, audit_completed_at = ?, review_submitted_at = ?, updated_at = ?
+           WHERE id = ?`,
+          audit_note || null, req.user.id, now, now, now, record.id
+        );
+
+        await addOperationLog(record.id, req.user.id, req.user.name, req.user.role, '批量审核通过', record.status, 'pending_review', audit_note || '');
+        successIds.push(record.id);
+      } catch (err) {
+        failedItems.push({
+          id: record.id,
+          child_id: record.child_id,
+          error: err.message,
+        });
+      }
+    }
+
+    const successRecordsRaw = await db.all(
+      `SELECT r.id, r.child_id, c.name as child_name, r.status
+       FROM morning_check_records r
+       JOIN children c ON r.child_id = c.id
+       WHERE r.id IN (${successIds.map(() => '?').join(',')})`,
+      ...successIds
+    );
+
+    const successRecords = successRecordsRaw.map(r => ({
+      ...r,
+      status_name: STATUS_NAMES[r.status] || r.status,
+    }));
+
+    res.json({
+      message: `批量审核完成：成功 ${successIds.length} 条，失败 ${failedItems.length} 条`,
+      success_count: successIds.length,
+      fail_count: failedItems.length,
+      success_records: successRecords,
+      failed_items: failedItems,
+    });
+  } catch (err) {
+    res.status(500).json({ error: '批量审核失败：' + err.message });
+  }
+});
+
+app.put('/api/records/batch/review-pass', authenticate, requireRole('reviewer'), async (req, res) => {
+  try {
+    const { ids, review_note } = req.body;
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: '请选择要复核的记录' });
+    }
+    if (ids.length > 100) {
+      return res.status(400).json({ error: '批量复核最多处理 100 条记录' });
+    }
+
+    const placeholders = ids.map(() => '?').join(',');
+    const records = await db.all(
+      `SELECT * FROM morning_check_records WHERE id IN (${placeholders})`,
+      ...ids
+    );
+
+    if (records.length === 0) {
+      return res.status(404).json({ error: '未找到选中的记录' });
+    }
+
+    const now = nowIso();
+    const successIds = [];
+    const failedItems = [];
+
+    for (const record of records) {
+      try {
+        if (!canPerformAction(req.user.role, record.status, 'review_pass')) {
+          failedItems.push({
+            id: record.id,
+            child_id: record.child_id,
+            error: `当前状态为「${STATUS_NAMES[record.status]}」，不能复核归档`,
+          });
+          continue;
+        }
+
+        await db.run(
+          `UPDATE morning_check_records
+           SET status = 'archived', current_node = 'completed', review_note = ?, reviewed_by = ?, review_completed_at = ?, updated_at = ?
+           WHERE id = ?`,
+          review_note || null, req.user.id, now, now, record.id
+        );
+
+        await addOperationLog(record.id, req.user.id, req.user.name, req.user.role, '批量复核归档', record.status, 'archived', review_note || '');
+        successIds.push(record.id);
+      } catch (err) {
+        failedItems.push({
+          id: record.id,
+          child_id: record.child_id,
+          error: err.message,
+        });
+      }
+    }
+
+    const successRecordsRaw = await db.all(
+      `SELECT r.id, r.child_id, c.name as child_name, r.status
+       FROM morning_check_records r
+       JOIN children c ON r.child_id = c.id
+       WHERE r.id IN (${successIds.map(() => '?').join(',')})`,
+      ...successIds
+    );
+
+    const successRecords = successRecordsRaw.map(r => ({
+      ...r,
+      status_name: STATUS_NAMES[r.status] || r.status,
+    }));
+
+    res.json({
+      message: `批量复核完成：成功 ${successIds.length} 条，失败 ${failedItems.length} 条`,
+      success_count: successIds.length,
+      fail_count: failedItems.length,
+      success_records: successRecords,
+      failed_items: failedItems,
+    });
+  } catch (err) {
+    res.status(500).json({ error: '批量复核失败：' + err.message });
   }
 });
 

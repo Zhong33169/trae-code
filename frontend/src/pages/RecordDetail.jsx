@@ -48,17 +48,13 @@ export default function RecordDetail({ user, id }) {
     loadDetail()
   }, [id])
 
-  const canEditRegistration = () => {
-    if (user.role !== 'registrar') return false
-    return record.status === 'pending_registration' || record.status === 'pending_correction'
+  const canDoAction = (action) => {
+    if (!record?.available_actions) return false
+    return record.available_actions.some(a => a.action === action)
   }
 
-  const canAudit = () => {
-    return user.role === 'auditor' && record.status === 'pending_audit'
-  }
-
-  const canReview = () => {
-    return user.role === 'reviewer' && record.status === 'pending_review'
+  const hasAnyAction = () => {
+    return record?.available_actions?.length > 0
   }
 
   const handleSubmitAudit = async () => {
@@ -201,6 +197,10 @@ export default function RecordDetail({ user, id }) {
     nodes[3].status = 'done'
   }
 
+  const showRegistrationForm = canDoAction('submit_audit') && actionType === 'edit'
+  const showAuditForm = (canDoAction('audit_pass') || canDoAction('audit_reject')) && actionType === 'audit'
+  const showReviewForm = (canDoAction('review_pass') || canDoAction('review_reject')) && actionType === 'review'
+
   return (
     <div>
       <div className="page-header">
@@ -225,6 +225,11 @@ export default function RecordDetail({ user, id }) {
         {record.abnormal_reason && (
           <div className="alert alert-warning">
             <strong>异常原因：</strong>{record.abnormal_reason}
+            {record.abnormal_by_name && (
+              <span style={{ marginLeft: '12px', fontSize: '13px', opacity: 0.8 }}>
+                （责任人：{record.abnormal_by_name}）
+              </span>
+            )}
           </div>
         )}
 
@@ -268,59 +273,61 @@ export default function RecordDetail({ user, id }) {
               </div>
             </div>
 
-            <div className="card">
-              <h3 className="section-title">晨检信息</h3>
-              <div className="detail-grid">
-                <div className="detail-item">
-                  <span className="label">体温</span>
-                  <span className="value">{record.temperature ? record.temperature + '℃' : '-'}</span>
+            {record.temperature !== undefined && (
+              <div className="card">
+                <h3 className="section-title">晨检信息</h3>
+                <div className="detail-grid">
+                  <div className="detail-item">
+                    <span className="label">体温</span>
+                    <span className="value">{record.temperature ? record.temperature + '℃' : '-'}</span>
+                  </div>
+                  <div className="detail-item">
+                    <span className="label">精神状态</span>
+                    <span className="value">{record.mental_status || '-'}</span>
+                  </div>
+                  <div className="detail-item">
+                    <span className="label">皮肤情况</span>
+                    <span className="value">{record.skin_condition || '-'}</span>
+                  </div>
+                  <div className="detail-item">
+                    <span className="label">咽喉情况</span>
+                    <span className="value">{record.throat_condition || '-'}</span>
+                  </div>
+                  <div className="detail-item">
+                    <span className="label">手足情况</span>
+                    <span className="value">{record.hand_foot_condition || '-'}</span>
+                  </div>
+                  <div className="detail-item">
+                    <span className="label">其他症状</span>
+                    <span className="value">{record.other_symptoms || '-'}</span>
+                  </div>
                 </div>
-                <div className="detail-item">
-                  <span className="label">精神状态</span>
-                  <span className="value">{record.mental_status || '-'}</span>
-                </div>
-                <div className="detail-item">
-                  <span className="label">皮肤情况</span>
-                  <span className="value">{record.skin_condition || '-'}</span>
-                </div>
-                <div className="detail-item">
-                  <span className="label">咽喉情况</span>
-                  <span className="value">{record.throat_condition || '-'}</span>
-                </div>
-                <div className="detail-item">
-                  <span className="label">手足情况</span>
-                  <span className="value">{record.hand_foot_condition || '-'}</span>
-                </div>
-                <div className="detail-item">
-                  <span className="label">其他症状</span>
-                  <span className="value">{record.other_symptoms || '-'}</span>
-                </div>
+                {(record.registration_note || record.audit_note || record.review_note) && (
+                  <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px dashed #ebeef5' }}>
+                    {record.registration_note && (
+                      <div className="detail-item" style={{ marginBottom: '8px' }}>
+                        <span className="label">登记备注</span>
+                        <span className="value">{record.registration_note}</span>
+                      </div>
+                    )}
+                    {record.audit_note && (
+                      <div className="detail-item" style={{ marginBottom: '8px' }}>
+                        <span className="label">审核意见</span>
+                        <span className="value">{record.audit_note}</span>
+                      </div>
+                    )}
+                    {record.review_note && (
+                      <div className="detail-item">
+                        <span className="label">复核意见</span>
+                        <span className="value">{record.review_note}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
-              {(record.registration_note || record.audit_note || record.review_note) && (
-                <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px dashed #ebeef5' }}>
-                  {record.registration_note && (
-                    <div className="detail-item" style={{ marginBottom: '8px' }}>
-                      <span className="label">登记备注</span>
-                      <span className="value">{record.registration_note}</span>
-                    </div>
-                  )}
-                  {record.audit_note && (
-                    <div className="detail-item" style={{ marginBottom: '8px' }}>
-                      <span className="label">审核意见</span>
-                      <span className="value">{record.audit_note}</span>
-                    </div>
-                  )}
-                  {record.review_note && (
-                    <div className="detail-item">
-                      <span className="label">复核意见</span>
-                      <span className="value">{record.review_note}</span>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
+            )}
 
-            {canEditRegistration() && actionType === 'edit' && (
+            {showRegistrationForm && (
               <div className="card">
                 <h3 className="section-title">
                   {record.status === 'pending_correction' ? '补正登记' : '登记信息'}
@@ -423,7 +430,7 @@ export default function RecordDetail({ user, id }) {
               </div>
             )}
 
-            {canAudit() && actionType === 'audit' && (
+            {showAuditForm && (
               <div className="card">
                 <h3 className="section-title">审核处理</h3>
                 <div className="form-item">
@@ -465,7 +472,7 @@ export default function RecordDetail({ user, id }) {
               </div>
             )}
 
-            {canReview() && actionType === 'review' && (
+            {showReviewForm && (
               <div className="card">
                 <h3 className="section-title">复核处理</h3>
                 <div className="form-item">
@@ -548,34 +555,38 @@ export default function RecordDetail({ user, id }) {
 
             <div className="card">
               <h3 className="section-title">操作按钮</h3>
-              {canEditRegistration() && !actionType && (
-                <button
-                  className="btn btn-primary"
-                  style={{ width: '100%', marginBottom: '10px' }}
-                  onClick={() => setActionType('edit')}
-                >
-                  {record.status === 'pending_correction' ? '补正并提交审核' : '登记并提交审核'}
-                </button>
+              {hasAnyAction() && !actionType && (
+                <>
+                  {canDoAction('submit_audit') && (
+                    <button
+                      className="btn btn-primary"
+                      style={{ width: '100%', marginBottom: '10px' }}
+                      onClick={() => setActionType('edit')}
+                    >
+                      {record.status === 'pending_correction' ? '补正并提交审核' : '登记并提交审核'}
+                    </button>
+                  )}
+                  {(canDoAction('audit_pass') || canDoAction('audit_reject')) && (
+                    <button
+                      className="btn btn-primary"
+                      style={{ width: '100%', marginBottom: '10px' }}
+                      onClick={() => setActionType('audit')}
+                    >
+                      处理审核
+                    </button>
+                  )}
+                  {(canDoAction('review_pass') || canDoAction('review_reject')) && (
+                    <button
+                      className="btn btn-primary"
+                      style={{ width: '100%', marginBottom: '10px' }}
+                      onClick={() => setActionType('review')}
+                    >
+                      处理复核
+                    </button>
+                  )}
+                </>
               )}
-              {canAudit() && !actionType && (
-                <button
-                  className="btn btn-primary"
-                  style={{ width: '100%', marginBottom: '10px' }}
-                  onClick={() => setActionType('audit')}
-                >
-                  处理审核
-                </button>
-              )}
-              {canReview() && !actionType && (
-                <button
-                  className="btn btn-primary"
-                  style={{ width: '100%', marginBottom: '10px' }}
-                  onClick={() => setActionType('review')}
-                >
-                  处理复核
-                </button>
-              )}
-              {!canEditRegistration() && !canAudit() && !canReview() && (
+              {!hasAnyAction() && (
                 <div style={{ color: '#909399', fontSize: '13px', textAlign: 'center' }}>
                   当前状态下您没有可执行的操作
                 </div>

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'preact/hooks'
 import { route } from 'preact-router'
 import { api, formatDuration, todayStr } from '../utils/api.js'
 import CreateRecordModal from '../components/CreateRecordModal.jsx'
+import BatchResultModal from '../components/BatchResultModal.jsx'
 
 export default function Records({ user }) {
   const [records, setRecords] = useState([])
@@ -13,7 +14,11 @@ export default function Records({ user }) {
   const [childName, setChildName] = useState('')
   const [checkDate, setCheckDate] = useState(todayStr())
   const [showCreate, setShowCreate] = useState(false)
-  const [activeTab, setActiveTab] = useState('all')
+  const [activeTab, setActiveTab] = useState('queue')
+  const [selectedIds, setSelectedIds] = useState([])
+  const [batchLoading, setBatchLoading] = useState(false)
+  const [batchResult, setBatchResult] = useState(null)
+  const [batchType, setBatchType] = useState('audit')
 
   const loadData = async () => {
     setLoading(true)
@@ -29,6 +34,7 @@ export default function Records({ user }) {
       const res = await api.getRecords(params)
       setRecords(res.list)
       setTotal(res.total)
+      setSelectedIds([])
     } catch (err) {
       alert(err.message || '加载失败')
     } finally {
@@ -50,17 +56,102 @@ export default function Records({ user }) {
     loadData()
   }
 
+  const toggleSelectAll = () => {
+    if (selectedIds.length === records.length) {
+      setSelectedIds([])
+    } else {
+      setSelectedIds(records.map(r => r.id))
+    }
+  }
+
+  const toggleSelect = (id) => {
+    if (selectedIds.includes(id)) {
+      setSelectedIds(selectedIds.filter(i => i !== id))
+    } else {
+      setSelectedIds([...selectedIds, id])
+    }
+  }
+
+  const canShowBatchAudit = () => {
+    return user.role === 'auditor' && selectedIds.length > 0 && activeTab === 'queue'
+  }
+
+  const canShowBatchReview = () => {
+    return user.role === 'reviewer' && selectedIds.length > 0 && activeTab === 'queue'
+  }
+
+  const handleBatchAudit = async () => {
+    if (!confirm(`确定要批量审核选中的 ${selectedIds.length} 条记录吗？`)) return
+    setBatchLoading(true)
+    try {
+      const res = await api.batchAuditPass(selectedIds, '批量审核通过')
+      setBatchType('audit')
+      setBatchResult(res)
+      loadData()
+    } catch (err) {
+      alert(err.message || '批量审核失败')
+    } finally {
+      setBatchLoading(false)
+    }
+  }
+
+  const handleBatchReview = async () => {
+    if (!confirm(`确定要批量复核选中的 ${selectedIds.length} 条记录吗？`)) return
+    setBatchLoading(true)
+    try {
+      const res = await api.batchReviewPass(selectedIds, '批量复核归档')
+      setBatchType('review')
+      setBatchResult(res)
+      loadData()
+    } catch (err) {
+      alert(err.message || '批量复核失败')
+    } finally {
+      setBatchLoading(false)
+    }
+  }
+
   const totalPages = Math.ceil(total / pageSize)
+  const isAllSelected = records.length > 0 && selectedIds.length === records.length
+
+  const showCheckbox = () => {
+    if (activeTab !== 'queue') return false
+    return user.role === 'auditor' || user.role === 'reviewer'
+  }
 
   return (
     <div>
       <div className="page-header">
         <h1>晨检记录</h1>
-        {user.role === 'registrar' && (
-          <button className="btn btn-primary" onClick={() => setShowCreate(true)}>
-            + 新建记录
-          </button>
-        )}
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          {showCheckbox() && selectedIds.length > 0 && (
+            <span style={{ fontSize: '13px', color: '#606266' }}>
+              已选 {selectedIds.length} 项
+            </span>
+          )}
+          {canShowBatchAudit() && (
+            <button
+              className="btn btn-success"
+              onClick={handleBatchAudit}
+              disabled={batchLoading}
+            >
+              {batchLoading ? '处理中...' : '批量审核通过'}
+            </button>
+          )}
+          {canShowBatchReview() && (
+            <button
+              className="btn btn-success"
+              onClick={handleBatchReview}
+              disabled={batchLoading}
+            >
+              {batchLoading ? '处理中...' : '批量复核归档'}
+            </button>
+          )}
+          {user.role === 'registrar' && (
+            <button className="btn btn-primary" onClick={() => setShowCreate(true)}>
+              + 新建记录
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="page-content">
@@ -68,13 +159,13 @@ export default function Records({ user }) {
           <div className="tab-bar">
             <div
               className={`tab ${activeTab === 'queue' ? 'active' : ''}`}
-              onClick={() => { setActiveTab('queue'); setPage(1) }}
+              onClick={() => { setActiveTab('queue'); setPage(1); setSelectedIds([]) }}
             >
               我的待办
             </div>
             <div
               className={`tab ${activeTab === 'all' ? 'active' : ''}`}
-              onClick={() => { setActiveTab('all'); setPage(1) }}
+              onClick={() => { setActiveTab('all'); setPage(1); setSelectedIds([]) }}
             >
               全部记录
             </div>
@@ -129,11 +220,22 @@ export default function Records({ user }) {
               <table>
                 <thead>
                   <tr>
+                    {showCheckbox() && (
+                      <th style={{ width: '40px' }}>
+                        <input
+                          type="checkbox"
+                          checked={isAllSelected}
+                          onChange={toggleSelectAll}
+                        />
+                      </th>
+                    )}
                     <th>ID</th>
                     <th>幼儿姓名</th>
                     <th>班级</th>
                     <th>检查日期</th>
-                    <th>体温</th>
+                    {user.role !== 'registrar' || activeTab === 'all' ? (
+                      <th>体温</th>
+                    ) : null}
                     <th>状态</th>
                     <th>当前节点</th>
                     <th>超时情况</th>
@@ -143,11 +245,22 @@ export default function Records({ user }) {
                 <tbody>
                   {records.map(record => (
                     <tr key={record.id}>
+                      {showCheckbox() && (
+                        <td>
+                          <input
+                            type="checkbox"
+                            checked={selectedIds.includes(record.id)}
+                            onChange={() => toggleSelect(record.id)}
+                          />
+                        </td>
+                      )}
                       <td>#{record.id}</td>
                       <td>{record.child_name}</td>
                       <td>{record.class_name}</td>
                       <td>{record.check_date}</td>
-                      <td>{record.temperature ? record.temperature + '℃' : '-'}</td>
+                      {user.role !== 'registrar' || activeTab === 'all' ? (
+                        <td>{record.temperature ? record.temperature + '℃' : '-'}</td>
+                      ) : null}
                       <td>
                         <span className={`status-tag status-${record.status}`}>
                           {record.status_name}
@@ -206,6 +319,14 @@ export default function Records({ user }) {
           onClose={() => setShowCreate(false)}
           onCreated={handleCreated}
           defaultDate={checkDate}
+        />
+      )}
+
+      {batchResult && (
+        <BatchResultModal
+          result={batchResult}
+          type={batchType}
+          onClose={() => setBatchResult(null)}
         />
       )}
     </div>
