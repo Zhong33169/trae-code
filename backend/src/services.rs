@@ -84,9 +84,14 @@ pub async fn list_records(
     exception_type: Option<String>,
     handler_role: Option<String>,
     handler_id: Option<i64>,
+    active_only: bool,
 ) -> Result<Vec<BorrowRecord>, String> {
     let mut query: QueryBuilder<Sqlite> = QueryBuilder::new(SELECT_RECORD_WITH_HANDLER);
     query.push(" WHERE 1=1");
+
+    if active_only {
+        query.push(" AND br.status != 'archived'");
+    }
 
     if let Some(s) = status {
         query.push(" AND br.status = ");

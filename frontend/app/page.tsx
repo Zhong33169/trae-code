@@ -63,7 +63,7 @@ export default function Home() {
     try {
       const [wbRes, todoRes, handledRes] = await Promise.all([
         getWorkbenchStats(selectedUser.id, selectedUser.role),
-        getRecords({ handler_id: String(selectedUser.id) }),
+        getRecords({ handler_id: String(selectedUser.id), active_only: 'true' }),
         getHandledRecords(selectedUser.id),
       ]);
       if (wbRes.success && wbRes.data) {

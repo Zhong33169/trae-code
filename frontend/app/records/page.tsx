@@ -30,7 +30,7 @@ export default function RecordsPage() {
 
       let recordsRes;
       if (viewFilter === 'todo') {
-        recordsRes = await getRecords({ ...params, handler_id: String(selectedUser.id) });
+        recordsRes = await getRecords({ ...params, handler_id: String(selectedUser.id), active_only: 'true' });
       } else if (viewFilter === 'handled') {
         recordsRes = await getHandledRecords(selectedUser.id, params);
       } else {

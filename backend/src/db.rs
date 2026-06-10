@@ -193,7 +193,7 @@ pub async fn seed_sample_data(pool: &SqlitePool) {
         "draft",
         Some("missing_evidence"),
         1,
-        2,
+        1,
         "registrar",
         "借阅登记时缺少身份证明材料",
     ).await;
@@ -292,6 +292,75 @@ pub async fn seed_sample_data(pool: &SqlitePool) {
         "supervisor",
         "审核通过，待复核归档",
     ).await;
+
+    // ========== 特殊轨迹补全 ==========
+
+    // BR20240004 赵强 - 审核退回补正后再次提交到审核（完整轨迹：草稿→提交→审核驳回→补正→再提交→待审核）
+    {
+        let record_id: i64 = sqlx::query_scalar("SELECT id FROM borrow_records WHERE record_no = ?")
+            .bind("BR20240004")
+            .fetch_one(pool)
+            .await
+            .unwrap();
+
+        // 清空原有处理记录，重新生成完整轨迹
+        sqlx::query("DELETE FROM process_records WHERE borrow_record_id = ?")
+            .bind(record_id)
+            .execute(pool)
+            .await
+            .unwrap();
+
+        insert_process_record(pool, record_id, 1, "张登记", "registrar",
+            "submit", "draft", "pending_audit",
+            "借阅登记提交，申请审核", None, 1, 2).await;
+        insert_process_record(pool, record_id, 3, "王审核", "supervisor",
+            "audit_reject", "pending_audit", "returned_correction",
+            "信息有误，退回补正", Some("书籍ISBN号与系统记录不符，借阅用途描述不完整，请核实后补充提交"), 2, 3).await;
+        insert_process_record(pool, record_id, 1, "张登记", "registrar",
+            "correct", "returned_correction", "returned_correction",
+            "已补正：更新ISBN号为978-7-111-59972-5，补充借阅用途说明为课程参考资料", None, 3, 4).await;
+        insert_process_record(pool, record_id, 1, "张登记", "registrar",
+            "submit", "returned_correction", "pending_audit",
+            "补正后再次提交审核", None, 4, 5).await;
+
+        sqlx::query("UPDATE borrow_records SET status = 'pending_audit', version = 5, current_handler_id = 3, current_handler_role = 'supervisor' WHERE id = ?")
+            .bind(record_id)
+            .execute(pool)
+            .await
+            .unwrap();
+    }
+
+    // BR20240006 周杰 - 复核驳回退回补正（完整轨迹：草稿→提交→审核通过→复核驳回→退回补正）
+    {
+        let record_id: i64 = sqlx::query_scalar("SELECT id FROM borrow_records WHERE record_no = ?")
+            .bind("BR20240006")
+            .fetch_one(pool)
+            .await
+            .unwrap();
+
+        // 清空原有处理记录，重新生成完整轨迹
+        sqlx::query("DELETE FROM process_records WHERE borrow_record_id = ?")
+            .bind(record_id)
+            .execute(pool)
+            .await
+            .unwrap();
+
+        insert_process_record(pool, record_id, 2, "李登记", "registrar",
+            "submit", "draft", "pending_audit",
+            "借阅登记提交，申请审核", None, 1, 2).await;
+        insert_process_record(pool, record_id, 3, "王审核", "supervisor",
+            "audit_pass", "pending_audit", "pending_review",
+            "材料齐全，审核通过，提请复核", None, 2, 3).await;
+        insert_process_record(pool, record_id, 4, "赵复核", "director",
+            "review_reject", "pending_review", "returned_correction",
+            "复核发现问题，退回补正", Some("借阅用途与实际登记不符，图书分类信息有误，请补充更正后重新提交"), 3, 4).await;
+
+        sqlx::query("UPDATE borrow_records SET status = 'returned_correction', version = 4, current_handler_id = 2, current_handler_role = 'registrar' WHERE id = ?")
+            .bind(record_id)
+            .execute(pool)
+            .await
+            .unwrap();
+    }
 }
 
 async fn seed_record_with_process(

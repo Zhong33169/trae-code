@@ -42,8 +42,9 @@ pub async fn list_records(
     let exception_type = query.get("exception_type").cloned();
     let handler_role = query.get("handler_role").cloned();
     let handler_id = query.get("handler_id").and_then(|v| v.parse::<i64>().ok());
+    let active_only = query.get("active_only").map(|v| v == "true" || v == "1").unwrap_or(false);
 
-    match services::list_records(&state.pool, status, exception_type, handler_role, handler_id).await {
+    match services::list_records(&state.pool, status, exception_type, handler_role, handler_id, active_only).await {
         Ok(records) => success_response(records),
         Err(e) => error_response(&e),
     }
