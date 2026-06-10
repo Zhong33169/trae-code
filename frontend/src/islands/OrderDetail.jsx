@@ -510,8 +510,10 @@ export default function OrderDetail({ orderId, userId, userRole, onBack, onActio
               evidences={evidences}
               evidenceCheck={evidenceCheck}
               canEdit={canEdit && !isEditing}
+              version={detail?.order?.version}
               onAdd={handleAddEvidence}
               onDelete={handleDeleteEvidence}
+              onRefresh={loadDetail}
               submitting={evidenceSubmitting}
             />
           </div>

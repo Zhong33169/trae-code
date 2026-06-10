@@ -79,10 +79,12 @@ const init = async () => {
       action TEXT NOT NULL,
       operator_id TEXT NOT NULL,
       operator_role TEXT NOT NULL,
+      operator_name TEXT,
       failure_type TEXT NOT NULL,
       failure_reason TEXT NOT NULL,
       request_data TEXT,
-      version_at_time INTEGER,
+      submitted_version INTEGER,
+      current_version INTEGER,
       status_at_time TEXT,
       created_at TEXT DEFAULT (datetime('now', 'localtime'))
     );
@@ -110,6 +112,8 @@ const init = async () => {
       evidence_name TEXT,
       changed_by TEXT NOT NULL,
       changed_by_role TEXT NOT NULL,
+      version_from INTEGER,
+      version_to INTEGER,
       created_at TEXT DEFAULT (datetime('now', 'localtime'))
     );
 

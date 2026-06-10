@@ -11,14 +11,19 @@ export default function EvidenceManager({
   evidences = [],
   evidenceCheck = null,
   canEdit = false,
+  version = null,
   onAdd,
   onDelete,
+  onRefresh,
   submitting = false
 }) {
   const [showAdd, setShowAdd] = useState(false);
   const [evType, setEvType] = useState('prescription');
   const [evName, setEvName] = useState('');
   const [error, setError] = useState('');
+
+  const hasVersion = version !== null && version !== undefined;
+  const canOperate = canEdit && hasVersion && !submitting;
 
   const handleAdd = async () => {
     if (!evType) {
@@ -27,6 +32,10 @@ export default function EvidenceManager({
     }
     if (!evName.trim()) {
       setError('请输入证据名称');
+      return;
+    }
+    if (!hasVersion) {
+      setError('数据版本缺失，请刷新页面后重试');
       return;
     }
     setError('');
@@ -39,6 +48,10 @@ export default function EvidenceManager({
   };
 
   const handleDelete = async (evidenceId) => {
+    if (!hasVersion) {
+      alert('数据版本缺失，请刷新页面后重试');
+      return;
+    }
     if (window.confirm('确定要删除该证据吗？')) {
       await onDelete?.(evidenceId);
     }
@@ -52,6 +65,17 @@ export default function EvidenceManager({
       {evidenceCheck && !evidenceCheck.valid && (
         <div className="evidence-missing">
           ⚠️ 缺少必填证据：{evidenceCheck.missingLabels.join('、')}
+        </div>
+      )}
+
+      {canEdit && !hasVersion && (
+        <div className="evidence-version-warning">
+          ⚠️ 数据版本未知，无法操作证据
+          {onRefresh && (
+            <button className="btn btn-sm btn-default" onClick={onRefresh} style={{ marginLeft: 8 }}>
+              刷新
+            </button>
+          )}
         </div>
       )}
 
@@ -69,7 +93,7 @@ export default function EvidenceManager({
                 <button
                   className="ev-delete"
                   onClick={() => handleDelete(ev.id)}
-                  disabled={submitting}
+                  disabled={!canOperate}
                 >
                   删除
                 </button>
@@ -79,13 +103,13 @@ export default function EvidenceManager({
         )}
       </div>
 
-      {canEdit && (
+      {canEdit && hasVersion && (
         <>
           {!showAdd ? (
             <button
               className="btn btn-primary btn-sm"
               onClick={() => setShowAdd(true)}
-              disabled={submitting}
+              disabled={!canOperate}
               style={{ marginTop: '12px', width: '100%' }}
             >
               + 添加证据
@@ -128,6 +152,12 @@ export default function EvidenceManager({
           )}
           {error && <div className="form-error" style={{ marginTop: '8px' }}>{error}</div>}
         </>
+      )}
+
+      {hasVersion && (
+        <div className="evidence-version-info">
+          当前数据版本：<strong>v{version}</strong>
+        </div>
       )}
     </div>
   );

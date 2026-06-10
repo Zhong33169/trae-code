@@ -178,7 +178,8 @@ router.post('/orders/:id/evidences', async (ctx) => {
     return;
   }
 
-  const result = await orderModel.addEvidence(id, type, name, userId, version);
+  const versionNum = version !== undefined && version !== null ? Number(version) : undefined;
+  const result = await orderModel.addEvidence(id, type, name, userId, versionNum);
   if (!result.success) {
     ctx.status = 400;
   }
@@ -195,7 +196,8 @@ router.delete('/evidences/:id', async (ctx) => {
     return;
   }
 
-  const result = await orderModel.deleteEvidence(id, userId, version ? parseInt(version) : undefined);
+  const versionNum = version !== undefined && version !== null ? parseInt(version, 10) : undefined;
+  const result = await orderModel.deleteEvidence(id, userId, versionNum);
   if (!result.success) {
     ctx.status = 400;
   }

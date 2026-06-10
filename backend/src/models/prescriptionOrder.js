@@ -52,21 +52,26 @@ const formatOrder = (order) => {
   };
 };
 
-const logAuditFailure = async (orderId, action, userId, userRole, failureType, failureReason, requestData = null) => {
+const logAuditFailure = async (orderId, action, userId, userRole, failureType, failureReason, requestData = null, submittedVersion = null, currentVersion = null, userName = null) => {
   const db = await getDb();
   const order = orderId ? await getOrderById(orderId) : null;
   const id = uuidv4();
+  const actualCurrentVersion = currentVersion !== null ? currentVersion : (order?.version || null);
+  const actualStatus = order?.status || null;
   db.prepare(`
     INSERT INTO audit_failures
-    (id, order_id, action, operator_id, operator_role, failure_type, failure_reason,
-     request_data, version_at_time, status_at_time)
+    (id, order_id, action, operator_id, operator_role, operator_name,
+     failure_type, failure_reason, request_data,
+     submitted_version, current_version, status_at_time)
     VALUES
-    (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
-    id, orderId, action, userId, userRole, failureType, failureReason,
+    id, orderId, action, userId, userRole, userName,
+    failureType, failureReason,
     requestData ? JSON.stringify(requestData) : null,
-    order?.version || null,
-    order?.status || null
+    submittedVersion,
+    actualCurrentVersion,
+    actualStatus
   );
   db.saveToDisk();
 };
@@ -87,15 +92,15 @@ const logFieldChange = async (db, orderId, fieldName, oldValue, newValue, userId
   );
 };
 
-const logEvidenceChange = async (db, orderId, evidenceId, changeType, evidenceType, evidenceName, userId, userRole) => {
+const logEvidenceChange = async (db, orderId, evidenceId, changeType, evidenceType, evidenceName, userId, userRole, versionFrom = null, versionTo = null) => {
   const id = uuidv4();
   db.prepare(`
     INSERT INTO evidence_changes
     (id, order_id, evidence_id, change_type, evidence_type, evidence_name,
-     changed_by, changed_by_role)
+     changed_by, changed_by_role, version_from, version_to)
     VALUES
-    (?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(id, orderId, evidenceId, changeType, evidenceType, evidenceName, userId, userRole);
+    (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, orderId, evidenceId, changeType, evidenceType, evidenceName, userId, userRole, versionFrom, versionTo);
 };
 
 const getOrdersByRole = async (userId, userRole, options = {}) => {
@@ -490,41 +495,50 @@ const performAction = async (orderId, userId, userRole, action, opinion, version
   }
 };
 
-const addEvidence = async (orderId, type, name, userId, version = undefined) => {
+const addEvidence = async (orderId, type, name, userId, version) => {
   const db = await getDb();
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
   if (!user) {
-    await logAuditFailure(orderId, 'add_evidence', userId, 'unknown', 'user_not_found', '用户不存在', { type, name });
+    await logAuditFailure(orderId, 'add_evidence', userId, 'unknown', 'user_not_found', '用户不存在', { type, name }, version, null, null);
     return { success: false, message: '用户不存在' };
   }
 
   const order = await getOrderById(orderId);
   if (!order) {
-    await logAuditFailure(orderId, 'add_evidence', userId, user.role, 'order_not_found', '订单不存在', { type, name });
+    await logAuditFailure(orderId, 'add_evidence', userId, user.role, 'order_not_found', '订单不存在', { type, name }, version, null, user.name);
     return { success: false, message: '订单不存在' };
   }
 
+  if (version === undefined || version === null) {
+    await logAuditFailure(orderId, 'add_evidence', userId, user.role, 'version_missing', '版本号不能为空', { type, name }, null, order.version, user.name);
+    return { success: false, message: '版本号不能为空' };
+  }
+  if (typeof version !== 'number' || !Number.isInteger(version) || version <= 0) {
+    await logAuditFailure(orderId, 'add_evidence', userId, user.role, 'version_invalid', '版本号格式无效', { type, name, version }, version, order.version, user.name);
+    return { success: false, message: '版本号格式无效' };
+  }
+
   if (order.registrar_id !== userId && order.current_handler !== userId) {
-    await logAuditFailure(orderId, 'add_evidence', userId, user.role, 'permission_denied', '无权限添加证据', { type, name });
+    await logAuditFailure(orderId, 'add_evidence', userId, user.role, 'permission_denied', '无权限添加证据', { type, name }, version, order.version, user.name);
     return { success: false, message: '无权限添加证据' };
   }
 
   if (!['draft', 'returned'].includes(order.status)) {
-    await logAuditFailure(orderId, 'add_evidence', userId, user.role, 'status_invalid', `当前状态【${order.statusLabel}】不可添加证据`, { type, name });
+    await logAuditFailure(orderId, 'add_evidence', userId, user.role, 'status_invalid', `当前状态【${order.statusLabel}】不可添加证据`, { type, name }, version, order.version, user.name);
     return { success: false, message: `当前状态【${order.statusLabel}】不可添加证据` };
   }
 
-  if (version !== undefined && version !== order.version) {
-    await logAuditFailure(orderId, 'add_evidence', userId, user.role, 'version_conflict', '版本冲突，数据已被修改', { type, name });
+  if (version !== order.version) {
+    await logAuditFailure(orderId, 'add_evidence', userId, user.role, 'version_conflict', '版本冲突，数据已被修改', { type, name }, version, order.version, user.name);
     return { success: false, message: '版本冲突，数据已被修改，请刷新后重试' };
   }
 
   if (!type || !EVIDENCE_TYPE_LABELS[type]) {
-    await logAuditFailure(orderId, 'add_evidence', userId, user.role, 'validation_failed', '无效的证据类型', { type, name });
+    await logAuditFailure(orderId, 'add_evidence', userId, user.role, 'validation_failed', '无效的证据类型', { type, name }, version, order.version, user.name);
     return { success: false, message: '无效的证据类型' };
   }
   if (!name || !name.trim()) {
-    await logAuditFailure(orderId, 'add_evidence', userId, user.role, 'validation_failed', '证据名称不能为空', { type, name });
+    await logAuditFailure(orderId, 'add_evidence', userId, user.role, 'validation_failed', '证据名称不能为空', { type, name }, version, order.version, user.name);
     return { success: false, message: '证据名称不能为空' };
   }
 
@@ -542,7 +556,7 @@ const addEvidence = async (orderId, type, name, userId, version = undefined) => 
     const actionLabel = isReturned ? '补正添加证据' : '草稿添加证据';
     const logId = uuidv4();
 
-    await logEvidenceChange(db, orderId, id, 'add', type, name.trim(), userId, user.role);
+    await logEvidenceChange(db, orderId, id, 'add', type, name.trim(), userId, user.role, order.version, newVersion);
 
     db.prepare(`
       UPDATE prescription_orders 
@@ -586,43 +600,52 @@ const addEvidence = async (orderId, type, name, userId, version = undefined) => 
     };
   } catch (e) {
     try { db.run('ROLLBACK'); } catch (_) {}
-    await logAuditFailure(orderId, 'add_evidence', userId, user.role, 'db_error', e.message, { type, name });
+    await logAuditFailure(orderId, 'add_evidence', userId, user.role, 'db_error', e.message, { type, name }, version, order.version, user.name);
     return { success: false, message: e.message };
   }
 };
 
-const deleteEvidence = async (evidenceId, userId, version = undefined) => {
+const deleteEvidence = async (evidenceId, userId, version) => {
   const db = await getDb();
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
   if (!user) {
-    await logAuditFailure(null, 'delete_evidence', userId, 'unknown', 'user_not_found', '用户不存在', { evidenceId });
+    await logAuditFailure(null, 'delete_evidence', userId, 'unknown', 'user_not_found', '用户不存在', { evidenceId }, version, null, null);
     return { success: false, message: '用户不存在' };
   }
 
   const evidence = db.prepare('SELECT * FROM evidences WHERE id = ?').get(evidenceId);
   if (!evidence) {
-    await logAuditFailure(null, 'delete_evidence', userId, user.role, 'evidence_not_found', '证据不存在', { evidenceId });
+    await logAuditFailure(null, 'delete_evidence', userId, user.role, 'evidence_not_found', '证据不存在', { evidenceId }, version, null, user.name);
     return { success: false, message: '证据不存在' };
   }
 
   const order = await getOrderById(evidence.order_id);
   if (!order) {
-    await logAuditFailure(evidence.order_id, 'delete_evidence', userId, user.role, 'order_not_found', '订单不存在', { evidenceId });
+    await logAuditFailure(evidence.order_id, 'delete_evidence', userId, user.role, 'order_not_found', '订单不存在', { evidenceId }, version, null, user.name);
     return { success: false, message: '订单不存在' };
   }
 
+  if (version === undefined || version === null) {
+    await logAuditFailure(evidence.order_id, 'delete_evidence', userId, user.role, 'version_missing', '版本号不能为空', { evidenceId }, null, order.version, user.name);
+    return { success: false, message: '版本号不能为空' };
+  }
+  if (typeof version !== 'number' || !Number.isInteger(version) || version <= 0) {
+    await logAuditFailure(evidence.order_id, 'delete_evidence', userId, user.role, 'version_invalid', '版本号格式无效', { evidenceId, version }, version, order.version, user.name);
+    return { success: false, message: '版本号格式无效' };
+  }
+
   if (order.registrar_id !== userId && order.current_handler !== userId) {
-    await logAuditFailure(evidence.order_id, 'delete_evidence', userId, user.role, 'permission_denied', '无权限删除证据', { evidenceId });
+    await logAuditFailure(evidence.order_id, 'delete_evidence', userId, user.role, 'permission_denied', '无权限删除证据', { evidenceId }, version, order.version, user.name);
     return { success: false, message: '无权限删除证据' };
   }
 
   if (!['draft', 'returned'].includes(order.status)) {
-    await logAuditFailure(evidence.order_id, 'delete_evidence', userId, user.role, 'status_invalid', `当前状态【${order.statusLabel}】不可删除证据`, { evidenceId });
+    await logAuditFailure(evidence.order_id, 'delete_evidence', userId, user.role, 'status_invalid', `当前状态【${order.statusLabel}】不可删除证据`, { evidenceId }, version, order.version, user.name);
     return { success: false, message: `当前状态【${order.statusLabel}】不可删除证据` };
   }
 
-  if (version !== undefined && version !== order.version) {
-    await logAuditFailure(evidence.order_id, 'delete_evidence', userId, user.role, 'version_conflict', '版本冲突，数据已被修改', { evidenceId });
+  if (version !== order.version) {
+    await logAuditFailure(evidence.order_id, 'delete_evidence', userId, user.role, 'version_conflict', '版本冲突，数据已被修改', { evidenceId }, version, order.version, user.name);
     return { success: false, message: '版本冲突，数据已被修改，请刷新后重试' };
   }
 
@@ -634,7 +657,7 @@ const deleteEvidence = async (evidenceId, userId, version = undefined) => {
     const action = isReturned ? 'delete_evidence_amendment' : 'delete_evidence_draft';
     const logId = uuidv4();
 
-    await logEvidenceChange(db, evidence.order_id, evidenceId, 'delete', evidence.type, evidence.name, userId, user.role);
+    await logEvidenceChange(db, evidence.order_id, evidenceId, 'delete', evidence.type, evidence.name, userId, user.role, order.version, newVersion);
 
     db.prepare('DELETE FROM evidences WHERE id = ?').run(evidenceId);
 
@@ -678,7 +701,7 @@ const deleteEvidence = async (evidenceId, userId, version = undefined) => {
     };
   } catch (e) {
     try { db.run('ROLLBACK'); } catch (_) {}
-    await logAuditFailure(evidence.order_id, 'delete_evidence', userId, user.role, 'db_error', e.message, { evidenceId });
+    await logAuditFailure(evidence.order_id, 'delete_evidence', userId, user.role, 'db_error', e.message, { evidenceId }, version, order.version, user.name);
     return { success: false, message: e.message };
   }
 };
