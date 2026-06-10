@@ -1,9 +1,17 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Fragment } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import * as api from '../api';
-import type { CrossBorderOrder, Statistics } from '../types';
-import { STATUS_TEXT, STATUS_COLOR } from '../types';
+import type { CrossBorderOrder, Statistics, BlockReason } from '../types';
+import {
+  STATUS_TEXT,
+  STATUS_COLOR,
+  LISTING_TEXT,
+  LISTING_COLOR,
+  INVENTORY_TEXT,
+  INVENTORY_COLOR,
+  BLOCK_FIELD_TEXT,
+} from '../types';
 import { BatchModal } from '../components/BatchModal';
 
 export function OrderListPage() {
@@ -14,15 +22,21 @@ export function OrderListPage() {
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('');
   const [overdueFilter, setOverdueFilter] = useState('');
+  const [blockedFilter, setBlockedFilter] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [batchModalOpen, setBatchModalOpen] = useState(false);
   const [batchMode, setBatchMode] = useState<'submit' | 'supervisor' | 'reviewer'>('submit');
+  const [expandedBlocks, setExpandedBlocks] = useState<Set<string>>(new Set());
 
   const loadData = async () => {
     setLoading(true);
     try {
       const [ordersData, statsData] = await Promise.all([
-        api.getOrders({ status: statusFilter || undefined, overdue: overdueFilter || undefined }),
+        api.getOrders({
+          status: statusFilter || undefined,
+          overdue: overdueFilter || undefined,
+          blocked: blockedFilter || undefined,
+        }),
         api.getStatistics(),
       ]);
       setOrders(ordersData.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
@@ -36,7 +50,7 @@ export function OrderListPage() {
 
   useEffect(() => {
     loadData();
-  }, [statusFilter, overdueFilter]);
+  }, [statusFilter, overdueFilter, blockedFilter]);
 
   const getDeadlineStatus = (order: CrossBorderOrder) => {
     if (order.status === 'archived') return 'normal';
@@ -52,9 +66,9 @@ export function OrderListPage() {
   const formatDeadline = (deadline: string) => {
     const d = new Date(deadline);
     const now = new Date();
-    const diffMs = d.getTime() - now.getTime();
-    const diffHours = diffMs / (1000 * 60 * 60);
-    
+    let diffMs = d.getTime() - now.getTime();
+    let diffHours = diffMs / (1000 * 60 * 60);
+
     let prefix = '';
     if (diffMs < 0) {
       prefix = '已逾期 ';
@@ -62,7 +76,7 @@ export function OrderListPage() {
     } else {
       prefix = '剩余 ';
     }
-    
+
     if (Math.abs(diffHours) < 1) {
       return `${prefix}${Math.floor(Math.abs(diffHours) * 60)} 分钟`;
     } else if (Math.abs(diffHours) < 24) {
@@ -90,7 +104,17 @@ export function OrderListPage() {
     }
   };
 
-  const canBatchSubmit = user?.role === 'registrar' && selectedIds.size > 0 && 
+  const toggleBlocksExpand = (id: string) => {
+    const newExp = new Set(expandedBlocks);
+    if (newExp.has(id)) {
+      newExp.delete(id);
+    } else {
+      newExp.add(id);
+    }
+    setExpandedBlocks(newExp);
+  };
+
+  const canBatchSubmit = user?.role === 'registrar' && selectedIds.size > 0 &&
     orders.filter(o => selectedIds.has(o.id)).every(o => o.status === 'draft' || o.status === 'returned');
 
   const canBatchSupervisor = user?.role === 'supervisor' && selectedIds.size > 0 &&
@@ -106,6 +130,23 @@ export function OrderListPage() {
 
   const getSelectedOrders = () => {
     return orders.filter(o => selectedIds.has(o.id));
+  };
+
+  const renderBlockBadges = (blocks: BlockReason[]) => {
+    const errors = blocks.filter(b => b.level === 'error');
+    if (errors.length === 0) return null;
+    return (
+      <div className="block-badges">
+        {errors.slice(0, 2).map((b, i) => (
+          <span key={i} className="block-badge block-error">
+            {BLOCK_FIELD_TEXT[b.field]}
+          </span>
+        ))}
+        {errors.length > 2 && (
+          <span className="block-badge block-error">+{errors.length - 2}</span>
+        )}
+      </div>
+    );
   };
 
   return (
@@ -154,12 +195,10 @@ export function OrderListPage() {
               <div className="stat-card-value">{stats.processingCount}</div>
             </div>
           )}
-          {user?.role === 'registrar' && (
-            <div className="stat-card warning">
-              <div className="stat-card-title">已退回</div>
-              <div className="stat-card-value">{stats.overdueCount > 0 ? Math.floor(stats.overdueCount / 2) : 0}</div>
-            </div>
-          )}
+          <div className="stat-card danger">
+            <div className="stat-card-title">阻断推进</div>
+            <div className="stat-card-value">{stats.blockedCount}</div>
+          </div>
           <div className="stat-card warning">
             <div className="stat-card-title">即将到期</div>
             <div className="stat-card-value">{stats.warningCount}</div>
@@ -204,6 +243,18 @@ export function OrderListPage() {
           </select>
         </div>
         <div className="filter-group">
+          <span className="filter-label">阻断：</span>
+          <select
+            className="filter-select"
+            value={blockedFilter}
+            onChange={(e) => setBlockedFilter(e.target.value)}
+          >
+            <option value="">全部</option>
+            <option value="true">有阻断</option>
+            <option value="false">无阻断</option>
+          </select>
+        </div>
+        <div className="filter-group">
           <button className="btn btn-default btn-sm" onClick={loadData}>
             刷新
           </button>
@@ -224,84 +275,171 @@ export function OrderListPage() {
               </th>
               <th>订单号</th>
               <th>商品名称</th>
-              <th>平台</th>
-              <th>目的国</th>
+              <th>刊登状态</th>
+              <th>库存状态</th>
               <th>金额</th>
               <th>状态</th>
+              <th>阻断原因</th>
               <th>处理时限</th>
+              <th>后续动作</th>
               <th>操作</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={9} className="empty-state">加载中...</td>
+                <td colSpan={11} className="empty-state">加载中...</td>
               </tr>
             ) : orders.length === 0 ? (
               <tr>
-                <td colSpan={9} className="empty-state">暂无订单</td>
+                <td colSpan={11} className="empty-state">暂无订单</td>
               </tr>
             ) : (
               orders.map((order) => {
                 const deadlineStatus = getDeadlineStatus(order);
+                const blocksExpanded = expandedBlocks.has(order.id);
                 return (
-                  <tr
-                    key={order.id}
-                    className={deadlineStatus === 'overdue' ? 'overdue' : deadlineStatus === 'warning' ? 'warning' : ''}
-                  >
-                    <td>
-                      <input
-                        type="checkbox"
-                        className="checkbox"
-                        checked={selectedIds.has(order.id)}
-                        onChange={() => toggleSelect(order.id)}
-                      />
-                    </td>
-                    <td>
-                      <a onClick={() => navigate(`/orders/${order.id}`)} style={{ cursor: 'pointer' }}>
-                        {order.orderNo}
-                      </a>
-                    </td>
-                    <td>{order.productName}</td>
-                    <td>{order.platform}</td>
-                    <td>{order.buyerCountry}</td>
-                    <td>
-                      {order.currency} {order.amount.toFixed(2)}
-                    </td>
-                    <td>
-                      <span
-                        className="status-tag"
-                        style={{
-                          background: STATUS_COLOR[order.status] + '20',
-                          color: STATUS_COLOR[order.status],
-                          border: `1px solid ${STATUS_COLOR[order.status]}40`,
-                        }}
-                      >
-                        {STATUS_TEXT[order.status]}
-                      </span>
-                      {order.isOverdue && (
-                        <span className="status-tag overdue" style={{ marginLeft: '4px' }}>
-                          已逾期
+                  <Fragment key={order.id}>
+                    <tr
+                      key={order.id}
+                      className={deadlineStatus === 'overdue' ? 'overdue' : deadlineStatus === 'warning' ? 'warning' : ''}
+                    >
+                      <td>
+                        <input
+                          type="checkbox"
+                          className="checkbox"
+                          checked={selectedIds.has(order.id)}
+                          onChange={() => toggleSelect(order.id)}
+                        />
+                      </td>
+                      <td>
+                        <a onClick={() => navigate(`/orders/${order.id}`)} style={{ cursor: 'pointer' }}>
+                          {order.orderNo}
+                        </a>
+                      </td>
+                      <td>{order.productName}</td>
+                      <td>
+                        <span
+                          className="status-tag"
+                          style={{
+                            background: LISTING_COLOR[order.listingStatus] + '20',
+                            color: LISTING_COLOR[order.listingStatus],
+                            border: `1px solid ${LISTING_COLOR[order.listingStatus]}40`,
+                          }}
+                        >
+                          {LISTING_TEXT[order.listingStatus]}
                         </span>
-                      )}
-                    </td>
-                    <td>
-                      <div style={{ color: deadlineStatus === 'overdue' ? '#ff4d4f' : deadlineStatus === 'warning' ? '#faad14' : '#333' }}>
-                        {formatDeadline(order.deadline)}
-                      </div>
-                      <div style={{ fontSize: '12px', color: '#999' }}>
-                        {new Date(order.deadline).toLocaleString('zh-CN')}
-                      </div>
-                    </td>
-                    <td>
-                      <button
-                        className="btn btn-default btn-sm"
-                        onClick={() => navigate(`/orders/${order.id}`)}
-                      >
-                        详情
-                      </button>
-                    </td>
-                  </tr>
+                      </td>
+                      <td>
+                        <span
+                          className="status-tag"
+                          style={{
+                            background: INVENTORY_COLOR[order.inventoryStatus] + '20',
+                            color: INVENTORY_COLOR[order.inventoryStatus],
+                            border: `1px solid ${INVENTORY_COLOR[order.inventoryStatus]}40`,
+                          }}
+                        >
+                          {INVENTORY_TEXT[order.inventoryStatus]}
+                        </span>
+                        <div style={{ fontSize: '12px', color: '#999', marginTop: '2px' }}>
+                          {order.inventoryQuantity}/{order.quantity}
+                        </div>
+                      </td>
+                      <td>
+                        {order.currency} {order.amount.toFixed(2)}
+                      </td>
+                      <td>
+                        <span
+                          className="status-tag"
+                          style={{
+                            background: STATUS_COLOR[order.status] + '20',
+                            color: STATUS_COLOR[order.status],
+                            border: `1px solid ${STATUS_COLOR[order.status]}40`,
+                          }}
+                        >
+                          {STATUS_TEXT[order.status]}
+                        </span>
+                        {order.isOverdue && (
+                          <span className="status-tag overdue" style={{ marginLeft: '4px' }}>
+                            已逾期
+                          </span>
+                        )}
+                      </td>
+                      <td>
+                        {order.blockReasons && order.blockReasons.length > 0 ? (
+                          <>
+                            {renderBlockBadges(order.blockReasons)}
+                            <button
+                              className="link-btn"
+                              onClick={() => toggleBlocksExpand(order.id)}
+                              style={{ marginTop: '4px' }}
+                            >
+                              {blocksExpanded ? '收起' : '展开原因'}
+                            </button>
+                          </>
+                        ) : (
+                          <span style={{ color: '#999' }}>—</span>
+                        )}
+                      </td>
+                      <td>
+                        <div style={{ color: deadlineStatus === 'overdue' ? '#ff4d4f' : deadlineStatus === 'warning' ? '#faad14' : '#333' }}>
+                          {formatDeadline(order.deadline)}
+                        </div>
+                        <div style={{ fontSize: '12px', color: '#999' }}>
+                          {new Date(order.deadline).toLocaleString('zh-CN')}
+                        </div>
+                      </td>
+                      <td>
+                        {order.nextAction ? (
+                          <div style={{
+                            padding: '6px 10px',
+                            background: order.isOverdue ? '#fff1f0' : '#e6f7ff',
+                            border: `1px solid ${order.isOverdue ? '#ffa39e' : '#91d5ff'}`,
+                            borderRadius: '4px',
+                            fontSize: '12px',
+                            color: order.isOverdue ? '#cf1322' : '#096dd9',
+                            maxWidth: '200px',
+                          }}>
+                            {order.nextAction}
+                          </div>
+                        ) : (
+                          <span style={{ color: '#999' }}>—</span>
+                        )}
+                      </td>
+                      <td>
+                        <button
+                          className="btn btn-default btn-sm"
+                          onClick={() => navigate(`/orders/${order.id}`)}
+                        >
+                          详情
+                        </button>
+                      </td>
+                    </tr>
+                    {blocksExpanded && order.blockReasons && order.blockReasons.length > 0 && (
+                      <tr className="blocks-expand-row">
+                        <td colSpan={11}>
+                          <div className="blocks-expand-box">
+                            <div style={{ fontWeight: 600, marginBottom: '8px' }}>阻断原因明细：</div>
+                            {order.blockReasons.map((b, i) => (
+                              <div
+                                key={i}
+                                className={`block-row ${b.level === 'error' ? 'block-row-error' : b.level === 'warning' ? 'block-row-warn' : ''}`}
+                              >
+                                <span className="block-field-tag" style={{
+                                  background: b.level === 'error' ? '#ff4d4f20' : '#faad1420',
+                                  color: b.level === 'error' ? '#cf1322' : '#d46b08',
+                                  border: `1px solid ${b.level === 'error' ? '#ffa39e' : '#ffd591'}`,
+                                }}>
+                                  {BLOCK_FIELD_TEXT[b.field]}
+                                </span>
+                                <span style={{ marginLeft: '8px' }}>{b.reason}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
                 );
               })
             )}

@@ -40,9 +40,9 @@ func GetStatistics(c *fiber.Ctx) error {
 		if !visible {
 			continue
 		}
-		
+
 		stats.TotalCount++
-		
+
 		switch order.Status {
 		case models.StatusPending:
 			stats.PendingCount++
@@ -51,11 +51,15 @@ func GetStatistics(c *fiber.Ctx) error {
 		case models.StatusArchived:
 			stats.ArchivedCount++
 		}
-		
+
 		if order.IsOverdue {
 			stats.OverdueCount++
 		}
-		
+
+		if len(order.BlockReasons) > 0 {
+			stats.BlockedCount++
+		}
+
 		if order.Status != models.StatusArchived && !order.IsOverdue {
 			if isWarning(order) {
 				stats.WarningCount++

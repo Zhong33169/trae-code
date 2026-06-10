@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import * as api from '../api';
+import type { ListingStatus, InventoryStatus } from '../types';
+import { LISTING_TEXT, INVENTORY_TEXT } from '../types';
 
 const defaultMaterials = [
   { name: '商业发票', type: 'invoice', uploaded: false, required: true },
@@ -24,6 +26,10 @@ export function NewOrderPage() {
     buyerCountry: 'US',
     deadlineHours: 48,
     remark: '',
+    listingStatus: 'not_listed' as ListingStatus,
+    inventoryStatus: 'not_synced' as InventoryStatus,
+    inventoryQuantity: 0,
+    listingUrl: '',
   });
   const [materials, setMaterials] = useState(defaultMaterials);
 
@@ -63,6 +69,9 @@ export function NewOrderPage() {
     newMaterials[index] = { ...newMaterials[index], [field]: value };
     setMaterials(newMaterials);
   };
+
+  const listingOptions: ListingStatus[] = ['not_listed', 'active', 'listing_failed', 'delisted'];
+  const inventoryOptions: InventoryStatus[] = ['not_synced', 'synced', 'insufficient', 'sync_failed'];
 
   return (
     <div>
@@ -189,7 +198,66 @@ export function NewOrderPage() {
             </div>
 
             <div className="detail-section">
-              <h3 className="detail-section-title">材料清单</h3>
+              <h3 className="detail-section-title">商品刊登与库存（影响推进）</h3>
+              <div className="detail-grid">
+                <div className="form-item">
+                  <label className="form-label">刊登状态</label>
+                  <select
+                    className="form-select"
+                    value={formData.listingStatus}
+                    onChange={(e) => setFormData({ ...formData, listingStatus: e.target.value as ListingStatus })}
+                  >
+                    {listingOptions.map(opt => (
+                      <option key={opt} value={opt}>{LISTING_TEXT[opt]}</option>
+                    ))}
+                  </select>
+                  <div style={{ fontSize: '12px', color: '#999', marginTop: '4px' }}>
+                    非 "刊登正常" 状态会产生阻断
+                  </div>
+                </div>
+                <div className="form-item">
+                  <label className="form-label">刊登链接</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={formData.listingUrl}
+                    onChange={(e) => setFormData({ ...formData, listingUrl: e.target.value })}
+                    placeholder="https://..."
+                  />
+                </div>
+                <div className="form-item">
+                  <label className="form-label">库存同步状态</label>
+                  <select
+                    className="form-select"
+                    value={formData.inventoryStatus}
+                    onChange={(e) => setFormData({ ...formData, inventoryStatus: e.target.value as InventoryStatus })}
+                  >
+                    {inventoryOptions.map(opt => (
+                      <option key={opt} value={opt}>{INVENTORY_TEXT[opt]}</option>
+                    ))}
+                  </select>
+                  <div style={{ fontSize: '12px', color: '#999', marginTop: '4px' }}>
+                    非 "同步正常" 会产生阻断
+                  </div>
+                </div>
+                <div className="form-item">
+                  <label className="form-label">可用库存数量</label>
+                  <input
+                    type="number"
+                    className="form-input"
+                    min="0"
+                    value={formData.inventoryQuantity}
+                    onChange={(e) => setFormData({ ...formData, inventoryQuantity: parseInt(e.target.value) || 0 })}
+                  />
+                  <div style={{ fontSize: '12px', color: '#999', marginTop: '4px' }}>
+                    小于订单量 {formData.quantity} 会产生阻断
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="detail-section">
+              <h3 className="detail-section-title">材料清单（必需项缺失会阻断）</h3>
               <div className="material-list">
                 {materials.map((m, index) => (
                   <div key={index} className="material-item">

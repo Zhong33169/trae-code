@@ -52,8 +52,10 @@ func main() {
 	orders.Get("/:id", handlers.GetOrder)
 	orders.Post("/:id/submit", middleware.RoleRequired(models.RoleRegistrar), handlers.SubmitOrder)
 	orders.Put("/:id/materials", middleware.RoleRequired(models.RoleRegistrar), handlers.UpdateMaterials)
+	orders.Put("/:id/listing-inventory", middleware.RoleRequired(models.RoleRegistrar), handlers.UpdateListingInventory)
 	orders.Post("/:id/supervisor-process", middleware.RoleRequired(models.RoleSupervisor), handlers.SupervisorProcess)
 	orders.Post("/:id/reviewer-process", middleware.RoleRequired(models.RoleReviewer), handlers.ReviewerProcess)
+	orders.Post("/:id/manual-disposition", middleware.RoleRequired(models.RoleReviewer), handlers.ManualDisposition)
 
 	batch := api.Group("/batch")
 	batch.Use(middleware.AuthRequired())
