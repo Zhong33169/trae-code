@@ -17,6 +17,25 @@ function BatchOperationModal({ visible, onClose, selectedIds, versions, role, on
       alert('请先选择要处理的服务单');
       return;
     }
+    
+    const missingVersionIds = selectedIds.filter(id => 
+      versions === undefined || versions === null || 
+      versions[id] === undefined || versions[id] === null || versions[id] === ''
+    );
+    
+    if (missingVersionIds.length > 0) {
+      setResult({
+        success: [],
+        skipped: [],
+        failed: missingVersionIds.map(id => ({
+          id,
+          error: '版本信息缺失，请刷新列表后重试',
+          error_code: 'VERSION_MISSING'
+        }))
+      });
+      return;
+    }
+    
     setSubmitting(true);
     setResult(null);
     try {
@@ -35,7 +54,16 @@ function BatchOperationModal({ visible, onClose, selectedIds, versions, role, on
         onSuccess && onSuccess(res.data);
       }
     } catch (err) {
-      alert(err.response?.data?.detail || '操作失败');
+      const detail = err.response?.data?.detail || '操作失败';
+      setResult({
+        success: [],
+        skipped: [],
+        failed: selectedIds.map(id => ({
+          id,
+          error: detail,
+          error_code: err.response?.data?.error_code || 'UNKNOWN'
+        }))
+      });
     } finally {
       setSubmitting(false);
     }

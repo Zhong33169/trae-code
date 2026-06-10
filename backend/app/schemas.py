@@ -83,7 +83,7 @@ class MaterialCreate(BaseModel):
     material_type: str
     material_name: str
     file_url: Optional[str] = None
-    version: Optional[int] = None
+    version: int
 
 class Material(MaterialCreate):
     id: int
@@ -100,7 +100,7 @@ class FeedbackBase(BaseModel):
     teacher_comment: Optional[str] = None
 
 class FeedbackCreate(FeedbackBase):
-    version: Optional[int] = None
+    version: int
 
 class Feedback(FeedbackBase):
     id: int
@@ -121,17 +121,17 @@ class ServiceOrderCreate(BaseModel):
 class ServiceOrderUpdate(BaseModel):
     opinion: Optional[str] = None
     materials: Optional[List[MaterialCreate]] = None
-    version: Optional[int] = None
+    version: int
 
 class ReviewRequest(BaseModel):
     approved: bool
     opinion: Optional[str] = None
-    version: Optional[int] = None
+    version: int
 
 class FinalizeRequest(BaseModel):
     approved: bool
     opinion: Optional[str] = None
-    version: Optional[int] = None
+    version: int
 
 class ServiceOrder(BaseModel):
     id: int
@@ -195,7 +195,8 @@ class BatchItem(BaseModel):
 
 class BatchOperationRequest(BaseModel):
     order_ids: List[int]
-    versions: Optional[dict] = None
+    versions: dict
+    approved: bool = True
     opinion: Optional[str] = None
 
 class StatisticsResponse(BaseModel):

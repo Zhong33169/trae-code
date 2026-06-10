@@ -28,6 +28,10 @@ function AddMaterialModal({ visible, onClose, orderId, version, onSuccess }) {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!materialName.trim()) return;
+    if (version === undefined || version === null || version === '') {
+      setError('版本信息缺失，请刷新页面后重试');
+      return;
+    }
     setLoading(true);
     setError('');
     try {
@@ -39,9 +43,10 @@ function AddMaterialModal({ visible, onClose, orderId, version, onSuccess }) {
       onSuccess(res.data);
     } catch (err) {
       const detail = err.response?.data?.detail || '添加材料失败';
-      setError(detail);
       if (err.response?.status === 409) {
         setError(`并发冲突：${detail}（输入已保留，请刷新后重试）`);
+      } else {
+        setError(detail);
       }
     } finally {
       setLoading(false);

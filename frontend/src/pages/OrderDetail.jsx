@@ -94,6 +94,10 @@ function OrderDetail() {
     ['pending_review', 'pending_finalize', 'reviewing', 'finalizing'].includes(order?.status);
 
   const handleSubmit = async () => {
+    if (order?.version === undefined || order?.version === null) {
+      showToast('error', '版本信息缺失，请刷新页面后重试');
+      return;
+    }
     setProcessing(true);
     try {
       const res = await api.post(`/orders/${id}/submit`, { 
@@ -117,6 +121,10 @@ function OrderDetail() {
   };
 
   const handleReview = async (approved) => {
+    if (order?.version === undefined || order?.version === null) {
+      showToast('error', '版本信息缺失，请刷新页面后重试');
+      return;
+    }
     setProcessing(true);
     try {
       const res = await api.post(`/orders/${id}/review`, { 
@@ -140,6 +148,10 @@ function OrderDetail() {
   };
 
   const handleFinalize = async (approved) => {
+    if (order?.version === undefined || order?.version === null) {
+      showToast('error', '版本信息缺失，请刷新页面后重试');
+      return;
+    }
     setProcessing(true);
     try {
       const res = await api.post(`/orders/${id}/finalize`, { 
@@ -164,6 +176,10 @@ function OrderDetail() {
 
   const handleDeleteMaterial = async (materialId) => {
     if (!confirm('确定要删除这份材料吗？')) return;
+    if (order?.version === undefined || order?.version === null) {
+      showToast('error', '版本信息缺失，请刷新页面后重试');
+      return;
+    }
     try {
       const res = await api.delete(`/orders/${id}/materials/${materialId}?version=${order.version}`);
       setOrder(res.data);

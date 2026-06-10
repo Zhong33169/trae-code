@@ -2,6 +2,7 @@ from starlette.applications import Starlette
 from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import JSONResponse
 from starlette.exceptions import HTTPException
+from pydantic import ValidationError
 import traceback
 
 from app.config import FRONTEND_ORIGIN
@@ -26,6 +27,18 @@ for route in routes:
 async def startup():
     await init_db()
     await seed_data.seed_all()
+
+@app.exception_handler(ValidationError)
+async def validation_exception_handler(request, exc):
+    errors = []
+    for e in exc.errors():
+        field = ".".join(str(loc) for loc in e.get("loc", []))
+        msg = e.get("msg", "")
+        errors.append(f"{field}: {msg}")
+    return JSONResponse(
+        {"detail": "参数校验失败：" + "; ".join(errors), "error_code": "VALIDATION_ERROR"},
+        status_code=400
+    )
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request, exc):

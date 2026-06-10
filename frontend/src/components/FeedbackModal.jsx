@@ -34,6 +34,10 @@ function FeedbackModal({ visible, onClose, orderId, version, onSuccess }) {
       setError('请填写课堂表现和作业完成情况');
       return;
     }
+    if (version === undefined || version === null || version === '') {
+      setError('版本信息缺失，请刷新页面后重试');
+      return;
+    }
     setLoading(true);
     setError('');
     try {
