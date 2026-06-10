@@ -277,6 +277,105 @@ class Command(BaseCommand):
                 'description': '完全空白的草稿，测试各种缺证据场景',
                 'add_evidence': [],
             },
+            {
+                'no': 'LAB202506010009',
+                'title': '数字电路实验 - 触发器设计',
+                'lab': '电子实验室C201',
+                'course': '数字逻辑与电路',
+                'experiment': 'JK触发器与D触发器设计',
+                'applicant': ta_li,
+                'dept': '物理学院',
+                'start': now + timedelta(days=8),
+                'end': now + timedelta(days=8, hours=3),
+                'students': 38,
+                'status': LabReservation.STATUS_COLLEGE_REJECTED,
+                'has_plan': True,
+                'has_material': True,
+                'has_safety': True,
+                'description': '学院退回的预约单 - 实验时间与学院活动冲突',
+                'submitted': True,
+                'lab_reviewed': True,
+                'reviewer': labadmin_liu,
+                'review_comment': '设备可用，同意',
+                'college_rejected': True,
+                'rejector': college_zhao,
+                'rejection_reason': '实验时间与学院年度学术报告冲突，请调整时间后重新提交',
+                'add_evidence': ['experiment_plan', 'material_application', 'safety_confirmation'],
+            },
+            {
+                'no': 'LAB202506010010',
+                'title': '微机原理实验 - 中断系统',
+                'lab': '计算机实验室A305',
+                'course': '微机原理与接口技术',
+                'experiment': '8259A中断控制器实验',
+                'applicant': ta_wang,
+                'dept': '计算机学院',
+                'start': now + timedelta(days=9),
+                'end': now + timedelta(days=9, hours=2),
+                'students': 44,
+                'status': LabReservation.STATUS_LAB_REVIEWED,
+                'has_plan': True,
+                'has_material': True,
+                'has_safety': True,
+                'description': '刘管理员审核通过，待赵院长确认 - 跨学院审批场景',
+                'submitted': True,
+                'lab_reviewed': True,
+                'reviewer': labadmin_liu,
+                'review_comment': '实验方案合理，设备齐全',
+                'add_evidence': ['experiment_plan', 'material_application', 'safety_confirmation'],
+            },
+            {
+                'no': 'LAB202506010011',
+                'title': '计算机组成原理实验 - 流水线设计',
+                'lab': '计算机实验室A302',
+                'course': '计算机组成原理',
+                'experiment': '五级流水线CPU设计',
+                'applicant': ta_wang,
+                'dept': '计算机学院',
+                'start': now + timedelta(days=12),
+                'end': now + timedelta(days=12, hours=4),
+                'students': 40,
+                'status': LabReservation.STATUS_CONFIRMED,
+                'has_plan': True,
+                'has_material': True,
+                'has_safety': True,
+                'description': '完整流程：提交→退回→补录→再提交→审核→确认 - 多角色连续办理',
+                'submitted': True,
+                'lab_reviewed': True,
+                'reviewer': labadmin_zhang,
+                'review_comment': '补录材料齐全，同意通过',
+                'college_confirmed': True,
+                'confirmer': college_chen,
+                'confirm_comment': '学院确认通过，请按计划开展实验',
+                'add_evidence': ['experiment_plan'],
+                'has_supplementary': True,
+                'supplement_type': 'material_application',
+                'supplement_title': '耗材申领单（补录版）',
+                'has_second_supplementary': True,
+                'second_supplement_type': 'safety_confirmation',
+                'second_supplement_title': '安全确认书（补录版）',
+                'was_lab_rejected': True,
+                'first_rejection_reason': '缺少耗材申领单和安全确认书，两项证据缺失',
+            },
+            {
+                'no': 'LAB202506010012',
+                'title': '嵌入式系统实验 - GPIO编程',
+                'lab': '嵌入式实验室D101',
+                'course': '嵌入式系统开发',
+                'experiment': 'STM32 GPIO输入输出实验',
+                'applicant': ta_li,
+                'dept': '物理学院',
+                'start': now + timedelta(days=11),
+                'end': now + timedelta(days=11, hours=3),
+                'students': 32,
+                'status': LabReservation.STATUS_SUBMITTED,
+                'has_plan': True,
+                'has_material': True,
+                'has_safety': True,
+                'description': '刘管理员待审核 - 多管理员场景',
+                'submitted': True,
+                'add_evidence': ['experiment_plan', 'material_application', 'safety_confirmation'],
+            },
         ]
 
         for data in reservations_data:
@@ -386,6 +485,21 @@ class Command(BaseCommand):
                     reason='学院确认通过',
                 )
 
+            if data.get('college_rejected'):
+                reservation.rejection_reason = data.get('rejection_reason', '')
+                reservation.rejected_by = data.get('rejector')
+                reservation.rejected_at = data['start'] - timedelta(hours=6)
+                reservation.version += 1
+                AuditLog.objects.create(
+                    reservation=reservation,
+                    action=AuditLog.ACTION_COLLEGE_REJECT,
+                    actor=data['rejector'],
+                    comment=data.get('rejection_reason', ''),
+                    previous_status=LabReservation.STATUS_LAB_REVIEWED,
+                    new_status=LabReservation.STATUS_COLLEGE_REJECTED,
+                    reason=data.get('rejection_reason', ''),
+                )
+
             if data.get('has_supplementary'):
                 supplement_type = data.get('supplement_type', 'safety_confirmation')
                 ev_title, ev_file = evidence_type_map[supplement_type]
@@ -418,8 +532,8 @@ class Command(BaseCommand):
                     action=SupplementaryRecord.ACTION_ADD_EVIDENCE,
                     description=f'补充{ev_title}：{supp_title}',
                     supplementer=data['applicant'],
-                    previous_status=LabReservation.STATUS_SUBMITTED,
-                    new_status=LabReservation.STATUS_SUBMITTED,
+                    previous_status=reservation.status,
+                    new_status=reservation.status,
                     related_evidence=evidence,
                 )
 
@@ -428,9 +542,56 @@ class Command(BaseCommand):
                     action=AuditLog.ACTION_SUPPLEMENT,
                     actor=data['applicant'],
                     comment=f'补录{ev_title}',
-                    previous_status=LabReservation.STATUS_SUBMITTED,
-                    new_status=LabReservation.STATUS_SUBMITTED,
+                    previous_status=reservation.status,
+                    new_status=reservation.status,
                     reason=f'补充证据材料：{supp_title}',
+                )
+
+            if data.get('has_second_supplementary'):
+                second_type = data.get('second_supplement_type', 'safety_confirmation')
+                ev_title2, ev_file2 = evidence_type_map[second_type]
+                supp_title2 = data.get('second_supplement_title', f'补录-{ev_title2}')
+
+                evidence2 = Evidence.objects.create(
+                    reservation=reservation,
+                    evidence_type=second_type,
+                    title=supp_title2,
+                    file_name=f'supplementary_v2_{ev_file2}',
+                    file_url=f'/uploads/{reservation.reservation_no}/supplementary_v2_{ev_file2}',
+                    description=f'第二次补录的{ev_title2}，继续完善材料',
+                    uploaded_by=data['applicant'],
+                    version=3,
+                    is_supplementary=True,
+                )
+
+                if second_type == 'experiment_plan':
+                    reservation.has_experiment_plan = True
+                elif second_type == 'material_application':
+                    reservation.has_material_application = True
+                elif second_type == 'safety_confirmation':
+                    reservation.has_safety_confirmation = True
+
+                reservation.version += 1
+                reservation.save()
+
+                SupplementaryRecord.objects.create(
+                    reservation=reservation,
+                    action=SupplementaryRecord.ACTION_ADD_EVIDENCE,
+                    description=f'补充{ev_title2}：{supp_title2}',
+                    supplementer=data['applicant'],
+                    previous_status=reservation.status,
+                    new_status=reservation.status,
+                    related_evidence=evidence2,
+                )
+
+                AuditLog.objects.create(
+                    reservation=reservation,
+                    action=AuditLog.ACTION_SUPPLEMENT,
+                    actor=data['applicant'],
+                    comment=f'补录{ev_title2}',
+                    previous_status=reservation.status,
+                    new_status=reservation.status,
+                    reason=f'补充证据材料：{supp_title2}',
                 )
 
             reservation.save()

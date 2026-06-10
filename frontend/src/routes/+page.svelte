@@ -26,8 +26,11 @@
     showDetail = true;
   }
 
-  $: $refreshTrigger;
-  $: loadReservations();
+  $: {
+    $refreshTrigger;
+    $currentUser;
+    loadReservations();
+  }
 
   async function loadReservations() {
     loading = true;

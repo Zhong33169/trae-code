@@ -76,7 +76,199 @@ def user_to_profile_out(user: User) -> UserProfileOut:
     )
 
 
-def reservation_to_list_item(reservation: LabReservation) -> LabReservationListItem:
+def _get_detailed_errors(reservation, user, check_type):
+    """获取详细的错误原因列表"""
+    errors = []
+    role = user.profile.role
+
+    if check_type == 'submit':
+        if role != UserProfile.ROLE_TA:
+            errors.append(f'角色不符：当前为{user.profile.get_role_display()}，需实验助教')
+        if reservation.applicant_id != user.id:
+            errors.append('只能提交自己创建的预约单')
+        if reservation.status not in [
+            LabReservation.STATUS_DRAFT,
+            LabReservation.STATUS_LAB_REJECTED,
+            LabReservation.STATUS_COLLEGE_REJECTED,
+        ]:
+            errors.append(f'状态不符：当前为{reservation.get_status_display()}')
+        missing = reservation.get_missing_evidence()
+        if missing:
+            labels = {'experiment_plan': '实验预约方案', 'material_application': '耗材申领单', 'safety_confirmation': '安全确认书'}
+            errors.append(f'缺少证据：{"、".join(labels.get(m, m) for m in missing)}')
+
+    elif check_type == 'lab_review':
+        if role != UserProfile.ROLE_LAB_ADMIN:
+            errors.append(f'角色不符：当前为{user.profile.get_role_display()}，需实验室管理员')
+        if reservation.status != LabReservation.STATUS_SUBMITTED:
+            errors.append(f'状态不符：当前为{reservation.get_status_display()}，需已提交状态')
+        missing = reservation.get_missing_evidence()
+        if missing:
+            labels = {'experiment_plan': '实验预约方案', 'material_application': '耗材申领单', 'safety_confirmation': '安全确认书'}
+            errors.append(f'证据不足：缺少{"、".join(labels.get(m, m) for m in missing)}')
+
+    elif check_type == 'college_confirm':
+        if role != UserProfile.ROLE_COLLEGE_HEAD:
+            errors.append(f'角色不符：当前为{user.profile.get_role_display()}，需学院负责人')
+        if reservation.status == LabReservation.STATUS_SUBMITTED:
+            errors.append('流程错误：必须先由实验室管理员审核，学院不能跳过实验室审核')
+        elif reservation.status != LabReservation.STATUS_LAB_REVIEWED:
+            errors.append(f'状态不符：当前为{reservation.get_status_display()}，需实验室审核通过状态')
+
+    elif check_type == 'supplement':
+        if role != UserProfile.ROLE_TA:
+            errors.append(f'角色不符：当前为{user.profile.get_role_display()}，需实验助教')
+        if reservation.applicant_id != user.id:
+            errors.append('只能补录自己创建的预约单')
+        if reservation.status in [LabReservation.STATUS_CONFIRMED]:
+            errors.append('已确认的预约单不能再补录')
+        if reservation.status not in [
+            LabReservation.STATUS_DRAFT,
+            LabReservation.STATUS_SUBMITTED,
+            LabReservation.STATUS_LAB_REJECTED,
+            LabReservation.STATUS_COLLEGE_REJECTED,
+            LabReservation.STATUS_LAB_REVIEWED,
+        ]:
+            errors.append(f'状态不符：当前为{reservation.get_status_display()}')
+
+    return errors
+
+
+def _get_flow_steps(reservation):
+    """获取流程步骤状态"""
+    steps = []
+
+    steps.append({
+        'key': 'submit',
+        'label': '实验助教提交',
+        'status': 'done' if reservation.submitted_at else 'pending',
+        'actor': reservation.applicant.username if reservation.submitted_at else '',
+        'time': reservation.submitted_at.isoformat() if reservation.submitted_at else '',
+    })
+
+    if reservation.status == LabReservation.STATUS_LAB_REJECTED:
+        steps.append({
+            'key': 'lab_review',
+            'label': '实验室审核',
+            'status': 'rejected',
+            'actor': reservation.rejected_by.username if reservation.rejected_by else '',
+            'time': reservation.rejected_at.isoformat() if reservation.rejected_at else '',
+            'comment': reservation.rejection_reason,
+        })
+    elif reservation.lab_reviewed_at:
+        steps.append({
+            'key': 'lab_review',
+            'label': '实验室审核通过',
+            'status': 'done',
+            'actor': reservation.lab_reviewer.username if reservation.lab_reviewer else '',
+            'time': reservation.lab_reviewed_at.isoformat() if reservation.lab_reviewed_at else '',
+            'comment': reservation.lab_review_comment,
+        })
+    elif reservation.submitted_at:
+        steps.append({
+            'key': 'lab_review',
+            'label': '实验室审核',
+            'status': 'current',
+            'actor': '',
+            'time': '',
+        })
+    else:
+        steps.append({
+            'key': 'lab_review',
+            'label': '实验室审核',
+            'status': 'pending',
+            'actor': '',
+            'time': '',
+        })
+
+    if reservation.status == LabReservation.STATUS_COLLEGE_REJECTED:
+        steps.append({
+            'key': 'college_confirm',
+            'label': '学院确认',
+            'status': 'rejected',
+            'actor': reservation.rejected_by.username if reservation.rejected_by else '',
+            'time': reservation.rejected_at.isoformat() if reservation.rejected_at else '',
+            'comment': reservation.rejection_reason,
+        })
+    elif reservation.confirmed_at:
+        steps.append({
+            'key': 'college_confirm',
+            'label': '学院确认通过',
+            'status': 'done',
+            'actor': reservation.confirmer.username if reservation.confirmer else '',
+            'time': reservation.confirmed_at.isoformat() if reservation.confirmed_at else '',
+            'comment': reservation.confirm_comment,
+        })
+    elif reservation.lab_reviewed_at and reservation.status == LabReservation.STATUS_LAB_REVIEWED:
+        steps.append({
+            'key': 'college_confirm',
+            'label': '学院确认',
+            'status': 'current',
+            'actor': '',
+            'time': '',
+        })
+    else:
+        steps.append({
+            'key': 'college_confirm',
+            'label': '学院确认',
+            'status': 'pending',
+            'actor': '',
+            'time': '',
+        })
+
+    return steps
+
+
+def _get_next_action(reservation):
+    """获取下一动作和角色"""
+    status = reservation.status
+    if status in [LabReservation.STATUS_DRAFT, LabReservation.STATUS_LAB_REJECTED, LabReservation.STATUS_COLLEGE_REJECTED]:
+        return 'submit', UserProfile.ROLE_TA, '提交审核'
+    elif status == LabReservation.STATUS_SUBMITTED:
+        return 'lab_review', UserProfile.ROLE_LAB_ADMIN, '实验室审核'
+    elif status == LabReservation.STATUS_LAB_REVIEWED:
+        return 'college_confirm', UserProfile.ROLE_COLLEGE_HEAD, '学院确认'
+    elif status == LabReservation.STATUS_CONFIRMED:
+        return 'done', '', '已完成'
+    return '', '', ''
+
+
+def reservation_to_list_item(reservation: LabReservation, user: User = None) -> LabReservationListItem:
+    can_submit = False
+    can_lab_review = False
+    can_college_confirm = False
+    can_supplement = False
+    primary_action = ''
+    primary_action_label = ''
+    disabled_reason = ''
+
+    if user:
+        can_submit, submit_error = reservation.can_submit(user)
+        can_lab_review, lab_review_error = reservation.can_lab_review(user)
+        can_college_confirm, college_confirm_error = reservation.can_college_confirm(user)
+        can_supplement, supplement_error = reservation.can_supplement(user)
+
+        if can_submit:
+            primary_action = 'submit'
+            primary_action_label = '提交'
+        elif can_lab_review:
+            primary_action = 'lab_review'
+            primary_action_label = '审核'
+        elif can_college_confirm:
+            primary_action = 'college_confirm'
+            primary_action_label = '确认'
+        else:
+            if reservation.status == LabReservation.STATUS_DRAFT:
+                disabled_reason = submit_error if submit_error else '草稿状态'
+            elif reservation.status == LabReservation.STATUS_SUBMITTED:
+                disabled_reason = lab_review_error if lab_review_error and user.profile.role == UserProfile.ROLE_LAB_ADMIN else '待实验室审核'
+            elif reservation.status == LabReservation.STATUS_LAB_REVIEWED:
+                disabled_reason = college_confirm_error if college_confirm_error and user.profile.role == UserProfile.ROLE_COLLEGE_HEAD else '待学院确认'
+            elif reservation.status == LabReservation.STATUS_CONFIRMED:
+                disabled_reason = '流程已完成'
+            elif reservation.status in [LabReservation.STATUS_LAB_REJECTED, LabReservation.STATUS_COLLEGE_REJECTED]:
+                disabled_reason = '已退回，请补录后重新提交'
+
     return LabReservationListItem(
         id=reservation.id,
         reservation_no=reservation.reservation_no,
@@ -98,6 +290,14 @@ def reservation_to_list_item(reservation: LabReservation) -> LabReservationListI
         updated_at=reservation.updated_at,
         rejection_reason=reservation.rejection_reason,
         supplementary_count=reservation.supplementary_records.count(),
+        can_submit=can_submit,
+        can_lab_review=can_lab_review,
+        can_college_confirm=can_college_confirm,
+        can_supplement=can_supplement,
+        primary_action=primary_action,
+        primary_action_label=primary_action_label,
+        disabled_reason=disabled_reason,
+        missing_evidence=reservation.get_missing_evidence(),
     )
 
 
@@ -106,6 +306,16 @@ def reservation_to_detail(reservation: LabReservation, user: User) -> LabReserva
     can_lab_review, lab_review_error = reservation.can_lab_review(user)
     can_college_confirm, college_confirm_error = reservation.can_college_confirm(user)
     can_supplement, supplement_error = reservation.can_supplement(user)
+
+    submit_errors = _get_detailed_errors(reservation, user, 'submit')
+    lab_review_errors = _get_detailed_errors(reservation, user, 'lab_review')
+    college_confirm_errors = _get_detailed_errors(reservation, user, 'college_confirm')
+    supplement_errors = _get_detailed_errors(reservation, user, 'supplement')
+
+    flow_steps = _get_flow_steps(reservation)
+    next_action, next_role, next_label = _get_next_action(reservation)
+
+    version_history_count = reservation.audit_logs.count()
 
     return LabReservationDetail(
         id=reservation.id,
@@ -119,6 +329,7 @@ def reservation_to_detail(reservation: LabReservation, user: User) -> LabReserva
         status=reservation.status,
         status_display=reservation.get_status_display(),
         version=reservation.version,
+        version_history_count=version_history_count,
         start_time=reservation.start_time,
         end_time=reservation.end_time,
         student_count=reservation.student_count,
@@ -146,6 +357,13 @@ def reservation_to_detail(reservation: LabReservation, user: User) -> LabReserva
         lab_review_error=lab_review_error,
         college_confirm_error=college_confirm_error,
         supplement_error=supplement_error,
+        submit_errors=submit_errors,
+        lab_review_errors=lab_review_errors,
+        college_confirm_errors=college_confirm_errors,
+        supplement_errors=supplement_errors,
+        flow_steps=flow_steps,
+        next_action=next_action,
+        next_actor_role=next_role,
     )
 
 
@@ -268,7 +486,7 @@ def list_reservations(
     items = queryset[start:end]
 
     return ReservationListResponse(
-        items=[reservation_to_list_item(r) for r in items],
+        items=[reservation_to_list_item(r, user) for r in items],
         total=total,
         page=page,
         page_size=page_size,
@@ -880,23 +1098,33 @@ def batch_operation(request, payload: BatchOperationIn):
             can_op, err = reservation.can_lab_review(user)
             if not can_op:
                 fail_count += 1
+                detailed_errors = _get_detailed_errors(reservation, user, 'lab_review')
                 results.append({
                     'id': res_id,
                     'reservation_no': reservation.reservation_no,
                     'success': False,
                     'error': err,
                     'code': 'cannot_operate',
+                    'errors': detailed_errors,
+                    'previous_status': reservation.status,
+                    'current_version': reservation.version,
                 })
                 continue
             missing = reservation.get_missing_evidence()
             if missing:
                 fail_count += 1
+                labels = {'experiment_plan': '实验预约方案', 'material_application': '耗材申领单', 'safety_confirmation': '安全确认书'}
+                missing_labels = [labels.get(m, m) for m in missing]
                 results.append({
                     'id': res_id,
                     'reservation_no': reservation.reservation_no,
                     'success': False,
-                    'error': f'证据不完整：缺少{", ".join(missing)}',
+                    'error': f'证据不完整：缺少{"、".join(missing_labels)}',
                     'code': 'insufficient_evidence',
+                    'errors': [f'缺少证据：{"、".join(missing_labels)}'],
+                    'previous_status': reservation.status,
+                    'current_version': reservation.version,
+                    'missing_evidence': missing,
                 })
                 continue
 
@@ -924,20 +1152,28 @@ def batch_operation(request, payload: BatchOperationIn):
                 'id': res_id,
                 'reservation_no': reservation.reservation_no,
                 'success': True,
+                'action': 'lab_review_pass',
+                'previous_status': previous_status,
                 'new_status': LabReservation.STATUS_LAB_REVIEWED,
+                'previous_version': expected_ver,
                 'new_version': reservation.version,
+                'comment': payload.comment,
             })
 
         elif payload.operation == 'lab_reject':
             can_op, err = reservation.can_lab_review(user)
             if not can_op:
                 fail_count += 1
+                detailed_errors = _get_detailed_errors(reservation, user, 'lab_review')
                 results.append({
                     'id': res_id,
                     'reservation_no': reservation.reservation_no,
                     'success': False,
                     'error': err,
                     'code': 'cannot_operate',
+                    'errors': detailed_errors,
+                    'previous_status': reservation.status,
+                    'current_version': reservation.version,
                 })
                 continue
 
@@ -965,20 +1201,28 @@ def batch_operation(request, payload: BatchOperationIn):
                 'id': res_id,
                 'reservation_no': reservation.reservation_no,
                 'success': True,
+                'action': 'lab_reject',
+                'previous_status': previous_status,
                 'new_status': LabReservation.STATUS_LAB_REJECTED,
+                'previous_version': expected_ver,
                 'new_version': reservation.version,
+                'comment': payload.comment,
             })
 
         elif payload.operation == 'college_confirm_pass':
             can_op, err = reservation.can_college_confirm(user)
             if not can_op:
                 fail_count += 1
+                detailed_errors = _get_detailed_errors(reservation, user, 'college_confirm')
                 results.append({
                     'id': res_id,
                     'reservation_no': reservation.reservation_no,
                     'success': False,
                     'error': err,
                     'code': 'cannot_operate',
+                    'errors': detailed_errors,
+                    'previous_status': reservation.status,
+                    'current_version': reservation.version,
                 })
                 continue
 
@@ -1006,20 +1250,28 @@ def batch_operation(request, payload: BatchOperationIn):
                 'id': res_id,
                 'reservation_no': reservation.reservation_no,
                 'success': True,
+                'action': 'college_confirm_pass',
+                'previous_status': previous_status,
                 'new_status': LabReservation.STATUS_CONFIRMED,
+                'previous_version': expected_ver,
                 'new_version': reservation.version,
+                'comment': payload.comment,
             })
 
         elif payload.operation == 'college_reject':
             can_op, err = reservation.can_college_confirm(user)
             if not can_op:
                 fail_count += 1
+                detailed_errors = _get_detailed_errors(reservation, user, 'college_confirm')
                 results.append({
                     'id': res_id,
                     'reservation_no': reservation.reservation_no,
                     'success': False,
                     'error': err,
                     'code': 'cannot_operate',
+                    'errors': detailed_errors,
+                    'previous_status': reservation.status,
+                    'current_version': reservation.version,
                 })
                 continue
 
@@ -1047,8 +1299,12 @@ def batch_operation(request, payload: BatchOperationIn):
                 'id': res_id,
                 'reservation_no': reservation.reservation_no,
                 'success': True,
+                'action': 'college_reject',
+                'previous_status': previous_status,
                 'new_status': LabReservation.STATUS_COLLEGE_REJECTED,
+                'previous_version': expected_ver,
                 'new_version': reservation.version,
+                'comment': payload.comment,
             })
 
     return {

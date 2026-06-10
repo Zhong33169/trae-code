@@ -42,13 +42,22 @@
       if (result.fail_count > 0) {
         const failReasons = result.results
           .filter((r) => !r.success)
-          .map((r) => `${r.reservation_no || '#' + r.id}: ${r.error}`)
+          .map((r) => {
+            let msg = `${r.reservation_no || '#' + r.id}: ${r.error}`;
+            if (r.errors && r.errors.length > 0) {
+              msg += '\n  - ' + r.errors.join('\n  - ');
+            }
+            return msg;
+          })
           .join('\n');
-        errorMsg = `成功 ${result.success_count} 条，失败 ${result.fail_count} 条\n${failReasons}`;
-      } else {
+        errorMsg = `成功 ${result.success_count} 条，失败 ${result.fail_count} 条\n\n失败详情：\n${failReasons}`;
+      }
+      
+      refreshData();
+      dispatch('complete', { result });
+      
+      if (result.fail_count === 0) {
         showCommentDialog = false;
-        dispatch('complete');
-        refreshData();
       }
     } catch (e) {
       errorMsg = e.message;

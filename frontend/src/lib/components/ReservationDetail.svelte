@@ -1,7 +1,7 @@
 <script>
   import { onMount, onDestroy } from 'svelte';
   import { createEventDispatcher } from 'svelte';
-  import { currentUser, refreshData } from '$lib/stores.js';
+  import { currentUser, refreshData, refreshTrigger } from '$lib/stores.js';
   import { api } from '$lib/api.js';
   import {
     STATUS_LABELS,
@@ -34,6 +34,13 @@
   let supplementType = EVIDENCE_TYPES.EXPERIMENT_PLAN;
   let supplementTitle = '';
   let supplementDesc = '';
+
+  $: {
+    reservationId;
+    $refreshTrigger;
+    $currentUser;
+    loadData();
+  }
 
   async function loadData() {
     if (!reservationId) return;

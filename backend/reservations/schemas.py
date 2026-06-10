@@ -90,6 +90,14 @@ class LabReservationListItem(BaseModel):
     updated_at: datetime
     rejection_reason: str
     supplementary_count: int = 0
+    can_submit: bool = False
+    can_lab_review: bool = False
+    can_college_confirm: bool = False
+    can_supplement: bool = False
+    primary_action: str = ''
+    primary_action_label: str = ''
+    disabled_reason: str = ''
+    missing_evidence: List[str] = []
 
     class Config:
         from_attributes = True
@@ -107,6 +115,7 @@ class LabReservationDetail(BaseModel):
     status: str
     status_display: str
     version: int
+    version_history_count: int = 0
     start_time: datetime
     end_time: datetime
     student_count: int
@@ -134,6 +143,13 @@ class LabReservationDetail(BaseModel):
     lab_review_error: str
     college_confirm_error: str
     supplement_error: str
+    submit_errors: List[str] = []
+    lab_review_errors: List[str] = []
+    college_confirm_errors: List[str] = []
+    supplement_errors: List[str] = []
+    flow_steps: List[dict] = []
+    next_action: str = ''
+    next_actor_role: str = ''
 
     class Config:
         from_attributes = True
