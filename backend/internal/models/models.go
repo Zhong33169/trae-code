@@ -194,7 +194,7 @@ func GetStatusName(status ApplicationStatus) string {
 	case StatusPendingConfirm:
 		return "待房态确认"
 	case StatusRoomConfirmed:
-		return "房态已确认"
+		return "待复核归档"
 	case StatusPendingHandover:
 		return "待入住交接"
 	case StatusCompleted:

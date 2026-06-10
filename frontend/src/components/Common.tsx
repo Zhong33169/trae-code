@@ -44,7 +44,7 @@ export function StatusBadge({ status, statusName }: { status: string; statusName
     returned: '已退回',
     reviewed: '审核通过',
     pending_confirm: '待房态确认',
-    room_confirmed: '待归档',
+    room_confirmed: '待复核归档',
     pending_handover: '待入住交接',
     completed: '已完成',
     rejected: '已拒绝',

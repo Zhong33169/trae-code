@@ -164,17 +164,17 @@ export default function StatisticsPage() {
         <div className="card-body">
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '16px' }}>
             {[
-              { k: 'contractSigning', n: '租客签约', t: 24, c: '#3b82f6', icon: '📝' },
-              { k: 'review', n: '租约审核', t: 48, c: '#8b5cf6', icon: '✅' },
-              { k: 'roomConfirm', n: '房态确认', t: 24, c: '#f59e0b', icon: '🏠' },
-              { k: 'handover', n: '入住交接', t: 48, c: '#0ea5e9', icon: '🔑' },
-              { k: 'archive', n: '复核归档', t: 72, c: '#10b981', icon: '📁' },
+              { k: 'contractSigning', n: '租客签约', t: 24, c: '#3b82f6', icon: '📝', p: 'contract_signing' },
+              { k: 'review', n: '租约审核', t: 48, c: '#8b5cf6', icon: '✅', p: 'review' },
+              { k: 'roomConfirm', n: '房态确认', t: 24, c: '#f59e0b', icon: '🏠', p: 'room_confirm' },
+              { k: 'handover', n: '入住交接', t: 48, c: '#0ea5e9', icon: '🔑', p: 'handover' },
+              { k: 'archive', n: '复核归档', t: 72, c: '#10b981', icon: '📁', p: 'archive' },
             ].map(node => {
               const count = (stats.nodeStats as any)?.[node.k] || 0
               return (
                 <Link
                   key={node.k}
-                  to={`/applications?currentNode=${node.k}`}
+                  to={`/applications?currentNode=${node.p}`}
                   style={{ display: 'block', padding: '16px', borderRadius: '8px', border: '2px solid var(--gray-200)', color: 'inherit', transition: 'all 0.2s' }}
                   className="stat-node-card"
                 >

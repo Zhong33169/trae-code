@@ -611,7 +611,7 @@ func ConfirmRoomStatus(c *gin.Context) {
 func CompleteHandover(c *gin.Context) {
 	userID, _, realName, role := middleware.GetCurrentUser(c)
 	if role != models.RoleAuditor && role != models.RoleReviewer {
-		c.JSON(http.StatusForbidden, gin.H{"code": 403, "message": "租约审核主管或复核负责人可以执行入住交接操作"})
+		c.JSON(http.StatusForbidden, gin.H{"code": 403, "message": "只有租约审核主管或长租公寓复核负责人可以执行入住交接操作"})
 		return
 	}
 
@@ -631,14 +631,19 @@ func CompleteHandover(c *gin.Context) {
 	if app.Status != models.StatusPendingHandover {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"code":    400,
-			"message": fmt.Sprintf("当前状态为【%s】，只有待入住交接状态可以执行此操作", models.GetStatusName(app.Status)),
+			"message": fmt.Sprintf("当前状态为【%s】，只有待入住交接状态可以执行入住交接操作", models.GetStatusName(app.Status)),
 		})
 		return
 	}
 
 	var req HandoverRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": "请求参数错误"})
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": "请求参数错误：必须填写交接说明"})
+		return
+	}
+
+	if req.HandoverResult == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": "交接说明不能为空，请详细描述钥匙、门禁、水电表等交接情况"})
 		return
 	}
 
@@ -646,14 +651,13 @@ func CompleteHandover(c *gin.Context) {
 	oldStatus := app.Status
 
 	database.DB.Model(&app).Updates(map[string]interface{}{
-		"status":             models.StatusRoomConfirmed,
-		"handover_result":    req.HandoverResult,
-		"handed_over_by":     userID,
+		"status":              models.StatusRoomConfirmed,
+		"current_node":        models.NodeArchive,
+		"handover_result":     req.HandoverResult,
+		"handed_over_by":      userID,
 		"handed_over_by_name": realName,
-		"handed_over_at":     now,
+		"handed_over_at":      now,
 	})
-
-	database.DB.Model(&models.LeaseApplication{}).Where("id = ?", app.ID).Update("status", app.Status)
 
 	database.UpdateNodeTimeline(app.ID, models.NodeHandover, "completed", userID, realName, &now)
 	database.UpdateNodeTimeline(app.ID, models.NodeArchive, "processing", 0, "", nil)
@@ -663,15 +667,15 @@ func CompleteHandover(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"code":    200,
-		"message": "入住交接完成，等待复核归档",
-		"data":    gin.H{"id": app.ID, "status": models.StatusRoomConfirmed, "statusName": models.GetStatusName(models.StatusRoomConfirmed)},
+		"message": "入住交接完成，已流转至复核归档环节",
+		"data":    gin.H{"id": app.ID, "status": models.StatusRoomConfirmed, "statusName": models.GetStatusName(models.StatusRoomConfirmed), "currentNode": models.NodeArchive, "currentNodeName": models.GetNodeName(models.NodeArchive)},
 	})
 }
 
 func ArchiveApplication(c *gin.Context) {
 	userID, _, realName, role := middleware.GetCurrentUser(c)
 	if role != models.RoleReviewer {
-		c.JSON(http.StatusForbidden, gin.H{"code": 403, "message": "只有长租公寓复核负责人可以执行复核归档操作"})
+		c.JSON(http.StatusForbidden, gin.H{"code": 403, "message": "只有长租公寓复核负责人可以执行复核归档操作，当前角色无权限"})
 		return
 	}
 
@@ -691,7 +695,7 @@ func ArchiveApplication(c *gin.Context) {
 	if app.Status != models.StatusRoomConfirmed {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"code":    400,
-			"message": fmt.Sprintf("当前状态为【%s】，只有入住交接完成后才能归档", models.GetStatusName(app.Status)),
+			"message": fmt.Sprintf("当前状态为【%s】，只有【待复核归档】状态（即入住交接完成后）才能执行归档操作", models.GetStatusName(app.Status)),
 		})
 		return
 	}
@@ -702,26 +706,32 @@ func ArchiveApplication(c *gin.Context) {
 		return
 	}
 
+	if req.Action != "archive" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": "归档操作 action 必须为 'archive'"})
+		return
+	}
+
 	now := time.Now()
 	oldStatus := app.Status
 
 	database.DB.Model(&app).Updates(map[string]interface{}{
-		"status":          models.StatusCompleted,
-		"archived_by":     userID,
+		"status":           models.StatusCompleted,
+		"current_node":     models.NodeArchive,
+		"archived_by":      userID,
 		"archived_by_name": realName,
-		"completed_at":    now,
-		"remark":          req.Remark,
+		"completed_at":     now,
+		"remark":           req.Remark,
 	})
 
 	database.UpdateNodeTimeline(app.ID, models.NodeArchive, "completed", userID, realName, &now)
 
-	database.CreateOperationLog(app.ID, userID, realName, string(role), "archive", "复核归档", string(oldStatus), string(models.StatusCompleted),
-		fmt.Sprintf("租约申请复核归档完成，备注：%s", req.Remark))
+	database.CreateOperationLog(app.ID, userID, realName, string(role), "archive", "复核归档完成", string(oldStatus), string(models.StatusCompleted),
+		fmt.Sprintf("租约申请复核归档完成，归档人：%s，备注：%s", realName, req.Remark))
 
 	c.JSON(http.StatusOK, gin.H{
 		"code":    200,
 		"message": "复核归档成功，租约申请流程全部完成",
-		"data":    gin.H{"id": app.ID, "status": models.StatusCompleted, "statusName": models.GetStatusName(models.StatusCompleted)},
+		"data":    gin.H{"id": app.ID, "status": models.StatusCompleted, "statusName": models.GetStatusName(models.StatusCompleted), "currentNode": models.NodeArchive, "currentNodeName": models.GetNodeName(models.NodeArchive)},
 	})
 }
 

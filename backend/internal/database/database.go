@@ -175,24 +175,50 @@ func seedApplications() {
 			ReviewedAt:     &now,
 		},
 		{
-			ApplicationNo:  fmt.Sprintf("ZY%s005", now.Format("200601")),
-			TenantName:     "租客五",
-			TenantIDCard:   "110101199105055678",
-			TenantPhone:    "13800138005",
-			ApartmentName:  "阳光公寓",
-			RoomNo:         "B-1101",
-			RoomArea:       48.0,
-			MonthlyRent:    3800,
-			LeaseStartDate: "2025-01-10",
-			LeaseEndDate:   "2026-01-09",
-			DepositAmount:  7600,
-			PaymentMethod:  "押二付一",
-			Status:         models.StatusCompleted,
-			CurrentNode:    models.NodeArchive,
-			Remark:         "全部流程完成，已归档",
-			CreatedBy:      registrar.ID,
-			CreatedByName:  registrar.RealName,
-			CompletedAt:    &now,
+			ApplicationNo:    fmt.Sprintf("ZY%s005", now.Format("200601")),
+			TenantName:       "租客五",
+			TenantIDCard:     "110101199105055678",
+			TenantPhone:      "13800138005",
+			ApartmentName:    "阳光公寓",
+			RoomNo:           "B-1101",
+			RoomArea:         48.0,
+			MonthlyRent:      3800,
+			LeaseStartDate:   "2025-01-10",
+			LeaseEndDate:     "2026-01-09",
+			DepositAmount:    7600,
+			PaymentMethod:    "押二付一",
+			Status:           models.StatusCompleted,
+			CurrentNode:      models.NodeArchive,
+			Remark:           "全部流程完成，已归档",
+			CreatedBy:        registrar.ID,
+			CreatedByName:    registrar.RealName,
+			CompletedAt:      &now,
+		},
+		{
+			ApplicationNo:    fmt.Sprintf("ZY%s006", now.Format("200601")),
+			TenantName:       "租客六",
+			TenantIDCard:     "110101198706066789",
+			TenantPhone:      "13800138006",
+			ApartmentName:    "安居公寓",
+			RoomNo:           "E-1808",
+			RoomArea:         55.0,
+			MonthlyRent:      4500,
+			LeaseStartDate:   "2025-02-15",
+			LeaseEndDate:     "2026-02-14",
+			DepositAmount:    9000,
+			PaymentMethod:    "押二付一",
+			Status:           models.StatusRoomConfirmed,
+			CurrentNode:      models.NodeArchive,
+			Remark:           "入住交接已完成，等待复核归档",
+			ReviewResult:     "资料齐全，符合长租公寓准入标准，同意办理",
+			ConfirmResult:    "房屋已腾空，水电煤气结清，门锁、家电完好，可交付",
+			HandoverResult:   "已交付房屋钥匙3把、门禁卡2张；水表读数128吨、电表读数2456度；租客确认验收无异议",
+			CreatedBy:        registrar.ID,
+			CreatedByName:    registrar.RealName,
+			SubmittedAt:      &now,
+			ReviewedAt:       &now,
+			ConfirmedAt:      &now,
+			HandedOverAt:     &now,
 		},
 	}
 
@@ -201,6 +227,32 @@ func seedApplications() {
 		createInitialNodeTimelines(&applications[i])
 		createInitialOperationLog(&applications[i], registrar)
 	}
+
+	// 为第6条样例申请（租客六，待复核归档状态）补充完整操作日志链条
+	auditor := models.User{}
+	DB.Where("role = ?", models.RoleAuditor).First(&auditor)
+	reviewer := models.User{}
+	DB.Where("role = ?", models.RoleReviewer).First(&reviewer)
+
+	app6 := models.LeaseApplication{}
+	DB.Where("tenant_name = ?", "租客六").First(&app6)
+	if app6.ID > 0 && auditor.ID > 0 {
+		CreateOperationLog(app6.ID, auditor.ID, auditor.RealName, string(models.RoleAuditor),
+			"review_approve", "审核通过",
+			string(models.StatusPendingReview), string(models.StatusPendingConfirm),
+			fmt.Sprintf("租约审核通过，审核意见：%s", app6.ReviewResult))
+
+		CreateOperationLog(app6.ID, auditor.ID, auditor.RealName, string(models.RoleAuditor),
+			"room_confirm", "房态确认",
+			string(models.StatusPendingConfirm), string(models.StatusPendingHandover),
+			fmt.Sprintf("房态确认完成，确认结果：%s", app6.ConfirmResult))
+
+		CreateOperationLog(app6.ID, auditor.ID, auditor.RealName, string(models.RoleAuditor),
+			"handover", "入住交接完成",
+			string(models.StatusPendingHandover), string(models.StatusRoomConfirmed),
+			fmt.Sprintf("入住交接完成，交接说明：%s", app6.HandoverResult))
+	}
+
 	log.Println("Seed applications created")
 }
 
@@ -248,7 +300,7 @@ func createInitialNodeTimelines(app *models.LeaseApplication) {
 			if nodeLimit.NodeType == models.NodeRoomConfirm {
 				timeline.Status = "processing"
 			}
-		case models.StatusRoomConfirmed, models.StatusPendingHandover:
+		case models.StatusPendingHandover:
 			if nodeLimit.NodeType == models.NodeContractSigning {
 				timeline.Status = "completed"
 				timeline.EndTime = app.SubmittedAt
@@ -262,6 +314,26 @@ func createInitialNodeTimelines(app *models.LeaseApplication) {
 				timeline.EndTime = app.ConfirmedAt
 			}
 			if nodeLimit.NodeType == models.NodeHandover {
+				timeline.Status = "processing"
+			}
+		case models.StatusRoomConfirmed:
+			if nodeLimit.NodeType == models.NodeContractSigning {
+				timeline.Status = "completed"
+				timeline.EndTime = app.SubmittedAt
+			}
+			if nodeLimit.NodeType == models.NodeReview {
+				timeline.Status = "completed"
+				timeline.EndTime = app.ReviewedAt
+			}
+			if nodeLimit.NodeType == models.NodeRoomConfirm {
+				timeline.Status = "completed"
+				timeline.EndTime = app.ConfirmedAt
+			}
+			if nodeLimit.NodeType == models.NodeHandover {
+				timeline.Status = "completed"
+				timeline.EndTime = app.HandedOverAt
+			}
+			if nodeLimit.NodeType == models.NodeArchive {
 				timeline.Status = "processing"
 			}
 		case models.StatusCompleted:

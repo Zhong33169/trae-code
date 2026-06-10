@@ -352,7 +352,22 @@ export default function ApplicationDetail() {
                   </div>
                 </div>
               )}
-              {app.remark && (
+              {app.status === 'completed' && (
+                <div className="section">
+                  <div className="section-title">📁 复核归档</div>
+                  <div className="data-list">
+                    <div className="data-item"><span className="data-label">归档人</span><span className="data-value">{app.archivedByName || '-'}</span></div>
+                    <div className="data-item"><span className="data-label">归档时间</span><span className="data-value">{app.completedAt ? formatDate(app.completedAt) : '-'}</span></div>
+                    {app.remark && (
+                      <div className="data-item" style={{ gridColumn: 'span 2' }}>
+                        <span className="data-label">归档备注</span>
+                        <span className="data-value">{app.remark}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+              {app.remark && app.status !== 'completed' && (
                 <div className="section">
                   <div className="section-title">📝 备注说明</div>
                   <div style={{ padding: '12px', background: '#f9fafb', borderRadius: '6px' }}>{app.remark}</div>
