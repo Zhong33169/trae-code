@@ -47,6 +47,9 @@ export interface LeaseApplication {
   isOverdue: boolean
   overdueReason: string
   followUpAction: string
+  hasOverdueBlocked: boolean
+  overdueBlockedCount: number
+  overdueSupplementedCount: number
   remark: string
   returnReason: string
   rejectReason: string
@@ -73,6 +76,7 @@ export interface LeaseApplication {
   attachments?: Attachment[]
   nodeTimelines?: NodeTimeline[]
   operationLogs?: OperationLog[]
+  overdueAudits?: OverdueAudit[]
 }
 
 export interface Attachment {
@@ -123,6 +127,28 @@ export interface OperationLog {
   createdAt: string
 }
 
+export type AuditType = 'blocked' | 'supplemented'
+
+export interface OverdueAudit {
+  id: number
+  applicationId: number
+  applicationNo: string
+  nodeType: NodeType
+  nodeName: string
+  auditType: AuditType
+  blockedReason: string
+  overdueReason: string
+  followUpAction: string
+  handlerId: number
+  handlerName: string
+  handlerRole: string
+  statusSnapshot: string
+  oldStatus: string
+  newStatus: string
+  proceedAction: string
+  createdAt: string
+}
+
 export interface NodeTimeLimit {
   nodeType: NodeType
   nodeName: string
@@ -148,6 +174,13 @@ export interface Statistics {
   newThisMonth: number
   completedThisMonth: number
   overdueCount: number
+  overdueBlockedCount: number
+  overdueSupplementedCount: number
+  overdueBlockedByNode: Array<{
+    nodeType: string
+    nodeName: string
+    blocked: number
+  }>
   statusStats: Record<string, number>
   statusNames: Record<string, string>
   nodeStats: Record<string, number>

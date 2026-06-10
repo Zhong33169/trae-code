@@ -141,6 +141,33 @@ type OperationLog struct {
 	CreatedAt     time.Time `json:"createdAt"`
 }
 
+type AuditType string
+
+const (
+	AuditTypeBlocked     AuditType = "blocked"
+	AuditTypeSupplemented AuditType = "supplemented"
+)
+
+type OverdueAudit struct {
+	ID              uint                `gorm:"primaryKey" json:"id"`
+	ApplicationID   uint                `gorm:"not null;index" json:"applicationId"`
+	ApplicationNo   string              `gorm:"size:50;not null" json:"applicationNo"`
+	NodeType        NodeType            `gorm:"size:30;not null;index" json:"nodeType"`
+	NodeName        string              `gorm:"size:50;not null" json:"nodeName"`
+	AuditType       AuditType           `gorm:"size:20;not null;index" json:"auditType"`
+	BlockedReason   string              `gorm:"size:500" json:"blockedReason"`
+	OverdueReason   string              `gorm:"size:500" json:"overdueReason"`
+	FollowUpAction  string              `gorm:"size:500" json:"followUpAction"`
+	HandlerID       uint                `gorm:"not null" json:"handlerId"`
+	HandlerName     string              `gorm:"size:50;not null" json:"handlerName"`
+	HandlerRole     string              `gorm:"size:20;not null" json:"handlerRole"`
+	StatusSnapshot  string              `gorm:"size:2000" json:"statusSnapshot"`
+	OldStatus       string              `gorm:"size:30" json:"oldStatus"`
+	NewStatus       string              `gorm:"size:30" json:"newStatus"`
+	ProceedAction   string              `gorm:"size:100" json:"proceedAction"`
+	CreatedAt       time.Time           `json:"createdAt"`
+}
+
 type NodeTimeLimit struct {
 	NodeType       NodeType `json:"nodeType"`
 	NodeName       string   `json:"nodeName"`

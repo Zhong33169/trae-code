@@ -26,6 +26,7 @@ export default function ApplicationList() {
     keyword: searchParams.get('keyword') || '',
     isOverdue: searchParams.get('isOverdue') || '',
     currentNode: searchParams.get('currentNode') || '',
+    hasOverdueBlocked: searchParams.get('hasOverdueBlocked') || '',
   })
 
   const statusOptions: Array<{ v: string; l: string }> = [
@@ -55,7 +56,7 @@ export default function ApplicationList() {
       return
     }
     loadList()
-  }, [page, filters.status, filters.isOverdue, filters.currentNode, filters.keyword])
+  }, [page, filters.status, filters.isOverdue, filters.currentNode, filters.keyword, filters.hasOverdueBlocked])
 
   useEffect(() => {
     loadList()
@@ -70,6 +71,7 @@ export default function ApplicationList() {
         keyword: filters.keyword,
         isOverdue: filters.isOverdue,
         currentNode: filters.currentNode,
+        hasOverdueBlocked: filters.hasOverdueBlocked,
       })
       setList(res.items || [])
       setTotal(res.total || 0)
@@ -87,12 +89,13 @@ export default function ApplicationList() {
     if (filters.keyword) params.keyword = filters.keyword
     if (filters.isOverdue) params.isOverdue = filters.isOverdue
     if (filters.currentNode) params.currentNode = filters.currentNode
+    if (filters.hasOverdueBlocked) params.hasOverdueBlocked = filters.hasOverdueBlocked
     setSearchParams(params)
     loadList()
   }
 
   function resetFilters() {
-    setFilters({ status: '', keyword: '', isOverdue: '', currentNode: '' })
+    setFilters({ status: '', keyword: '', isOverdue: '', currentNode: '', hasOverdueBlocked: '' })
     setPage(1)
     setSearchParams({})
   }
@@ -192,6 +195,14 @@ export default function ApplicationList() {
             </select>
           </div>
           <div className="filter-item">
+            <label className="filter-label">审计拦截</label>
+            <select className="form-control" value={filters.hasOverdueBlocked} onChange={e => setFilters({ ...filters, hasOverdueBlocked: e.target.value })}>
+              <option value="">全部</option>
+              <option value="true">有拦截记录</option>
+              <option value="false">无拦截记录</option>
+            </select>
+          </div>
+          <div className="filter-item">
             <label className="filter-label">关键字搜索</label>
             <input
               type="text"
@@ -225,6 +236,14 @@ export default function ApplicationList() {
               <option value="">全部</option>
               <option value="true">已超时</option>
               <option value="false">正常</option>
+            </select>
+          </div>
+          <div className="filter-item">
+            <label className="filter-label">审计拦截</label>
+            <select className="form-control" value={filters.hasOverdueBlocked} onChange={e => setFilters({ ...filters, hasOverdueBlocked: e.target.value })}>
+              <option value="">全部</option>
+              <option value="true">有拦截记录</option>
+              <option value="false">无拦截记录</option>
             </select>
           </div>
           <div className="filter-item">
@@ -279,6 +298,7 @@ export default function ApplicationList() {
                   <th>当前节点</th>
                   <th>状态</th>
                   <th>超时</th>
+                  <th>审计</th>
                   <th>登记人</th>
                   <th>创建时间</th>
                   <th style={{ width: '240px' }}>操作</th>
@@ -303,6 +323,23 @@ export default function ApplicationList() {
                         <span className="badge badge-red" title={app.overdueReason}>⚠️ 已超时</span>
                       ) : (
                         <span className="badge badge-green">正常</span>
+                      )}
+                    </td>
+                    <td>
+                      {(app.overdueBlockedCount || 0) > 0 && (
+                        <span className="badge badge-red" title="超时拦截次数" style={{ marginBottom: '4px' }}>
+                          🚫 拦截 {app.overdueBlockedCount}
+                        </span>
+                      )}
+                      {(app.overdueSupplementedCount || 0) > 0 && (
+                        <div>
+                          <span className="badge badge-green" title="超时补录次数">
+                            ✅ 补录 {app.overdueSupplementedCount}
+                          </span>
+                        </div>
+                      )}
+                      {!app.overdueBlockedCount && !app.overdueSupplementedCount && (
+                        <span style={{ color: '#9ca3af', fontSize: '12px' }}>-</span>
                       )}
                     </td>
                     <td>{app.createdByName}</td>

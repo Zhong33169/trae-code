@@ -66,6 +66,43 @@ func GetStatistics(c *gin.Context) {
 	var overdueCount int64
 	overdueQuery.Where("is_overdue = ?", true).Count(&overdueCount)
 
+	auditQuery := database.DB.Model(&models.OverdueAudit{})
+	if role == models.RoleRegistrar {
+		auditQuery = auditQuery.Where(
+			"application_id IN (SELECT id FROM lease_applications WHERE created_by = ?)",
+			userID,
+		)
+	}
+	var overdueBlockedCount int64
+	var overdueSupplementedCount int64
+	auditQuery.Where("audit_type = ?", string(models.AuditTypeBlocked)).Count(&overdueBlockedCount)
+	auditQuery = database.DB.Model(&models.OverdueAudit{})
+	if role == models.RoleRegistrar {
+		auditQuery = auditQuery.Where(
+			"application_id IN (SELECT id FROM lease_applications WHERE created_by = ?)",
+			userID,
+		)
+	}
+	auditQuery.Where("audit_type = ?", string(models.AuditTypeSupplemented)).Count(&overdueSupplementedCount)
+
+	auditByNode := []struct {
+		NodeType string `json:"nodeType"`
+		NodeName string `json:"nodeName"`
+		Blocked  int64  `json:"blocked"`
+	}{}
+	auditQuery = database.DB.Model(&models.OverdueAudit{})
+	if role == models.RoleRegistrar {
+		auditQuery = auditQuery.Where(
+			"application_id IN (SELECT id FROM lease_applications WHERE created_by = ?)",
+			userID,
+		)
+	}
+	auditQuery.
+		Select("node_type as node_type, node_name as node_name, COUNT(*) as blocked").
+		Where("audit_type = ?", string(models.AuditTypeBlocked)).
+		Group("node_type, node_name").
+		Scan(&auditByNode)
+
 	now := time.Now()
 	thirtyDaysAgo := now.AddDate(0, 0, -30)
 
@@ -158,6 +195,9 @@ func GetStatistics(c *gin.Context) {
 			"newThisMonth":     newThisMonth,
 			"completedThisMonth": completedThisMonth,
 			"overdueCount":     overdueCount,
+			"overdueBlockedCount":     overdueBlockedCount,
+			"overdueSupplementedCount": overdueSupplementedCount,
+			"overdueBlockedByNode":     auditByNode,
 			"statusStats": gin.H{
 				"draft":            statusMap[string(models.StatusDraft)],
 				"pendingReview":    statusMap[string(models.StatusPendingReview)],

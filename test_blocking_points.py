@@ -380,12 +380,195 @@ if test_app:
             print(f'\n  最近 {len(logs)} 条操作日志:')
             sync_log_found = False
             for l in logs[:5]:
-                print(f'    [{l["operationType"]}] {l.get("remark","")[:60]} by {l["operatorName"]}')
+                print(f'    [{l["operationType"]}] {l.get("remark","")[:60]} by {l["userName"]}')
                 if l.get('operationType') == 'overdue_record_sync':
                     sync_log_found = True
             check('操作日志有overdue_record_sync类型', sync_log_found)
         except Exception as e:
             print(f'  日志读取异常: {e}')
+
+logout()
+
+print()
+print('='*60)
+print('PART 3: 超时拦截审计闭环测试')
+print('='*60)
+
+# 测试步骤：
+# 1. 创建新申请 → 提交审核
+# 2. 标记审核节点超时
+# 3. 不带超时原因尝试审核 → 应该被拦截 → 检查 operation_logs overdue_blocked + node_timelines.remark + overdue_audits.blocked
+# 4. 再次不带超时原因尝试审核 → 再次拦截 → 检查拦截次数累加
+# 5. 带超时原因审核 → 成功 → 检查 overdue_audits.supplemented
+# 6. 检查列表接口 hasOverdueBlocked 过滤和 overdueBlockedCount 字段
+# 7. 检查详情接口 overdueAudits 数组和统计
+# 8. 检查统计接口 overdueBlockedCount/overdueSupplementedCount/overdueBlockedByNode
+
+import sqlite3
+db_path = '/Users/echo/Desktop/zqzl/zhong33169/trae-code-3/backend/data/app.db'
+
+# 步骤 1: registrar1 创建新申请并提交审核
+print('\n--- Step 1: registrar1 创建新申请并提交审核 ---')
+login('registrar1', '123456')
+audit_app = create_app('审计测试租客')
+print(f'  创建审计测试申请: id={audit_app["id"]} no={audit_app["applicationNo"]}')
+r = submit_app(audit_app['id'], '提交审计测试')
+dump('提交审核', r)
+check('提交审核成功', r.status_code == 200)
+logout()
+
+# 步骤 2: auditor1 登录，将审核节点标记为超时
+print('\n--- Step 2: auditor1 登录，将审核节点标记为超时 ---')
+login('auditor1', '123456')
+detail = get_app_detail(audit_app['id'])
+print(f'  当前状态: {detail["status"]} 节点: {detail["currentNode"]}')
+check('状态为 pending_review', detail['status'] == 'pending_review')
+
+conn = sqlite3.connect(db_path)
+cur = conn.cursor()
+cur.execute('UPDATE node_timelines SET is_overdue = 1 WHERE application_id = ? AND node_type = ?', 
+            (audit_app['id'], detail['currentNode']))
+print(f'  标记 node_timelines.is_overdue=1, 影响 {cur.rowcount} 行')
+conn.commit()
+conn.close()
+
+# 步骤 3: 不带超时原因尝试审核 → 应该被拦截
+print('\n--- Step 3: 不带超时原因尝试审核 → 拦截，检查三表写入 ---')
+r = review_app(audit_app['id'], result='审核通过')  # 不带超时记录
+s3 = dump('审核(无超时记录)被拦截', r)
+check('第一次拦截成功', s3 == 400)
+
+# 直接查数据库验证三表写入
+conn = sqlite3.connect(db_path)
+cur = conn.cursor()
+
+# 检查 operation_logs
+cur.execute('SELECT operation_type, operation_name, detail FROM operation_logs WHERE application_id = ? AND operation_type = ? ORDER BY id DESC LIMIT 1', 
+            (audit_app['id'], 'overdue_blocked'))
+log = cur.fetchone()
+print(f'  operation_logs.overdue_blocked: {log}')
+check('operation_logs 有 overdue_blocked 记录', log is not None)
+if log:
+    check('operation_logs.operation_name 正确', log[1] == '超时拦截')
+
+# 检查 node_timelines.remark
+cur.execute('SELECT remark FROM node_timelines WHERE application_id = ? AND node_type = ?', 
+            (audit_app['id'], 'review'))
+tl_remark = cur.fetchone()
+print(f'  node_timelines.remark: {tl_remark[0][:80] if tl_remark and tl_remark[0] else None}')
+check('node_timelines.remark 包含拦截记录', 
+      tl_remark and tl_remark[0] and '🚫 [超时拦截' in tl_remark[0])
+
+# 检查 overdue_audits.blocked
+cur.execute('SELECT audit_type, blocked_reason, handler_name, old_status, new_status FROM overdue_audits WHERE application_id = ? AND audit_type = ? ORDER BY id DESC LIMIT 1', 
+            (audit_app['id'], 'blocked'))
+audit_blocked = cur.fetchone()
+print(f'  overdue_audits.blocked: {audit_blocked}')
+check('overdue_audits 有 blocked 记录', audit_blocked is not None)
+if audit_blocked:
+    check('audit_type 正确', audit_blocked[0] == 'blocked')
+    check('blocked_reason 非空', bool(audit_blocked[1]))
+    check('handler_name 正确', audit_blocked[2] == '李审核')
+    check('old_status 正确', audit_blocked[3] == 'pending_review')
+    check('new_status 正确', audit_blocked[4] == 'pending_review')
+
+# 检查 status_snapshot
+cur.execute('SELECT status_snapshot FROM overdue_audits WHERE application_id = ? AND audit_type = ? ORDER BY id DESC LIMIT 1', 
+            (audit_app['id'], 'blocked'))
+snapshot = cur.fetchone()
+print(f'  status_snapshot: {snapshot[0] if snapshot else None}')
+check('status_snapshot 包含 isOverdue', snapshot and snapshot[0] and '"isOverdue":true' in snapshot[0])
+
+conn.close()
+
+# 步骤 4: 再次不带超时原因尝试审核 → 再次拦截，检查拦截次数累加
+print('\n--- Step 4: 再次尝试审核 → 第二次拦截，检查次数累加 ---')
+r = review_app(audit_app['id'], result='审核通过')  # 再次不带超时记录
+s4 = dump('第二次审核被拦截', r)
+check('第二次拦截成功', s4 == 400)
+
+# 查详情接口验证拦截统计
+detail2 = get_app_detail(audit_app['id'])
+print(f'  详情 overdueBlockedCount={detail2.get("overdueBlockedCount")}')
+print(f'  详情 overdueSupplementedCount={detail2.get("overdueSupplementedCount")}')
+print(f'  详情 overdueAudits 数量={len(detail2.get("overdueAudits", []))}')
+check('详情 overdueBlockedCount=2', detail2.get('overdueBlockedCount') == 2)
+check('详情 hasOverdueBlocked=true', detail2.get('hasOverdueBlocked') == True)
+
+# 检查 overdueAudits 数组内容
+audits = detail2.get('overdueAudits', [])
+blocked_audits = [a for a in audits if a['auditType'] == 'blocked']
+check('overdueAudits 有 2 条 blocked 记录', len(blocked_audits) == 2)
+if blocked_audits:
+    check('blocked_audit.nodeType 正确', blocked_audits[0]['nodeType'] == 'review')
+    check('blocked_audit.proceedAction 正确', blocked_audits[0]['proceedAction'] == '审核操作')
+    check('blocked_audit.handlerRole 正确', blocked_audits[0]['handlerRole'] == 'auditor')
+
+# 步骤 5: 带超时原因审核 → 成功，检查 supplemented 记录
+print('\n--- Step 5: 带超时原因审核 → 成功，检查 supplemented 记录 ---')
+r = review_app(audit_app['id'], result='审核通过',
+               overdue_reason='审计测试：租客外出旅游，资料延迟提交',
+               follow_up='已联系租客，资料已补齐，优先审核通过')
+s5 = dump('审核(带超时补录)成功', r)
+check('带补录审核成功', s5 == 200)
+
+# 检查数据库 supplemented 记录
+conn = sqlite3.connect(db_path)
+cur = conn.cursor()
+cur.execute('SELECT audit_type, overdue_reason, follow_up_action, handler_name, old_status, new_status FROM overdue_audits WHERE application_id = ? AND audit_type = ? ORDER BY id DESC LIMIT 1', 
+            (audit_app['id'], 'supplemented'))
+audit_supp = cur.fetchone()
+print(f'  overdue_audits.supplemented: {audit_supp}')
+check('overdue_audits 有 supplemented 记录', audit_supp is not None)
+if audit_supp:
+    check('audit_type 正确', audit_supp[0] == 'supplemented')
+    check('overdue_reason 正确', '审计测试' in audit_supp[1])
+    check('follow_up_action 正确', '已联系租客' in audit_supp[2])
+    check('old_status 正确', audit_supp[4] == 'pending_review')
+    check('new_status 正确', audit_supp[5] == 'pending_confirm')
+
+# 验证详情接口 supplemented 统计
+detail3 = get_app_detail(audit_app['id'])
+print(f'  详情 overdueBlockedCount={detail3.get("overdueBlockedCount")} overdueSupplementedCount={detail3.get("overdueSupplementedCount")}')
+check('详情 overdueSupplementedCount=1', detail3.get('overdueSupplementedCount') == 1)
+
+conn.close()
+
+# 步骤 6: 检查列表接口 hasOverdueBlocked 过滤和审计字段
+print('\n--- Step 6: 检查列表接口 hasOverdueBlocked 过滤 ---')
+# 无过滤
+apps_all = get_app_list()
+print(f'  无过滤列表 {len(apps_all)} 条')
+# 过滤 hasOverdueBlocked=true
+r = s.get(f'{BASE}/applications?hasOverdueBlocked=true')
+apps_blocked = r.json()['data']['items']
+print(f'  hasOverdueBlocked=true 列表 {len(apps_blocked)} 条')
+check('hasOverdueBlocked 过滤有效', len(apps_blocked) > 0 and len(apps_blocked) <= len(apps_all))
+
+# 检查列表项审计字段
+test_app_in_list = next((a for a in apps_blocked if a['id'] == audit_app['id']), None)
+if test_app_in_list:
+    print(f'  列表项 overdueBlockedCount={test_app_in_list.get("overdueBlockedCount")}')
+    print(f'  列表项 overdueSupplementedCount={test_app_in_list.get("overdueSupplementedCount")}')
+    check('列表项 hasOverdueBlocked=true', test_app_in_list.get('hasOverdueBlocked') == True)
+    check('列表项 overdueBlockedCount 存在', test_app_in_list.get('overdueBlockedCount') is not None)
+
+# 步骤 7: 检查统计接口审计数据
+print('\n--- Step 7: 检查统计接口审计数据 ---')
+r = s.get(f'{BASE}/stats/overview')
+stats = r.json()['data']
+print(f'  统计 overdueBlockedCount={stats.get("overdueBlockedCount")}')
+print(f'  统计 overdueSupplementedCount={stats.get("overdueSupplementedCount")}')
+print(f'  统计 overdueBlockedByNode={stats.get("overdueBlockedByNode")}')
+check('统计 overdueBlockedCount >= 2', stats.get('overdueBlockedCount', 0) >= 2)
+check('统计 overdueSupplementedCount >= 1', stats.get('overdueSupplementedCount', 0) >= 1)
+check('统计 overdueBlockedByNode 是数组', isinstance(stats.get('overdueBlockedByNode'), list))
+if stats.get('overdueBlockedByNode'):
+    review_blocked = next((n for n in stats['overdueBlockedByNode'] if n['nodeType'] == 'review'), None)
+    check('review 节点拦截统计存在', review_blocked is not None)
+    if review_blocked:
+        check('review 节点拦截数 >= 2', review_blocked.get('blocked', 0) >= 2)
+        check('review 节点名称正确', review_blocked.get('nodeName') == '租约审核')
 
 logout()
 

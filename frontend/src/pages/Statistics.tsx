@@ -84,6 +84,20 @@ export default function StatisticsPage() {
           </div>
           <div className="stat-card-icon yellow">✅</div>
         </div>
+        <div className="stat-card">
+          <div className="stat-card-info">
+            <h3>超时拦截次数</h3>
+            <div className="stat-card-value" style={{ color: (stats.overdueBlockedCount || 0) > 0 ? '#dc2626' : undefined }}>{stats.overdueBlockedCount || 0}</div>
+          </div>
+          <div className="stat-card-icon red">🚫</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-card-info">
+            <h3>超时补录次数</h3>
+            <div className="stat-card-value" style={{ color: (stats.overdueSupplementedCount || 0) > 0 ? '#059669' : undefined }}>{stats.overdueSupplementedCount || 0}</div>
+          </div>
+          <div className="stat-card-icon green">✅</div>
+        </div>
       </div>
 
       <div className="grid-2 mb-24">
@@ -187,6 +201,44 @@ export default function StatisticsPage() {
               )
             })}
           </div>
+        </div>
+      </div>
+
+      <div className="card mb-24">
+        <div className="card-header">
+          <div className="card-title">⏰ 超时拦截审计统计</div>
+        </div>
+        <div className="card-body">
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '16px', marginBottom: '20px' }}>
+            {[
+              { k: 'contract_signing', n: '租客签约', c: '#3b82f6', icon: '📝' },
+              { k: 'review', n: '租约审核', c: '#8b5cf6', icon: '✅' },
+              { k: 'room_confirm', n: '房态确认', c: '#f59e0b', icon: '🏠' },
+              { k: 'handover', n: '入住交接', c: '#0ea5e9', icon: '🔑' },
+              { k: 'archive', n: '复核归档', c: '#10b981', icon: '📁' },
+            ].map(node => {
+              const nodeStat = (stats.overdueBlockedByNode || []).find((s: any) => s.nodeType === node.k)
+              const blocked = nodeStat?.blocked || 0
+              return (
+                <Link
+                  key={node.k}
+                  to={`/applications?currentNode=${node.k}&hasOverdueBlocked=true`}
+                  style={{ display: 'block', padding: '16px', borderRadius: '8px', border: '2px solid #fee2e2', background: blocked > 0 ? '#fef2f2' : '#fafafa', color: 'inherit', transition: 'all 0.2s' }}
+                  className="stat-node-card"
+                >
+                  <div style={{ fontSize: '24px', marginBottom: '8px' }}>{node.icon}</div>
+                  <div style={{ fontSize: '13px', fontWeight: 600, marginBottom: '4px', color: node.c }}>{node.n}</div>
+                  <div style={{ fontSize: '22px', fontWeight: 700, color: blocked > 0 ? '#dc2626' : '#9ca3af' }}>{blocked}</div>
+                  <div style={{ fontSize: '11px', color: '#6b7280' }}>拦截次数</div>
+                </Link>
+              )
+            })}
+          </div>
+          {(stats.overdueBlockedCount || 0) === 0 && (stats.overdueSupplementedCount || 0) === 0 && (
+            <div style={{ textAlign: 'center', padding: '24px', color: '#9ca3af', fontSize: '13px' }}>
+              暂无超时拦截/补录记录
+            </div>
+          )}
         </div>
       </div>
 

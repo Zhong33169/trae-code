@@ -1,6 +1,7 @@
 package database
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -31,6 +32,7 @@ func InitDB() {
 		&models.Attachment{},
 		&models.NodeTimeline{},
 		&models.OperationLog{},
+		&models.OverdueAudit{},
 	)
 
 	seedUsers()
@@ -404,6 +406,54 @@ func CreateOperationLog(appID uint, userID uint, userName string, userRole strin
 		Detail:        detail,
 	}
 	DB.Create(&log)
+}
+
+func CreateOverdueAudit(
+	app *models.LeaseApplication,
+	timeline *models.NodeTimeline,
+	nodeType models.NodeType,
+	auditType models.AuditType,
+	blockedReason string,
+	overdueReason string,
+	followUpAction string,
+	handlerID uint,
+	handlerName string,
+	handlerRole string,
+	proceedAction string,
+	newStatus string,
+) {
+	isOverdue := app.IsOverdue
+	if timeline != nil {
+		isOverdue = timeline.IsOverdue
+	}
+	snapshot := map[string]interface{}{
+		"status":         app.Status,
+		"statusName":     models.GetStatusName(app.Status),
+		"currentNode":    app.CurrentNode,
+		"isOverdue":      isOverdue,
+		"overdueReason":  app.OverdueReason,
+		"followUpAction": app.FollowUpAction,
+	}
+	snapshotJSON, _ := json.Marshal(snapshot)
+
+	audit := models.OverdueAudit{
+		ApplicationID:  app.ID,
+		ApplicationNo:  app.ApplicationNo,
+		NodeType:       nodeType,
+		NodeName:       models.GetNodeName(nodeType),
+		AuditType:      auditType,
+		BlockedReason:  blockedReason,
+		OverdueReason:  overdueReason,
+		FollowUpAction: followUpAction,
+		HandlerID:      handlerID,
+		HandlerName:    handlerName,
+		HandlerRole:    handlerRole,
+		StatusSnapshot: string(snapshotJSON),
+		OldStatus:      string(app.Status),
+		NewStatus:      newStatus,
+		ProceedAction:  proceedAction,
+	}
+	DB.Create(&audit)
 }
 
 func UpdateNodeTimeline(appID uint, nodeType models.NodeType, status string, handlerUserID uint, handlerName string, endTime *time.Time) {

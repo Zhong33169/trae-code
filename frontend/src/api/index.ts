@@ -29,6 +29,7 @@ export const applicationApi = {
     keyword?: string
     isOverdue?: string
     currentNode?: string
+    hasOverdueBlocked?: string
   }) => get<PageResult<Partial<LeaseApplication>>>('/applications', params),
 
   getDetail: (id: number) => get<LeaseApplication>(`/applications/${id}`),

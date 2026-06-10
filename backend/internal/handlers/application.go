@@ -13,6 +13,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 type CreateApplicationRequest struct {
@@ -102,6 +103,7 @@ func checkNodeOverdueBeforeProceed(
 	reqOverdueReason string,
 	reqFollowUpAction string,
 	actionName string,
+	targetStatus models.ApplicationStatus,
 ) (bool, string) {
 	var timeline models.NodeTimeline
 	result := database.DB.Where("application_id = ? AND node_type = ?", app.ID, nodeType).First(&timeline)
@@ -119,26 +121,62 @@ func checkNodeOverdueBeforeProceed(
 	hasReqFields := reqOverdueReason != "" && reqFollowUpAction != ""
 
 	if !hasExisting && !hasReqFields {
-		return false, fmt.Sprintf(
+		blockedReason := fmt.Sprintf(
 			"当前节点【%s】已超时，必须先记录【超时原因】和【后续处理措施】才能推进%s。可通过详情页【⏰ 记录超时处理】按钮补录，或在本次请求中同步提交。",
 			models.GetNodeName(nodeType), actionName,
 		)
+
+		database.CreateOperationLog(
+			app.ID, userID, realName, string(role),
+			"overdue_blocked", "超时拦截",
+			string(app.Status), string(app.Status),
+			fmt.Sprintf("尝试推进%s被拦截：%s", actionName, blockedReason),
+		)
+
+		database.DB.Model(&models.NodeTimeline{}).
+			Where("application_id = ? AND node_type = ?", app.ID, nodeType).
+			UpdateColumn("remark", gorm.Expr(
+				"COALESCE(remark, '') || ?",
+				fmt.Sprintf("\n🚫 [超时拦截 %s] 操作人:%s 角色:%s 动作:%s 原因:%s",
+					time.Now().Format("2006-01-02 15:04:05"),
+					realName, role, actionName, blockedReason,
+				),
+			))
+
+		database.CreateOverdueAudit(
+			app, &timeline, nodeType,
+			models.AuditTypeBlocked,
+			blockedReason,
+			"", "",
+			userID, realName, string(role),
+			actionName,
+			string(app.Status),
+		)
+
+		return false, blockedReason
 	}
 
 	if hasReqFields && !hasExisting {
-		now := time.Now()
 		database.SetNodeOverdueRecord(app.ID, nodeType, reqOverdueReason, reqFollowUpAction)
 		database.DB.Model(&models.LeaseApplication{}).Where("id = ?", app.ID).Updates(map[string]interface{}{
-			"overdue_reason":  reqOverdueReason,
+			"overdue_reason":   reqOverdueReason,
 			"follow_up_action": reqFollowUpAction,
 		})
 		database.CreateOperationLog(
 			app.ID, userID, realName, string(role),
 			"overdue_record_sync", "超时记录(推进时补录)",
-			string(app.Status), string(app.Status),
+			string(app.Status), string(targetStatus),
 			fmt.Sprintf("推进%s前补录超时记录：原因=%s，后续措施=%s", actionName, reqOverdueReason, reqFollowUpAction),
 		)
-		_ = now
+		database.CreateOverdueAudit(
+			app, &timeline, nodeType,
+			models.AuditTypeSupplemented,
+			"",
+			reqOverdueReason, reqFollowUpAction,
+			userID, realName, string(role),
+			actionName,
+			string(targetStatus),
+		)
 	}
 
 	return true, ""
@@ -153,12 +191,24 @@ func GetApplicationList(c *gin.Context) {
 	keyword := c.Query("keyword")
 	isOverdue := c.Query("isOverdue")
 	currentNode := c.Query("currentNode")
+	hasOverdueBlocked := c.Query("hasOverdueBlocked")
 
 	query := database.DB.Model(&models.LeaseApplication{})
 
 	switch role {
 	case models.RoleRegistrar:
 		query = query.Where("created_by = ?", userID)
+	}
+
+	if hasOverdueBlocked == "true" || hasOverdueBlocked == "false" {
+		subQuery := database.DB.Table("overdue_audits").
+			Select("DISTINCT application_id").
+			Where("audit_type = ?", string(models.AuditTypeBlocked))
+		if hasOverdueBlocked == "true" {
+			query = query.Where("id IN (?)", subQuery)
+		} else {
+			query = query.Where("id NOT IN (?)", subQuery)
+		}
 	}
 
 	if status != "" {
@@ -190,24 +240,28 @@ func GetApplicationList(c *gin.Context) {
 
 	items := make([]map[string]interface{}, 0)
 	for _, app := range applications {
+		var blockedCount int64
+		database.DB.Model(&models.OverdueAudit{}).Where("application_id = ? AND audit_type = ?", app.ID, models.AuditTypeBlocked).Count(&blockedCount)
 		item := map[string]interface{}{
-			"id":               app.ID,
-			"applicationNo":    app.ApplicationNo,
-			"tenantName":       app.TenantName,
-			"tenantPhone":      app.TenantPhone,
-			"apartmentName":    app.ApartmentName,
-			"roomNo":           app.RoomNo,
-			"monthlyRent":      app.MonthlyRent,
-			"status":           app.Status,
-			"statusName":       models.GetStatusName(app.Status),
-			"currentNode":      app.CurrentNode,
-			"currentNodeName":  models.GetNodeName(app.CurrentNode),
-			"isOverdue":        app.IsOverdue,
-			"overdueReason":    app.OverdueReason,
-			"followUpAction":   app.FollowUpAction,
-			"createdByName":    app.CreatedByName,
-			"createdAt":        app.CreatedAt,
-			"updatedAt":        app.UpdatedAt,
+			"id":                    app.ID,
+			"applicationNo":         app.ApplicationNo,
+			"tenantName":            app.TenantName,
+			"tenantPhone":           app.TenantPhone,
+			"apartmentName":         app.ApartmentName,
+			"roomNo":                app.RoomNo,
+			"monthlyRent":           app.MonthlyRent,
+			"status":                app.Status,
+			"statusName":            models.GetStatusName(app.Status),
+			"currentNode":           app.CurrentNode,
+			"currentNodeName":       models.GetNodeName(app.CurrentNode),
+			"isOverdue":             app.IsOverdue,
+			"overdueReason":         app.OverdueReason,
+			"followUpAction":        app.FollowUpAction,
+			"hasOverdueBlocked":     blockedCount > 0,
+			"overdueBlockedCount":   blockedCount,
+			"createdByName":         app.CreatedByName,
+			"createdAt":             app.CreatedAt,
+			"updatedAt":             app.UpdatedAt,
 		}
 		items = append(items, item)
 	}
@@ -248,53 +302,69 @@ func GetApplicationDetail(c *gin.Context) {
 	database.DB.Order("id ASC").Where("application_id = ?", app.ID).Find(&app.NodeTimelines)
 	database.DB.Order("created_at DESC").Where("application_id = ?", app.ID).Find(&app.Attachments)
 
+	var overdueAudits []models.OverdueAudit
+	database.DB.Order("created_at DESC").Where("application_id = ?", app.ID).Find(&overdueAudits)
+
+	var hasOverdueBlocked bool
+	var overdueBlockedCount int64
+	var overdueSupplementedCount int64
+	database.DB.Model(&models.OverdueAudit{}).Where("application_id = ? AND audit_type = ?", app.ID, models.AuditTypeBlocked).Count(&overdueBlockedCount)
+	database.DB.Model(&models.OverdueAudit{}).Where("application_id = ? AND audit_type = ?", app.ID, models.AuditTypeSupplemented).Count(&overdueSupplementedCount)
+	if overdueBlockedCount > 0 {
+		hasOverdueBlocked = true
+	}
+
 	response := map[string]interface{}{
-		"id":               app.ID,
-		"applicationNo":    app.ApplicationNo,
-		"tenantName":       app.TenantName,
-		"tenantIdCard":     app.TenantIDCard,
-		"tenantPhone":      app.TenantPhone,
-		"apartmentName":    app.ApartmentName,
-		"roomNo":           app.RoomNo,
-		"roomArea":         app.RoomArea,
-		"monthlyRent":      app.MonthlyRent,
-		"leaseStartDate":   app.LeaseStartDate,
-		"leaseEndDate":     app.LeaseEndDate,
-		"depositAmount":    app.DepositAmount,
-		"paymentMethod":    app.PaymentMethod,
-		"status":           app.Status,
-		"statusName":       models.GetStatusName(app.Status),
-		"currentNode":      app.CurrentNode,
-		"currentNodeName":  models.GetNodeName(app.CurrentNode),
-		"isOverdue":        app.IsOverdue,
-		"overdueReason":    app.OverdueReason,
-		"followUpAction":   app.FollowUpAction,
-		"remark":           app.Remark,
-		"returnReason":     app.ReturnReason,
-		"rejectReason":     app.RejectReason,
-		"reviewResult":     app.ReviewResult,
-		"confirmResult":    app.ConfirmResult,
-		"handoverResult":   app.HandoverResult,
-		"createdBy":        app.CreatedBy,
-		"createdByName":    app.CreatedByName,
-		"reviewedBy":       app.ReviewedBy,
-		"reviewedByName":   app.ReviewedByName,
-		"confirmedBy":      app.ConfirmedBy,
-		"confirmedByName":  app.ConfirmedByName,
-		"handedOverBy":     app.HandedOverBy,
-		"handedOverByName": app.HandedOverByName,
-		"archivedBy":       app.ArchivedBy,
-		"archivedByName":   app.ArchivedByName,
-		"createdAt":        app.CreatedAt,
-		"updatedAt":        app.UpdatedAt,
-		"submittedAt":      app.SubmittedAt,
-		"reviewedAt":       app.ReviewedAt,
-		"confirmedAt":      app.ConfirmedAt,
-		"handedOverAt":     app.HandedOverAt,
-		"completedAt":      app.CompletedAt,
-		"attachments":      app.Attachments,
-		"nodeTimelines":    app.NodeTimelines,
-		"operationLogs":    app.OperationLogs,
+		"id":                    app.ID,
+		"applicationNo":         app.ApplicationNo,
+		"tenantName":            app.TenantName,
+		"tenantIdCard":          app.TenantIDCard,
+		"tenantPhone":           app.TenantPhone,
+		"apartmentName":         app.ApartmentName,
+		"roomNo":                app.RoomNo,
+		"roomArea":              app.RoomArea,
+		"monthlyRent":           app.MonthlyRent,
+		"leaseStartDate":        app.LeaseStartDate,
+		"leaseEndDate":          app.LeaseEndDate,
+		"depositAmount":         app.DepositAmount,
+		"paymentMethod":         app.PaymentMethod,
+		"status":                app.Status,
+		"statusName":            models.GetStatusName(app.Status),
+		"currentNode":           app.CurrentNode,
+		"currentNodeName":       models.GetNodeName(app.CurrentNode),
+		"isOverdue":             app.IsOverdue,
+		"overdueReason":         app.OverdueReason,
+		"followUpAction":        app.FollowUpAction,
+		"hasOverdueBlocked":     hasOverdueBlocked,
+		"overdueBlockedCount":   overdueBlockedCount,
+		"overdueSupplementedCount": overdueSupplementedCount,
+		"overdueAudits":         overdueAudits,
+		"remark":                app.Remark,
+		"returnReason":          app.ReturnReason,
+		"rejectReason":          app.RejectReason,
+		"reviewResult":          app.ReviewResult,
+		"confirmResult":         app.ConfirmResult,
+		"handoverResult":        app.HandoverResult,
+		"createdBy":             app.CreatedBy,
+		"createdByName":         app.CreatedByName,
+		"reviewedBy":            app.ReviewedBy,
+		"reviewedByName":        app.ReviewedByName,
+		"confirmedBy":           app.ConfirmedBy,
+		"confirmedByName":       app.ConfirmedByName,
+		"handedOverBy":          app.HandedOverBy,
+		"handedOverByName":      app.HandedOverByName,
+		"archivedBy":            app.ArchivedBy,
+		"archivedByName":        app.ArchivedByName,
+		"createdAt":             app.CreatedAt,
+		"updatedAt":             app.UpdatedAt,
+		"submittedAt":           app.SubmittedAt,
+		"reviewedAt":            app.ReviewedAt,
+		"confirmedAt":           app.ConfirmedAt,
+		"handedOverAt":          app.HandedOverAt,
+		"completedAt":           app.CompletedAt,
+		"attachments":           app.Attachments,
+		"nodeTimelines":         app.NodeTimelines,
+		"operationLogs":         app.OperationLogs,
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -472,7 +542,7 @@ func SubmitForReview(c *gin.Context) {
 	var req SubmitReviewRequest
 	c.ShouldBindJSON(&req)
 
-	if allowed, errMsg := checkNodeOverdueBeforeProceed(c, &app, models.NodeContractSigning, userID, realName, role, req.OverdueReason, req.FollowUpAction, "至审核环节"); !allowed {
+	if allowed, errMsg := checkNodeOverdueBeforeProceed(c, &app, models.NodeContractSigning, userID, realName, role, req.OverdueReason, req.FollowUpAction, "至审核环节", models.StatusPendingReview); !allowed {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": errMsg})
 		return
 	}
@@ -535,7 +605,15 @@ func ReviewApplication(c *gin.Context) {
 		return
 	}
 
-	if allowed, errMsg := checkNodeOverdueBeforeProceed(c, &app, models.NodeReview, userID, realName, role, req.OverdueReason, req.FollowUpAction, "审核操作"); !allowed {
+	var targetStatus models.ApplicationStatus
+	switch req.Action {
+	case "approve":
+		targetStatus = models.StatusPendingConfirm
+	case "return", "reject":
+		targetStatus = models.StatusReturned
+	}
+
+	if allowed, errMsg := checkNodeOverdueBeforeProceed(c, &app, models.NodeReview, userID, realName, role, req.OverdueReason, req.FollowUpAction, "审核操作", targetStatus); !allowed {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": errMsg})
 		return
 	}
@@ -655,7 +733,7 @@ func ConfirmRoomStatus(c *gin.Context) {
 		return
 	}
 
-	if allowed, errMsg := checkNodeOverdueBeforeProceed(c, &app, models.NodeRoomConfirm, userID, realName, role, req.OverdueReason, req.FollowUpAction, "房态确认操作"); !allowed {
+	if allowed, errMsg := checkNodeOverdueBeforeProceed(c, &app, models.NodeRoomConfirm, userID, realName, role, req.OverdueReason, req.FollowUpAction, "房态确认操作", models.StatusPendingHandover); !allowed {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": errMsg})
 		return
 	}
@@ -724,7 +802,7 @@ func CompleteHandover(c *gin.Context) {
 		return
 	}
 
-	if allowed, errMsg := checkNodeOverdueBeforeProceed(c, &app, models.NodeHandover, userID, realName, role, req.OverdueReason, req.FollowUpAction, "入住交接操作"); !allowed {
+	if allowed, errMsg := checkNodeOverdueBeforeProceed(c, &app, models.NodeHandover, userID, realName, role, req.OverdueReason, req.FollowUpAction, "入住交接操作", models.StatusRoomConfirmed); !allowed {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": errMsg})
 		return
 	}
@@ -798,7 +876,7 @@ func ArchiveApplication(c *gin.Context) {
 		return
 	}
 
-	if allowed, errMsg := checkNodeOverdueBeforeProceed(c, &app, models.NodeArchive, userID, realName, role, req.OverdueReason, req.FollowUpAction, "复核归档操作"); !allowed {
+	if allowed, errMsg := checkNodeOverdueBeforeProceed(c, &app, models.NodeArchive, userID, realName, role, req.OverdueReason, req.FollowUpAction, "复核归档操作", models.StatusCompleted); !allowed {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": errMsg})
 		return
 	}
@@ -856,8 +934,23 @@ func RecordOverdue(c *gin.Context) {
 
 	database.SetNodeOverdueRecord(app.ID, nodeType, req.OverdueReason, req.FollowUpAction)
 
+	database.DB.Model(&models.LeaseApplication{}).Where("id = ?", app.ID).Updates(map[string]interface{}{
+		"overdue_reason":   req.OverdueReason,
+		"follow_up_action": req.FollowUpAction,
+	})
+
 	database.CreateOperationLog(app.ID, userID, realName, string(role), "overdue_record", "记录超时处理", string(app.Status), string(app.Status),
 		fmt.Sprintf("记录节点【%s】超时原因：%s；后续处理措施：%s", models.GetNodeName(nodeType), req.OverdueReason, req.FollowUpAction))
+
+	database.CreateOverdueAudit(
+		&app, nil, nodeType,
+		models.AuditTypeSupplemented,
+		"",
+		req.OverdueReason, req.FollowUpAction,
+		userID, realName, string(role),
+		"单独记录",
+		string(app.Status),
+	)
 
 	c.JSON(http.StatusOK, gin.H{
 		"code":    200,

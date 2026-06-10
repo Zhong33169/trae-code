@@ -67,6 +67,11 @@ export default function ApplicationDetail() {
     return isCurrentNodeOverdue() && !hasExistingOverdueRecord()
   }
 
+  function getNodeBlockedHistory(nodeType: string) {
+    if (!app?.overdueAudits) return []
+    return app.overdueAudits.filter(a => a.nodeType === nodeType && a.auditType === 'blocked')
+  }
+
   const [uploadLoading, setUploadLoading] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [uploadCategory, setUploadCategory] = useState('签约资料')
@@ -712,6 +717,54 @@ export default function ApplicationDetail() {
         </div>
       </div>
 
+      {/* 超时审计记录 */}
+      {app.overdueAudits && app.overdueAudits.length > 0 && (
+        <div className="card">
+          <div className="card-header">
+            <div className="card-title">
+              ⏰ 超时审计记录
+              <span className="badge badge-red ml-8">拦截 {app.overdueBlockedCount || 0} 次</span>
+              <span className="badge badge-green ml-8">补录 {app.overdueSupplementedCount || 0} 次</span>
+            </div>
+          </div>
+          <div style={{ maxHeight: '320px', overflowY: 'auto' }}>
+            {app.overdueAudits.map(audit => (
+              <div key={audit.id} className="log-item">
+                <div className="log-header">
+                  <div className="log-name">
+                    <span className={`badge ${audit.auditType === 'blocked' ? 'badge-red' : 'badge-green'}`} style={{ marginRight: '8px' }}>
+                      {audit.auditType === 'blocked' ? '🚫 超时拦截' : '✅ 超时补录'}
+                    </span>
+                    <span style={{ fontWeight: 500 }}>{audit.nodeName}</span>
+                    {audit.proceedAction && <span style={{ color: '#6b7280', marginLeft: '8px' }}> · {audit.proceedAction}</span>}
+                  </div>
+                  <div className="log-time">{formatDate(audit.createdAt)}</div>
+                </div>
+                <div className="log-meta">
+                  <span>👤 {audit.handlerName}</span>
+                  <span className="badge badge-info">{audit.handlerRole === 'registrar' ? '租约登记员' : audit.handlerRole === 'auditor' ? '审核主管' : '复核负责人'}</span>
+                </div>
+                {audit.auditType === 'blocked' && audit.blockedReason && (
+                  <div className="log-detail" style={{ background: '#fef2f2' }}>
+                    <b style={{ color: '#dc2626' }}>🚫 拦截原因：</b>{audit.blockedReason}
+                  </div>
+                )}
+                {audit.auditType === 'supplemented' && (
+                  <>
+                    <div className="log-detail" style={{ background: '#f0fdf4' }}>
+                      <b style={{ color: '#16a34a' }}>⏰ 超时原因：</b>{audit.overdueReason}
+                    </div>
+                    <div className="log-detail" style={{ background: '#f0fdf4', marginTop: '4px' }}>
+                      <b style={{ color: '#16a34a' }}>📋 后续处理：</b>{audit.followUpAction}
+                    </div>
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* 提交审核 Modal */}
       <Modal
         open={showSubmit}
@@ -742,6 +795,25 @@ export default function ApplicationDetail() {
             <div className="form-group">
               <label className="form-label required">后续处理措施</label>
               <textarea className="form-control" value={submitFollowUpAction} onChange={e => setSubmitFollowUpAction(e.target.value)} placeholder="请说明将采取的后续措施" rows={2} />
+            </div>
+          </div>
+        )}
+        {getNodeBlockedHistory(app.currentNode).length > 0 && (
+          <div className="card" style={{ marginTop: '16px', background: '#fff7ed' }}>
+            <div className="card-header" style={{ padding: '8px 12px' }}>
+              <div className="card-title" style={{ fontSize: '13px' }}>
+                🚫 该节点拦截历史（{getNodeBlockedHistory(app.currentNode).length} 次）
+              </div>
+            </div>
+            <div style={{ maxHeight: '140px', overflowY: 'auto', padding: '8px 12px' }}>
+              {getNodeBlockedHistory(app.currentNode).slice(0, 5).map(audit => (
+                <div key={audit.id} style={{ fontSize: '12px', padding: '6px 0', borderBottom: '1px dashed #fed7aa' }}>
+                  <div style={{ color: '#9a3412', marginBottom: '2px' }}>
+                    <b>[{audit.handlerName}]</b> {formatDate(audit.createdAt)}
+                  </div>
+                  <div style={{ color: '#78350f' }}>{audit.blockedReason}</div>
+                </div>
+              ))}
             </div>
           </div>
         )}
@@ -848,6 +920,25 @@ export default function ApplicationDetail() {
             </div>
           </div>
         )}
+        {getNodeBlockedHistory(app.currentNode).length > 0 && (
+          <div className="card" style={{ marginTop: '16px', background: '#fff7ed' }}>
+            <div className="card-header" style={{ padding: '8px 12px' }}>
+              <div className="card-title" style={{ fontSize: '13px' }}>
+                🚫 该节点拦截历史（{getNodeBlockedHistory(app.currentNode).length} 次）
+              </div>
+            </div>
+            <div style={{ maxHeight: '140px', overflowY: 'auto', padding: '8px 12px' }}>
+              {getNodeBlockedHistory(app.currentNode).slice(0, 5).map(audit => (
+                <div key={audit.id} style={{ fontSize: '12px', padding: '6px 0', borderBottom: '1px dashed #fed7aa' }}>
+                  <div style={{ color: '#9a3412', marginBottom: '2px' }}>
+                    <b>[{audit.handlerName}]</b> {formatDate(audit.createdAt)}
+                  </div>
+                  <div style={{ color: '#78350f' }}>{audit.blockedReason}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </Modal>
 
       {/* 房态确认 */}
@@ -892,6 +983,25 @@ export default function ApplicationDetail() {
             </div>
           </div>
         )}
+        {getNodeBlockedHistory(app.currentNode).length > 0 && (
+          <div className="card" style={{ marginTop: '16px', background: '#fff7ed' }}>
+            <div className="card-header" style={{ padding: '8px 12px' }}>
+              <div className="card-title" style={{ fontSize: '13px' }}>
+                🚫 该节点拦截历史（{getNodeBlockedHistory(app.currentNode).length} 次）
+              </div>
+            </div>
+            <div style={{ maxHeight: '140px', overflowY: 'auto', padding: '8px 12px' }}>
+              {getNodeBlockedHistory(app.currentNode).slice(0, 5).map(audit => (
+                <div key={audit.id} style={{ fontSize: '12px', padding: '6px 0', borderBottom: '1px dashed #fed7aa' }}>
+                  <div style={{ color: '#9a3412', marginBottom: '2px' }}>
+                    <b>[{audit.handlerName}]</b> {formatDate(audit.createdAt)}
+                  </div>
+                  <div style={{ color: '#78350f' }}>{audit.blockedReason}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </Modal>
 
       {/* 入住交接 */}
@@ -926,6 +1036,25 @@ export default function ApplicationDetail() {
             <div className="form-group">
               <label className="form-label required">后续处理措施</label>
               <textarea className="form-control" value={handoverFollowUpAction} onChange={e => setHandoverFollowUpAction(e.target.value)} placeholder="请说明将采取的后续措施" rows={2} />
+            </div>
+          </div>
+        )}
+        {getNodeBlockedHistory(app.currentNode).length > 0 && (
+          <div className="card" style={{ marginTop: '16px', background: '#fff7ed' }}>
+            <div className="card-header" style={{ padding: '8px 12px' }}>
+              <div className="card-title" style={{ fontSize: '13px' }}>
+                🚫 该节点拦截历史（{getNodeBlockedHistory(app.currentNode).length} 次）
+              </div>
+            </div>
+            <div style={{ maxHeight: '140px', overflowY: 'auto', padding: '8px 12px' }}>
+              {getNodeBlockedHistory(app.currentNode).slice(0, 5).map(audit => (
+                <div key={audit.id} style={{ fontSize: '12px', padding: '6px 0', borderBottom: '1px dashed #fed7aa' }}>
+                  <div style={{ color: '#9a3412', marginBottom: '2px' }}>
+                    <b>[{audit.handlerName}]</b> {formatDate(audit.createdAt)}
+                  </div>
+                  <div style={{ color: '#78350f' }}>{audit.blockedReason}</div>
+                </div>
+              ))}
             </div>
           </div>
         )}
@@ -968,6 +1097,25 @@ export default function ApplicationDetail() {
             <div className="form-group">
               <label className="form-label required">后续处理措施</label>
               <textarea className="form-control" value={archiveFollowUpAction} onChange={e => setArchiveFollowUpAction(e.target.value)} placeholder="请说明将采取的后续措施" rows={2} />
+            </div>
+          </div>
+        )}
+        {getNodeBlockedHistory(app.currentNode).length > 0 && (
+          <div className="card" style={{ marginTop: '16px', background: '#fff7ed' }}>
+            <div className="card-header" style={{ padding: '8px 12px' }}>
+              <div className="card-title" style={{ fontSize: '13px' }}>
+                🚫 该节点拦截历史（{getNodeBlockedHistory(app.currentNode).length} 次）
+              </div>
+            </div>
+            <div style={{ maxHeight: '140px', overflowY: 'auto', padding: '8px 12px' }}>
+              {getNodeBlockedHistory(app.currentNode).slice(0, 5).map(audit => (
+                <div key={audit.id} style={{ fontSize: '12px', padding: '6px 0', borderBottom: '1px dashed #fed7aa' }}>
+                  <div style={{ color: '#9a3412', marginBottom: '2px' }}>
+                    <b>[{audit.handlerName}]</b> {formatDate(audit.createdAt)}
+                  </div>
+                  <div style={{ color: '#78350f' }}>{audit.blockedReason}</div>
+                </div>
+              ))}
             </div>
           </div>
         )}
