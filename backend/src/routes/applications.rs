@@ -332,10 +332,11 @@ pub fn update_application(
     Ok(Json(get_application_by_id(id).unwrap()))
 }
 
-#[post("/applications/<id>/submit")]
+#[post("/applications/<id>/submit", format = "json", data = "<req>")]
 pub fn submit_application(
     auth: AuthenticatedUser,
     id: i64,
+    req: Json<SubmitRequest>,
 ) -> Result<Json<ReplenishmentApplication>, (Status, Json<ApiError>)> {
     match auth.user.role {
         UserRole::Registrar => {}
@@ -370,6 +371,16 @@ pub fn submit_application(
                 })
             ));
         }
+    }
+
+    if app.current_version != req.current_version {
+        return Err((
+            Status::Conflict,
+            Json(ApiError {
+                error: "版本冲突".to_string(),
+                details: Some(format!("当前版本为 v{}，你提供的版本为 v{}，请刷新后重试", app.current_version, req.current_version)),
+            })
+        ));
     }
 
     let mut missing_evidence: Vec<&str> = Vec::new();
@@ -613,6 +624,7 @@ pub fn final_review_application(
 
 fn do_review_single(
     app_id: i64,
+    current_version: i32,
     approved: bool,
     remarks: Option<&str>,
     user_id: i64,
@@ -630,6 +642,16 @@ fn do_review_single(
             };
         }
     };
+
+    if app.current_version != current_version {
+        return BatchResultItem {
+            application_id: app.id,
+            application_no: app.application_no,
+            success: false,
+            status: app.status.as_str().to_string(),
+            message: format!("版本冲突：当前版本 v{}，你提供的版本 v{}", app.current_version, current_version),
+        };
+    }
 
     match role {
         UserRole::Reviewer => {
@@ -764,7 +786,7 @@ pub fn batch_review_applications(
         }
     }
 
-    if req.application_ids.is_empty() {
+    if req.applications.is_empty() {
         return Err((
             Status::BadRequest,
             Json(ApiError {
@@ -777,8 +799,15 @@ pub fn batch_review_applications(
     let remarks = req.remarks.as_deref();
     let mut results = Vec::new();
 
-    for &app_id in &req.application_ids {
-        let result = do_review_single(app_id, req.approved, remarks, auth.user.id, &auth.user.role);
+    for item in &req.applications {
+        let result = do_review_single(
+            item.application_id,
+            item.current_version,
+            req.approved,
+            remarks,
+            auth.user.id,
+            &auth.user.role,
+        );
         results.push(result);
     }
 

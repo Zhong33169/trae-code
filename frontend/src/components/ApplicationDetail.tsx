@@ -56,7 +56,9 @@ export default function ApplicationDetail({
     setLoading(true);
     setError(null);
     try {
-      await submitApplication(application.id);
+      await submitApplication(application.id, {
+        current_version: application.current_version,
+      });
       onUpdated();
     } catch (e) {
       setError(e instanceof Error ? e.message : '提交失败');

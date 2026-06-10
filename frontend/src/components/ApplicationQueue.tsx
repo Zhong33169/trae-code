@@ -70,8 +70,12 @@ export default function ApplicationQueue({
     setBatchLoading(true);
     setBatchError(null);
     try {
+      const apps = applications.filter(a => selectedIds.has(a.id));
       const result = await batchReview({
-        application_ids: Array.from(selectedIds),
+        applications: apps.map(a => ({
+          application_id: a.id,
+          current_version: a.current_version,
+        })),
         approved: batchApproved,
         remarks: batchRemarks || null,
       });

@@ -238,6 +238,11 @@ pub struct UpdateApplicationRequest {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct SubmitRequest {
+    pub current_version: i32,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct ReviewRequest {
     pub current_version: i32,
     pub approved: bool,
@@ -245,8 +250,14 @@ pub struct ReviewRequest {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct BatchReviewItem {
+    pub application_id: i64,
+    pub current_version: i32,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct BatchReviewRequest {
-    pub application_ids: Vec<i64>,
+    pub applications: Vec<BatchReviewItem>,
     pub approved: bool,
     pub remarks: Option<String>,
 }

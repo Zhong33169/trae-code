@@ -126,9 +126,12 @@ export async function updateApplication(id: number, data: {
   });
 }
 
-export async function submitApplication(id: number): Promise<ReplenishmentApplication> {
+export async function submitApplication(id: number, data: {
+  current_version: number;
+}): Promise<ReplenishmentApplication> {
   return request<ReplenishmentApplication>(`/applications/${id}/submit`, {
     method: 'POST',
+    body: JSON.stringify(data),
   });
 }
 
@@ -155,7 +158,7 @@ export async function finalReviewApplication(id: number, data: {
 }
 
 export async function batchReview(data: {
-  application_ids: number[];
+  applications: { application_id: number; current_version: number }[];
   approved: boolean;
   remarks?: string | null;
 }): Promise<BatchReviewResponse> {
