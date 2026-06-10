@@ -33,6 +33,7 @@ import {
 import {
   INSPECTION_TYPE_LABELS,
   SCAN_RESULT_LABELS,
+  ACTION_CONFIGS,
 } from "~/config";
 import { ScanResultResponse } from "~/services/qrScan";
 
@@ -385,34 +386,55 @@ function InspectionDetailPage() {
     color: "#111827",
   };
 
-  const getActionButton = (
-    action: string,
-    status: string,
-    label: string,
-    color: string,
-    icon: string
-  ) => {
-    if (!data.allowed_actions?.includes(action) && !data.can_operate) return null;
+  const getActionButton = (actionKey: string) => {
+    const config = ACTION_CONFIGS[actionKey];
+    if (!config) return null;
+    if (!data.allowed_actions?.includes(actionKey)) return null;
+
+    const handleClick = () => {
+      switch (actionKey) {
+        case "scan_qr":
+          setQrModalOpen(true);
+          break;
+        case "update":
+          navigate(`/inspections/${data.id}/edit`);
+          break;
+        case "submit_fault_report":
+          setFaultModalOpen(true);
+          break;
+        case "mark_repair_complete":
+          setRepairCompleteModalOpen(true);
+          break;
+        case "acceptance_pass":
+        case "acceptance_reject":
+          setAcceptanceModalOpen(true);
+          break;
+        case "submit":
+        case "approve":
+        case "reject":
+        case "report_fault":
+        case "mark_repair_start":
+        case "submit_acceptance":
+        case "archive":
+        case "final_reject":
+          handleStatusAction(config.target_status || "", config.label);
+          break;
+        default:
+          break;
+      }
+    };
+
+    const isPrimary = actionKey === "scan_qr";
 
     return (
       <button
-        key={action}
-        onClick={() => {
-          if (action === "submit_fault") {
-            setFaultModalOpen(true);
-          } else if (action === "repair_complete") {
-            setRepairCompleteModalOpen(true);
-          } else if (action === "acceptance") {
-            setAcceptanceModalOpen(true);
-          } else {
-            handleStatusAction(status, label);
-          }
-        }}
+        key={actionKey}
+        onClick={handleClick}
         style={{
           padding: "8px 16px",
-          border: `1px solid ${color}`,
-          backgroundColor: "#fff",
-          color: color,
+          border: isPrimary ? "none" : `1px solid ${config.color}`,
+          backgroundColor: isPrimary ? config.color : "#fff",
+          color: isPrimary ? "#fff" : config.color,
           borderRadius: "6px",
           fontSize: "13px",
           cursor: "pointer",
@@ -423,14 +445,19 @@ function InspectionDetailPage() {
           gap: "6px",
         }}
         onMouseEnter={(e) => {
-          (e.target as HTMLButtonElement).style.backgroundColor = `${color}10`;
+          if (!isPrimary) {
+            (e.target as HTMLButtonElement).style.backgroundColor =
+              `${config.color}10`;
+          }
         }}
         onMouseLeave={(e) => {
-          (e.target as HTMLButtonElement).style.backgroundColor = "#fff";
+          if (!isPrimary) {
+            (e.target as HTMLButtonElement).style.backgroundColor = "#fff";
+          }
         }}
       >
-        <span>{icon}</span>
-        {label}
+        <span>{config.icon}</span>
+        {config.label}
       </button>
     );
   };
@@ -505,56 +532,16 @@ function InspectionDetailPage() {
             </div>
           </div>
           <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-            {hasRole("registrar") &&
-              getActionButton("submit_fault", "fault_report", "报故障", "#ef4444", "⚠️")}
-            {hasRole("registrar") &&
-              getActionButton(
-                "repair_complete",
-                "repair_completed",
-                "修复完成",
-                "#8b5cf6",
-                "🔧"
-              )}
-            {hasRole("supervisor") &&
-              getActionButton("review", "reviewing", "审核", "#3b82f6", "✓")}
-            {hasRole("supervisor") &&
-              getActionButton(
-                "acceptance",
-                "acceptance",
-                "验收",
-                "#8b5cf6",
-                "📋"
-              )}
-            {hasRole("reviewer") &&
-              getActionButton(
-                "final_review",
-                "final_review",
-                "复核归档",
-                "#0ea5e9",
-                "📦"
-              )}
-            {(data.allowed_actions?.includes("qr_scan") ||
-              hasRole("registrar")) && (
-              <button
-                onClick={() => setQrModalOpen(true)}
-                style={{
-                  padding: "8px 16px",
-                  border: "none",
-                  backgroundColor: "#10b981",
-                  color: "#fff",
-                  borderRadius: "6px",
-                  fontSize: "13px",
-                  cursor: "pointer",
-                  fontWeight: 500,
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "6px",
-                }}
-              >
-                <span>📱</span>
-                扫码核验
-              </button>
-            )}
+            {data.allowed_actions
+              ?.filter((a) => a !== "view")
+              .filter((a) => {
+                const config = ACTION_CONFIGS[a];
+                return config && !config.is_form;
+              })
+              .filter((a) => a !== "scan_qr")
+              .map((actionKey) => getActionButton(actionKey))}
+            {data.allowed_actions?.includes("scan_qr") &&
+              getActionButton("scan_qr")}
             <button
               onClick={loadData}
               style={{

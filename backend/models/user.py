@@ -23,10 +23,11 @@ class User(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
-    def role_label(self):
+    @property
+    def role_label(self) -> str:
         labels = {
             UserRole.REGISTRAR: "设备巡检登记员",
             UserRole.SUPERVISOR: "设备巡检审核主管",
             UserRole.REVIEWER: "新能源汽车充电站复核负责人",
         }
-        return labels.get(self.role, self.role)
+        return labels.get(self.role, self.role.value)

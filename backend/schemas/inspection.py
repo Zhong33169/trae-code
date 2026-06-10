@@ -85,6 +85,8 @@ class InspectionOrderResponse(BaseModel):
     created_at: datetime
     updated_at: Optional[datetime] = None
     version: int
+    can_operate: bool = False
+    allowed_actions: List[str] = []
 
     class Config:
         from_attributes = True

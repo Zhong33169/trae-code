@@ -26,6 +26,20 @@ class QRCodeRecord(Base):
     scanned_by = Column(Integer, ForeignKey("users.id"), nullable=False)
     scanner = relationship("User", foreign_keys=[scanned_by])
 
+    @property
+    def result_label(self) -> str:
+        labels = {
+            ScanResult.SUCCESS: "核验成功",
+            ScanResult.INVALID_QR: "无效二维码",
+            ScanResult.DUPLICATE_SCAN: "重复扫码",
+            ScanResult.USER_MISMATCH: "扫码人不匹配",
+            ScanResult.ORDER_NOT_FOUND: "巡检单不存在",
+            ScanResult.INVALID_STATUS: "状态不允许扫码",
+            ScanResult.PILE_NOT_MATCH: "充电桩不匹配",
+            ScanResult.TIME_OUT: "扫码超时",
+        }
+        return labels.get(self.result, self.result.value)
+
     inspection_order_id = Column(Integer, ForeignKey("inspection_orders.id"))
     inspection_order = relationship("InspectionOrder", back_populates="qr_records")
 

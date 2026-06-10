@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
 from sqlalchemy import select, func, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import joinedload, selectinload
 from typing import Optional, List, Tuple
 from datetime import datetime, timezone
 
@@ -20,6 +20,7 @@ from models.charging_pile import ChargingPile
 from models.audit_log import AuditAction
 from models.fault_report import FaultReport
 from models.repair_acceptance import RepairAcceptance
+from models.qr_record import QRCodeRecord
 from schemas.inspection import (
     InspectionOrderCreate,
     InspectionOrderUpdate,
@@ -113,12 +114,62 @@ def get_allowed_actions(inspection: InspectionOrder, user: User) -> Tuple[bool, 
     return can_operate, actions
 
 
-def build_inspection_response(inspection: InspectionOrder) -> InspectionOrderResponse:
+def get_action_target_status(action: str) -> Optional[InspectionStatus]:
+    action_map = {
+        "submit": InspectionStatus.PENDING_REVIEW,
+        "approve": InspectionStatus.PENDING_FINAL_REVIEW,
+        "reject": InspectionStatus.REVIEW_REJECTED,
+        "report_fault": InspectionStatus.PENDING_FAULT_REPORT,
+        "submit_fault_report": InspectionStatus.FAULT_REPORTED,
+        "mark_repair_start": InspectionStatus.PENDING_REPAIR,
+        "mark_repair_complete": InspectionStatus.REPAIR_COMPLETED,
+        "submit_acceptance": InspectionStatus.PENDING_ACCEPTANCE,
+        "acceptance_pass": InspectionStatus.PENDING_FINAL_REVIEW,
+        "acceptance_reject": InspectionStatus.ACCEPTANCE_REJECTED,
+        "archive": InspectionStatus.ARCHIVED,
+        "final_reject": InspectionStatus.FINAL_REVIEW_REJECTED,
+    }
+    return action_map.get(action)
+
+
+def get_action_label(action: str) -> str:
+    label_map = {
+        "view": "查看",
+        "update": "编辑",
+        "scan_qr": "扫码核验",
+        "submit": "提交审核",
+        "approve": "审核通过",
+        "reject": "审核退回",
+        "report_fault": "故障上报",
+        "submit_fault_report": "提交故障报告",
+        "mark_repair_start": "开始修复",
+        "mark_repair_complete": "修复完成",
+        "submit_acceptance": "提交验收",
+        "acceptance_pass": "验收通过",
+        "acceptance_reject": "验收驳回",
+        "archive": "复核归档",
+        "final_reject": "复核退回",
+    }
+    return label_map.get(action, action)
+
+
+def build_inspection_response(
+    inspection: InspectionOrder,
+    current_user: Optional[User] = None
+) -> InspectionOrderResponse:
     type_label = get_type_label(inspection.type)
     status_label = get_status_label(inspection.status)
     is_overdue = False
     if inspection.time_limit:
-        is_overdue = datetime.now(timezone.utc) > inspection.time_limit
+        now = datetime.now(timezone.utc)
+        if inspection.time_limit.tzinfo is None:
+            now = now.replace(tzinfo=None)
+        is_overdue = now > inspection.time_limit
+
+    can_operate = False
+    allowed_actions = ["view"]
+    if current_user:
+        can_operate, allowed_actions = get_allowed_actions(inspection, current_user)
 
     return InspectionOrderResponse(
         id=inspection.id,
@@ -157,6 +208,8 @@ def build_inspection_response(inspection: InspectionOrder) -> InspectionOrderRes
         created_at=inspection.created_at,
         updated_at=inspection.updated_at,
         version=inspection.version,
+        can_operate=can_operate,
+        allowed_actions=allowed_actions,
     )
 
 
@@ -171,6 +224,30 @@ async def get_statistics(db: AsyncSession, user: User) -> dict:
         result = await db.execute(query)
         count = result.scalar_one()
         stats[status.value] = count
+
+    role_queues = get_role_queues(user.role)
+    my_todo_query = select(func.count()).select_from(InspectionOrder)
+    if user.role == UserRole.REGISTRAR:
+        my_todo_query = my_todo_query.where(
+            and_(
+                InspectionOrder.status.in_(role_queues),
+                InspectionOrder.created_by == user.id
+            )
+        )
+    else:
+        my_todo_query = my_todo_query.where(InspectionOrder.status.in_(role_queues))
+    my_todo_result = await db.execute(my_todo_query)
+    stats["my_todo"] = my_todo_result.scalar_one()
+
+    my_created_query = select(func.count()).select_from(InspectionOrder).where(
+        InspectionOrder.created_by == user.id
+    )
+    my_created_result = await db.execute(my_created_query)
+    stats["my_created"] = my_created_result.scalar_one()
+
+    all_query = select(func.count()).select_from(InspectionOrder)
+    all_result = await db.execute(all_query)
+    stats["all"] = all_result.scalar_one()
 
     return stats
 
@@ -220,7 +297,7 @@ async def get_inspections(
 
     return InspectionOrderListResponse(
         total=total,
-        items=[build_inspection_response(inspection) for inspection in inspections],
+        items=[build_inspection_response(inspection, current_user) for inspection in inspections],
         page=page,
         page_size=page_size,
         statistics=statistics,
@@ -237,7 +314,7 @@ async def get_inspection(
         select(InspectionOrder)
         .options(
             joinedload(InspectionOrder.charging_pile),
-            joinedload(InspectionOrder.qr_records),
+            selectinload(InspectionOrder.qr_records).joinedload(QRCodeRecord.scanner),
             joinedload(InspectionOrder.fault_report),
             joinedload(InspectionOrder.repair_acceptance),
         )
@@ -251,16 +328,13 @@ async def get_inspection(
             detail=f"巡检单ID {order_id} 不存在"
         )
 
-    base_response = build_inspection_response(inspection)
-    can_operate, allowed_actions = get_allowed_actions(inspection, current_user)
+    base_response = build_inspection_response(inspection, current_user)
 
     return InspectionOrderWithDetails(
         **base_response.model_dump(),
         qr_records=inspection.qr_records,
         fault_report=inspection.fault_report,
         repair_acceptance=inspection.repair_acceptance,
-        can_operate=can_operate,
-        allowed_actions=allowed_actions,
     )
 
 
@@ -318,7 +392,7 @@ async def create_inspection(
     )
     inspection = result.scalar_one()
 
-    return build_inspection_response(inspection)
+    return build_inspection_response(inspection, current_user)
 
 
 @router.put("/{order_id}", response_model=InspectionOrderResponse, summary="更新巡检单", description="更新巡检单（登记员在草稿或退回状态）")
@@ -382,7 +456,7 @@ async def update_inspection(
     await db.commit()
     await db.refresh(inspection)
 
-    return build_inspection_response(inspection)
+    return build_inspection_response(inspection, current_user)
 
 
 @router.post("/{order_id}/status", response_model=InspectionOrderResponse, summary="状态流转", description="巡检单状态流转API，需要校验权限、材料完整性、并发控制")
@@ -523,7 +597,7 @@ async def update_status(
         await db.commit()
         await db.refresh(inspection)
 
-        return build_inspection_response(inspection)
+        return build_inspection_response(inspection, current_user)
 
     finally:
         release_lock(order_id)
@@ -671,7 +745,7 @@ async def mark_repair_complete(
         await db.commit()
         await db.refresh(inspection)
 
-        return build_inspection_response(inspection)
+        return build_inspection_response(inspection, current_user)
 
     finally:
         release_lock(order_id)

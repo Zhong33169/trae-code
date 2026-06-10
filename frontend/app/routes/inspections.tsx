@@ -26,6 +26,7 @@ import {
   INSPECTION_STATUS_LABELS,
   INSPECTION_TYPE_LABELS,
   STATUS_COLORS,
+  ACTION_CONFIGS,
 } from "~/config";
 
 export function meta() {
@@ -39,7 +40,7 @@ function InspectionsPage() {
   const { success, error, warning } = useToast();
 
   const queryParams = parseQueryString(location.search);
-  const initialQueue = queryParams.queue || "pending_my";
+  const initialQueue = queryParams.queue || "my_todo";
 
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<InspectionOrder[]>([]);
@@ -70,15 +71,9 @@ function InspectionsPage() {
   const [conflictMessage, setConflictMessage] = useState("");
 
   const queueLabels: Record<string, string> = {
-    pending_my: "待我处理",
+    my_todo: "待我处理",
     my_created: "我发起的",
     all: "全部",
-    pending_review: "待审核",
-    pending_fault: "待故障处理",
-    pending_repair: "待修复",
-    pending_acceptance: "待验收",
-    pending_final: "待复核",
-    archived: "已归档",
   };
 
   const loadData = useCallback(async () => {
@@ -137,15 +132,18 @@ function InspectionsPage() {
     setSelectedRecords(records);
   };
 
-  const handleBatchProcess = (targetStatus: string, targetLabel: string) => {
+  const handleBatchProcess = (actionKey: string, actionLabel: string) => {
     if (selectedRecords.length === 0) {
       warning("请先选择要处理的巡检单");
       return;
     }
+    const config = ACTION_CONFIGS[actionKey];
+    if (!config?.target_status) {
+      warning("此操作不支持批量处理");
+      return;
+    }
     const operableItems = selectedRecords.filter(
-      (r) =>
-        r.allowed_actions?.includes(targetStatus) ||
-        r.status === "pending_review"
+      (r) => r.allowed_actions?.includes(actionKey)
     );
     if (operableItems.length === 0) {
       warning("所选巡检单均不支持此操作");
@@ -158,8 +156,8 @@ function InspectionsPage() {
     }
     setSelectedRecords(operableItems);
     setSelectedRowKeys(operableItems.map((r) => String(r.id)));
-    setBatchTargetStatus(targetStatus);
-    setBatchTargetLabel(targetLabel);
+    setBatchTargetStatus(config.target_status);
+    setBatchTargetLabel(actionLabel);
     setBatchModalOpen(true);
   };
 
@@ -202,14 +200,28 @@ function InspectionsPage() {
     }
   };
 
-  const handleStatusAction = (
-    order: InspectionOrder,
-    status: string,
-    label: string
-  ) => {
-    setCurrentOrder(order);
-    setTargetStatus(status);
-    setTargetStatusLabel(label);
+  const handleActionClick = (record: InspectionOrder, actionKey: string) => {
+    const config = ACTION_CONFIGS[actionKey];
+    if (!config) return;
+
+    if (actionKey === "scan_qr") {
+      navigate(`/inspections/${record.id}?action=scan_qr`);
+      return;
+    }
+
+    if (actionKey === "update") {
+      navigate(`/inspections/${record.id}/edit`);
+      return;
+    }
+
+    if (config.is_form) {
+      navigate(`/inspections/${record.id}`);
+      return;
+    }
+
+    setCurrentOrder(record);
+    setTargetStatus(config.target_status || "");
+    setTargetStatusLabel(config.label);
     setStatusModalOpen(true);
   };
 
@@ -351,70 +363,59 @@ function InspectionsPage() {
     {
       key: "actions",
       title: "操作",
-      width: "150px",
+      width: "200px",
       align: "center",
       render: (record) => {
-        const actions: { status: string; label: string; color: string }[] = [];
-        
-        if (record.allowed_actions?.includes("review") || 
-            (hasRole("supervisor") && record.status === "pending_review")) {
-          actions.push({ status: "reviewing", label: "审核", color: "#3b82f6" });
-        }
-        if (record.allowed_actions?.includes("submit_fault") ||
-            (hasRole("registrar") && record.status === "pending_fault_report")) {
-          actions.push({ status: "fault_report", label: "报故障", color: "#ef4444" });
-        }
-        if (record.allowed_actions?.includes("repair_complete") ||
-            (hasRole("registrar") && record.status === "pending_repair")) {
-          actions.push({ status: "repair_completed", label: "修复完成", color: "#8b5cf6" });
-        }
-        if (record.allowed_actions?.includes("acceptance") ||
-            (hasRole("supervisor") && record.status === "pending_acceptance")) {
-          actions.push({ status: "acceptance", label: "验收", color: "#8b5cf6" });
-        }
-        if (record.allowed_actions?.includes("final_review") ||
-            (hasRole("reviewer") && record.status === "pending_final_review")) {
-          actions.push({ status: "final_review", label: "复核", color: "#0ea5e9" });
-        }
+        const actionKeys = record.allowed_actions?.filter(
+          (a) => a !== "view" && a !== "update"
+        ) || [];
 
         return (
-          <div style={{ display: "flex", gap: "8px", justifyContent: "center" }}>
-            {actions.slice(0, 2).map((action) => (
-              <button
-                key={action.status}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleStatusAction(record, action.status, action.label);
-                }}
-                style={{
-                  padding: "4px 12px",
-                  border: `1px solid ${action.color}`,
-                  backgroundColor: "transparent",
-                  color: action.color,
-                  borderRadius: "4px",
-                  fontSize: "12px",
-                  cursor: "pointer",
-                  transition: "all 0.2s",
-                }}
-                onMouseEnter={(e) => {
-                  (e.target as HTMLButtonElement).style.backgroundColor =
-                    `${action.color}10`;
-                }}
-                onMouseLeave={(e) => {
-                  (e.target as HTMLButtonElement).style.backgroundColor =
-                    "transparent";
-                }}
-              >
-                {action.label}
-              </button>
-            ))}
+          <div style={{ display: "flex", gap: "6px", justifyContent: "center", flexWrap: "wrap" }}>
+            {actionKeys.slice(0, 2).map((actionKey) => {
+              const config = ACTION_CONFIGS[actionKey];
+              if (!config) return null;
+              return (
+                <button
+                  key={actionKey}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleActionClick(record, actionKey);
+                  }}
+                  style={{
+                    padding: "4px 10px",
+                    border: `1px solid ${config.color}`,
+                    backgroundColor: "transparent",
+                    color: config.color,
+                    borderRadius: "4px",
+                    fontSize: "12px",
+                    cursor: "pointer",
+                    transition: "all 0.2s",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "4px",
+                  }}
+                  onMouseEnter={(e) => {
+                    (e.target as HTMLButtonElement).style.backgroundColor =
+                      `${config.color}10`;
+                  }}
+                  onMouseLeave={(e) => {
+                    (e.target as HTMLButtonElement).style.backgroundColor =
+                      "transparent";
+                  }}
+                >
+                  <span>{config.icon}</span>
+                  <span>{config.label}</span>
+                </button>
+              );
+            })}
             <button
               onClick={(e) => {
                 e.stopPropagation();
                 navigate(`/inspections/${record.id}`);
               }}
               style={{
-                padding: "4px 12px",
+                padding: "4px 10px",
                 border: "1px solid #d1d5db",
                 backgroundColor: "transparent",
                 color: "#6b7280",
@@ -620,27 +621,46 @@ function InspectionsPage() {
             )}
 
             {selectedRowKeys.length > 0 && (
-              <>
+              <div style={{ display: "flex", gap: "8px" }}>
                 {hasRole("supervisor") && (
                   <button
-                    onClick={() => handleBatchProcess("reviewing", "审核通过")}
+                    onClick={() =>
+                      handleBatchProcess("approve", "审核通过")
+                    }
                     style={{
                       padding: "8px 16px",
-                      border: "1px solid #3b82f6",
+                      border: "1px solid #10b981",
                       backgroundColor: "#fff",
-                      color: "#3b82f6",
+                      color: "#10b981",
                       borderRadius: "6px",
                       fontSize: "13px",
                       cursor: "pointer",
                       fontWeight: 500,
                     }}
                   >
-                    批量审核 ({selectedRowKeys.length})
+                    ✅ 批量通过 ({selectedRowKeys.length})
+                  </button>
+                )}
+                {hasRole("supervisor") && (
+                  <button
+                    onClick={() => handleBatchProcess("reject", "审核退回")}
+                    style={{
+                      padding: "8px 16px",
+                      border: "1px solid #ef4444",
+                      backgroundColor: "#fff",
+                      color: "#ef4444",
+                      borderRadius: "6px",
+                      fontSize: "13px",
+                      cursor: "pointer",
+                      fontWeight: 500,
+                    }}
+                  >
+                    ❌ 批量退回 ({selectedRowKeys.length})
                   </button>
                 )}
                 {hasRole("reviewer") && (
                   <button
-                    onClick={() => handleBatchProcess("final_review", "复核归档")}
+                    onClick={() => handleBatchProcess("archive", "复核归档")}
                     style={{
                       padding: "8px 16px",
                       border: "1px solid #0ea5e9",
@@ -652,10 +672,10 @@ function InspectionsPage() {
                       fontWeight: 500,
                     }}
                   >
-                    批量复核 ({selectedRowKeys.length})
+                    📦 批量归档 ({selectedRowKeys.length})
                   </button>
                 )}
-              </>
+              </div>
             )}
 
             <button

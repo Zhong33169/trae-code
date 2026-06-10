@@ -108,13 +108,20 @@ async def process_single_item(
         valid_transitions = {
             (UserRole.REGISTRAR, InspectionStatus.DRAFT): [InspectionStatus.PENDING_REVIEW],
             (UserRole.REGISTRAR, InspectionStatus.REVIEW_REJECTED): [InspectionStatus.PENDING_REVIEW],
+            (UserRole.REGISTRAR, InspectionStatus.FINAL_REVIEW_REJECTED): [InspectionStatus.PENDING_REVIEW],
+            (UserRole.REGISTRAR, InspectionStatus.ACCEPTANCE_REJECTED): [InspectionStatus.PENDING_REVIEW],
             (UserRole.SUPERVISOR, InspectionStatus.PENDING_REVIEW): [
                 InspectionStatus.PENDING_FINAL_REVIEW,
+                InspectionStatus.PENDING_FAULT_REPORT,
                 InspectionStatus.REVIEW_REJECTED,
             ],
-            (UserRole.SUPERVISOR, InspectionStatus.REVIEWING): [
+            (UserRole.SUPERVISOR, InspectionStatus.PENDING_FAULT_REPORT): [InspectionStatus.FAULT_REPORTED],
+            (UserRole.SUPERVISOR, InspectionStatus.FAULT_REPORTED): [InspectionStatus.PENDING_REPAIR],
+            (UserRole.SUPERVISOR, InspectionStatus.PENDING_REPAIR): [InspectionStatus.REPAIR_COMPLETED],
+            (UserRole.SUPERVISOR, InspectionStatus.REPAIR_COMPLETED): [InspectionStatus.PENDING_ACCEPTANCE],
+            (UserRole.SUPERVISOR, InspectionStatus.PENDING_ACCEPTANCE): [
                 InspectionStatus.PENDING_FINAL_REVIEW,
-                InspectionStatus.REVIEW_REJECTED,
+                InspectionStatus.ACCEPTANCE_REJECTED,
             ],
             (UserRole.REVIEWER, InspectionStatus.PENDING_FINAL_REVIEW): [
                 InspectionStatus.ARCHIVED,

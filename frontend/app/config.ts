@@ -57,3 +57,119 @@ export const STATUS_COLORS: Record<string, string> = {
   archived: "#10b981",
   cancelled: "#6b7280",
 };
+
+export interface ActionConfig {
+  label: string;
+  color: string;
+  target_status?: string;
+  icon: string;
+  need_opinion?: boolean;
+  need_signature?: boolean;
+  is_form?: boolean;
+}
+
+export const ACTION_CONFIGS: Record<string, ActionConfig> = {
+  view: {
+    label: "查看",
+    color: "#6b7280",
+    icon: "👁️",
+  },
+  update: {
+    label: "编辑",
+    color: "#3b82f6",
+    icon: "✏️",
+  },
+  scan_qr: {
+    label: "扫码核验",
+    color: "#10b981",
+    icon: "📱",
+    is_form: true,
+  },
+  submit: {
+    label: "提交审核",
+    color: "#3b82f6",
+    target_status: "pending_review",
+    icon: "📤",
+    need_opinion: false,
+    need_signature: true,
+  },
+  approve: {
+    label: "审核通过",
+    color: "#10b981",
+    target_status: "pending_final_review",
+    icon: "✅",
+    need_opinion: true,
+    need_signature: true,
+  },
+  reject: {
+    label: "审核退回",
+    color: "#ef4444",
+    target_status: "review_rejected",
+    icon: "❌",
+    need_opinion: true,
+    need_signature: true,
+  },
+  report_fault: {
+    label: "故障上报",
+    color: "#f97316",
+    target_status: "pending_fault_report",
+    icon: "⚠️",
+    need_opinion: true,
+    need_signature: true,
+  },
+  submit_fault_report: {
+    label: "提交故障报告",
+    color: "#f97316",
+    target_status: "fault_reported",
+    icon: "📋",
+    is_form: true,
+  },
+  mark_repair_start: {
+    label: "开始修复",
+    color: "#8b5cf6",
+    target_status: "pending_repair",
+    icon: "🔧",
+  },
+  mark_repair_complete: {
+    label: "修复完成",
+    color: "#8b5cf6",
+    target_status: "repair_completed",
+    icon: "🔨",
+  },
+  submit_acceptance: {
+    label: "提交验收",
+    color: "#8b5cf6",
+    target_status: "pending_acceptance",
+    icon: "📝",
+  },
+  acceptance_pass: {
+    label: "验收通过",
+    color: "#10b981",
+    target_status: "pending_final_review",
+    icon: "✅",
+    is_form: true,
+  },
+  acceptance_reject: {
+    label: "验收驳回",
+    color: "#ef4444",
+    target_status: "acceptance_rejected",
+    icon: "❌",
+    is_form: true,
+  },
+  archive: {
+    label: "复核归档",
+    color: "#0ea5e9",
+    target_status: "archived",
+    icon: "📦",
+    need_opinion: true,
+    need_signature: true,
+  },
+  final_reject: {
+    label: "复核退回",
+    color: "#ef4444",
+    target_status: "final_review_rejected",
+    icon: "↩️",
+    need_opinion: true,
+    need_signature: true,
+  },
+};

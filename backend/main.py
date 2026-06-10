@@ -5,12 +5,14 @@ import uvicorn
 
 from config import settings
 from database import init_db
+from init_data import init_demo_data
 from routers import auth, inspection, qr_scan, batch, audit, charging_pile
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
+    await init_demo_data()
     yield
 
 

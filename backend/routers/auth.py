@@ -97,7 +97,7 @@ async def login(
         username=user.username,
         full_name=user.full_name,
         role=user.role,
-        role_label=user.role_label(),
+        role_label=user.role_label,
         station_code=user.station_code,
         is_active=user.is_active,
         created_at=user.created_at
@@ -120,7 +120,7 @@ async def get_current_user_info(
         username=current_user.username,
         full_name=current_user.full_name,
         role=current_user.role,
-        role_label=current_user.role_label(),
+        role_label=current_user.role_label,
         station_code=current_user.station_code,
         is_active=current_user.is_active,
         created_at=current_user.created_at
@@ -141,7 +141,7 @@ async def get_all_users(
             username=user.username,
             full_name=user.full_name,
             role=user.role,
-            role_label=user.role_label(),
+            role_label=user.role_label,
             station_code=user.station_code,
             is_active=user.is_active,
             created_at=user.created_at
