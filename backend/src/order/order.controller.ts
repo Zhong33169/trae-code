@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards, UseInterceptors, UploadedFile, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards, UseInterceptors, UploadedFile, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { OrderService, CreateOrderDto, UpdateOrderDto } from './order.service';
@@ -213,6 +213,7 @@ export class OrderController {
   }
 
   @Post('batch')
+  @Roles(UserRole.REGISTRAR, UserRole.SUPERVISOR, UserRole.REVIEWER)
   async batchProcess(
     @Body() body: { ids: string[]; action: string; reason?: string },
     @CurrentUser() user: User,
@@ -223,6 +224,26 @@ export class OrderController {
     if (!body.action) {
       throw new BadRequestException('请指定操作类型');
     }
+
+    const registrarActions = ['submit', 'sign', 'rectify', 'deliver'];
+    const supervisorActions = [
+      'review_approve', 'review_reject', 'submit_final',
+      'ship', 'exception', 'materials_missing', 'timeout', 'return',
+    ];
+    const reviewerActions = ['final_approve', 'final_reject', 'archive'];
+
+    if (registrarActions.includes(body.action) && user.role !== UserRole.REGISTRAR
+        && user.role !== UserRole.SUPERVISOR && user.role !== UserRole.REVIEWER) {
+      throw new ForbiddenException('权限不足：该操作仅登记员/主管/复核员可执行');
+    }
+    if (supervisorActions.includes(body.action) && user.role !== UserRole.SUPERVISOR
+        && user.role !== UserRole.REVIEWER) {
+      throw new ForbiddenException('权限不足：该操作仅主管/复核员可执行');
+    }
+    if (reviewerActions.includes(body.action) && user.role !== UserRole.REVIEWER) {
+      throw new ForbiddenException('权限不足：该操作仅复核员可执行');
+    }
+
     return this.orderService.batchProcess(body.ids, body.action, user, body.reason);
   }
 

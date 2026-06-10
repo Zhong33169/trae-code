@@ -670,12 +670,33 @@ export class OrderService {
     action: string,
     user: User,
     reason?: string,
-  ): Promise<{ success: string[]; failed: { id: string; reason: string }[] }> {
-    const success: string[] = [];
-    const failed: { id: string; reason: string }[] = [];
+  ): Promise<{
+    successCount: number;
+    failedCount: number;
+    results: {
+      id: string;
+      orderNo: string;
+      success: boolean;
+      reason?: string;
+    }[];
+  }> {
+    const results: {
+      id: string;
+      orderNo: string;
+      success: boolean;
+      reason?: string;
+    }[] = [];
 
     for (const id of ids) {
+      let orderNo = '';
       try {
+        const order = await this.orderRepository.findOne({ where: { id } });
+        orderNo = order?.orderNo || id;
+
+        if (!order) {
+          throw new NotFoundException('订单不存在');
+        }
+
         switch (action) {
           case 'submit':
             await this.submitForReview(id, user);
@@ -686,6 +707,9 @@ export class OrderService {
           case 'review_reject':
             if (!reason) throw new BadRequestException('退回原因不能为空');
             await this.reviewReject(id, user, reason);
+            break;
+          case 'submit_final':
+            await this.submitForFinalReview(id, user);
             break;
           case 'final_approve':
             await this.finalApprove(id, user, reason);
@@ -728,13 +752,16 @@ export class OrderService {
           default:
             throw new BadRequestException(`不支持的操作: ${action}`);
         }
-        success.push(id);
+        results.push({ id, orderNo, success: true });
       } catch (error: any) {
-        failed.push({ id, reason: error.message });
+        results.push({ id, orderNo: orderNo || id, success: false, reason: error.message });
       }
     }
 
-    return { success, failed };
+    const successCount = results.filter(r => r.success).length;
+    const failedCount = results.filter(r => !r.success).length;
+
+    return { successCount, failedCount, results };
   }
 
   async getAttachments(orderId: string): Promise<Attachment[]> {

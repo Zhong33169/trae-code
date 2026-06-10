@@ -26,6 +26,7 @@ export interface ImportRecordData {
     unit?: string;
     productId?: string;
   }[];
+  validationErrors?: string[];
 }
 
 @Injectable()
@@ -54,48 +55,59 @@ export class ImportService {
     const workbook = XLSX.readFile(filePath);
     const sheetName = workbook.SheetNames[0];
     const worksheet = workbook.Sheets[sheetName];
-    const jsonData = XLSX.utils.sheet_to_json(worksheet);
+    const jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
 
     const records: ImportRecordData[] = [];
-    const orderMap = new Map<string, ImportRecordData>();
 
     jsonData.forEach((row: any, index: number) => {
-      const orderNo = row['订单编号'] || row['orderNo'] || `TEMP_${index}`;
-      const communityName = row['社区名称'] || row['communityName'];
-      const productName = row['商品名称'] || row['productName'];
-      const unitPrice = parseFloat(row['单价'] || row['unitPrice'] || 0);
-      const quantity = parseInt(row['数量'] || row['quantity'] || 0, 10);
-      const unit = row['单位'] || row['unit'] || '件';
+      const validationErrors: string[] = [];
+      const rowNumber = index + 2;
+
+      const orderNo = row['订单编号'] || row['orderNo'] || '';
+      const communityName = (row['社区名称'] || row['communityName'] || '').toString().trim();
+      const productName = (row['商品名称'] || row['productName'] || '').toString().trim();
+      const unitPriceStr = (row['单价'] || row['unitPrice'] || '0').toString();
+      const unitPrice = parseFloat(unitPriceStr);
+      const quantityStr = (row['数量'] || row['quantity'] || '0').toString();
+      const quantity = parseInt(quantityStr, 10);
+      const unit = (row['单位'] || row['unit'] || '件').toString().trim() || '件';
 
       if (!communityName) {
-        return;
+        validationErrors.push(`第${rowNumber}行：缺少社区名称`);
+      }
+      if (!productName) {
+        validationErrors.push(`第${rowNumber}行：缺少商品名称`);
+      }
+      if (isNaN(quantity) || quantity <= 0) {
+        validationErrors.push(`第${rowNumber}行：缺少商品数量或数量无效（${quantityStr}）`);
+      }
+      if (isNaN(unitPrice) || unitPrice < 0) {
+        validationErrors.push(`第${rowNumber}行：单价无效（${unitPriceStr}）`);
       }
 
-      if (!orderMap.has(orderNo)) {
-        orderMap.set(orderNo, {
-          orderNo: row['订单编号'] || row['orderNo'] || undefined,
-          communityName,
-          contactName: row['联系人'] || row['contactName'],
-          contactPhone: row['联系电话'] || row['contactPhone'],
-          deliveryAddress: row['配送地址'] || row['deliveryAddress'],
-          remark: row['备注'] || row['remark'],
-          expectedDeliveryDate: row['预计配送日期'] || row['expectedDeliveryDate']
-            ? new Date(row['预计配送日期'] || row['expectedDeliveryDate'])
-            : undefined,
-          items: [],
-        });
-      }
-
-      const orderData = orderMap.get(orderNo)!;
-      orderData.items.push({
-        productName,
-        unitPrice,
-        quantity,
-        unit,
+      records.push({
+        orderNo: orderNo || undefined,
+        communityName,
+        contactName: (row['联系人'] || row['contactName'] || '').toString().trim() || undefined,
+        contactPhone: (row['联系电话'] || row['contactPhone'] || '').toString().trim() || undefined,
+        deliveryAddress: (row['配送地址'] || row['deliveryAddress'] || '').toString().trim() || undefined,
+        remark: (row['备注'] || row['remark'] || '').toString().trim() || undefined,
+        expectedDeliveryDate: row['预计配送日期'] || row['expectedDeliveryDate']
+          ? new Date(row['预计配送日期'] || row['expectedDeliveryDate'])
+          : undefined,
+        items: [
+          {
+            productName,
+            unitPrice: isNaN(unitPrice) ? 0 : unitPrice,
+            quantity: isNaN(quantity) ? 0 : quantity,
+            unit,
+          },
+        ],
+        validationErrors: validationErrors.length > 0 ? validationErrors : undefined,
       });
     });
 
-    return Array.from(orderMap.values());
+    return records;
   }
 
   async createBatch(
@@ -138,7 +150,7 @@ export class ImportService {
       throw new NotFoundException('导入批次不存在');
     }
 
-    if (batch.status !== ImportBatchStatus.PENDING) {
+    if (batch.status !== ImportBatchStatus.PENDING && batch.status !== ImportBatchStatus.PROCESSING) {
       throw new BadRequestException('该批次已处理过，不能重复处理');
     }
 
@@ -154,10 +166,39 @@ export class ImportService {
       try {
         const data = record.rawData as ImportRecordData;
 
-        if (!data.communityName || data.items.length === 0) {
+        if (data.validationErrors && data.validationErrors.length > 0) {
           record.status = ImportRecordStatus.FAILED;
-          record.failReason = '数据不完整：缺少社区名称或商品信息';
+          record.failReason = data.validationErrors.join('；');
           failedCount++;
+          await this.importRecordRepository.save(record);
+          continue;
+        }
+
+        if (!data.communityName) {
+          record.status = ImportRecordStatus.FAILED;
+          record.failReason = '缺少社区名称';
+          failedCount++;
+          await this.importRecordRepository.save(record);
+          continue;
+        }
+
+        if (!data.items || data.items.length === 0) {
+          record.status = ImportRecordStatus.FAILED;
+          record.failReason = '缺少商品信息';
+          failedCount++;
+          await this.importRecordRepository.save(record);
+          continue;
+        }
+
+        const invalidItem = data.items.find(i => !i.productName || i.quantity <= 0);
+        if (invalidItem) {
+          const errs: string[] = [];
+          if (!invalidItem.productName) errs.push('缺少商品名称');
+          if (invalidItem.quantity <= 0) errs.push('商品数量无效');
+          record.status = ImportRecordStatus.FAILED;
+          record.failReason = errs.join('；');
+          failedCount++;
+          await this.importRecordRepository.save(record);
           continue;
         }
 
@@ -168,28 +209,56 @@ export class ImportService {
           const existingOrder = await this.orderService.findByOrderNo(data.orderNo);
 
           if (existingOrder) {
+            hasConflict = true;
             if (existingOrder.source === OrderSource.OFFLINE_IMPORT) {
-              hasConflict = true;
               differences.conflictType = 'duplicate_import';
-              differences.description = `订单 ${data.orderNo} 已通过离线导入存在，重复导入`;
+              differences.description = `订单 ${data.orderNo} 已通过离线导入存在（批次：${existingOrder.importBatchId || '未知'}，状态：${existingOrder.status}），重复导入不覆盖`;
               differences.existingOrderId = existingOrder.id;
               differences.existingStatus = existingOrder.status;
+              differences.existingCreatedAt = existingOrder.createdAt;
+              differences.importData = {
+                communityName: data.communityName,
+                items: data.items,
+              };
+              differences.existingData = {
+                communityName: existingOrder.communityName,
+                totalAmount: existingOrder.totalAmount,
+                totalQuantity: existingOrder.totalQuantity,
+              };
             } else {
-              hasConflict = true;
               differences.conflictType = 'online_offline_conflict';
-              differences.description = `订单 ${data.orderNo} 为线上订单，与线下台账状态可能冲突，不覆盖`;
+              differences.description = `订单 ${data.orderNo} 为线上订单（创建人：${existingOrder.createdById || '未知'}，状态：${existingOrder.status}），与线下台账状态可能冲突，不静默覆盖`;
               differences.existingOrderId = existingOrder.id;
               differences.existingStatus = existingOrder.status;
               differences.existingSource = existingOrder.source;
+              differences.existingCreatedAt = existingOrder.createdAt;
+              differences.importData = {
+                communityName: data.communityName,
+                items: data.items,
+              };
+              differences.existingData = {
+                communityName: existingOrder.communityName,
+                totalAmount: existingOrder.totalAmount,
+                totalQuantity: existingOrder.totalQuantity,
+              };
             }
 
-            if (hasConflict) {
-              record.status = ImportRecordStatus.CONFLICT;
-              record.conflictDescription = differences.description;
-              record.differences = differences;
-              conflictCount++;
-              continue;
-            }
+            record.status = ImportRecordStatus.CONFLICT;
+            record.conflictDescription = differences.description;
+            record.differences = differences;
+            conflictCount++;
+            await this.importRecordRepository.save(record);
+
+            await this.auditLogService.create({
+              orderId: existingOrder.id,
+              userId: user.id,
+              action: AuditAction.IMPORT,
+              description: `离线导入冲突：批次 ${batch.batchNo} 第${record.rowNumber}行，${differences.description}`,
+              success: false,
+              failReason: differences.description,
+            });
+
+            continue;
           }
         }
 
@@ -224,22 +293,22 @@ export class ImportService {
         record.orderId = order.id;
         record.status = ImportRecordStatus.SUCCESS;
         successCount++;
+        await this.importRecordRepository.save(record);
 
         await this.auditLogService.create({
           orderId: order.id,
           userId: user.id,
           action: AuditAction.IMPORT,
-          description: `通过批次 ${batch.batchNo} 离线导入订单`,
+          description: `通过批次 ${batch.batchNo} 第${record.rowNumber}行离线导入订单`,
           success: true,
           afterData: order,
         });
       } catch (error: any) {
         record.status = ImportRecordStatus.FAILED;
-        record.failReason = error.message || '导入失败';
+        record.failReason = error.message || '导入失败：系统异常';
         failedCount++;
+        await this.importRecordRepository.save(record);
       }
-
-      await this.importRecordRepository.save(record);
     }
 
     batch.successCount = successCount;
@@ -247,10 +316,16 @@ export class ImportService {
     batch.conflictCount = conflictCount;
     batch.skippedCount = skippedCount;
 
-    if (failedCount > 0 && successCount > 0) {
+    if (failedCount > 0 && conflictCount > 0 && successCount > 0) {
       batch.status = ImportBatchStatus.PARTIAL_SUCCESS;
-    } else if (failedCount > 0 && successCount === 0) {
-      batch.status = ImportBatchStatus.FAILED;
+    } else if (successCount > 0 && (failedCount > 0 || conflictCount > 0)) {
+      batch.status = ImportBatchStatus.PARTIAL_SUCCESS;
+    } else if (failedCount > 0 || conflictCount > 0) {
+      if (successCount === 0) {
+        batch.status = ImportBatchStatus.FAILED;
+      } else {
+        batch.status = ImportBatchStatus.PARTIAL_SUCCESS;
+      }
     } else {
       batch.status = ImportBatchStatus.SUCCESS;
     }
@@ -260,7 +335,7 @@ export class ImportService {
     await this.auditLogService.create({
       userId: user.id,
       action: AuditAction.IMPORT,
-      description: `处理导入批次 ${batch.batchNo}，成功 ${successCount} 条，失败 ${failedCount} 条，冲突 ${conflictCount} 条`,
+      description: `处理导入批次 ${batch.batchNo}，共 ${batch.totalRecords} 条，成功 ${successCount} 条，失败 ${failedCount} 条，冲突 ${conflictCount} 条`,
       success: true,
     });
 
