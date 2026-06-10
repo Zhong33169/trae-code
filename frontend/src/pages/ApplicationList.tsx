@@ -326,21 +326,22 @@ export default function ApplicationList() {
                       )}
                     </td>
                     <td>
-                      {(app.overdueBlockedCount || 0) > 0 && (
-                        <span className="badge badge-red" title="超时拦截次数" style={{ marginBottom: '4px' }}>
-                          🚫 拦截 {app.overdueBlockedCount}
-                        </span>
-                      )}
-                      {(app.overdueSupplementedCount || 0) > 0 && (
-                        <div>
-                          <span className="badge badge-green" title="超时补录次数">
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', minWidth: '120px' }}>
+                        {(app.overdueBlockedCount || 0) > 0 ? (
+                          <span className="badge badge-red" title={`该申请已被拦截 ${app.overdueBlockedCount} 次`}>
+                            🚫 拦截 {app.overdueBlockedCount}
+                          </span>
+                        ) : (
+                          <span className="badge" style={{ background: '#f3f4f6', color: '#9ca3af' }}>🚫 拦截 0</span>
+                        )}
+                        {(app.overdueSupplementedCount || 0) > 0 ? (
+                          <span className="badge badge-green" title={`该申请已补录超时记录 ${app.overdueSupplementedCount} 次`}>
                             ✅ 补录 {app.overdueSupplementedCount}
                           </span>
-                        </div>
-                      )}
-                      {!app.overdueBlockedCount && !app.overdueSupplementedCount && (
-                        <span style={{ color: '#9ca3af', fontSize: '12px' }}>-</span>
-                      )}
+                        ) : (
+                          <span className="badge" style={{ background: '#f3f4f6', color: '#9ca3af' }}>✅ 补录 0</span>
+                        )}
+                      </div>
                     </td>
                     <td>{app.createdByName}</td>
                     <td style={{ fontSize: '12px', whiteSpace: 'nowrap' }}>

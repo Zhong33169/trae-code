@@ -238,30 +238,59 @@ func GetApplicationList(c *gin.Context) {
 		applications[i].OperationLogs = nil
 	}
 
+	appIDs := make([]uint, 0, len(applications))
+	for _, app := range applications {
+		appIDs = append(appIDs, app.ID)
+	}
+
+	type auditCount struct {
+		ApplicationID uint  `gorm:"column:application_id"`
+		Blocked       int64 `gorm:"column:blocked"`
+		Supplemented  int64 `gorm:"column:supplemented"`
+	}
+	var auditCounts []auditCount
+	if len(appIDs) > 0 {
+		database.DB.Table("overdue_audits").
+			Select("application_id, " +
+				"SUM(CASE WHEN audit_type = ? THEN 1 ELSE 0 END) as blocked, "+
+				"SUM(CASE WHEN audit_type = ? THEN 1 ELSE 0 END) as supplemented",
+				string(models.AuditTypeBlocked), string(models.AuditTypeSupplemented)).
+			Where("application_id IN (?)", appIDs).
+			Group("application_id").
+			Scan(&auditCounts)
+	}
+	auditMap := make(map[uint]auditCount)
+	for _, ac := range auditCounts {
+		auditMap[ac.ApplicationID] = ac
+	}
+
 	items := make([]map[string]interface{}, 0)
 	for _, app := range applications {
-		var blockedCount int64
-		database.DB.Model(&models.OverdueAudit{}).Where("application_id = ? AND audit_type = ?", app.ID, models.AuditTypeBlocked).Count(&blockedCount)
+		ac := auditMap[app.ID]
 		item := map[string]interface{}{
-			"id":                    app.ID,
-			"applicationNo":         app.ApplicationNo,
-			"tenantName":            app.TenantName,
-			"tenantPhone":           app.TenantPhone,
-			"apartmentName":         app.ApartmentName,
-			"roomNo":                app.RoomNo,
-			"monthlyRent":           app.MonthlyRent,
-			"status":                app.Status,
-			"statusName":            models.GetStatusName(app.Status),
-			"currentNode":           app.CurrentNode,
-			"currentNodeName":       models.GetNodeName(app.CurrentNode),
-			"isOverdue":             app.IsOverdue,
-			"overdueReason":         app.OverdueReason,
-			"followUpAction":        app.FollowUpAction,
-			"hasOverdueBlocked":     blockedCount > 0,
-			"overdueBlockedCount":   blockedCount,
-			"createdByName":         app.CreatedByName,
-			"createdAt":             app.CreatedAt,
-			"updatedAt":             app.UpdatedAt,
+			"id":                       app.ID,
+			"applicationNo":            app.ApplicationNo,
+			"tenantName":               app.TenantName,
+			"tenantPhone":              app.TenantPhone,
+			"apartmentName":            app.ApartmentName,
+			"roomNo":                   app.RoomNo,
+			"monthlyRent":              app.MonthlyRent,
+			"leaseStartDate":           app.LeaseStartDate,
+			"leaseEndDate":             app.LeaseEndDate,
+			"status":                   app.Status,
+			"statusName":               models.GetStatusName(app.Status),
+			"currentNode":              app.CurrentNode,
+			"currentNodeName":          models.GetNodeName(app.CurrentNode),
+			"isOverdue":                app.IsOverdue,
+			"overdueReason":            app.OverdueReason,
+			"followUpAction":           app.FollowUpAction,
+			"hasOverdueBlocked":        ac.Blocked > 0,
+			"overdueBlockedCount":      ac.Blocked,
+			"overdueSupplementedCount": ac.Supplemented,
+			"createdByName":            app.CreatedByName,
+			"createdBy":                app.CreatedBy,
+			"createdAt":                app.CreatedAt,
+			"updatedAt":                app.UpdatedAt,
 		}
 		items = append(items, item)
 	}

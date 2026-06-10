@@ -37,6 +37,7 @@ func InitDB() {
 
 	seedUsers()
 	seedApplications()
+	seedOverdueAudits()
 	log.Println("Database initialized successfully")
 }
 
@@ -375,6 +376,126 @@ func createInitialOperationLog(app *models.LeaseApplication, user models.User) {
 		}
 		DB.Create(&log2)
 	}
+}
+
+func seedOverdueAudits() {
+	var count int64
+	DB.Model(&models.OverdueAudit{}).Count(&count)
+	if count > 0 {
+		return
+	}
+
+	var applications []models.LeaseApplication
+	DB.Find(&applications)
+	if len(applications) == 0 {
+		return
+	}
+
+	var auditor models.User
+	DB.Where("role = ? OR role = ?", string(models.RoleAuditor), string(models.RoleReviewer)).Order("id ASC").First(&auditor)
+	if auditor.ID == 0 {
+		var anyUser models.User
+		DB.Order("id ASC").First(&anyUser)
+		auditor = anyUser
+	}
+
+	type seedAudit struct {
+		appID            uint
+		nodeType         models.NodeType
+		auditType        string
+		blockedReason    string
+		overdueReason    string
+		followUpAction   string
+		oldStatus        string
+		newStatus        string
+		statusSnapshot   string
+		proceedAction    string
+		hoursAgo         int
+	}
+
+	now := time.Now()
+	seeds := []seedAudit{}
+
+	for i, app := range applications {
+		if i >= 6 {
+			break
+		}
+		appNode := app.CurrentNode
+		if appNode == "" {
+			appNode = models.NodeReview
+		}
+		snapshot := map[string]interface{}{
+			"status":       string(app.Status),
+			"currentNode":  string(appNode),
+			"isOverdue":    true,
+			"hasBlocked":   true,
+		}
+		snapshotJSON, _ := json.Marshal(snapshot)
+		seeds = append(seeds, seedAudit{
+			appID:          app.ID,
+			nodeType:       appNode,
+			auditType:      string(models.AuditTypeBlocked),
+			blockedReason:  fmt.Sprintf("节点已超时，系统自动拦截 - 样例%d", i+1),
+			oldStatus:      string(app.Status),
+			newStatus:      string(app.Status),
+			statusSnapshot: string(snapshotJSON),
+			proceedAction:  "review",
+			hoursAgo:       (i + 1) * 3,
+		})
+		if i%2 == 1 {
+			targetStatus := string(app.Status)
+			if appNode == models.NodeReview {
+				targetStatus = string(models.StatusPendingConfirm)
+			} else if appNode == models.NodeRoomConfirm {
+				targetStatus = string(models.StatusPendingHandover)
+			} else if appNode == models.NodeHandover {
+				targetStatus = string(models.StatusRoomConfirmed)
+			} else if appNode == models.NodeContractSigning {
+				targetStatus = string(models.StatusPendingReview)
+			}
+			suppSnapshot := map[string]interface{}{
+				"status":       string(app.Status),
+				"currentNode":  string(appNode),
+				"isOverdue":    true,
+				"hasBlocked":   true,
+			}
+			suppJSON, _ := json.Marshal(suppSnapshot)
+			seeds = append(seeds, seedAudit{
+				appID:          app.ID,
+				nodeType:       appNode,
+				auditType:      string(models.AuditTypeSupplemented),
+				overdueReason:  fmt.Sprintf("审核人因临时外出未及时处理，已补录超时说明 - 样例%d", i+1),
+				followUpAction: fmt.Sprintf("已电话沟通确认，预计 %d 小时内完成处理", (i+1)*2),
+				oldStatus:      string(app.Status),
+				newStatus:      targetStatus,
+				statusSnapshot: string(suppJSON),
+				proceedAction:  "review",
+				hoursAgo:       (i+1)*2 - 1,
+			})
+		}
+	}
+
+	for _, s := range seeds {
+		createdAt := now.Add(-time.Duration(s.hoursAgo) * time.Hour)
+		audit := models.OverdueAudit{
+			ApplicationID:  s.appID,
+			NodeType:       s.nodeType,
+			AuditType:      models.AuditType(s.auditType),
+			BlockedReason:  s.blockedReason,
+			OverdueReason:  s.overdueReason,
+			FollowUpAction: s.followUpAction,
+			HandlerID:      auditor.ID,
+			HandlerName:    auditor.RealName,
+			HandlerRole:    string(auditor.Role),
+			OldStatus:      s.oldStatus,
+			NewStatus:      s.newStatus,
+			StatusSnapshot: s.statusSnapshot,
+			ProceedAction:  s.proceedAction,
+			CreatedAt:      createdAt,
+		}
+		DB.Create(&audit)
+	}
+	log.Printf("Seed overdue audits created: %d", len(seeds))
 }
 
 func checkAndUpdateOverdue(applicationID uint) {
