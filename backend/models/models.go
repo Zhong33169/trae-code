@@ -31,6 +31,39 @@ const (
 	AttachRejected AttachmentStatus = "rejected"
 )
 
+type RequiredMaterial struct {
+	Type     string `json:"type"`
+	Name     string `json:"name"`
+	Required bool   `json:"required"`
+}
+
+var RequiredMaterials = []RequiredMaterial{
+	{Type: "id_card_front", Name: "身份证正面", Required: true},
+	{Type: "id_card_back", Name: "身份证背面", Required: true},
+	{Type: "education", Name: "学历证明", Required: true},
+	{Type: "photo", Name: "一寸免冠照片", Required: true},
+	{Type: "health", Name: "体检报告", Required: false},
+	{Type: "other", Name: "其他材料", Required: false},
+}
+
+type MaterialCheckResult struct {
+	Type           string `json:"type"`
+	Name           string `json:"name"`
+	Required       bool   `json:"required"`
+	HasAttachment  bool   `json:"has_attachment"`
+	IsRejected     bool   `json:"is_rejected"`
+	RejectReason   string `json:"reject_reason,omitempty"`
+	AttachmentID   uint   `json:"attachment_id,omitempty"`
+	Status         string `json:"status,omitempty"`
+}
+
+type EnrollmentMaterialStatus struct {
+	CanSubmit     bool                  `json:"can_submit"`
+	MissingCount  int                   `json:"missing_count"`
+	RejectedCount int                   `json:"rejected_count"`
+	Materials     []MaterialCheckResult `json:"materials"`
+}
+
 type User struct {
 	ID       uint   `gorm:"primaryKey" json:"id"`
 	Username string `gorm:"uniqueIndex" json:"username"`

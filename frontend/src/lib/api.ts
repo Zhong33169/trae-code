@@ -58,7 +58,10 @@ export const api = {
   },
 
   getEnrollment: (id: number) => request<any>(`/enrollments/${id}`),
-  
+
+  getMaterialStatus: (id: number) =>
+    request<any>(`/enrollments/${id}/material-status`),
+
   createEnrollment: (data: any) =>
     request<any>('/enrollments', {
       method: 'POST',

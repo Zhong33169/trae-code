@@ -34,6 +34,7 @@ func main() {
 			{
 				enrollments.GET("", handlers.GetEnrollments)
 				enrollments.GET("/:id", handlers.GetEnrollment)
+				enrollments.GET("/:id/material-status", handlers.CheckMaterialStatus)
 				enrollments.POST("", middleware.RoleMiddleware("admission"), handlers.CreateEnrollment)
 				enrollments.POST("/:id/submit", middleware.RoleMiddleware("admission"), handlers.SubmitEnrollment)
 				enrollments.POST("/:id/verify", middleware.RoleMiddleware("academic"), handlers.VerifyEnrollment)

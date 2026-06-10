@@ -15,6 +15,24 @@ export type EnrollmentStatus =
 
 export type AttachmentStatus = 'pending' | 'approved' | 'rejected';
 
+export interface MaterialCheckResult {
+  type: string;
+  name: string;
+  required: boolean;
+  has_attachment: boolean;
+  is_rejected: boolean;
+  reject_reason?: string;
+  attachment_id?: number;
+  status?: string;
+}
+
+export interface EnrollmentMaterialStatus {
+  can_submit: boolean;
+  missing_count: number;
+  rejected_count: number;
+  materials: MaterialCheckResult[];
+}
+
 export interface Attachment {
   id: number;
   enrollment_id: number;

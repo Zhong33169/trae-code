@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { api, getCurrentUser } from '../lib/api';
 import { STATUS_LABELS, STATUS_COLORS, ROLE_LABELS } from '../lib/types';
-import type { Enrollment, Attachment, AuditLog } from '../lib/types';
+import type { Enrollment, Attachment, AuditLog, EnrollmentMaterialStatus } from '../lib/types';
 
 interface EnrollmentDetailProps {
   id: number;
@@ -10,9 +10,10 @@ interface EnrollmentDetailProps {
 
 export default function EnrollmentDetail({ id, onBack }: EnrollmentDetailProps) {
   const [enrollment, setEnrollment] = useState<Enrollment | null>(null);
+  const [materialStatus, setMaterialStatus] = useState<EnrollmentMaterialStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState<any>(null);
-  const [activeTab, setActiveTab] = useState<'attachments' | 'audit'>('attachments');
+  const [activeTab, setActiveTab] = useState<'materials' | 'audit'>('materials');
   const [verifyReason, setVerifyReason] = useState('');
   const [reviewRemark, setReviewRemark] = useState('');
   const [reviewReason, setReviewReason] = useState('');
@@ -21,6 +22,8 @@ export default function EnrollmentDetail({ id, onBack }: EnrollmentDetailProps) 
   const [rejectAttachId, setRejectAttachId] = useState<number | null>(null);
   const [rejectReason, setRejectReason] = useState('');
   const [uploading, setUploading] = useState(false);
+  const [uploadType, setUploadType] = useState('');
+  const [showUploadModal, setShowUploadModal] = useState(false);
 
   useEffect(() => {
     setUser(getCurrentUser());
@@ -30,8 +33,12 @@ export default function EnrollmentDetail({ id, onBack }: EnrollmentDetailProps) 
   const loadDetail = async () => {
     setLoading(true);
     try {
-      const data = await api.getEnrollment(id);
+      const [data, matStatus] = await Promise.all([
+        api.getEnrollment(id),
+        api.getMaterialStatus(id),
+      ]);
       setEnrollment(data);
+      setMaterialStatus(matStatus);
     } catch (e) {
       console.error(e);
     } finally {
@@ -80,25 +87,32 @@ export default function EnrollmentDetail({ id, onBack }: EnrollmentDetailProps) 
     }
   };
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, attachType?: string) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     const formData = new FormData();
     formData.append('file', file);
     formData.append('name', file.name);
-    formData.append('type', file.type);
+    formData.append('type', attachType || file.type);
 
     setUploading(true);
     try {
       await api.uploadAttachment(id, formData);
       loadDetail();
+      setShowUploadModal(false);
+      setUploadType('');
     } catch (e: any) {
       alert(e.message);
     } finally {
       setUploading(false);
       e.target.value = '';
     }
+  };
+
+  const openUploadForType = (type: string) => {
+    setUploadType(type);
+    setShowUploadModal(true);
   };
 
   const handleApproveAttach = async (attachId: number) => {
@@ -238,10 +252,15 @@ export default function EnrollmentDetail({ id, onBack }: EnrollmentDetailProps) 
 
           <div className="tabs">
             <button
-              className={`tab ${activeTab === 'attachments' ? 'active' : ''}`}
-              onClick={() => setActiveTab('attachments')}
+              className={`tab ${activeTab === 'materials' ? 'active' : ''}`}
+              onClick={() => setActiveTab('materials')}
             >
-              📎 附件材料 ({enrollment.attachments?.length || 0})
+              � 材料清单
+              {materialStatus && (materialStatus.missing_count > 0 || materialStatus.rejected_count > 0) && (
+                <span className="tab-badge">
+                  {materialStatus.missing_count + materialStatus.rejected_count}
+                </span>
+              )}
             </button>
             <button
               className={`tab ${activeTab === 'audit' ? 'active' : ''}`}
@@ -251,83 +270,156 @@ export default function EnrollmentDetail({ id, onBack }: EnrollmentDetailProps) 
             </button>
           </div>
 
-          {activeTab === 'attachments' && (
-            <div className="attachments-section">
+          {activeTab === 'materials' && materialStatus && (
+            <div className="materials-section">
+              <div className="materials-summary">
+                <div className="summary-item ok">
+                  <span className="summary-icon">✅</span>
+                  <span className="summary-label">可提交</span>
+                  <span className="summary-value">{materialStatus.can_submit ? '是' : '否'}</span>
+                </div>
+                <div className="summary-item missing">
+                  <span className="summary-icon">❌</span>
+                  <span className="summary-label">缺失材料</span>
+                  <span className="summary-value">{materialStatus.missing_count} 项</span>
+                </div>
+                <div className="summary-item rejected">
+                  <span className="summary-icon">⚠️</span>
+                  <span className="summary-label">驳回材料</span>
+                  <span className="summary-value">{materialStatus.rejected_count} 项</span>
+                </div>
+              </div>
+
+              <div className="material-list">
+                {materialStatus.materials.map((mat) => {
+                  const attachment = enrollment.attachments?.find(a => a.type === mat.type);
+                  const isMissing = mat.required && !mat.has_attachment;
+                  const isRejected = mat.is_rejected;
+                  const isPending = mat.has_attachment && mat.status === 'pending';
+                  const isApproved = mat.has_attachment && mat.status === 'approved';
+
+                  let statusClass = 'pending';
+                  let statusText = '未上传';
+                  let statusIcon = '📄';
+
+                  if (isMissing) {
+                    statusClass = 'missing';
+                    statusText = '缺失';
+                    statusIcon = '❌';
+                  } else if (isRejected) {
+                    statusClass = 'rejected';
+                    statusText = '已驳回';
+                    statusIcon = '⚠️';
+                  } else if (isApproved) {
+                    statusClass = 'approved';
+                    statusText = '已通过';
+                    statusIcon = '✅';
+                  } else if (isPending) {
+                    statusClass = 'pending';
+                    statusText = '待核验';
+                    statusIcon = '⏳';
+                  } else if (mat.has_attachment) {
+                    statusClass = 'pending';
+                    statusText = '待核验';
+                    statusIcon = '⏳';
+                  }
+
+                  return (
+                    <div key={mat.type} className={`material-item ${statusClass}`}>
+                      <div className="material-left">
+                        <span className="material-icon">{statusIcon}</span>
+                        <div className="material-info">
+                          <div className="material-name">
+                            {mat.name}
+                            {mat.required && <span className="required-tag">必填</span>}
+                            {!mat.required && <span className="optional-tag">选填</span>}
+                          </div>
+                          {mat.reject_reason && (
+                            <div className="material-reject-reason">
+                              驳回原因：{mat.reject_reason}
+                            </div>
+                          )}
+                          {attachment && (
+                            <div className="attachment-detail">
+                              <span>文件名：{attachment.name}</span>
+                              <span>上传人：{attachment.uploaded_by_name}</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      <div className="material-right">
+                        <span className={`material-status-tag ${statusClass}`}>
+                          {statusText}
+                        </span>
+                        <div className="material-actions">
+                          {canUpload && (
+                            <label className="btn-small upload-small">
+                              <input
+                                type="file"
+                                style={{ display: 'none' }}
+                                onChange={(e) => handleFileUpload(e, mat.type)}
+                                disabled={uploading}
+                              />
+                              {uploading && uploadType === mat.type ? '上传中...' : '上传/替换'}
+                            </label>
+                          )}
+                          {canManageAttach && attachment && attachment.status === 'pending' && (
+                            <>
+                              <button
+                                className="btn-small success"
+                                onClick={() => handleApproveAttach(attachment.id)}
+                              >
+                                通过
+                              </button>
+                              <button
+                                className="btn-small danger"
+                                onClick={() => {
+                                  setRejectAttachId(attachment.id);
+                                  setRejectReason('');
+                                }}
+                              >
+                                驳回
+                              </button>
+                            </>
+                          )}
+                          {canUpload && attachment && (
+                            <button
+                              className="btn-small danger"
+                              onClick={() => handleDeleteAttach(attachment.id)}
+                            >
+                              删除
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
               {canUpload && (
-                <div className="upload-section">
-                  <label className="upload-btn">
+                <div className="upload-other-section">
+                  <h4>其他附件</h4>
+                  <div className="other-attachments">
+                    {enrollment.attachments?.filter(a => !materialStatus.materials.find(m => m.type === a.type))
+                      .map(att => (
+                        <div key={att.id} className="attachment-mini">
+                          <span>📄 {att.name}</span>
+                          <span className={`mini-status ${att.status}`}>
+                            {attachStatusLabel[att.status]}
+                          </span>
+                        </div>
+                      ))}
+                  </div>
+                  <label className="upload-btn small">
                     <input
                       type="file"
-                      onChange={handleFileUpload}
+                      onChange={(e) => handleFileUpload(e, 'other')}
                       style={{ display: 'none' }}
                       disabled={uploading}
                     />
-                    {uploading ? '上传中...' : '📤 上传附件'}
+                    📤 上传其他附件
                   </label>
-                </div>
-              )}
-
-              {enrollment.attachments?.length === 0 ? (
-                <div className="empty">暂无附件</div>
-              ) : (
-                <div className="attachments-grid">
-                  {enrollment.attachments?.map((att) => (
-                    <div key={att.id} className="attachment-card">
-                      <div className="attach-icon">📄</div>
-                      <div className="attach-info">
-                        <div className="attach-name">{att.name}</div>
-                        <div className="attach-meta">
-                          上传人：{att.uploaded_by_name}
-                        </div>
-                        <div className="attach-meta">
-                          {new Date(att.created_at).toLocaleDateString()}
-                        </div>
-                        <span
-                          className="attach-status"
-                          style={{
-                            background: attachStatusColor[att.status] + '20',
-                            color: attachStatusColor[att.status],
-                          }}
-                        >
-                          {attachStatusLabel[att.status]}
-                        </span>
-                      </div>
-                      {att.reject_reason && (
-                        <div className="attach-reject-reason">
-                          驳回原因：{att.reject_reason}
-                        </div>
-                      )}
-                      <div className="attach-actions">
-                        {canManageAttach && att.status === 'pending' && (
-                          <>
-                            <button
-                              className="btn-small success"
-                              onClick={() => handleApproveAttach(att.id)}
-                            >
-                              通过
-                            </button>
-                            <button
-                              className="btn-small danger"
-                              onClick={() => {
-                                setRejectAttachId(att.id);
-                                setRejectReason('');
-                              }}
-                            >
-                              驳回
-                            </button>
-                          </>
-                        )}
-                        {canUpload && (
-                          <button
-                            className="btn-small danger"
-                            onClick={() => handleDeleteAttach(att.id)}
-                          >
-                            删除
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  ))}
                 </div>
               )}
             </div>
@@ -730,6 +822,181 @@ export default function EnrollmentDetail({ id, onBack }: EnrollmentDetailProps) 
         }
         .btn-small.success { background: #10b981; color: white; }
         .btn-small.danger { background: #ef4444; color: white; }
+        .upload-small {
+          background: #3b82f6;
+          color: white;
+          display: inline-block;
+          text-align: center;
+        }
+        .tab-badge {
+          display: inline-block;
+          min-width: 18px;
+          height: 18px;
+          line-height: 18px;
+          padding: 0 5px;
+          margin-left: 6px;
+          background: #ef4444;
+          color: white;
+          border-radius: 9px;
+          font-size: 11px;
+          text-align: center;
+        }
+        .materials-section, .audit-section {
+          background: white;
+          border-radius: 0 0 12px 12px;
+          padding: 20px;
+          box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        .materials-summary {
+          display: grid;
+          grid-template-columns: repeat(3, 1fr);
+          gap: 12px;
+          margin-bottom: 20px;
+        }
+        .summary-item {
+          padding: 16px;
+          border-radius: 8px;
+          display: flex;
+          align-items: center;
+          gap: 10px;
+        }
+        .summary-item.ok { background: #ecfdf5; }
+        .summary-item.missing { background: #fef2f2; }
+        .summary-item.rejected { background: #fffbeb; }
+        .summary-icon { font-size: 20px; }
+        .summary-label {
+          font-size: 13px;
+          color: #6b7280;
+          flex: 1;
+        }
+        .summary-value {
+          font-size: 16px;
+          font-weight: 600;
+        }
+        .material-list {
+          display: flex;
+          flex-direction: column;
+          gap: 10px;
+          margin-bottom: 20px;
+        }
+        .material-item {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 14px 16px;
+          border: 1px solid #e5e7eb;
+          border-radius: 8px;
+          gap: 16px;
+        }
+        .material-item.missing {
+          border-color: #fca5a5;
+          background: #fef2f2;
+        }
+        .material-item.rejected {
+          border-color: #fcd34d;
+          background: #fffbeb;
+        }
+        .material-item.approved {
+          border-color: #6ee7b7;
+          background: #ecfdf5;
+        }
+        .material-left {
+          display: flex;
+          align-items: flex-start;
+          gap: 12px;
+          flex: 1;
+        }
+        .material-icon { font-size: 24px; }
+        .material-name {
+          font-size: 14px;
+          font-weight: 500;
+          color: #1f2937;
+          margin-bottom: 4px;
+        }
+        .required-tag {
+          display: inline-block;
+          padding: 1px 6px;
+          background: #ef4444;
+          color: white;
+          border-radius: 4px;
+          font-size: 10px;
+          margin-left: 6px;
+          font-weight: 400;
+        }
+        .optional-tag {
+          display: inline-block;
+          padding: 1px 6px;
+          background: #9ca3af;
+          color: white;
+          border-radius: 4px;
+          font-size: 10px;
+          margin-left: 6px;
+          font-weight: 400;
+        }
+        .material-reject-reason {
+          font-size: 12px;
+          color: #92400e;
+          margin-top: 4px;
+        }
+        .attachment-detail {
+          display: flex;
+          gap: 12px;
+          font-size: 12px;
+          color: #6b7280;
+          margin-top: 4px;
+        }
+        .material-right {
+          display: flex;
+          flex-direction: column;
+          align-items: flex-end;
+          gap: 8px;
+        }
+        .material-status-tag {
+          padding: 2px 10px;
+          border-radius: 12px;
+          font-size: 12px;
+          font-weight: 500;
+        }
+        .material-status-tag.missing { background: #fee2e2; color: #dc2626; }
+        .material-status-tag.rejected { background: #fef3c7; color: #d97706; }
+        .material-status-tag.approved { background: #d1fae5; color: #059669; }
+        .material-status-tag.pending { background: #e0e7ff; color: #4f46e5; }
+        .material-actions {
+          display: flex;
+          gap: 6px;
+          flex-wrap: wrap;
+          justify-content: flex-end;
+        }
+        .upload-other-section {
+          padding-top: 16px;
+          border-top: 1px solid #e5e7eb;
+        }
+        .upload-other-section h4 {
+          margin: 0 0 12px 0;
+          font-size: 14px;
+          color: #374151;
+        }
+        .other-attachments {
+          margin-bottom: 12px;
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+        }
+        .attachment-mini {
+          display: flex;
+          justify-content: space-between;
+          padding: 8px 12px;
+          background: #f9fafb;
+          border-radius: 6px;
+          font-size: 13px;
+        }
+        .mini-status.pending { color: #4f46e5; }
+        .mini-status.approved { color: #059669; }
+        .mini-status.rejected { color: #dc2626; }
+        .upload-btn.small {
+          padding: 6px 12px;
+          font-size: 13px;
+        }
         .audit-timeline {
           position: relative;
           padding-left: 24px;

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -126,10 +127,19 @@ func SubmitEnrollment(c *gin.Context) {
 		return
 	}
 
-	var attachments []models.Attachment
-	database.DB.Where("enrollment_id = ?", id).Find(&attachments)
-	if len(attachments) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "请先上传至少一个附件"})
+	materialStatus := checkMaterialStatus(uint(id))
+
+	if !materialStatus.CanSubmit {
+		var errMsg string
+		if materialStatus.MissingCount > 0 && materialStatus.RejectedCount > 0 {
+			errMsg = fmt.Sprintf("还有 %d 项必备材料缺失，%d 项材料被驳回，请补齐后再提交",
+				materialStatus.MissingCount, materialStatus.RejectedCount)
+		} else if materialStatus.MissingCount > 0 {
+			errMsg = fmt.Sprintf("还有 %d 项必备材料缺失，请补齐后再提交", materialStatus.MissingCount)
+		} else if materialStatus.RejectedCount > 0 {
+			errMsg = fmt.Sprintf("还有 %d 项材料被驳回，请修改后再提交", materialStatus.RejectedCount)
+		}
+		c.JSON(http.StatusBadRequest, gin.H{"error": errMsg, "material_status": materialStatus})
 		return
 	}
 
@@ -144,7 +154,8 @@ func SubmitEnrollment(c *gin.Context) {
 
 	database.DB.Save(&enrollment)
 
-	addAuditLog(enrollment.ID, userID.(uint), userName.(string), userRole.(string), "提交核验", "", fromStatus, string(models.StatusPendingVerify))
+	addAuditLog(enrollment.ID, userID.(uint), userName.(string), userRole.(string),
+		"提交核验", "", fromStatus, string(models.StatusPendingVerify))
 
 	c.JSON(http.StatusOK, enrollment)
 }
@@ -329,4 +340,62 @@ func addAuditLog(enrollmentID, userID uint, userName, userRole, action, reason, 
 		ToStatus:     toStatus,
 	}
 	database.DB.Create(&log)
+}
+
+func CheckMaterialStatus(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的ID"})
+		return
+	}
+
+	status := checkMaterialStatus(uint(id))
+	c.JSON(http.StatusOK, status)
+}
+
+func checkMaterialStatus(enrollmentID uint) models.EnrollmentMaterialStatus {
+	var attachments []models.Attachment
+	database.DB.Where("enrollment_id = ?", enrollmentID).Find(&attachments)
+
+	attachMap := make(map[string]models.Attachment)
+	for _, att := range attachments {
+		attachMap[att.Type] = att
+	}
+
+	var results []models.MaterialCheckResult
+	missingCount := 0
+	rejectedCount := 0
+
+	for _, mat := range models.RequiredMaterials {
+		att, exists := attachMap[mat.Type]
+		result := models.MaterialCheckResult{
+			Type:          mat.Type,
+			Name:          mat.Name,
+			Required:      mat.Required,
+			HasAttachment: exists,
+		}
+
+		if exists {
+			result.AttachmentID = att.ID
+			result.Status = string(att.Status)
+			result.IsRejected = att.Status == models.AttachRejected
+			if att.Status == models.AttachRejected {
+				result.RejectReason = att.RejectReason
+				rejectedCount++
+			}
+		} else if mat.Required {
+			missingCount++
+		}
+
+		results = append(results, result)
+	}
+
+	canSubmit := missingCount == 0 && rejectedCount == 0
+
+	return models.EnrollmentMaterialStatus{
+		CanSubmit:     canSubmit,
+		MissingCount:  missingCount,
+		RejectedCount: rejectedCount,
+		Materials:     results,
+	}
 }
