@@ -82,16 +82,16 @@ fn get_plan_by_id(conn: &rusqlite::Connection, id: &str) -> Result<NursingPlan, 
 
 fn validate_handover(handover: &HandoverInfo) -> Result<(), AppError> {
     if handover.shift.trim().is_empty() {
-        return Err(AppError::Validation("班次不能为空".into()));
+        return Err(AppError::Validation("交接信息错误：班次不能为空，请选择班次".into()));
     }
     if handover.handover_by.trim().is_empty() {
-        return Err(AppError::Validation("交出人不能为空".into()));
+        return Err(AppError::Validation("交接信息错误：交出人不能为空，请输入交出人姓名".into()));
     }
     if handover.takeover_by.trim().is_empty() {
-        return Err(AppError::Validation("接收人不能为空".into()));
+        return Err(AppError::Validation("交接信息错误：接收人不能为空，请输入接收人姓名".into()));
     }
     if handover.confirm_time.trim().is_empty() {
-        return Err(AppError::Validation("确认时间不能为空".into()));
+        return Err(AppError::Validation("交接信息错误：确认时间不能为空，请选择确认时间".into()));
     }
     Ok(())
 }

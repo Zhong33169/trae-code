@@ -176,25 +176,47 @@
 
           <div v-if="batchAction === 'approve' || batchAction === 'archive'" class="form-group">
             <label>交接信息 <span class="required">*</span></label>
+            <div v-if="batchFormError" class="batch-form-error">
+              <span class="error-icon">!</span>
+              <span>{{ batchFormError }}</span>
+            </div>
             <div class="handover-form">
-              <div>
+              <div :class="{ 'has-error': handoverFieldErrors.shift }">
                 <label>班次：</label>
-                <select v-model="handoverForm.shift">
+                <select v-model="handoverForm.shift" @change="clearFieldError('shift')">
                   <option value="">请选择</option>
                   <option v-for="s in SHIFT_OPTIONS" :key="s" :value="s">{{ s }}</option>
                 </select>
+                <span v-if="handoverFieldErrors.shift" class="field-error">{{ handoverFieldErrors.shift }}</span>
               </div>
-              <div>
+              <div :class="{ 'has-error': handoverFieldErrors.handover_by }">
                 <label>交出人：</label>
-                <input type="text" v-model="handoverForm.handover_by" placeholder="请输入交出人" />
+                <input 
+                  type="text" 
+                  v-model="handoverForm.handover_by" 
+                  placeholder="请输入交出人" 
+                  @input="clearFieldError('handover_by')"
+                />
+                <span v-if="handoverFieldErrors.handover_by" class="field-error">{{ handoverFieldErrors.handover_by }}</span>
               </div>
-              <div>
+              <div :class="{ 'has-error': handoverFieldErrors.takeover_by }">
                 <label>接收人：</label>
-                <input type="text" v-model="handoverForm.takeover_by" placeholder="请输入接收人" />
+                <input 
+                  type="text" 
+                  v-model="handoverForm.takeover_by" 
+                  placeholder="请输入接收人" 
+                  @input="clearFieldError('takeover_by')"
+                />
+                <span v-if="handoverFieldErrors.takeover_by" class="field-error">{{ handoverFieldErrors.takeover_by }}</span>
               </div>
-              <div>
+              <div :class="{ 'has-error': handoverFieldErrors.confirm_time }">
                 <label>确认时间：</label>
-                <input type="datetime-local" v-model="handoverForm.confirm_time" />
+                <input 
+                  type="datetime-local" 
+                  v-model="handoverForm.confirm_time" 
+                  @change="clearFieldError('confirm_time')"
+                />
+                <span v-if="handoverFieldErrors.confirm_time" class="field-error">{{ handoverFieldErrors.confirm_time }}</span>
               </div>
               <div class="col-full">
                 <label>交接内容：</label>
@@ -250,6 +272,10 @@
           </div>
 
           <div v-if="batchResult?.items.length" class="result-detail">
+            <div v-if="batchResult.batch.fail_count > 0" class="fail-summary">
+              <span class="fail-icon">!</span>
+              <span>共 <strong>{{ batchResult.batch.fail_count }}</strong> 条处理失败，请查看下方明细</span>
+            </div>
             <h4>处理明细</h4>
             <table class="table table-sm">
               <thead>
@@ -259,11 +285,11 @@
                   <th>原状态</th>
                   <th>目标状态</th>
                   <th>结果</th>
-                  <th>失败原因</th>
+                  <th>说明</th>
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="item in batchResult.items" :key="item.id">
+                <tr v-for="item in batchResult.items" :key="item.id" :class="{ 'row-fail': !item.success }">
                   <td>{{ item.plan_no }}</td>
                   <td>{{ item.elder_name }}</td>
                   <td>{{ item.from_status ? STATUS_MAP[item.from_status] : '-' }}</td>
@@ -273,7 +299,10 @@
                       {{ item.success ? '成功' : '失败' }}
                     </span>
                   </td>
-                  <td class="col-reason">{{ item.error_message || '-' }}</td>
+                  <td class="col-reason">
+                    <span v-if="item.success" class="success-text">处理完成</span>
+                    <span v-else class="fail-reason">{{ item.error_message }}</span>
+                  </td>
                 </tr>
               </tbody>
             </table>
@@ -335,6 +364,14 @@ const rejectError = ref('')
 
 const showResultModal = ref(false)
 const batchResult = ref<BatchTransitionResponse | null>(null)
+const batchFormError = ref('')
+
+const handoverFieldErrors = ref<Record<string, string>>({
+  shift: '',
+  handover_by: '',
+  takeover_by: '',
+  confirm_time: ''
+})
 
 const totalPages = computed(() => Math.ceil(total.value / pageSize.value))
 
@@ -490,6 +527,13 @@ function openBatchModal(action: string) {
   batchAction.value = action
   handoverError.value = ''
   rejectError.value = ''
+  batchFormError.value = ''
+  handoverFieldErrors.value = {
+    shift: '',
+    handover_by: '',
+    takeover_by: '',
+    confirm_time: ''
+  }
   handoverForm.value = {
     shift: '',
     handover_by: '',
@@ -499,6 +543,35 @@ function openBatchModal(action: string) {
   }
   rejectReason.value = ''
   showBatchModal.value = true
+}
+
+function clearFieldError(field: string) {
+  if (handoverFieldErrors.value[field]) {
+    handoverFieldErrors.value[field] = ''
+  }
+  if (batchFormError.value) {
+    batchFormError.value = ''
+  }
+}
+
+function parseHandoverError(errorMsg: string) {
+  const cleanMsg = errorMsg.replace(/^.*交接信息错误[：:]/, '').trim()
+  
+  if (errorMsg.includes('班次')) {
+    handoverFieldErrors.value.shift = cleanMsg || '班次不能为空，请选择班次'
+  }
+  if (errorMsg.includes('交出人')) {
+    handoverFieldErrors.value.handover_by = cleanMsg || '交出人不能为空，请输入交出人姓名'
+  }
+  if (errorMsg.includes('接收人')) {
+    handoverFieldErrors.value.takeover_by = cleanMsg || '接收人不能为空，请输入接收人姓名'
+  }
+  if (errorMsg.includes('确认时间')) {
+    handoverFieldErrors.value.confirm_time = cleanMsg || '确认时间不能为空，请选择确认时间'
+  }
+  if (errorMsg.includes('交接信息') && !handoverFieldErrors.value.shift && !handoverFieldErrors.value.handover_by) {
+    batchFormError.value = errorMsg
+  }
 }
 
 function closeBatchModal() {
@@ -577,11 +650,25 @@ async function executeBatch() {
       await loadPlans()
       await statsStore.refreshStats()
     } else {
-      alert(result.message || '批量操作失败')
+      const errMsg = result.message || '批量操作失败'
+      if (errMsg.includes('交接') || errMsg.includes('退回')) {
+        parseHandoverError(errMsg)
+        rejectError.value = errMsg.includes('退回') ? errMsg : ''
+      } else {
+        alert(errMsg)
+      }
     }
   } catch (e: any) {
     console.error('批量操作失败', e)
-    alert(e?.data?.message || '批量操作失败')
+    const errMsg = e?.data?.message || '批量操作失败'
+    if (errMsg.includes('交接') || errMsg.includes('退回')) {
+      parseHandoverError(errMsg)
+      if (errMsg.includes('退回')) {
+        rejectError.value = errMsg
+      }
+    } else {
+      alert(errMsg)
+    }
   } finally {
     batchSubmitting.value = false
   }
@@ -645,6 +732,61 @@ onMounted(() => {
   background: #e6f7ff !important;
 }
 
+.result-detail {
+  margin-top: 20px;
+}
+
+.result-detail h4 {
+  margin-bottom: 12px;
+  color: #333;
+}
+
+.fail-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 15px;
+  background: #fff2f0;
+  border: 1px solid #ffccc7;
+  border-radius: 4px;
+  margin-bottom: 15px;
+  color: #cf1322;
+  font-size: 14px;
+}
+
+.fail-summary .fail-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #f5222d;
+  color: white;
+  font-weight: bold;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.result-detail .row-fail {
+  background: #fff2f0;
+}
+
+.result-detail .row-fail td {
+  color: #cf1322;
+}
+
+.result-detail .success-text {
+  color: #52c41a;
+  font-size: 13px;
+}
+
+.result-detail .fail-reason {
+  color: #cf1322;
+  font-size: 13px;
+  font-weight: 500;
+}
+
 .col-reason {
   max-width: 180px;
   overflow: hidden;
@@ -685,9 +827,44 @@ onMounted(() => {
   gap: 5px;
 }
 
-.handover-form label {
+.handover-form .has-error input,
+.handover-form .has-error select,
+.handover-form .has-error textarea {
+  border-color: #f5222d;
+  box-shadow: 0 0 0 2px rgba(245, 34, 45, 0.1);
+}
+
+.handover-form .field-error {
+  color: #f5222d;
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+.batch-form-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  background: #fff2f0;
+  border: 1px solid #ffccc7;
+  border-radius: 4px;
+  margin-bottom: 12px;
+  color: #cf1322;
   font-size: 13px;
-  color: #666;
+}
+
+.batch-form-error .error-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #f5222d;
+  color: white;
+  font-weight: bold;
+  font-size: 12px;
+  flex-shrink: 0;
 }
 
 .error-text {

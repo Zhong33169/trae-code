@@ -28,18 +28,18 @@ struct ErrorResponse {
 
 impl<'r> Responder<'r, 'static> for AppError {
     fn respond_to(self, req: &'r rocket::Request<'_>) -> rocket::response::Result<'static> {
-        let (status, error_code) = match &self {
-            AppError::Database(_) => (Status::InternalServerError, "database_error"),
-            AppError::Auth(_) => (Status::Unauthorized, "auth_failed"),
-            AppError::Validation(_) => (Status::BadRequest, "validation_error"),
-            AppError::NotFound(_) => (Status::NotFound, "not_found"),
-            AppError::Permission(_) => (Status::Forbidden, "permission_denied"),
-            AppError::StateTransition(_) => (Status::BadRequest, "state_transition_error"),
+        let (status, error_code, message) = match &self {
+            AppError::Database(msg) => (Status::InternalServerError, "database_error", msg.clone()),
+            AppError::Auth(msg) => (Status::Unauthorized, "auth_failed", msg.clone()),
+            AppError::Validation(msg) => (Status::BadRequest, "validation_error", msg.clone()),
+            AppError::NotFound(msg) => (Status::NotFound, "not_found", msg.clone()),
+            AppError::Permission(msg) => (Status::Forbidden, "permission_denied", msg.clone()),
+            AppError::StateTransition(msg) => (Status::BadRequest, "state_transition_error", msg.clone()),
         };
 
         let body = Json(ErrorResponse {
             success: false,
-            message: self.to_string(),
+            message,
             error_code: error_code.to_string(),
         });
 
