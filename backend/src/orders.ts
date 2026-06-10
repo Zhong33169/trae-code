@@ -1,8 +1,8 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { randomUUID } from 'crypto';
-import { prepare } from './db.js';
+import { prepare, loadBlockAttempts, recordBlockAttempt, getBlockHint } from './db.js';
 import { authMiddleware } from './auth.js';
-import { JwtPayload, Order, EvidenceItem, AuditLog } from './types.js';
+import { JwtPayload, Order, EvidenceItem, AuditLog, BlockCode } from './types.js';
 
 function formatOrder(row: any): Order {
   return {
@@ -34,6 +34,7 @@ function loadOrderWithRelations(orderId: string): Order | null {
   const order = formatOrder(row);
   order.evidenceItems = loadEvidenceItems(orderId);
   order.auditLogs = loadAuditLogs(orderId);
+  order.blockAttempts = loadBlockAttempts(orderId);
   return order;
 }
 
@@ -44,6 +45,38 @@ function generateOrderNo(): string {
     String(now.getDate()).padStart(2, '0');
   const seq = String(Math.floor(Math.random() * 999) + 1).padStart(3, '0');
   return `ORD-${dateStr}-${seq}`;
+}
+
+function sendBlock(
+  reply: FastifyReply,
+  code: BlockCode,
+  reason: string,
+  currentVersion: number,
+  orderId: string,
+  operatorId: string,
+  operatorRole: string,
+  actionAttempted: 'supplement' | 'verify' | 'review',
+  submittedVersion: number | null,
+  httpCode: number = 403
+): void {
+  recordBlockAttempt({
+    id: randomUUID(),
+    orderId,
+    operatorId,
+    operatorRole: operatorRole as any,
+    actionAttempted,
+    code,
+    reason,
+    submittedVersion,
+    currentVersion,
+  });
+  reply.code(httpCode).send({
+    error: '操作被拦截',
+    reason,
+    code,
+    actionHint: getBlockHint(code),
+    currentVersion,
+  });
 }
 
 export async function registerOrderRoutes(app: FastifyInstance): Promise<void> {
@@ -64,6 +97,7 @@ export async function registerOrderRoutes(app: FastifyInstance): Promise<void> {
         const order = formatOrder(row);
         order.evidenceItems = loadEvidenceItems(row.id);
         order.auditLogs = loadAuditLogs(row.id);
+        order.blockAttempts = loadBlockAttempts(row.id);
         return order;
       });
 
@@ -89,7 +123,13 @@ export async function registerOrderRoutes(app: FastifyInstance): Promise<void> {
     handler: async (request: FastifyRequest, reply: FastifyReply) => {
       const user = request.user as JwtPayload;
       if (user.role !== 'receptionist') {
-        reply.code(403).send({ error: '权限不足', reason: '仅前厅接待可以创建订单' });
+        reply.code(403).send({
+          error: '权限不足',
+          reason: '仅前厅接待可以创建订单',
+          code: 'wrong_role',
+          actionHint: getBlockHint('wrong_role'),
+          currentVersion: 1,
+        });
         return;
       }
 
@@ -137,21 +177,27 @@ export async function registerOrderRoutes(app: FastifyInstance): Promise<void> {
         reply.code(404).send({ error: '订单不存在' });
         return;
       }
+      const submittedVersion = body.version ?? null;
+      const currentVersion = orderRow.version;
 
       if (user.role !== 'receptionist') {
-        reply.code(403).send({ error: '权限不足', reason: '仅前厅接待可以补录登记' });
+        sendBlock(reply, 'wrong_role', '仅前厅接待可以补录登记', currentVersion, id, user.id, user.role, 'supplement', submittedVersion);
+        return;
+      }
+      if (orderRow.status === 'archived') {
+        sendBlock(reply, 'archived', '已归档订单不可修改', currentVersion, id, user.id, user.role, 'supplement', submittedVersion);
         return;
       }
       if (orderRow.status !== 'pending_supplement') {
-        reply.code(403).send({ error: '状态错误', reason: '订单状态不是待补录，无法补录' });
+        sendBlock(reply, 'wrong_status', '订单状态不是待补录，无法补录', currentVersion, id, user.id, user.role, 'supplement', submittedVersion);
         return;
       }
       if (!body.evidenceItems || body.evidenceItems.length === 0) {
-        reply.code(403).send({ error: '证据不足', reason: '补录登记必须至少提供1项登记证据' });
+        sendBlock(reply, 'missing_evidence', '补录登记必须至少提供1项登记证据', currentVersion, id, user.id, user.role, 'supplement', submittedVersion);
         return;
       }
-      if (body.version !== orderRow.version) {
-        reply.code(403).send({ error: '版本冲突', reason: '订单已被他人修改，请刷新后重试（版本冲突）' });
+      if (submittedVersion !== currentVersion) {
+        sendBlock(reply, 'version_conflict', '订单已被他人修改，请刷新后重试（版本冲突）', currentVersion, id, user.id, user.role, 'supplement', submittedVersion);
         return;
       }
 
@@ -159,11 +205,11 @@ export async function registerOrderRoutes(app: FastifyInstance): Promise<void> {
         "SELECT id FROM audit_logs WHERE order_id = ? AND action = 'supplement'"
       ).get(id);
       if (existingSupplement) {
-        reply.code(403).send({ error: '重复补录', reason: '该订单已有补录记录，不可重复补录' });
+        sendBlock(reply, 'duplicate_supplement', '该订单已有补录记录，不可重复补录', currentVersion, id, user.id, user.role, 'supplement', submittedVersion);
         return;
       }
 
-      const newVersion = orderRow.version + 1;
+      const newVersion = currentVersion + 1;
       prepare(`
         UPDATE orders SET
           guest_name = ?, guest_phone = ?, room_number = ?, supplement_reason = ?,
@@ -205,25 +251,31 @@ export async function registerOrderRoutes(app: FastifyInstance): Promise<void> {
         reply.code(404).send({ error: '订单不存在' });
         return;
       }
+      const submittedVersion = body.version ?? null;
+      const currentVersion = orderRow.version;
 
       if (user.role !== 'room_supervisor') {
-        reply.code(403).send({ error: '权限不足', reason: '仅客房主管可以进行过程核验' });
+        sendBlock(reply, 'wrong_role', '仅客房主管可以进行过程核验', currentVersion, id, user.id, user.role, 'verify', submittedVersion);
+        return;
+      }
+      if (orderRow.status === 'archived') {
+        sendBlock(reply, 'archived', '已归档订单不可修改', currentVersion, id, user.id, user.role, 'verify', submittedVersion);
         return;
       }
       if (orderRow.status !== 'pending_verification') {
-        reply.code(403).send({ error: '状态错误', reason: '订单状态不是待核验，无法核验' });
+        sendBlock(reply, 'wrong_status', '订单状态不是待核验，无法核验', currentVersion, id, user.id, user.role, 'verify', submittedVersion);
         return;
       }
       if (body.verified && (!body.evidenceItems || body.evidenceItems.length === 0)) {
-        reply.code(403).send({ error: '证据不足', reason: '核验通过必须至少提供1项核验证据' });
+        sendBlock(reply, 'missing_evidence', '核验通过必须至少提供1项核验证据', currentVersion, id, user.id, user.role, 'verify', submittedVersion);
         return;
       }
-      if (body.version !== orderRow.version) {
-        reply.code(403).send({ error: '版本冲突', reason: '订单已被他人修改，请刷新后重试（版本冲突）' });
+      if (submittedVersion !== currentVersion) {
+        sendBlock(reply, 'version_conflict', '订单已被他人修改，请刷新后重试（版本冲突）', currentVersion, id, user.id, user.role, 'verify', submittedVersion);
         return;
       }
 
-      const newVersion = orderRow.version + 1;
+      const newVersion = currentVersion + 1;
       const newStatus = body.verified ? 'pending_review' : 'pending_supplement';
 
       prepare(`
@@ -271,29 +323,31 @@ export async function registerOrderRoutes(app: FastifyInstance): Promise<void> {
         reply.code(404).send({ error: '订单不存在' });
         return;
       }
+      const submittedVersion = body.version ?? null;
+      const currentVersion = orderRow.version;
 
       if (user.role !== 'duty_manager') {
-        reply.code(403).send({ error: '权限不足', reason: '仅值班经理可以进行复核归档' });
+        sendBlock(reply, 'wrong_role', '仅值班经理可以进行复核归档', currentVersion, id, user.id, user.role, 'review', submittedVersion);
+        return;
+      }
+      if (orderRow.status === 'archived') {
+        sendBlock(reply, 'archived', '已归档订单不可修改', currentVersion, id, user.id, user.role, 'review', submittedVersion);
         return;
       }
       if (orderRow.status !== 'pending_review') {
-        if (orderRow.status === 'archived') {
-          reply.code(403).send({ error: '已归档', reason: '已归档订单不可修改' });
-          return;
-        }
-        reply.code(403).send({ error: '状态错误', reason: '订单状态不是待复核，无法归档' });
+        sendBlock(reply, 'wrong_status', '订单状态不是待复核，无法归档', currentVersion, id, user.id, user.role, 'review', submittedVersion);
         return;
       }
       if (body.approved && (!body.evidenceItems || body.evidenceItems.length === 0)) {
-        reply.code(403).send({ error: '证据不足', reason: '归档确认必须至少提供1项归档证据' });
+        sendBlock(reply, 'missing_evidence', '归档确认必须至少提供1项归档证据', currentVersion, id, user.id, user.role, 'review', submittedVersion);
         return;
       }
-      if (body.version !== orderRow.version) {
-        reply.code(403).send({ error: '版本冲突', reason: '订单已被他人修改，请刷新后重试（版本冲突）' });
+      if (submittedVersion !== currentVersion) {
+        sendBlock(reply, 'version_conflict', '订单已被他人修改，请刷新后重试（版本冲突）', currentVersion, id, user.id, user.role, 'review', submittedVersion);
         return;
       }
 
-      const newVersion = orderRow.version + 1;
+      const newVersion = currentVersion + 1;
       const newStatus = body.approved ? 'archived' : 'pending_verification';
 
       prepare(`
@@ -339,7 +393,15 @@ export async function registerOrderRoutes(app: FastifyInstance): Promise<void> {
 
       const orderList = body.orders || [];
       const successes: { id: string; order_no: string }[] = [];
-      const failures: { id: string; order_no?: string; reason: string; code: string }[] = [];
+      const failures: {
+        id: string;
+        order_no?: string;
+        reason: string;
+        code: string;
+        actionHint: string;
+        submittedVersion: number | null;
+        currentVersion: number;
+      }[] = [];
 
       for (const orderItem of orderList) {
         const orderId = orderItem.id;
@@ -347,39 +409,57 @@ export async function registerOrderRoutes(app: FastifyInstance): Promise<void> {
 
         const orderRow = prepare('SELECT * FROM orders WHERE id = ?').get(orderId) as any;
         if (!orderRow) {
-          failures.push({ id: orderId, reason: '订单不存在', code: 'not_found' });
+          failures.push({
+            id: orderId,
+            reason: '订单不存在',
+            code: 'not_found',
+            actionHint: getBlockHint('not_found'),
+            submittedVersion: submitVersion ?? null,
+            currentVersion: 0,
+          });
           continue;
         }
 
         const orderNo = orderRow.order_no;
+        const currentVersion = orderRow.version;
+        const submittedVersion = submitVersion ?? null;
+
+        const recordFail = (code: BlockCode, reason: string) => {
+          recordBlockAttempt({
+            id: randomUUID(),
+            orderId,
+            operatorId: user.id,
+            operatorRole: user.role,
+            actionAttempted: body.action,
+            code,
+            reason,
+            submittedVersion,
+            currentVersion,
+          });
+          failures.push({
+            id: orderId,
+            order_no: orderNo,
+            reason,
+            code,
+            actionHint: getBlockHint(code),
+            submittedVersion,
+            currentVersion,
+          });
+        };
 
         try {
           if (body.action === 'supplement') {
-            if (user.role !== 'receptionist') {
-              failures.push({ id: orderId, order_no: orderNo, reason: '仅前厅接待可以补录登记', code: 'wrong_role' });
-              continue;
-            }
-            if (orderRow.status !== 'pending_supplement') {
-              failures.push({ id: orderId, order_no: orderNo, reason: '订单状态不是待补录，无法补录', code: 'wrong_status' });
-              continue;
-            }
-            if (!body.evidenceItems || body.evidenceItems.length === 0) {
-              failures.push({ id: orderId, order_no: orderNo, reason: '补录登记必须至少提供1项登记证据', code: 'missing_evidence' });
-              continue;
-            }
-            if (submitVersion !== orderRow.version) {
-              failures.push({ id: orderId, order_no: orderNo, reason: '订单已被他人修改，请刷新后重试（版本冲突）', code: 'version_conflict' });
-              continue;
-            }
+            if (user.role !== 'receptionist') { recordFail('wrong_role', '仅前厅接待可以补录登记'); continue; }
+            if (orderRow.status === 'archived') { recordFail('archived', '已归档订单不可修改'); continue; }
+            if (orderRow.status !== 'pending_supplement') { recordFail('wrong_status', '订单状态不是待补录，无法补录'); continue; }
+            if (!body.evidenceItems || body.evidenceItems.length === 0) { recordFail('missing_evidence', '补录登记必须至少提供1项登记证据'); continue; }
+            if (submittedVersion !== currentVersion) { recordFail('version_conflict', '订单已被他人修改，请刷新后重试（版本冲突）'); continue; }
             const existingSupplement = prepare(
               "SELECT id FROM audit_logs WHERE order_id = ? AND action = 'supplement'"
             ).get(orderId);
-            if (existingSupplement) {
-              failures.push({ id: orderId, order_no: orderNo, reason: '该订单已有补录记录，不可重复补录', code: 'duplicate_supplement' });
-              continue;
-            }
+            if (existingSupplement) { recordFail('duplicate_supplement', '该订单已有补录记录，不可重复补录'); continue; }
 
-            const newVersion = orderRow.version + 1;
+            const newVersion = currentVersion + 1;
             prepare(`
               UPDATE orders SET status = 'pending_verification', version = ?, updated_at = datetime('now') WHERE id = ?
             `).run(newVersion, orderId);
@@ -398,24 +478,13 @@ export async function registerOrderRoutes(app: FastifyInstance): Promise<void> {
             successes.push({ id: orderId, order_no: orderNo });
 
           } else if (body.action === 'verify') {
-            if (user.role !== 'room_supervisor') {
-              failures.push({ id: orderId, order_no: orderNo, reason: '仅客房主管可以进行过程核验', code: 'wrong_role' });
-              continue;
-            }
-            if (orderRow.status !== 'pending_verification') {
-              failures.push({ id: orderId, order_no: orderNo, reason: '订单状态不是待核验，无法核验', code: 'wrong_status' });
-              continue;
-            }
-            if (body.verified && (!body.evidenceItems || body.evidenceItems.length === 0)) {
-              failures.push({ id: orderId, order_no: orderNo, reason: '核验通过必须至少提供1项核验证据', code: 'missing_evidence' });
-              continue;
-            }
-            if (submitVersion !== orderRow.version) {
-              failures.push({ id: orderId, order_no: orderNo, reason: '订单已被他人修改，请刷新后重试（版本冲突）', code: 'version_conflict' });
-              continue;
-            }
+            if (user.role !== 'room_supervisor') { recordFail('wrong_role', '仅客房主管可以进行过程核验'); continue; }
+            if (orderRow.status === 'archived') { recordFail('archived', '已归档订单不可修改'); continue; }
+            if (orderRow.status !== 'pending_verification') { recordFail('wrong_status', '订单状态不是待核验，无法核验'); continue; }
+            if (body.verified && (!body.evidenceItems || body.evidenceItems.length === 0)) { recordFail('missing_evidence', '核验通过必须至少提供1项核验证据'); continue; }
+            if (submittedVersion !== currentVersion) { recordFail('version_conflict', '订单已被他人修改，请刷新后重试（版本冲突）'); continue; }
 
-            const newVersion = orderRow.version + 1;
+            const newVersion = currentVersion + 1;
             const newStatus = body.verified ? 'pending_review' : 'pending_supplement';
             prepare(`
               UPDATE orders SET status = ?, version = ?, updated_at = datetime('now') WHERE id = ?
@@ -442,28 +511,13 @@ export async function registerOrderRoutes(app: FastifyInstance): Promise<void> {
             successes.push({ id: orderId, order_no: orderNo });
 
           } else if (body.action === 'review') {
-            if (user.role !== 'duty_manager') {
-              failures.push({ id: orderId, order_no: orderNo, reason: '仅值班经理可以进行复核归档', code: 'wrong_role' });
-              continue;
-            }
-            if (orderRow.status === 'archived') {
-              failures.push({ id: orderId, order_no: orderNo, reason: '已归档订单不可修改', code: 'archived' });
-              continue;
-            }
-            if (orderRow.status !== 'pending_review') {
-              failures.push({ id: orderId, order_no: orderNo, reason: '订单状态不是待复核，无法归档', code: 'wrong_status' });
-              continue;
-            }
-            if (body.approved && (!body.evidenceItems || body.evidenceItems.length === 0)) {
-              failures.push({ id: orderId, order_no: orderNo, reason: '归档确认必须至少提供1项归档证据', code: 'missing_evidence' });
-              continue;
-            }
-            if (submitVersion !== orderRow.version) {
-              failures.push({ id: orderId, order_no: orderNo, reason: '订单已被他人修改，请刷新后重试（版本冲突）', code: 'version_conflict' });
-              continue;
-            }
+            if (user.role !== 'duty_manager') { recordFail('wrong_role', '仅值班经理可以进行复核归档'); continue; }
+            if (orderRow.status === 'archived') { recordFail('archived', '已归档订单不可修改'); continue; }
+            if (orderRow.status !== 'pending_review') { recordFail('wrong_status', '订单状态不是待复核，无法归档'); continue; }
+            if (body.approved && (!body.evidenceItems || body.evidenceItems.length === 0)) { recordFail('missing_evidence', '归档确认必须至少提供1项归档证据'); continue; }
+            if (submittedVersion !== currentVersion) { recordFail('version_conflict', '订单已被他人修改，请刷新后重试（版本冲突）'); continue; }
 
-            const newVersion = orderRow.version + 1;
+            const newVersion = currentVersion + 1;
             const newStatus = body.approved ? 'archived' : 'pending_verification';
             prepare(`
               UPDATE orders SET status = ?, version = ?, updated_at = datetime('now') WHERE id = ?
@@ -490,7 +544,7 @@ export async function registerOrderRoutes(app: FastifyInstance): Promise<void> {
             successes.push({ id: orderId, order_no: orderNo });
           }
         } catch (err: any) {
-          failures.push({ id: orderId, order_no: orderRow?.order_no, reason: err.message || '操作失败', code: 'unknown' });
+          recordFail('unknown', err.message || '操作失败');
         }
       }
 

@@ -16,6 +16,8 @@ import {
   ShieldCheck,
   CheckCheck,
   Send,
+  Ban,
+  ArrowRight,
 } from "lucide-react";
 import { useStore } from "@/store/useStore";
 import {
@@ -25,6 +27,8 @@ import {
   reviewOrder,
   type Order,
   type ApiError,
+  type BlockAttempt,
+  type BlockCode,
 } from "@/lib/api";
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string }> = {
@@ -33,6 +37,26 @@ const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string }
   pending_review: { label: "待复核", color: "text-purple-700", bg: "bg-purple-100" },
   archived: { label: "已归档", color: "text-green-700", bg: "bg-green-100" },
 };
+
+const BLOCK_CODE_LABELS: Record<BlockCode, { label: string; color: string; bg: string }> = {
+  wrong_role: { label: "错角色", color: "text-purple-700", bg: "bg-purple-100" },
+  wrong_status: { label: "错状态", color: "text-orange-700", bg: "bg-orange-100" },
+  missing_evidence: { label: "缺证据", color: "text-amber-700", bg: "bg-amber-100" },
+  version_conflict: { label: "版本冲突", color: "text-rose-700", bg: "bg-rose-100" },
+  duplicate_supplement: { label: "重复补录", color: "text-pink-700", bg: "bg-pink-100" },
+  archived: { label: "已归档", color: "text-green-700", bg: "bg-green-100" },
+  not_found: { label: "不存在", color: "text-gray-700", bg: "bg-gray-100" },
+  unknown: { label: "未知", color: "text-gray-700", bg: "bg-gray-100" },
+};
+
+function BlockCodeBadge({ code }: { code: BlockCode | string }) {
+  const cfg = BLOCK_CODE_LABELS[code as BlockCode] || { label: code, color: "text-gray-700", bg: "bg-gray-100" };
+  return (
+    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium ${cfg.bg} ${cfg.color}`}>
+      {cfg.label}
+    </span>
+  );
+}
 
 const ROLE_LABELS: Record<string, string> = {
   receptionist: "前厅接待",
@@ -142,6 +166,7 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [errorDetail, setErrorDetail] = useState<{ code?: string; actionHint?: string; currentVersion?: number } | null>(null);
   const [success, setSuccess] = useState(false);
 
   const [guestName, setGuestName] = useState("");
@@ -158,6 +183,7 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
     try {
       setLoading(true);
       setError(null);
+      setErrorDetail(null);
       const data = await getOrder(token, id);
       setOrder(data);
       setGuestName(data.guest_name);
@@ -167,6 +193,11 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
     } catch (err) {
       const apiErr = err as ApiError;
       setError(apiErr.error || "获取订单失败");
+      setErrorDetail({
+        code: apiErr.code,
+        actionHint: apiErr.actionHint,
+        currentVersion: apiErr.currentVersion,
+      });
     } finally {
       setLoading(false);
     }
@@ -196,6 +227,7 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
       }
       setSubmitting(true);
       setError(null);
+      setErrorDetail(null);
       try {
         await supplementOrder(token, id, {
           version: order.version,
@@ -213,16 +245,24 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
       } catch (err) {
         const apiErr = err as ApiError;
         setError(apiErr.reason || apiErr.error || "操作失败");
+        setErrorDetail({
+          code: apiErr.code,
+          actionHint: apiErr.actionHint,
+          currentVersion: apiErr.currentVersion,
+        });
+        loadOrder();
       } finally {
         setSubmitting(false);
       }
     } else if (role === "room_supervisor" && status === "pending_verification") {
       if (verified && evidenceItems.length === 0) {
         setError("核验通过必须至少提供1项核验证据");
+        setErrorDetail(null);
         return;
       }
       setSubmitting(true);
       setError(null);
+      setErrorDetail(null);
       try {
         await verifyOrder(token, id, {
           version: order.version,
@@ -238,16 +278,24 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
       } catch (err) {
         const apiErr = err as ApiError;
         setError(apiErr.reason || apiErr.error || "操作失败");
+        setErrorDetail({
+          code: apiErr.code,
+          actionHint: apiErr.actionHint,
+          currentVersion: apiErr.currentVersion,
+        });
+        loadOrder();
       } finally {
         setSubmitting(false);
       }
     } else if (role === "duty_manager" && status === "pending_review") {
       if (approved && evidenceItems.length === 0) {
         setError("归档确认必须至少提供1项归档证据");
+        setErrorDetail(null);
         return;
       }
       setSubmitting(true);
       setError(null);
+      setErrorDetail(null);
       try {
         await reviewOrder(token, id, {
           version: order.version,
@@ -263,6 +311,12 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
       } catch (err) {
         const apiErr = err as ApiError;
         setError(apiErr.reason || apiErr.error || "操作失败");
+        setErrorDetail({
+          code: apiErr.code,
+          actionHint: apiErr.actionHint,
+          currentVersion: apiErr.currentVersion,
+        });
+        loadOrder();
       } finally {
         setSubmitting(false);
       }
@@ -389,9 +443,52 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
         {error && (
           <div className="bg-red-50 border border-red-200 rounded-xl px-5 py-4 flex items-start gap-3">
             <AlertTriangle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
-            <div>
-              <p className="text-sm font-medium text-red-800">操作失败</p>
-              <p className="text-sm text-red-600 mt-1">{error}</p>
+            <div className="flex-1">
+              <div className="flex items-center gap-2 mb-1">
+                <p className="text-sm font-medium text-red-800">操作被拦截</p>
+                {errorDetail?.code && <BlockCodeBadge code={errorDetail.code} />}
+                {typeof errorDetail?.currentVersion === "number" && (
+                  <span className="text-xs text-gray-500">当前版本 v{errorDetail.currentVersion}</span>
+                )}
+              </div>
+              <p className="text-sm text-red-700">{error}</p>
+              {errorDetail?.actionHint && (
+                <p className="text-xs text-red-600 mt-1.5 flex items-start gap-1">
+                  <ArrowRight className="w-3 h-3 mt-0.5 shrink-0" />
+                  <span>{errorDetail.actionHint}</span>
+                </p>
+              )}
+            </div>
+          </div>
+        )}
+
+        {(order.blockAttempts && order.blockAttempts.length > 0) && (
+          <div className="bg-white rounded-xl border border-gray-200 p-6">
+            <h2 className="text-sm font-semibold text-navy-800 mb-4 flex items-center gap-2">
+              <Ban className="w-4 h-4 text-amber-600" />
+              拦截记录 <span className="text-xs text-gray-400 font-normal">({order.blockAttempts.length})</span>
+            </h2>
+            <div className="space-y-3">
+              {order.blockAttempts.slice().reverse().map((b) => (
+                <div key={b.id} className="border border-amber-200 bg-amber-50 rounded-lg px-4 py-3">
+                  <div className="flex items-center gap-2 mb-1">
+                    <BlockCodeBadge code={b.code} />
+                    <span className="text-xs text-gray-500">{ROLE_LABELS[b.operator_role] || b.operator_role}</span>
+                    <span className="text-xs text-gray-400">{new Date(b.created_at).toLocaleString("zh-CN")}</span>
+                  </div>
+                  <div className="flex items-center gap-3 text-xs text-gray-500 mb-1">
+                    <span>当前版本 v{b.current_version}</span>
+                    {b.submitted_version !== null && b.submitted_version !== b.current_version && (
+                      <span className="text-rose-600">(提交 v{b.submitted_version})</span>
+                    )}
+                  </div>
+                  <p className="text-sm text-amber-900">{b.reason}</p>
+                  <p className="text-xs text-amber-700 mt-1 flex items-start gap-1">
+                    <ArrowRight className="w-3 h-3 mt-0.5 shrink-0" />
+                    <span>{b.action_hint}</span>
+                  </p>
+                </div>
+              ))}
             </div>
           </div>
         )}
@@ -538,30 +635,85 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
           )}
         </div>
 
-        {order.auditLogs && order.auditLogs.length > 0 && (
+        {(order.auditLogs && order.auditLogs.length > 0) || (order.blockAttempts && order.blockAttempts.length > 0) ? (
           <div className="bg-white rounded-xl border border-gray-200 p-6">
-            <h2 className="text-sm font-semibold text-navy-800 mb-4">操作日志</h2>
+            <h2 className="text-sm font-semibold text-navy-800 mb-4">审计时间线</h2>
             <div className="space-y-0">
-              {order.auditLogs.map((log, idx) => (
-                <div key={log.id} className="flex gap-4 pb-4 last:pb-0">
-                  <div className="flex flex-col items-center">
-                    <div className="w-8 h-8 rounded-full bg-navy-100 flex items-center justify-center shrink-0">
-                      <Clock className="w-4 h-4 text-navy-500" />
-                    </div>
-                    {idx < order.auditLogs!.length - 1 && <div className="w-px flex-1 bg-gray-200 mt-1" />}
-                  </div>
-                  <div className="flex-1 min-w-0 pb-2">
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="text-xs font-medium text-navy-700">{ROLE_LABELS[log.operator_role] || log.operator_role}</span>
-                      <span className="text-xs text-gray-400">{new Date(log.created_at).toLocaleString("zh-CN")}</span>
-                    </div>
-                    <p className="text-sm text-gray-600">{log.detail}</p>
-                  </div>
-                </div>
-              ))}
+              {(() => {
+                const logs: Array<{
+                  id: string;
+                  type: "audit" | "block";
+                  ts: number;
+                  data: any;
+                }> = [
+                  ...(order.auditLogs || []).map((l) => ({
+                    id: l.id,
+                    type: "audit" as const,
+                    ts: new Date(l.created_at).getTime(),
+                    data: l,
+                  })),
+                  ...(order.blockAttempts || []).map((b) => ({
+                    id: b.id,
+                    type: "block" as const,
+                    ts: new Date(b.created_at).getTime(),
+                    data: b,
+                  })),
+                ].sort((a, b) => a.ts - b.ts);
+
+                return logs.map((item, idx) => {
+                  if (item.type === "audit") {
+                    const log = item.data;
+                    return (
+                      <div key={item.id} className="flex gap-4 pb-4 last:pb-0">
+                        <div className="flex flex-col items-center">
+                          <div className="w-8 h-8 rounded-full bg-navy-100 flex items-center justify-center shrink-0">
+                            <Clock className="w-4 h-4 text-navy-500" />
+                          </div>
+                          {idx < logs.length - 1 && <div className="w-px flex-1 bg-gray-200 mt-1" />}
+                        </div>
+                        <div className="flex-1 min-w-0 pb-2">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="text-xs font-medium text-navy-700">{ROLE_LABELS[log.operator_role] || log.operator_role}</span>
+                            <span className="text-xs text-gray-400">{new Date(log.created_at).toLocaleString("zh-CN")}</span>
+                          </div>
+                          <p className="text-sm text-gray-600">{log.detail}</p>
+                        </div>
+                      </div>
+                    );
+                  } else {
+                    const b = item.data as BlockAttempt;
+                    return (
+                      <div key={item.id} className="flex gap-4 pb-4 last:pb-0">
+                        <div className="flex flex-col items-center">
+                          <div className="w-8 h-8 rounded-full bg-amber-100 flex items-center justify-center shrink-0">
+                            <Ban className="w-4 h-4 text-amber-600" />
+                          </div>
+                          {idx < logs.length - 1 && <div className="w-px flex-1 bg-gray-200 mt-1" />}
+                        </div>
+                        <div className="flex-1 min-w-0 pb-2">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="text-xs font-medium text-amber-700">
+                              {ROLE_LABELS[b.operator_role] || b.operator_role}
+                            </span>
+                            <BlockCodeBadge code={b.code} />
+                            <span className="text-xs text-gray-400">{new Date(b.created_at).toLocaleString("zh-CN")}</span>
+                          </div>
+                          <p className="text-sm text-amber-800">
+                            尝试{b.action_attempted === "supplement" ? "补录" : b.action_attempted === "verify" ? "核验" : "归档"}被拦截：{b.reason}
+                          </p>
+                          <p className="text-xs text-amber-600 mt-1 flex items-start gap-1">
+                            <ArrowRight className="w-3 h-3 mt-0.5 shrink-0" />
+                            <span>{b.action_hint}</span>
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  }
+                });
+              })()}
             </div>
           </div>
-        )}
+        ) : null}
       </div>
     </div>
   );

@@ -2,12 +2,28 @@ import initSqlJs, { Database as SqlJsDatabase } from 'sql.js';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { readFileSync, writeFileSync, existsSync } from 'fs';
+import type { BlockCode, UserRole } from './types.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const DB_PATH = join(__dirname, '..', 'data.db');
 
 let db: SqlJsDatabase;
+
+export const BLOCK_HINTS: Record<BlockCode, string> = {
+  wrong_role: '请切换到正确的角色后重试',
+  wrong_status: '请确认订单当前状态是否与操作匹配，或先完成前置步骤',
+  missing_evidence: '请补充至少1项必需证据后再提交',
+  version_conflict: '请刷新页面获取最新版本后重试',
+  duplicate_supplement: '该订单已有补录记录，可前往核验流程继续推进',
+  archived: '已归档订单不可修改，如需变更请联系管理员',
+  not_found: '订单不存在，请返回列表重新选择',
+  unknown: '操作异常，请稍后重试或联系技术支持',
+};
+
+export function getBlockHint(code: BlockCode): string {
+  return BLOCK_HINTS[code] || BLOCK_HINTS.unknown;
+}
 
 export interface PreparedResult {
   get: (...params: any[]) => any;
@@ -54,6 +70,38 @@ function saveDb(): void {
     const data = db.export();
     writeFileSync(DB_PATH, Buffer.from(data));
   } catch {}
+}
+
+export function loadBlockAttempts(orderId: string): any[] {
+  return prepare('SELECT * FROM block_attempts WHERE order_id = ? ORDER BY created_at DESC').all(orderId);
+}
+
+export function recordBlockAttempt(params: {
+  id: string;
+  orderId: string;
+  operatorId: string;
+  operatorRole: UserRole;
+  actionAttempted: 'supplement' | 'verify' | 'review';
+  code: BlockCode;
+  reason: string;
+  submittedVersion: number | null;
+  currentVersion: number;
+}): void {
+  prepare(`
+    INSERT INTO block_attempts (id, order_id, operator_id, operator_role, action_attempted, code, reason, action_hint, submitted_version, current_version)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    params.id,
+    params.orderId,
+    params.operatorId,
+    params.operatorRole,
+    params.actionAttempted,
+    params.code,
+    params.reason,
+    getBlockHint(params.code),
+    params.submittedVersion,
+    params.currentVersion
+  );
 }
 
 export async function initDb(): Promise<void> {
@@ -115,6 +163,22 @@ export async function initDb(): Promise<void> {
     );
   `);
 
+  db.run(`
+    CREATE TABLE IF NOT EXISTS block_attempts (
+      id TEXT PRIMARY KEY,
+      order_id TEXT NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+      operator_id TEXT NOT NULL REFERENCES users(id),
+      operator_role TEXT NOT NULL,
+      action_attempted TEXT NOT NULL CHECK(action_attempted IN ('supplement','verify','review')),
+      code TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      action_hint TEXT NOT NULL,
+      submitted_version INTEGER,
+      current_version INTEGER NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
+
   seedData();
   saveDb();
 }
@@ -161,4 +225,11 @@ function seedData(): void {
   db.run("INSERT INTO audit_logs (id, order_id, action, operator_id, operator_role, detail) VALUES ('a11', 'o9', 'supplement', 'u1', 'receptionist', '补录登记完成')");
   db.run("INSERT INTO audit_logs (id, order_id, action, operator_id, operator_role, detail) VALUES ('a12', 'o9', 'verify', 'u2', 'room_supervisor', '核验通过')");
   db.run("INSERT INTO audit_logs (id, order_id, action, operator_id, operator_role, detail) VALUES ('a13', 'o9', 'review', 'u3', 'duty_manager', '复核退回：信息有误')");
+
+  db.run("INSERT INTO block_attempts (id, order_id, operator_id, operator_role, action_attempted, code, reason, action_hint, submitted_version, current_version) VALUES ('b1', 'o2', 'u1', 'receptionist', 'supplement', 'wrong_status', '订单状态不是待补录，无法补录', '请确认订单当前状态是否与操作匹配，或先完成前置步骤', 2, 2)");
+  db.run("INSERT INTO block_attempts (id, order_id, operator_id, operator_role, action_attempted, code, reason, action_hint, submitted_version, current_version) VALUES ('b2', 'o4', 'u3', 'duty_manager', 'review', 'archived', '已归档订单不可修改', '已归档订单不可修改，如需变更请联系管理员', 4, 4)");
+  db.run("INSERT INTO block_attempts (id, order_id, operator_id, operator_role, action_attempted, code, reason, action_hint, submitted_version, current_version) VALUES ('b3', 'o7', 'u1', 'receptionist', 'supplement', 'duplicate_supplement', '该订单已有补录记录，不可重复补录', '该订单已有补录记录，可前往核验流程继续推进', 3, 3)");
+  db.run("INSERT INTO block_attempts (id, order_id, operator_id, operator_role, action_attempted, code, reason, action_hint, submitted_version, current_version) VALUES ('b4', 'o9', 'u2', 'room_supervisor', 'verify', 'version_conflict', '订单已被他人修改，请刷新后重试（版本冲突）', '请刷新页面获取最新版本后重试', 3, 4)");
+  db.run("INSERT INTO block_attempts (id, order_id, operator_id, operator_role, action_attempted, code, reason, action_hint, submitted_version, current_version) VALUES ('b5', 'o3', 'u1', 'receptionist', 'supplement', 'wrong_role', '仅前厅接待可以补录登记', '请切换到正确的角色后重试', 3, 3)");
+  db.run("INSERT INTO block_attempts (id, order_id, operator_id, operator_role, action_attempted, code, reason, action_hint, submitted_version, current_version) VALUES ('b6', 'o6', 'u1', 'receptionist', 'supplement', 'missing_evidence', '补录登记必须至少提供1项登记证据', '请补充至少1项必需证据后再提交', 1, 1)");
 }

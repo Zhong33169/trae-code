@@ -3,6 +3,21 @@ const API_BASE = 'http://localhost:8001'
 export type Role = 'receptionist' | 'room_supervisor' | 'duty_manager'
 export type OrderStatus = 'pending_supplement' | 'pending_verification' | 'pending_review' | 'archived'
 export type EvidenceStage = 'registration' | 'verification' | 'archive'
+export type BlockCode = 'wrong_role' | 'wrong_status' | 'missing_evidence' | 'version_conflict' | 'duplicate_supplement' | 'archived' | 'not_found' | 'unknown'
+
+export interface BlockAttempt {
+  id: string
+  order_id: string
+  operator_id: string
+  operator_role: Role
+  action_attempted: 'supplement' | 'verify' | 'review'
+  code: BlockCode
+  reason: string
+  action_hint: string
+  submitted_version: number | null
+  current_version: number
+  created_at: string
+}
 
 export interface User {
   id: string
@@ -43,6 +58,7 @@ export interface Order {
   updated_at: string
   evidenceItems?: EvidenceItem[]
   auditLogs?: AuditLog[]
+  blockAttempts?: BlockAttempt[]
 }
 
 export interface CreateOrderData {
@@ -94,6 +110,9 @@ export interface BatchFailureItem {
   order_no?: string
   reason: string
   code: string
+  actionHint: string
+  submittedVersion: number | null
+  currentVersion: number
 }
 
 export interface BatchActionResult {
@@ -104,6 +123,9 @@ export interface BatchActionResult {
 export interface ApiError {
   error: string
   reason: string
+  code?: string
+  actionHint?: string
+  currentVersion?: number
 }
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {

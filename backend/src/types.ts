@@ -26,6 +26,7 @@ export interface Order {
   updated_at: string;
   evidenceItems?: EvidenceItem[];
   auditLogs?: AuditLog[];
+  blockAttempts?: BlockAttempt[];
 }
 
 export interface EvidenceItem {
@@ -47,13 +48,40 @@ export interface AuditLog {
   created_at: string;
 }
 
+export type BlockCode =
+  | 'wrong_role'
+  | 'wrong_status'
+  | 'missing_evidence'
+  | 'version_conflict'
+  | 'duplicate_supplement'
+  | 'archived'
+  | 'not_found'
+  | 'unknown';
+
 export interface JwtPayload {
   id: string;
   username: string;
   role: UserRole;
 }
 
+export interface BlockAttempt {
+  id: string;
+  order_id: string;
+  operator_id: string;
+  operator_role: UserRole;
+  action_attempted: 'supplement' | 'verify' | 'review';
+  code: BlockCode;
+  reason: string;
+  action_hint: string;
+  submitted_version: number | null;
+  current_version: number;
+  created_at: string;
+}
+
 export interface ValidationError {
   error: string;
   reason: string;
+  code: BlockCode;
+  actionHint: string;
+  currentVersion: number;
 }

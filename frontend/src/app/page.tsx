@@ -25,6 +25,8 @@ import {
   type EvidenceItem,
   type ApiError,
   type BatchActionResult,
+  type BlockAttempt,
+  type BlockCode,
 } from "@/lib/api";
 
 const ROLE_CONFIG = {
@@ -48,6 +50,17 @@ const STATUS_FILTERS = [
   { key: "archived", label: "已归档" },
 ];
 
+const BLOCK_CODE_LABELS: Record<BlockCode, { label: string; color: string; bg: string }> = {
+  wrong_role: { label: "错角色", color: "text-purple-700", bg: "bg-purple-100" },
+  wrong_status: { label: "错状态", color: "text-orange-700", bg: "bg-orange-100" },
+  missing_evidence: { label: "缺证据", color: "text-amber-700", bg: "bg-amber-100" },
+  version_conflict: { label: "版本冲突", color: "text-rose-700", bg: "bg-rose-100" },
+  duplicate_supplement: { label: "重复补录", color: "text-pink-700", bg: "bg-pink-100" },
+  archived: { label: "已归档", color: "text-green-700", bg: "bg-green-100" },
+  not_found: { label: "不存在", color: "text-gray-700", bg: "bg-gray-100" },
+  unknown: { label: "未知", color: "text-gray-700", bg: "bg-gray-100" },
+};
+
 const STAGE_LABELS: Record<string, string> = {
   registration: "登记证据",
   verification: "核验证据",
@@ -68,6 +81,51 @@ function StatusBadge({ status }: { status: string }) {
     <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${cfg.bg} ${cfg.color}`}>
       {cfg.label}
     </span>
+  );
+}
+
+function BlockCodeBadge({ code }: { code: BlockCode | string }) {
+  const cfg = BLOCK_CODE_LABELS[code as BlockCode] || { label: code, color: "text-gray-700", bg: "bg-gray-100" };
+  return (
+    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium ${cfg.bg} ${cfg.color}`}>
+      {cfg.label}
+    </span>
+  );
+}
+
+function BlockHintCard({ block, compact }: { block: BlockAttempt; compact?: boolean }) {
+  if (compact) {
+    return (
+      <div className="mt-2.5 border border-amber-200 bg-amber-50 rounded-md px-2.5 py-1.5 flex items-start gap-1.5">
+        <AlertCircle className="w-3.5 h-3.5 text-amber-600 mt-0.5 shrink-0" />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5">
+            <BlockCodeBadge code={block.code} />
+            <span className="text-[10px] text-gray-400">v{block.current_version}</span>
+          </div>
+          <p className="text-[11px] text-amber-900 mt-0.5 truncate">{block.reason}</p>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="border border-amber-200 bg-amber-50 rounded-lg px-3 py-2.5 flex items-start gap-2.5">
+      <AlertCircle className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 mb-1">
+          <BlockCodeBadge code={block.code} />
+          <span className="text-xs text-gray-500">当前版本 v{block.current_version}</span>
+          {block.submitted_version !== null && block.submitted_version !== block.current_version && (
+            <span className="text-[10px] text-rose-600">(提交 v{block.submitted_version})</span>
+          )}
+        </div>
+        <p className="text-sm text-amber-900 font-medium">{block.reason}</p>
+        <p className="text-xs text-amber-700 mt-1 flex items-center gap-1">
+          <ArrowRight className="w-3 h-3" />
+          {block.action_hint}
+        </p>
+      </div>
+    </div>
   );
 }
 
@@ -179,7 +237,15 @@ function BatchActionBar({ onShowDetail }: { onShowDetail: (result: BatchActionRe
       const apiErr = err as ApiError;
       const failResult: BatchActionResult = {
         successes: [],
-        failures: selectedOrders.map((o) => ({ id: o.id, order_no: o.order_no, reason: apiErr.reason || apiErr.error || "操作失败", code: "unknown" })),
+        failures: selectedOrders.map((o) => ({
+          id: o.id,
+          order_no: o.order_no,
+          reason: apiErr.reason || apiErr.error || "操作失败",
+          code: apiErr.code || "unknown",
+          actionHint: apiErr.actionHint || "请联系管理员或稍后重试",
+          submittedVersion: o.version,
+          currentVersion: apiErr.currentVersion ?? o.version,
+        })),
       };
       setResult(failResult);
     } finally {
@@ -377,6 +443,7 @@ export default function HomePage() {
               const progress = getEvidenceProgress(order);
               const isSelected = selectedOrderId === order.id;
               const isChecked = selectedOrderIds.includes(order.id);
+              const lastBlock = (order.blockAttempts || []).slice(-1)[0] || null;
               return (
                 <div
                   key={order.id}
@@ -399,7 +466,10 @@ export default function HomePage() {
                     </button>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between mb-1.5">
-                        <span className="text-sm font-semibold text-navy-800">{order.order_no}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-semibold text-navy-800">{order.order_no}</span>
+                          <span className="text-[10px] text-gray-400">v{order.version}</span>
+                        </div>
                         <StatusBadge status={order.status} />
                       </div>
                       <div className="flex items-center gap-4 text-xs text-gray-500 mb-2">
@@ -418,6 +488,7 @@ export default function HomePage() {
                         </div>
                         <span className="text-xs text-gray-400">{progress.current}/{progress.total}</span>
                       </div>
+                      {lastBlock && <BlockHintCard block={lastBlock} compact />}
                     </div>
                   </div>
                 </div>
@@ -461,13 +532,21 @@ export default function HomePage() {
               </div>
               {batchFailDetail.failures.map((f) => (
                 <div key={f.id} className="border border-red-200 bg-red-50 rounded-lg p-3">
-                  <div className="flex items-center justify-between mb-1">
+                  <div className="flex items-center justify-between mb-1.5">
                     <span className="font-medium text-sm text-navy-900">{f.order_no || f.id}</span>
-                    <span className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded-full">
-                      {f.code}
-                    </span>
+                    <BlockCodeBadge code={f.code} />
                   </div>
-                  <p className="text-sm text-red-700">{f.reason}</p>
+                  <div className="flex items-center gap-3 mb-1 text-xs text-gray-500">
+                    <span>当前版本 v{f.currentVersion}</span>
+                    {f.submittedVersion !== null && f.submittedVersion !== f.currentVersion && (
+                      <span className="text-rose-600">(提交 v{f.submittedVersion})</span>
+                    )}
+                  </div>
+                  <p className="text-sm text-red-700 mb-1.5">{f.reason}</p>
+                  <p className="text-xs text-red-600 bg-white/60 rounded px-2 py-1 flex items-start gap-1">
+                    <ArrowRight className="w-3 h-3 mt-0.5 shrink-0" />
+                    <span>{f.actionHint}</span>
+                  </p>
                 </div>
               ))}
             </div>
