@@ -838,15 +838,25 @@ export class OrderService {
     results: {
       id: string;
       orderNo: string;
+      action: string;
       success: boolean;
       reason?: string;
+      beforeStatus?: string;
+      afterStatus?: string;
+      operatorRole?: string;
+      operatorName?: string;
     }[];
   }> {
     const results: {
       id: string;
       orderNo: string;
+      action: string;
       success: boolean;
       reason?: string;
+      beforeStatus?: string;
+      afterStatus?: string;
+      operatorRole?: string;
+      operatorName?: string;
     }[] = [];
 
     const actionToAuditAction: Record<string, AuditAction> = {
@@ -934,10 +944,31 @@ export class OrderService {
           default:
             throw new BadRequestException(`不支持的操作: ${action}`);
         }
-        results.push({ id, orderNo, success: true });
+
+        const updatedOrder = await this.orderRepository.findOne({ where: { id } });
+        results.push({
+          id,
+          orderNo,
+          action,
+          success: true,
+          beforeStatus,
+          afterStatus: updatedOrder?.status || '',
+          operatorRole: user.role,
+          operatorName: user.name,
+        });
       } catch (error: any) {
         const failReasonText = error.message || '操作失败';
-        results.push({ id, orderNo: orderNo || id, success: false, reason: failReasonText });
+        results.push({
+          id,
+          orderNo: orderNo || id,
+          action,
+          success: false,
+          reason: failReasonText,
+          beforeStatus,
+          afterStatus: beforeStatus,
+          operatorRole: user.role,
+          operatorName: user.name,
+        });
 
         await this.auditLogService.create({
           orderId: id,

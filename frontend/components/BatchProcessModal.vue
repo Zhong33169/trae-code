@@ -1,6 +1,6 @@
 <template>
   <div class="modal-overlay" @click.self="$emit('close')">
-    <div class="modal-content p-6" style="max-width: 620px">
+    <div class="modal-content p-6" style="max-width: 720px">
       <h3 class="text-lg font-bold mb-4">批量处理</h3>
 
       <p class="text-gray-600 mb-4">
@@ -30,23 +30,40 @@
           <p class="text-red-600 font-medium">失败：{{ result.failedCount }} 条</p>
         </div>
 
-        <div v-if="result.results && result.results.length > 0" class="space-y-2 max-h-[40vh] overflow-y-auto">
+        <div v-if="result.results && result.results.length > 0" class="space-y-2 max-h-[45vh] overflow-y-auto">
           <div
             v-for="(r, idx) in result.results"
             :key="idx"
-            class="flex items-start gap-2 p-2 rounded text-sm"
-            :class="r.success ? 'bg-green-50' : 'bg-red-50'"
+            class="p-3 rounded text-sm border"
+            :class="r.success ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'"
           >
-            <span
-              class="inline-block w-5 h-5 rounded-full text-center text-white text-xs leading-5 flex-shrink-0 mt-0.5"
-              :class="r.success ? 'bg-green-500' : 'bg-red-500'"
-            >
-              {{ r.success ? '✓' : '✗' }}
-            </span>
-            <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2 mb-1">
+              <span
+                class="inline-block w-5 h-5 rounded-full text-center text-white text-xs leading-5 flex-shrink-0"
+                :class="r.success ? 'bg-green-500' : 'bg-red-500'"
+              >
+                {{ r.success ? '✓' : '✗' }}
+              </span>
               <span class="font-medium">{{ r.orderNo || r.id }}</span>
-              <span v-if="r.success" class="text-green-700 ml-2">处理成功</span>
-              <span v-else class="text-red-700 ml-2">失败：{{ r.reason }}</span>
+              <span v-if="r.action" class="text-gray-500 text-xs">操作：{{ actionLabel(r.action) }}</span>
+            </div>
+
+            <div v-if="r.success" class="ml-7 text-green-700">
+              <span>{{ beforeStatusLabel(r.beforeStatus) }} → {{ beforeStatusLabel(r.afterStatus) }}</span>
+              <span v-if="r.operatorName" class="text-gray-400 ml-2 text-xs">操作者：{{ r.operatorName }}</span>
+            </div>
+
+            <div v-else class="ml-7">
+              <div class="flex items-center gap-2">
+                <span class="inline-block px-1.5 py-0.5 rounded text-xs font-medium" :class="failTypeClass(r.reason)">
+                  {{ failTypeLabel(r.reason) }}
+                </span>
+                <span class="text-red-700">{{ r.reason }}</span>
+              </div>
+              <div class="mt-1 text-gray-500 text-xs flex gap-4">
+                <span v-if="r.beforeStatus">状态：{{ beforeStatusLabel(r.beforeStatus) }}</span>
+                <span v-if="r.operatorName">操作者：{{ r.operatorName }}（{{ roleLabel(r.operatorRole) }}）</span>
+              </div>
             </div>
           </div>
         </div>
@@ -70,12 +87,18 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue';
+import { OrderStatusLabels } from '~/types';
 
 interface BatchResultItem {
   id: string;
   orderNo: string;
+  action: string;
   success: boolean;
   reason?: string;
+  beforeStatus?: string;
+  afterStatus?: string;
+  operatorRole?: string;
+  operatorName?: string;
 }
 
 interface BatchResult {
@@ -119,6 +142,45 @@ const reasonPlaceholder = computed(() => {
   }
   return '请输入备注';
 });
+
+const actionLabel = (action: string) => {
+  const map: Record<string, string> = {
+    submit: '提交审核', review_approve: '审核通过', review_reject: '审核退回',
+    submit_final: '提交复核', final_approve: '复核通过', final_reject: '复核退回',
+    ship: '发货', deliver: '配送', sign: '签收', archive: '归档',
+    exception: '标记异常', materials_missing: '材料缺失', timeout: '标记超时',
+    return: '退回', rectify: '补正',
+  };
+  return map[action] || action;
+};
+
+const beforeStatusLabel = (status?: string) => {
+  if (!status) return '-';
+  return (OrderStatusLabels as any)[status] || status;
+};
+
+const roleLabel = (role?: string) => {
+  const map: Record<string, string> = {
+    registrar: '登记员', supervisor: '主管', reviewer: '复核负责人',
+  };
+  return map[role || ''] || role || '-';
+};
+
+const failTypeLabel = (reason?: string) => {
+  if (!reason) return '未知';
+  if (reason.includes('权限')) return '权限拒绝';
+  if (reason.includes('状态') || reason.includes('无法')) return '状态不匹配';
+  if (reason.includes('不能为空') || reason.includes('缺少')) return '缺少原因';
+  return '操作失败';
+};
+
+const failTypeClass = (reason?: string) => {
+  if (!reason) return 'bg-gray-100 text-gray-600';
+  if (reason.includes('权限')) return 'bg-orange-100 text-orange-700';
+  if (reason.includes('状态') || reason.includes('无法')) return 'bg-yellow-100 text-yellow-700';
+  if (reason.includes('不能为空') || reason.includes('缺少')) return 'bg-purple-100 text-purple-700';
+  return 'bg-red-100 text-red-700';
+};
 
 const api = useApi();
 

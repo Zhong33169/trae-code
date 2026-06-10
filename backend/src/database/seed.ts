@@ -894,17 +894,20 @@ async function seed() {
   const pendingReviewOrder = createdOrders.find(o => o.status === OrderStatus.PENDING_REVIEW);
   const signedOrder = createdOrders.find(o => o.status === OrderStatus.SIGNED);
   const shippedOrder = createdOrders.find(o => o.status === OrderStatus.SHIPPED);
+  const deliveredOrder = createdOrders.find(o => o.status === OrderStatus.DELIVERED);
+  const finalApprovedOrder = createdOrders.find(o => o.status === OrderStatus.FINAL_APPROVED);
+  const exceptionOrder = createdOrders.find(o => o.status === OrderStatus.EXCEPTION);
 
   if (pendingReviewOrder) {
     await auditLogRepository.save({
       orderId: pendingReviewOrder.id,
       userId: registrar.id,
       action: AuditAction.REVIEW_APPROVE,
-      description: `尝试审核通过订单 ${pendingReviewOrder.orderNo} 失败：权限不足`,
+      description: `登记员张登记尝试审核通过订单 ${pendingReviewOrder.orderNo} 操作被权限拒绝`,
       success: false,
-      failReason: '权限不足：该操作仅主管可执行，登记员无权审核',
-      beforeData: { status: pendingReviewOrder.status },
-      afterData: { operatorRole: 'registrar', attemptedAction: 'review_approve' },
+      failReason: '权限拒绝：登记员无权执行「review_approve」操作，需要主管角色',
+      beforeData: { status: OrderStatus.PENDING_REVIEW },
+      afterData: { operatorRole: 'registrar', operatorName: '张登记', requiredRoles: ['supervisor'], attemptedAction: 'review_approve' },
       createdAt: minusHours(1),
     });
   }
@@ -918,7 +921,7 @@ async function seed() {
       success: false,
       failReason: `当前状态 ${OrderStatus.DRAFT} 无法审核，仅待审核状态可审核`,
       beforeData: { status: OrderStatus.DRAFT },
-      afterData: { operatorRole: 'supervisor', attemptedAction: 'review_approve' },
+      afterData: { operatorRole: 'supervisor', operatorName: '李主管', attemptedAction: 'review_approve' },
       createdAt: minusHours(0.5),
     });
   }
@@ -928,11 +931,11 @@ async function seed() {
       orderId: shippedOrder.id,
       userId: registrar.id,
       action: AuditAction.DELIVER,
-      description: `尝试配送订单 ${shippedOrder.orderNo} 失败：权限不足`,
+      description: `登记员张登记尝试执行「deliver」操作被权限拒绝`,
       success: false,
-      failReason: '权限不足：该操作仅主管可执行，登记员无权配送',
+      failReason: '权限拒绝：登记员无权执行「deliver」操作，需要主管角色',
       beforeData: { status: OrderStatus.SHIPPED },
-      afterData: { operatorRole: 'registrar', attemptedAction: 'deliver' },
+      afterData: { operatorRole: 'registrar', operatorName: '张登记', requiredRoles: ['supervisor'], attemptedAction: 'deliver' },
       createdAt: minusHours(3),
     });
   }
@@ -942,11 +945,11 @@ async function seed() {
       orderId: signedOrder.id,
       userId: supervisor.id,
       action: AuditAction.ARCHIVE,
-      description: `尝试归档订单 ${signedOrder.orderNo} 失败：权限不足`,
+      description: `主管李主管尝试执行「archive」操作被权限拒绝`,
       success: false,
-      failReason: '权限不足：该操作仅复核负责人可执行，主管无权归档',
+      failReason: '权限拒绝：主管无权执行「archive」操作，需要复核负责人角色',
       beforeData: { status: OrderStatus.SIGNED },
-      afterData: { operatorRole: 'supervisor', attemptedAction: 'archive' },
+      afterData: { operatorRole: 'supervisor', operatorName: '李主管', requiredRoles: ['reviewer'], attemptedAction: 'archive' },
       createdAt: minusHours(2),
     });
   }
@@ -960,7 +963,7 @@ async function seed() {
       success: false,
       failReason: '退回原因不能为空',
       beforeData: { status: OrderStatus.DRAFT },
-      afterData: { operatorRole: 'registrar', attemptedAction: 'review_reject' },
+      afterData: { operatorRole: 'registrar', operatorName: '张登记', attemptedAction: 'review_reject' },
       createdAt: minusHours(0.3),
     });
   }
@@ -970,16 +973,72 @@ async function seed() {
       orderId: pendingReviewOrder.id,
       userId: reviewer.id,
       action: AuditAction.REVIEW_APPROVE,
-      description: `尝试审核通过订单 ${pendingReviewOrder.orderNo} 失败：权限不足`,
+      description: `复核负责人王复核尝试执行「review_approve」操作被权限拒绝`,
       success: false,
-      failReason: '权限不足：该操作仅主管可执行，复核负责人无权审核',
+      failReason: '权限拒绝：复核负责人无权执行「review_approve」操作，需要主管角色',
       beforeData: { status: OrderStatus.PENDING_REVIEW },
-      afterData: { operatorRole: 'reviewer', attemptedAction: 'review_approve' },
+      afterData: { operatorRole: 'reviewer', operatorName: '王复核', requiredRoles: ['supervisor'], attemptedAction: 'review_approve' },
       createdAt: minusHours(1.5),
     });
   }
 
-  console.log(`✅ 6条跨角色失败审计样例创建完成`);
+  if (finalApprovedOrder) {
+    await auditLogRepository.save({
+      orderId: finalApprovedOrder.id,
+      userId: registrar.id,
+      action: AuditAction.SHIP,
+      description: `登记员张登记尝试执行「ship」操作被权限拒绝`,
+      success: false,
+      failReason: '权限拒绝：登记员无权执行「ship」操作，需要主管角色',
+      beforeData: { status: OrderStatus.FINAL_APPROVED },
+      afterData: { operatorRole: 'registrar', operatorName: '张登记', requiredRoles: ['supervisor'], attemptedAction: 'ship' },
+      createdAt: minusHours(5),
+    });
+  }
+
+  if (deliveredOrder) {
+    await auditLogRepository.save({
+      orderId: deliveredOrder.id,
+      userId: supervisor.id,
+      action: AuditAction.SIGN,
+      description: `主管李主管尝试执行「sign」操作被权限拒绝`,
+      success: false,
+      failReason: '权限拒绝：主管无权执行「sign」操作，需要登记员角色',
+      beforeData: { status: OrderStatus.DELIVERED },
+      afterData: { operatorRole: 'supervisor', operatorName: '李主管', requiredRoles: ['registrar'], attemptedAction: 'sign' },
+      createdAt: minusHours(4),
+    });
+  }
+
+  if (exceptionOrder) {
+    await auditLogRepository.save({
+      orderId: exceptionOrder.id,
+      userId: supervisor.id,
+      action: AuditAction.FINAL_REJECT,
+      description: `尝试复核退回订单 ${exceptionOrder.orderNo} 失败：状态不匹配`,
+      success: false,
+      failReason: `当前状态 ${OrderStatus.EXCEPTION} 无法复核，仅待复核状态可复核`,
+      beforeData: { status: OrderStatus.EXCEPTION },
+      afterData: { operatorRole: 'supervisor', operatorName: '李主管', attemptedAction: 'final_reject' },
+      createdAt: minusHours(7),
+    });
+  }
+
+  if (pendingReviewOrder) {
+    await auditLogRepository.save({
+      orderId: pendingReviewOrder.id,
+      userId: supervisor.id,
+      action: AuditAction.FINAL_REJECT,
+      description: `尝试复核退回订单 ${pendingReviewOrder.orderNo} 失败：缺少退回原因`,
+      success: false,
+      failReason: '退回原因不能为空',
+      beforeData: { status: OrderStatus.PENDING_REVIEW },
+      afterData: { operatorRole: 'supervisor', operatorName: '李主管', attemptedAction: 'final_reject' },
+      createdAt: minusHours(0.8),
+    });
+  }
+
+  console.log(`✅ 10条跨角色失败审计样例创建完成`);
 
   console.log('');
   console.log('🎉 种子数据初始化完成！');

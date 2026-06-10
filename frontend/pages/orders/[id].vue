@@ -317,21 +317,32 @@
           <div
             v-for="log in auditLogs"
             :key="log.id"
-            class="flex items-start gap-4 p-3 bg-gray-50 rounded-md"
+            class="flex items-start gap-4 p-3 rounded-md"
+            :class="log.success ? 'bg-gray-50' : 'bg-red-50 border border-red-200'"
           >
             <div class="w-2 h-2 rounded-full mt-2" :class="log.success ? 'bg-green-500' : 'bg-red-500'"></div>
             <div class="flex-1">
-              <div class="flex items-center gap-2">
+              <div class="flex items-center gap-2 flex-wrap">
                 <span class="font-medium">{{ AuditActionLabels[log.action] }}</span>
-                <span v-if="!log.success" class="badge badge-error">失败</span>
+                <span v-if="log.success" class="badge badge-success">成功</span>
+                <span v-else class="badge badge-error">失败</span>
+                <span
+                  v-if="!log.success && log.failReason"
+                  class="inline-block px-1.5 py-0.5 rounded text-xs font-medium"
+                  :class="auditFailTypeClass(log.failReason)"
+                >
+                  {{ auditFailTypeLabel(log.failReason) }}
+                </span>
               </div>
               <p class="text-sm text-gray-600 mt-1">{{ log.description }}</p>
               <p v-if="log.failReason" class="text-sm text-red-600 mt-1">
                 失败原因：{{ log.failReason }}
               </p>
-              <p class="text-xs text-gray-400 mt-1">
-                {{ log.user?.name || '系统' }} · {{ formatDate(log.createdAt) }}
-              </p>
+              <div class="flex gap-4 mt-1 text-xs text-gray-400 flex-wrap">
+                <span>{{ log.user?.name || '系统' }} · {{ formatDate(log.createdAt) }}</span>
+                <span v-if="log.beforeData?.status">操作前状态：{{ OrderStatusLabels[log.beforeData.status as OrderStatus] || log.beforeData.status }}</span>
+                <span v-if="log.afterData?.operatorRole">操作者角色：{{ auditRoleLabel(log.afterData.operatorRole) }}</span>
+              </div>
             </div>
           </div>
           <div v-if="auditLogs.length === 0" class="text-center py-4 text-gray-400">
@@ -569,6 +580,29 @@ const formatSize = (bytes: number) => {
   if (bytes < 1024) return bytes + ' B';
   if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
   return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+};
+
+const auditFailTypeLabel = (reason?: string) => {
+  if (!reason) return '未知';
+  if (reason.includes('权限')) return '权限拒绝';
+  if (reason.includes('状态') || reason.includes('无法')) return '状态不匹配';
+  if (reason.includes('不能为空') || reason.includes('缺少')) return '缺少原因';
+  return '操作失败';
+};
+
+const auditFailTypeClass = (reason?: string) => {
+  if (!reason) return 'bg-gray-100 text-gray-600';
+  if (reason.includes('权限')) return 'bg-orange-100 text-orange-700';
+  if (reason.includes('状态') || reason.includes('无法')) return 'bg-yellow-100 text-yellow-700';
+  if (reason.includes('不能为空') || reason.includes('缺少')) return 'bg-purple-100 text-purple-700';
+  return 'bg-red-100 text-red-700';
+};
+
+const auditRoleLabel = (role?: string) => {
+  const map: Record<string, string> = {
+    registrar: '登记员', supervisor: '主管', reviewer: '复核负责人',
+  };
+  return map[role || ''] || role || '-';
 };
 
 const loadOrder = async () => {
