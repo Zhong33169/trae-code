@@ -42,6 +42,7 @@ async fn main() -> std::io::Result<()> {
                     .route("/users", web::get().to(handlers::list_users))
                     .route("/records", web::get().to(handlers::list_records))
                     .route("/records", web::post().to(handlers::create_record))
+                    .route("/records/handled", web::get().to(handlers::list_handled_records))
                     .route("/records/{id}", web::get().to(handlers::get_record))
                     .route("/records/{id}", web::put().to(handlers::update_record))
                     .route("/records/{id}/submit", web::post().to(handlers::submit_record))
@@ -52,6 +53,7 @@ async fn main() -> std::io::Result<()> {
                     .route("/records/{id}/evidence", web::get().to(handlers::list_evidence))
                     .route("/records/{id}/evidence", web::post().to(handlers::add_evidence))
                     .route("/stats", web::get().to(handlers::get_stats))
+                    .route("/workbench/stats", web::get().to(handlers::get_workbench_stats))
             )
     })
     .bind(("0.0.0.0", port))?

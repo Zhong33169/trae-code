@@ -67,6 +67,13 @@ export interface StatsResponse {
   conflict: number;
 }
 
+export interface WorkbenchStats {
+  todo_count: number;
+  handled_count: number;
+  status_counts: Record<string, number>;
+  handler_role: string;
+}
+
 export interface ApiResponse<T> {
   success: boolean;
   message: string;

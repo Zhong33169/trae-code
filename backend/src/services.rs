@@ -83,6 +83,7 @@ pub async fn list_records(
     status: Option<String>,
     exception_type: Option<String>,
     handler_role: Option<String>,
+    handler_id: Option<i64>,
 ) -> Result<Vec<BorrowRecord>, String> {
     let mut query: QueryBuilder<Sqlite> = QueryBuilder::new(SELECT_RECORD_WITH_HANDLER);
     query.push(" WHERE 1=1");
@@ -100,6 +101,11 @@ pub async fn list_records(
     if let Some(r) = handler_role {
         query.push(" AND br.current_handler_role = ");
         query.push_bind(r);
+    }
+
+    if let Some(hid) = handler_id {
+        query.push(" AND br.current_handler_id = ");
+        query.push_bind(hid);
     }
 
     query.push(" ORDER BY br.id DESC");
@@ -762,4 +768,80 @@ async fn insert_validation_failed(
     .execute(pool)
     .await
     .ok();
+}
+
+pub async fn list_handled_records(
+    pool: &SqlitePool,
+    handler_id: i64,
+    status: Option<String>,
+    action: Option<String>,
+) -> Result<Vec<BorrowRecord>, String> {
+    let mut query: QueryBuilder<Sqlite> = QueryBuilder::new(
+        "SELECT DISTINCT br.*, u.name as current_handler_name FROM borrow_records br"
+    );
+    query.push(" LEFT JOIN users u ON br.current_handler_id = u.id");
+    query.push(" JOIN process_records pr ON pr.borrow_record_id = br.id");
+    query.push(" WHERE pr.handler_id = ");
+    query.push_bind(handler_id);
+
+    if let Some(s) = status {
+        query.push(" AND br.status = ");
+        query.push_bind(s);
+    }
+
+    if let Some(a) = action {
+        query.push(" AND pr.action = ");
+        query.push_bind(a);
+    }
+
+    query.push(" ORDER BY br.id DESC");
+
+    let records = query.build_query_as::<BorrowRecord>()
+        .fetch_all(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(records)
+}
+
+pub async fn get_workbench_stats(
+    pool: &SqlitePool,
+    handler_id: i64,
+    handler_role: &str,
+) -> Result<WorkbenchStats, String> {
+    let todo_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM borrow_records WHERE current_handler_id = ? AND status IN ('draft', 'pending_audit', 'pending_review', 'returned_correction')"
+    )
+    .bind(handler_id)
+    .fetch_one(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let handled_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(DISTINCT borrow_record_id) FROM process_records WHERE handler_id = ?"
+    )
+    .bind(handler_id)
+    .fetch_one(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let mut status_counts = std::collections::HashMap::new();
+    let statuses = ["draft", "pending_audit", "pending_review", "returned_correction", "archived"];
+    for s in statuses.iter() {
+        let count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM borrow_records WHERE status = ?"
+        )
+        .bind(s)
+        .fetch_one(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+        status_counts.insert(s.to_string(), count);
+    }
+
+    Ok(WorkbenchStats {
+        todo_count,
+        handled_count,
+        status_counts,
+        handler_role: handler_role.to_string(),
+    })
 }

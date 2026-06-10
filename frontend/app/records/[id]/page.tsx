@@ -536,25 +536,44 @@ export default function RecordDetailPage() {
 
           {lastProcess && (
             <div className="bg-white shadow rounded-lg p-6">
-              <h2 className="text-lg font-semibold text-gray-800 mb-4">上一处理意见</h2>
-              <div className="bg-blue-50 rounded-lg p-4">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-sm font-medium text-gray-900">
-                    {lastProcess.handler_name}
-                  </span>
+              <h2 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
+                <span className="w-1 h-5 bg-blue-500 rounded mr-2"></span>
+                上一处理意见
+              </h2>
+              <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-lg p-4 border border-blue-100">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center space-x-2">
+                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${ACTION_COLORS[lastProcess.action] || 'bg-blue-100 text-blue-700'}`}>
+                      {ACTION_MAP[lastProcess.action] || lastProcess.action}
+                    </span>
+                    <span className="text-sm font-medium text-gray-900">
+                      {lastProcess.handler_name}
+                    </span>
+                  </div>
                   <span className="text-xs text-gray-500">
-                    {lastProcess.created_at ? new Date(lastProcess.created_at).toLocaleDateString('zh-CN') : ''}
+                    {lastProcess.created_at ? new Date(lastProcess.created_at).toLocaleString('zh-CN') : ''}
                   </span>
                 </div>
-                <div className="text-xs text-gray-500 mb-2">
-                  {ROLE_MAP[lastProcess.handler_role] || lastProcess.handler_role} · {ACTION_MAP[lastProcess.action] || lastProcess.action}
+                <div className="text-xs text-gray-500 mb-3">
+                  角色：{ROLE_MAP[lastProcess.handler_role] || lastProcess.handler_role}
+                  {' · '}版本：v{lastProcess.version_before} → v{lastProcess.version_after}
                 </div>
+                {lastProcess.from_status && lastProcess.to_status && (
+                  <div className="text-xs text-gray-500 mb-3">
+                    状态：{STATUS_MAP[lastProcess.from_status] || lastProcess.from_status}
+                    <span className="mx-1">→</span>
+                    {STATUS_MAP[lastProcess.to_status] || lastProcess.to_status}
+                  </div>
+                )}
                 {lastProcess.opinion && (
-                  <div className="text-sm text-gray-700">{lastProcess.opinion}</div>
+                  <div className="text-sm text-gray-700 bg-white/60 rounded p-3">
+                    {lastProcess.opinion}
+                  </div>
                 )}
                 {lastProcess.reject_reason && (
-                  <div className="text-sm text-red-600 mt-2 pt-2 border-t border-red-100">
-                    <span className="font-medium">退回原因：</span>{lastProcess.reject_reason}
+                  <div className="mt-3 p-3 bg-red-50 rounded border border-red-100">
+                    <div className="text-sm font-medium text-red-700 mb-1">退回原因</div>
+                    <div className="text-sm text-red-600">{lastProcess.reject_reason}</div>
                   </div>
                 )}
               </div>
@@ -562,8 +581,16 @@ export default function RecordDetailPage() {
           )}
 
           <div className="bg-white shadow rounded-lg p-6">
-            <h2 className="text-lg font-semibold text-gray-800 mb-4">操作</h2>
+            <h2 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
+              <span className={`w-1 h-5 rounded mr-2 ${canSubmit || canAudit || canReview || canCorrect ? 'bg-green-500' : 'bg-gray-300'}`}></span>
+              办理动作
+            </h2>
 
+            {!canSubmit && !canAudit && !canReview && !canCorrect && (
+              <div className="text-center py-6 text-gray-500 text-sm">
+                当前身份或状态下无可办理操作
+              </div>
+            )}
             {canSubmit && (
               <div className="space-y-3">
                 <p className="text-sm text-gray-600">

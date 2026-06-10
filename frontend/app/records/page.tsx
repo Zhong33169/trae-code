@@ -3,8 +3,8 @@
 import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { getRecords, getStats } from '@/lib/api';
-import { BorrowRecord, StatsResponse, STATUS_MAP, EXCEPTION_MAP, STATUS_COLORS, EXCEPTION_COLORS, ROLE_MAP } from '@/lib/types';
+import { getRecords, getStats, getUsers, getHandledRecords } from '@/lib/api';
+import { BorrowRecord, StatsResponse, User, STATUS_MAP, EXCEPTION_MAP, STATUS_COLORS, EXCEPTION_COLORS, ROLE_MAP } from '@/lib/types';
 
 export default function RecordsPage() {
   const searchParams = useSearchParams();
@@ -12,21 +12,32 @@ export default function RecordsPage() {
   const [records, setRecords] = useState<BorrowRecord[]>([]);
   const [stats, setStats] = useState<StatsResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const [users, setUsers] = useState<User[]>([]);
+  const [selectedUserId, setSelectedUserId] = useState<number>(1);
+  const [selectedUser, setSelectedUser] = useState<User | null>(null);
 
   const statusFilter = searchParams.get('status') || '';
   const exceptionFilter = searchParams.get('exception_type') || '';
+  const viewFilter = searchParams.get('view') || 'all';
 
   const loadData = useCallback(async () => {
+    if (!selectedUser) return;
     setLoading(true);
     try {
       const params: Record<string, string> = {};
       if (statusFilter) params.status = statusFilter;
       if (exceptionFilter) params.exception_type = exceptionFilter;
 
-      const [recordsRes, statsRes] = await Promise.all([
-        getRecords(Object.keys(params).length ? params : undefined),
-        getStats(),
-      ]);
+      let recordsRes;
+      if (viewFilter === 'todo') {
+        recordsRes = await getRecords({ ...params, handler_id: String(selectedUser.id) });
+      } else if (viewFilter === 'handled') {
+        recordsRes = await getHandledRecords(selectedUser.id, params);
+      } else {
+        recordsRes = await getRecords(Object.keys(params).length ? params : undefined);
+      }
+
+      const statsRes = await getStats();
 
       if (recordsRes.success && recordsRes.data) {
         setRecords(recordsRes.data as BorrowRecord[]);
@@ -39,11 +50,29 @@ export default function RecordsPage() {
     } finally {
       setLoading(false);
     }
-  }, [statusFilter, exceptionFilter]);
+  }, [statusFilter, exceptionFilter, viewFilter, selectedUser]);
 
   useEffect(() => {
-    loadData();
-  }, [loadData]);
+    const init = async () => {
+      const res = await getUsers();
+      if (res.success && res.data) {
+        const userList = res.data as User[];
+        setUsers(userList);
+        const user = userList[0];
+        if (user) {
+          setSelectedUser(user);
+          setSelectedUserId(user.id);
+        }
+      }
+    };
+    init();
+  }, []);
+
+  useEffect(() => {
+    if (selectedUser) {
+      loadData();
+    }
+  }, [loadData, selectedUser]);
 
   const setFilter = (key: string, value: string) => {
     const params = new URLSearchParams(searchParams.toString());
@@ -74,7 +103,49 @@ export default function RecordsPage() {
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
-        <h1 className="text-2xl font-bold text-gray-900">借阅记录列表</h1>
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">借阅记录列表</h1>
+          <div className="flex items-center mt-2 space-x-4">
+            <div className="flex space-x-1">
+              {[
+                { value: 'all', label: '全部记录' },
+                { value: 'todo', label: '我的待办' },
+                { value: 'handled', label: '我的已办' },
+              ].map((v) => (
+                <button
+                  key={v.value}
+                  onClick={() => setFilter('view', v.value)}
+                  className={`px-3 py-1 text-sm rounded-md ${
+                    viewFilter === v.value
+                      ? 'bg-blue-600 text-white'
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  {v.label}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center space-x-2 text-sm">
+              <span className="text-gray-500">当前身份：</span>
+              <select
+                value={selectedUserId}
+                onChange={(e) => {
+                  const uid = Number(e.target.value);
+                  setSelectedUserId(uid);
+                  const user = users.find((u) => u.id === uid);
+                  if (user) setSelectedUser(user);
+                }}
+                className="border rounded px-2 py-1 text-sm bg-white"
+              >
+                {users.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.name} ({ROLE_MAP[u.role] || u.role})
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        </div>
         <Link
           href="/records/new"
           className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium"

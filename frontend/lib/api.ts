@@ -1,4 +1,4 @@
-import { ApiResponse, User, BorrowRecord, ProcessRecord, EvidenceItem, StatsResponse } from './types';
+import { ApiResponse, User, BorrowRecord, ProcessRecord, EvidenceItem, StatsResponse, WorkbenchStats } from './types';
 
 export async function apiFetch<T>(
   path: string,
@@ -92,4 +92,14 @@ export async function addEvidence(id: number, data: any): Promise<ApiResponse<Ev
     method: 'POST',
     body: JSON.stringify(data),
   });
+}
+
+export async function getWorkbenchStats(handlerId: number, handlerRole: string): Promise<ApiResponse<WorkbenchStats>> {
+  const params = new URLSearchParams({ handler_id: String(handlerId), handler_role: handlerRole });
+  return apiFetch<WorkbenchStats>(`/workbench/stats?${params.toString()}`);
+}
+
+export async function getHandledRecords(handlerId: number, params?: Record<string, string>): Promise<ApiResponse<BorrowRecord[]>> {
+  const query = new URLSearchParams({ handler_id: String(handlerId), ...params });
+  return apiFetch<BorrowRecord[]>(`/records/handled?${query.toString()}`);
 }

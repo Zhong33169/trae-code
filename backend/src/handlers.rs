@@ -41,9 +41,43 @@ pub async fn list_records(
     let status = query.get("status").cloned();
     let exception_type = query.get("exception_type").cloned();
     let handler_role = query.get("handler_role").cloned();
+    let handler_id = query.get("handler_id").and_then(|v| v.parse::<i64>().ok());
 
-    match services::list_records(&state.pool, status, exception_type, handler_role).await {
+    match services::list_records(&state.pool, status, exception_type, handler_role, handler_id).await {
         Ok(records) => success_response(records),
+        Err(e) => error_response(&e),
+    }
+}
+
+pub async fn list_handled_records(
+    state: web::Data<Arc<AppState>>,
+    query: web::Query<std::collections::HashMap<String, String>>,
+) -> impl Responder {
+    let handler_id = match query.get("handler_id").and_then(|v| v.parse::<i64>().ok()) {
+        Some(id) => id,
+        None => return error_response("缺少 handler_id 参数"),
+    };
+    let status = query.get("status").cloned();
+    let action = query.get("action").cloned();
+
+    match services::list_handled_records(&state.pool, handler_id, status, action).await {
+        Ok(records) => success_response(records),
+        Err(e) => error_response(&e),
+    }
+}
+
+pub async fn get_workbench_stats(
+    state: web::Data<Arc<AppState>>,
+    query: web::Query<std::collections::HashMap<String, String>>,
+) -> impl Responder {
+    let handler_id = match query.get("handler_id").and_then(|v| v.parse::<i64>().ok()) {
+        Some(id) => id,
+        None => return error_response("缺少 handler_id 参数"),
+    };
+    let handler_role = query.get("handler_role").cloned().unwrap_or_else(|| "registrar".to_string());
+
+    match services::get_workbench_stats(&state.pool, handler_id, &handler_role).await {
+        Ok(stats) => success_response(stats),
         Err(e) => error_response(&e),
     }
 }

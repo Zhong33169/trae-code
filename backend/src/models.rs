@@ -156,6 +156,14 @@ pub struct StatsResponse {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct WorkbenchStats {
+    pub todo_count: i64,
+    pub handled_count: i64,
+    pub status_counts: std::collections::HashMap<String, i64>,
+    pub handler_role: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ApiResponse<T> {
     pub success: bool,
     pub message: String,
