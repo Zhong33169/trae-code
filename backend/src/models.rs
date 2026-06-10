@@ -99,6 +99,15 @@ pub struct HandoverInfo {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HandoverInput {
+    pub shift: Option<String>,
+    pub handover_by: Option<String>,
+    pub takeover_by: Option<String>,
+    pub confirm_time: Option<String>,
+    pub handover_content: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StatusTransitionRequest {
     pub action: String,
     pub reason: Option<String>,
