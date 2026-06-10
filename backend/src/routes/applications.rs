@@ -763,6 +763,40 @@ fn do_review_single(
         }
     }
 
+    if approved {
+        let mut missing_evidence: Vec<&str> = Vec::new();
+        if app.evidence_store_replenishment.is_none() {
+            missing_evidence.push("门店补货凭证");
+        }
+        if app.evidence_delivery_confirmation.is_none() {
+            missing_evidence.push("配送确认单");
+        }
+        if app.evidence_registration.is_none() {
+            missing_evidence.push("补货申请登记凭证");
+        }
+
+        if !missing_evidence.is_empty() {
+            return BatchResultItem {
+                application_id: app.id,
+                application_no: app.application_no,
+                success: false,
+                status: app.status.as_str().to_string(),
+                message: format!("缺少必要凭证：{}", missing_evidence.join("、")),
+                attempted_version: current_version,
+                new_version: None,
+                performer_role: Some(role_str),
+                performer_name: performer,
+                status_from: status_from_str.clone(),
+                status_to: status_from_str.clone(),
+                remarks: remarks_owned,
+                evidence_store_replenishment: ev_store,
+                evidence_delivery_confirmation: ev_delivery,
+                evidence_registration: ev_reg,
+                items_count: items_cnt,
+            };
+        }
+    }
+
     let (new_status, action) = match role {
         UserRole::Reviewer => {
             if approved {

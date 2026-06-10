@@ -535,6 +535,49 @@ fn seed_data(conn: &Connection) -> Result<()> {
         )?;
     }
 
+    // ============================================================
+    // 8. 待审核但缺两项凭证（陆家嘴店，v2 pending_review，缺配送+登记）
+    //    场景：登记员误提交了还没补全凭证的申请，用于验证审核时缺证据拦截
+    // ============================================================
+    {
+        let app_no = "RP2026060100008";
+        let items = serde_json::json!([
+            {"sku": "SKU008", "name": "薯片番茄味", "quantity": 90, "unit": "袋"},
+            {"sku": "SKU016", "name": "坚果混合装", "quantity": 40, "unit": "包"}
+        ]).to_string();
+        let ev_store = Some("门店补货单-SH002-0602-误提交版.jpg");
+        let ev_delivery: Option<&str> = None; // 缺失
+        let ev_reg: Option<&str> = None; // 缺失
+        let remarks = Some("误提交：仅上传门店补货单，配送确认和登记凭证待补全。".to_string());
+
+        conn.execute(
+            "INSERT INTO replenishment_applications 
+             (application_no, store_id, status, current_version, items, 
+              evidence_store_replenishment, evidence_delivery_confirmation, evidence_registration,
+              remarks, created_by, updated_by)
+             VALUES (?1, 5, 'pending_review', 2, ?2, ?3, ?4, ?5, ?6, 1, 1)",
+            params![app_no, items, ev_store, ev_delivery, ev_reg, remarks],
+        )?;
+        let app_id = conn.last_insert_rowid();
+
+        conn.execute(
+            "INSERT INTO application_versions 
+             (application_id, version, status_from, status_to, items, 
+              evidence_store_replenishment, evidence_delivery_confirmation, evidence_registration,
+              remarks, action, performed_by)
+             VALUES (?1, 1, NULL, 'draft', ?2, ?3, ?4, ?5, ?6, 'create', 1)",
+            params![app_id, items, ev_store, ev_delivery, ev_reg, remarks],
+        )?;
+        conn.execute(
+            "INSERT INTO application_versions 
+             (application_id, version, status_from, status_to, items, 
+              evidence_store_replenishment, evidence_delivery_confirmation, evidence_registration,
+              remarks, action, performed_by)
+             VALUES (?1, 2, 'draft', 'pending_review', ?2, ?3, ?4, ?5, ?6, 'submit', 1)",
+            params![app_id, items, ev_store, ev_delivery, ev_reg, remarks],
+        )?;
+    }
+
     Ok(())
 }
 

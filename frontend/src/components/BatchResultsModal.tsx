@@ -367,61 +367,94 @@ export default function BatchResultsModal({ result, onClose }: Props) {
                     </div>
                   )}
 
-                  {/* 证据快照 */}
-                  {(item.evidence_store_replenishment || item.evidence_delivery_confirmation || item.evidence_registration) && (
-                    <div style={{
-                      display: 'grid',
-                      gridTemplateColumns: 'repeat(3, 1fr)',
-                      gap: '6px',
-                      padding: '10px',
-                      background: item.success ? 'white' : 'rgba(254, 242, 242, 0.5)',
-                      border: `1px solid ${item.success ? '#e5e7eb' : '#fecaca'}`,
-                      borderRadius: '8px',
-                    }}>
+                  {/* 证据快照（始终展示三项槽位） */}
+                  {(() => {
+                    const evCount = [
+                      item.evidence_store_replenishment,
+                      item.evidence_delivery_confirmation,
+                      item.evidence_registration,
+                    ].filter(Boolean).length;
+                    const missingCount = 3 - evCount;
+                    return (
                       <div style={{
-                        fontSize: '11px',
-                        color: '#9ca3af',
-                        gridColumn: '1 / -1',
-                        marginBottom: '2px',
-                        fontWeight: 500,
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(3, 1fr)',
+                        gap: '6px',
+                        padding: '10px',
+                        background: item.success ? 'white' : 'rgba(254, 242, 242, 0.5)',
+                        border: `1px solid ${item.success ? '#e5e7eb' : '#fecaca'}`,
+                        borderRadius: '8px',
                       }}>
-                        📎 办理时证据快照 {item.items_count ? `· 商品 ${item.items_count} 种` : ''}
-                      </div>
-                      {[
-                        { label: '门店补货凭证', value: item.evidence_store_replenishment },
-                        { label: '配送确认单', value: item.evidence_delivery_confirmation },
-                        { label: '补货登记凭证', value: item.evidence_registration },
-                      ].map((ev, eIdx) => (
-                        <div key={eIdx} style={{
-                          padding: '6px 8px',
-                          background: ev.value ? '#ecfdf5' : '#fef2f2',
-                          border: `1px solid ${ev.value ? '#a7f3d0' : '#fecaca'}`,
-                          borderRadius: '6px',
+                        <div style={{
+                          fontSize: '11px',
+                          color: '#6b7280',
+                          gridColumn: '1 / -1',
+                          marginBottom: '2px',
+                          fontWeight: 500,
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
                         }}>
-                          <div style={{
-                            fontSize: '10px',
-                            color: '#9ca3af',
-                            marginBottom: '2px',
-                          }}>{ev.label}</div>
-                          <div style={{
-                            fontSize: '11px',
-                            fontWeight: 500,
-                            color: ev.value ? '#065f46' : '#991b1b',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap',
-                          }} title={ev.value || ''}>
-                            {ev.value ? (
-                              <>
-                                <span style={{ marginRight: '2px' }}>✅</span>
-                                {ev.value}
-                              </>
-                            ) : '⛔ 未上传'}
-                          </div>
+                          <span>📎 办理时证据快照 {item.items_count ? `· 商品 ${item.items_count} 种` : ''}</span>
+                          {missingCount > 0 && (
+                            <span style={{
+                              color: '#dc2626',
+                              fontSize: '10px',
+                              fontWeight: 600,
+                              padding: '1px 6px',
+                              borderRadius: '8px',
+                              background: '#fee2e2',
+                            }}>
+                              缺失 {missingCount} 项
+                            </span>
+                          )}
+                          {missingCount === 0 && (
+                            <span style={{
+                              color: '#059669',
+                              fontSize: '10px',
+                              fontWeight: 600,
+                              padding: '1px 6px',
+                              borderRadius: '8px',
+                              background: '#d1fae5',
+                            }}>
+                              齐全
+                            </span>
+                          )}
                         </div>
-                      ))}
-                    </div>
-                  )}
+                        {[
+                          { label: '门店补货凭证', value: item.evidence_store_replenishment },
+                          { label: '配送确认单', value: item.evidence_delivery_confirmation },
+                          { label: '补货登记凭证', value: item.evidence_registration },
+                        ].map((ev, eIdx) => (
+                          <div key={eIdx} style={{
+                            padding: '6px 8px',
+                            background: ev.value ? '#ecfdf5' : '#fef2f2',
+                            border: `1px solid ${ev.value ? '#a7f3d0' : '#fecaca'}`,
+                            borderRadius: '6px',
+                          }}>
+                            <div style={{
+                              fontSize: '10px',
+                              color: ev.value ? '#059669' : '#dc2626',
+                              marginBottom: '2px',
+                              fontWeight: 500,
+                            }}>
+                              {ev.value ? '✓' : '✗'} {ev.label}
+                            </div>
+                            <div style={{
+                              fontSize: '11px',
+                              fontWeight: 500,
+                              color: ev.value ? '#065f46' : '#991b1b',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
+                            }} title={ev.value || ''}>
+                              {ev.value || '未上传'}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
 
                   {/* 失败建议 */}
                   {failureInfo && (
