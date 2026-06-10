@@ -312,8 +312,11 @@ async def init_demo_data():
                 grounding_note="接地良好",
                 overall_result="合格",
                 registrar_opinion="现场检查完成，设备运行正常",
+                registrar_signature="张巡检" if data["status"] not in [InspectionStatus.DRAFT] else None,
                 supervisor_opinion=data.get("supervisor_opinion"),
+                supervisor_signature="李主管" if data.get("supervisor_opinion") else None,
                 reviewer_opinion=data.get("reviewer_opinion"),
+                reviewer_signature="王站长" if data.get("reviewer_opinion") else None,
                 time_limit=created_at + timedelta(days=7),
                 created_by=registrar_id,
                 created_at=created_at,
@@ -456,6 +459,8 @@ async def init_demo_data():
                     from_status=InspectionStatus.DRAFT.value,
                     to_status=InspectionStatus.PENDING_REVIEW.value,
                     detail="提交审核",
+                    opinion="现场检查完成，设备运行正常",
+                    signature="张巡检",
                     ip_address="192.168.1.100",
                     user_agent="Mozilla/5.0",
                     created_at=inspection.created_at + timedelta(hours=2),
@@ -464,6 +469,7 @@ async def init_demo_data():
                 audit_count += 1
 
             if data.get("supervisor_opinion"):
+                from_status_val = InspectionStatus.PENDING_REVIEW.value
                 if data["status"] in [
                     InspectionStatus.PENDING_FINAL_REVIEW,
                     InspectionStatus.ARCHIVED,
@@ -496,14 +502,39 @@ async def init_demo_data():
                     operator_id=supervisor_id,
                     operator_name="李主管",
                     operator_role=UserRole.SUPERVISOR.value,
-                    from_status=InspectionStatus.PENDING_REVIEW.value,
+                    from_status=from_status_val,
                     to_status=to_status,
                     detail=data["supervisor_opinion"],
+                    opinion=data["supervisor_opinion"],
+                    signature="李主管",
                     ip_address="192.168.1.101",
                     user_agent="Mozilla/5.0",
                     created_at=inspection.created_at + timedelta(days=1),
                 )
                 session.add(audit_review)
+                audit_count += 1
+
+            if data["status"] == InspectionStatus.ACCEPTANCE_REJECTED:
+                audit_accept_reject = AuditLog(
+                    inspection_order_id=inspection.id,
+                    action=AuditAction.ACCEPT,
+                    operator_id=supervisor_id,
+                    operator_name="李主管",
+                    operator_role=UserRole.SUPERVISOR.value,
+                    from_status=InspectionStatus.PENDING_ACCEPTANCE.value,
+                    to_status=InspectionStatus.ACCEPTANCE_REJECTED.value,
+                    detail="修复质量不达标，部分测试项未通过",
+                    opinion="修复质量不达标，绝缘电阻测试不合格，需要重新维修",
+                    signature="李主管",
+                    error_code="ACCEPTANCE_FAILED",
+                    error_message="绝缘电阻测试值低于标准值，充电模块温度过高",
+                    suggestion="更换绝缘材料，检查散热系统",
+                    next_step="退回维修单位重新处理，预计3个工作日完成",
+                    ip_address="192.168.1.101",
+                    user_agent="Mozilla/5.0",
+                    created_at=inspection.created_at + timedelta(days=5),
+                )
+                session.add(audit_accept_reject)
                 audit_count += 1
 
             if data.get("reviewer_opinion"):
@@ -521,6 +552,12 @@ async def init_demo_data():
                     from_status=InspectionStatus.PENDING_FINAL_REVIEW.value,
                     to_status=data["status"].value,
                     detail=data["reviewer_opinion"],
+                    opinion=data["reviewer_opinion"],
+                    signature="王站长",
+                    error_code="INCOMPLETE_MATERIALS" if data["status"] == InspectionStatus.FINAL_REVIEW_REJECTED else None,
+                    error_message="材料不齐全，缺少现场照片" if data["status"] == InspectionStatus.FINAL_REVIEW_REJECTED else None,
+                    suggestion="补充现场照片后重新提交" if data["status"] == InspectionStatus.FINAL_REVIEW_REJECTED else None,
+                    next_step="请联系登记员补充材料" if data["status"] == InspectionStatus.FINAL_REVIEW_REJECTED else None,
                     ip_address="192.168.1.102",
                     user_agent="Mozilla/5.0",
                     created_at=inspection.created_at + timedelta(days=2),
@@ -536,4 +573,9 @@ async def init_demo_data():
 if __name__ == "__main__":
     import asyncio
 
-    asyncio.run(init_demo_data())
+    async def main():
+        from database import init_db
+        await init_db()
+        await init_demo_data()
+
+    asyncio.run(main())

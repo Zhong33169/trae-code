@@ -12,6 +12,12 @@ export interface AuditLog {
   operator_name: string | null;
   operator_role: string | null;
   detail: string | null;
+  opinion: string | null;
+  signature: string | null;
+  error_code: string | null;
+  error_message: string | null;
+  suggestion: string | null;
+  next_step: string | null;
   ip_address: string | null;
   created_at: string;
 }

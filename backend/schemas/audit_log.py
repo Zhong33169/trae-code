@@ -27,6 +27,12 @@ class AuditLogResponse(BaseModel):
     operator_name: Optional[str] = None
     operator_role: Optional[str] = None
     detail: Optional[str] = None
+    opinion: Optional[str] = None
+    signature: Optional[str] = None
+    error_code: Optional[str] = None
+    error_message: Optional[str] = None
+    suggestion: Optional[str] = None
+    next_step: Optional[str] = None
     ip_address: Optional[str] = None
     created_at: datetime
 

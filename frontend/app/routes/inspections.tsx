@@ -206,18 +206,13 @@ function InspectionsPage() {
     const config = ACTION_CONFIGS[actionKey];
     if (!config) return;
 
-    if (actionKey === "scan_qr") {
-      navigate(`/inspections/${record.id}?action=scan_qr`);
-      return;
-    }
-
     if (actionKey === "update") {
       navigate(`/inspections/${record.id}/edit`);
       return;
     }
 
-    if (config.is_form) {
-      navigate(`/inspections/${record.id}`);
+    if (actionKey === "scan_qr" || config.is_form) {
+      navigate(`/inspections/${record.id}?action=${actionKey}`);
       return;
     }
 

@@ -218,6 +218,8 @@ async def process_single_item(
             from_status=from_status,
             to_status=item.target_status,
             detail=item.opinion or f"批量操作: 状态从 [{get_status_label(from_status)}] 变更为 [{get_status_label(item.target_status)}]",
+            opinion=item.opinion,
+            signature=item.signature,
             ip_address=request.client.host if request.client else None,
             user_agent=request.headers.get("user-agent"),
             request_id=request_id,

@@ -37,6 +37,12 @@ class AuditLog(Base):
     operator_role = Column(String(50))
 
     detail = Column(Text)
+    opinion = Column(Text)
+    signature = Column(String(100))
+    error_code = Column(String(50))
+    error_message = Column(Text)
+    suggestion = Column(Text)
+    next_step = Column(Text)
     ip_address = Column(String(50))
     user_agent = Column(String(500))
     request_id = Column(String(100))

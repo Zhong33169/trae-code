@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { useParams, useNavigate } from "@remix-run/react";
+import { useParams, useNavigate, useLocation } from "@remix-run/react";
 import { useAuth } from "~/hooks/useAuth";
 import { useToast } from "~/hooks/useToast";
 import {
@@ -44,10 +44,13 @@ export function meta() {
 function InspectionDetailPage() {
   const params = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const { hasRole, user } = useAuth();
   const { success, error, warning, info } = useToast();
 
   const id = parseInt(params.id || "0");
+  const queryParams = new URLSearchParams(location.search);
+  const urlAction = queryParams.get("action");
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<InspectionOrderWithDetails | null>(null);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
@@ -83,13 +86,63 @@ function InspectionDetailPage() {
       ]);
       setData(detail);
       setAuditLogs(logs.items);
+
+      if (urlAction) {
+        setTimeout(() => {
+          switch (urlAction) {
+            case "scan_qr":
+              if (detail.allowed_actions?.includes("scan_qr")) {
+                setQrModalOpen(true);
+              }
+              break;
+            case "submit_fault_report":
+              if (detail.allowed_actions?.includes("submit_fault_report")) {
+                setFaultModalOpen(true);
+              }
+              break;
+            case "mark_repair_complete":
+              if (detail.allowed_actions?.includes("mark_repair_complete")) {
+                setRepairCompleteModalOpen(true);
+              }
+              break;
+            case "acceptance_pass":
+            case "acceptance_reject":
+              if (
+                detail.allowed_actions?.includes("acceptance_pass") ||
+                detail.allowed_actions?.includes("acceptance_reject")
+              ) {
+                setAcceptanceModalOpen(true);
+              }
+              break;
+            case "submit":
+            case "approve":
+            case "reject":
+            case "report_fault":
+            case "mark_repair_start":
+            case "submit_acceptance":
+            case "archive":
+            case "final_reject":
+              if (detail.allowed_actions?.includes(urlAction)) {
+                const config = ACTION_CONFIGS[urlAction];
+                if (config?.target_status) {
+                  setTargetStatus(config.target_status);
+                  setTargetStatusLabel(config.label);
+                  setStatusModalOpen(true);
+                }
+              }
+              break;
+            default:
+              break;
+          }
+        }, 100);
+      }
     } catch (err: any) {
       const errorMessage = err.response?.data?.detail || "加载数据失败";
       error(errorMessage);
     } finally {
       setLoading(false);
     }
-  }, [id, error]);
+  }, [id, error, urlAction]);
 
   useEffect(() => {
     if (id) {
@@ -534,14 +587,7 @@ function InspectionDetailPage() {
           <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
             {data.allowed_actions
               ?.filter((a) => a !== "view")
-              .filter((a) => {
-                const config = ACTION_CONFIGS[a];
-                return config && !config.is_form;
-              })
-              .filter((a) => a !== "scan_qr")
               .map((actionKey) => getActionButton(actionKey))}
-            {data.allowed_actions?.includes("scan_qr") &&
-              getActionButton("scan_qr")}
             <button
               onClick={loadData}
               style={{

@@ -243,6 +243,58 @@ export function AuditTimeline({ logs, loading = false }: AuditTimelineProps) {
                   </div>
                 )}
 
+                {(log.opinion || log.signature || log.error_code) && (
+                  <div
+                    style={{
+                      marginTop: "10px",
+                      fontSize: "13px",
+                      color: "#374151",
+                      lineHeight: 1.7,
+                      backgroundColor: log.error_code ? "#fef2f2" : "#f0fdf4",
+                      padding: "12px",
+                      borderRadius: "6px",
+                      border: `1px solid ${log.error_code ? "#fecaca" : "#bbf7d0"}`,
+                    }}
+                  >
+                    {log.opinion && (
+                      <div style={{ marginBottom: "6px" }}>
+                        <span style={{ color: "#6b7280" }}>办理意见：</span>
+                        <span style={{ color: "#111827" }}>{log.opinion}</span>
+                      </div>
+                    )}
+                    {log.signature && (
+                      <div style={{ marginBottom: "6px" }}>
+                        <span style={{ color: "#6b7280" }}>签名：</span>
+                        <span style={{ color: "#111827", fontWeight: 500 }}>{log.signature}</span>
+                      </div>
+                    )}
+                    {log.error_code && (
+                      <>
+                        <div style={{ marginBottom: "6px" }}>
+                          <span style={{ color: "#b91c1c" }}>错误码：</span>
+                          <span style={{ color: "#991b1b", fontWeight: 500 }}>{log.error_code}</span>
+                        </div>
+                        <div style={{ marginBottom: "6px" }}>
+                          <span style={{ color: "#b91c1c" }}>错误原因：</span>
+                          <span style={{ color: "#7f1d1d" }}>{log.error_message}</span>
+                        </div>
+                        {log.suggestion && (
+                          <div style={{ marginBottom: "6px" }}>
+                            <span style={{ color: "#15803d" }}>建议：</span>
+                            <span style={{ color: "#166534" }}>{log.suggestion}</span>
+                          </div>
+                        )}
+                        {log.next_step && (
+                          <div>
+                            <span style={{ color: "#1d4ed8" }}>下一步：</span>
+                            <span style={{ color: "#1e40af" }}>{log.next_step}</span>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
+
                 {log.ip_address && (
                   <div style={{ fontSize: "11px", color: "#9ca3af", marginTop: "8px" }}>
                     IP地址：{log.ip_address}

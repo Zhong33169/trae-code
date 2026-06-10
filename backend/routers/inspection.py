@@ -78,7 +78,10 @@ def get_allowed_actions(inspection: InspectionOrder, user: User) -> Tuple[bool, 
     can_operate = False
 
     if user.role == UserRole.REGISTRAR:
-        if inspection.status in [InspectionStatus.DRAFT, InspectionStatus.REVIEW_REJECTED,
+        if inspection.created_by != user.id:
+            can_operate = False
+            actions = ["view"]
+        elif inspection.status in [InspectionStatus.DRAFT, InspectionStatus.REVIEW_REJECTED,
                                  InspectionStatus.FINAL_REVIEW_REJECTED, InspectionStatus.ACCEPTANCE_REJECTED]:
             can_operate = True
             actions = ["view", "update", "scan_qr", "submit"]
@@ -595,6 +598,8 @@ async def update_status(
             from_status=from_status,
             to_status=target_status,
             detail=status_data.opinion or f"状态从 [{get_status_label(from_status)}] 变更为 [{get_status_label(target_status)}]",
+            opinion=status_data.opinion,
+            signature=status_data.signature,
             ip_address=request.client.host if request.client else None,
             user_agent=request.headers.get("user-agent"),
             request_id=request_id,
