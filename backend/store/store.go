@@ -383,6 +383,96 @@ func (s *Store) initOrders() {
 			NextAction:    "仅允许：退回登记员补正，或记录人工处置并上传审批文件后归档",
 			Version:       2,
 		},
+		// 9. 待复核 - 刊登下架+库存不足，未逾期（硬阻断：不能直接复核通过，需人工处置或退回）
+		{
+			ID:                uuid.New().String(),
+			OrderNo:           "CB20260610009",
+			ProductName:       "蓝牙无线耳机 Pro 降噪版",
+			ProductSKU:        "SKU-EAR-009",
+			Quantity:          200,
+			Amount:            8800.00,
+			Currency:          "USD",
+			Platform:          "Shopify",
+			BuyerCountry:      "US",
+			Status:            models.StatusProcessing,
+			ListingStatus:     models.ListingDelisted,
+			InventoryStatus:   models.InventorySynced,
+			InventoryQuantity: 80,
+			ListingURL:        "https://shopify.com/products/ear-009",
+			RegistrarID:       "u1",
+			RegistrarName:     "张伟-跨境登记员",
+			SupervisorID:      "u2",
+			SupervisorName:    "李娜-跨境审核主管",
+			Materials: []models.Material{
+				{ID: uuid.New().String(), Name: "商业发票", Type: "invoice", Uploaded: true, Required: true},
+				{ID: uuid.New().String(), Name: "装箱单", Type: "packing", Uploaded: true, Required: true},
+				{ID: uuid.New().String(), Name: "报关委托书", Type: "customs", Uploaded: true, Required: true},
+			},
+			Opinions: []models.OrderOpinion{
+				{UserID: "u1", UserName: "张伟-跨境登记员", Role: models.RoleRegistrar, Content: "登记完成", Time: now.Add(-36 * time.Hour), Pass: true},
+				{UserID: "u2", UserName: "李娜-跨境审核主管", Role: models.RoleSupervisor, Content: "初审通过（注意库存和刊登）", Time: now.Add(-24 * time.Hour), Pass: true},
+			},
+			BlockReasons: []models.BlockReason{
+				{Field: "listing", Reason: "商品已下架，无法正常履约", Level: "error"},
+				{Field: "inventory", Reason: "库存数量 80 小于订单数量 200，库存不足", Level: "error"},
+			},
+			ManualDispositions: []models.ManualDisposition{},
+			CreatedAt:          now.Add(-36 * time.Hour),
+			UpdatedAt:          now.Add(-24 * time.Hour),
+			Deadline:           now.Add(24 * time.Hour),
+			WarningHours:       24,
+			IsOverdue:          false,
+			NextAction:         "存在阻断项：修复商品刊登状态、同步库存并确保充足。退回补正，或执行人工处置流程后归档",
+			Version:            2,
+		},
+		// 10. 已归档 - 曾逾期且有阻断，通过人工处置归档（验证归档后阻断历史保留）
+		{
+			ID:                uuid.New().String(),
+			OrderNo:           "CB20260610010",
+			ProductName:       "便携投影仪 家用 1080P",
+			ProductSKU:        "SKU-PRO-010",
+			Quantity:          50,
+			Amount:            12500.00,
+			Currency:          "EUR",
+			Platform:          "Amazon",
+			BuyerCountry:      "DE",
+			Status:            models.StatusArchived,
+			ListingStatus:     models.ListingActive,
+			InventoryStatus:   models.InventorySynced,
+			InventoryQuantity: 120,
+			ListingURL:        "https://amazon.de/dp/B00010",
+			RegistrarID:       "u1",
+			RegistrarName:     "张伟-跨境登记员",
+			SupervisorID:      "u2",
+			SupervisorName:    "李娜-跨境审核主管",
+			ReviewerID:        "u3",
+			ReviewerName:      "王芳-跨境电商复核负责人",
+			Materials: []models.Material{
+				{ID: uuid.New().String(), Name: "商业发票", Type: "invoice", Uploaded: true, Required: true},
+				{ID: uuid.New().String(), Name: "装箱单", Type: "packing", Uploaded: true, Required: true},
+				{ID: uuid.New().String(), Name: "原产地证", Type: "origin", Uploaded: false, Required: true},
+			},
+			Opinions: []models.OrderOpinion{
+				{UserID: "u1", UserName: "张伟-跨境登记员", Role: models.RoleRegistrar, Content: "登记完成", Time: now.Add(-240 * time.Hour), Pass: true},
+				{UserID: "u2", UserName: "李娜-跨境审核主管", Role: models.RoleSupervisor, Content: "初审通过", Time: now.Add(-220 * time.Hour), Pass: true},
+				{UserID: "u3", UserName: "王芳-跨境电商复核负责人", Role: models.RoleReviewer, Content: "[人工处置-归档] 大客户优先放行，特批归档（审批文件：CB-APPROVAL-2026-0530）", Time: now.Add(-200 * time.Hour), Pass: true},
+			},
+			BlockReasons: []models.BlockReason{
+				{Field: "deadline", Reason: "订单已逾期，超过处理时限 200 小时", Level: "error"},
+				{Field: "materials", Reason: "缺少必需材料：原产地证", Level: "error"},
+			},
+			ManualDispositions: []models.ManualDisposition{
+				{UserID: "u3", UserName: "王芳-跨境电商复核负责人", Role: models.RoleReviewer, Action: "archive", Reason: "大客户 VIP 订单，特批放行", ApprovalDoc: "CB-APPROVAL-2026-0530", Time: now.Add(-200 * time.Hour)},
+			},
+			CreatedAt:     now.Add(-240 * time.Hour),
+			UpdatedAt:     now.Add(-200 * time.Hour),
+			Deadline:      now.Add(-200 * time.Hour),
+			WarningHours:  24,
+			IsOverdue:     false,
+			OverdueReason: "",
+			NextAction:    "订单已归档，处理流程结束（人工处置特批归档）",
+			Version:       3,
+		},
 	}
 
 	for _, order := range demoOrders {
@@ -549,6 +639,13 @@ func (s *Store) SaveOrder(order *models.CrossBorderOrder) {
 	order.UpdatedAt = time.Now()
 	order.Version++
 	order.BlockReasons = ComputeBlockReasons(order)
+	if order.Status != models.StatusArchived {
+		order.NextAction = generateNextAction(order)
+	} else {
+		if order.NextAction == "" {
+			order.NextAction = "订单已归档，处理流程结束"
+		}
+	}
 	s.orders[order.ID] = order
 }
 
@@ -613,16 +710,90 @@ func generateOverdueReason(order *models.CrossBorderOrder) string {
 }
 
 func generateNextAction(order *models.CrossBorderOrder) string {
+	blocks := ComputeBlockReasons(order)
+	if len(blocks) == 0 {
+		switch order.Status {
+		case models.StatusDraft:
+			return "材料与商品信息齐全，请尽快提交审核"
+		case models.StatusPending:
+			return "订单正常，请等待跨境审核主管审核"
+		case models.StatusProcessing:
+			return "订单正常，请等待跨境电商复核负责人复核归档"
+		case models.StatusReturned:
+			return "请按照退回意见补正后重新提交"
+		default:
+			return "请相关人员尽快处理"
+		}
+	}
+
+	hasDeadline := false
+	hasListing := false
+	hasInventory := false
+	hasMaterials := false
+	for _, b := range blocks {
+		if b.Level != "error" {
+			continue
+		}
+		switch b.Field {
+		case "deadline":
+			hasDeadline = true
+		case "listing":
+			hasListing = true
+		case "inventory":
+			hasInventory = true
+		case "materials":
+			hasMaterials = true
+		}
+	}
+
+	parts := make([]string, 0)
+	if hasMaterials {
+		parts = append(parts, "补全必需材料")
+	}
+	if hasListing {
+		parts = append(parts, "修复商品刊登状态")
+	}
+	if hasInventory {
+		parts = append(parts, "同步库存并确保充足")
+	}
+
 	switch order.Status {
-	case models.StatusPending:
-		return "请跨境登记员尽快补正材料/刊登/库存后重新提交；逾期订单不可直接通过"
-	case models.StatusReturned:
+	case models.StatusDraft, models.StatusReturned:
+		if len(parts) > 0 {
+			return "请登记员先" + joinParts(parts) + "，再提交审核"
+		}
 		return "请跨境登记员按照退回意见补充材料后重新提交"
+	case models.StatusPending:
+		if hasDeadline && len(parts) == 0 {
+			return "订单已逾期，主管不能直接通过；请退回补正，或由复核负责人人工处置"
+		}
+		if len(parts) > 0 {
+			if hasDeadline {
+				return "订单已逾期且有阻断项：" + joinParts(parts) + "。退回补正，或由复核负责人人工处置"
+			}
+			return "存在阻断项：" + joinParts(parts) + "。建议退回登记员补正后再审核"
+		}
+		return "请跨境审核主管尽快审核"
 	case models.StatusProcessing:
-		return "仅允许：退回登记员补正，或由跨境电商复核负责人记录人工处置并附审批文件后归档"
-	case models.StatusReviewed:
-		return "请尽快完成归档操作"
+		if hasDeadline && len(parts) == 0 {
+			return "订单已逾期，仅允许：退回登记员补正，或记录人工处置并附审批文件后归档"
+		}
+		if len(parts) > 0 {
+			return "存在阻断项：" + joinParts(parts) + "。退回补正，或执行人工处置流程后归档"
+		}
+		return "请跨境电商复核负责人尽快复核归档"
 	default:
 		return "请相关人员尽快处理"
 	}
+}
+
+func joinParts(parts []string) string {
+	if len(parts) == 0 {
+		return ""
+	}
+	res := parts[0]
+	for i := 1; i < len(parts); i++ {
+		res += "、" + parts[i]
+	}
+	return res
 }

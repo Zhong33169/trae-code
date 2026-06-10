@@ -79,6 +79,20 @@ func summarizeBlockReasons(reasons []models.BlockReason) string {
 	return msg
 }
 
+func buildErrorResponse(order *models.CrossBorderOrder, errMsg string, nextStep string) fiber.Map {
+	resp := fiber.Map{
+		"error":    errMsg,
+		"nextStep": nextStep,
+	}
+	if order != nil {
+		resp["orderNo"] = order.OrderNo
+		resp["orderId"] = order.ID
+		resp["blockReasons"] = order.BlockReasons
+		resp["version"] = order.Version
+	}
+	return resp
+}
+
 func ListOrders(c *fiber.Ctx) error {
 	store.GetStore().CheckAndUpdateOverdue()
 	user := middleware.GetCurrentUser(c)
@@ -258,52 +272,47 @@ func SubmitOrder(c *fiber.Ctx) error {
 
 	var req SubmitOrderRequest
 	if err := c.BodyParser(&req); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "请求格式错误",
-		})
+		return c.Status(fiber.StatusBadRequest).JSON(buildErrorResponse(nil, "请求格式错误", "请检查提交的参数是否完整"))
 	}
 
 	store.GetStore().CheckAndUpdateOverdue()
 
 	order := store.GetStore().GetOrder(id)
 	if order == nil {
-		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
-			"error": "订单不存在",
-		})
+		return c.Status(fiber.StatusNotFound).JSON(buildErrorResponse(nil, "订单不存在", "请确认订单ID是否正确"))
 	}
 
 	if order.Version != req.Version {
-		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
-			"error":        "订单已被修改，请刷新后重试",
-			"blockReasons": order.BlockReasons,
-			"nextStep":     "刷新页面获取最新订单状态后再提交",
-		})
+		return c.Status(fiber.StatusConflict).JSON(buildErrorResponse(
+			order,
+			"订单已被修改，版本冲突",
+			"刷新页面获取最新订单状态后再操作；两个页面同时操作同一订单会导致版本冲突",
+		))
 	}
 
 	if order.RegistrarID != user.ID {
-		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
-			"error":    "只能提交自己登记的订单",
-			"nextStep": "请联系订单登记员操作",
-		})
+		return c.Status(fiber.StatusForbidden).JSON(buildErrorResponse(
+			order,
+			"无权限提交此订单",
+			"只能提交自己登记的订单；如需操作请联系订单登记员",
+		))
 	}
 
 	if order.Status != models.StatusDraft && order.Status != models.StatusReturned {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error":        "当前状态无法提交审核",
-			"blockReasons": order.BlockReasons,
-			"nextStep":     "请检查订单状态，仅草稿或已退回状态可提交",
-		})
+		return c.Status(fiber.StatusBadRequest).JSON(buildErrorResponse(
+			order,
+			"当前状态无法提交审核",
+			"仅草稿或已退回状态可提交，请检查订单状态",
+		))
 	}
 
-	blockReasons := store.ComputeBlockReasons(order)
-	hasHardBlocks := store.HasHardBlocks(order)
-
-	if hasHardBlocks {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error":        "存在阻断项，无法提交：" + summarizeBlockReasons(blockReasons),
-			"blockReasons": blockReasons,
-			"nextStep":     "请先解除阻断（补全材料/修复刊登/补库存/等非逾期状态）后再提交；如为逾期订单，请由复核负责人执行人工处置",
-		})
+	if store.HasHardBlocks(order) {
+		blockReasons := store.ComputeBlockReasons(order)
+		return c.Status(fiber.StatusBadRequest).JSON(buildErrorResponse(
+			order,
+			"存在阻断项，无法提交："+summarizeBlockReasons(blockReasons),
+			order.NextAction,
+		))
 	}
 
 	oldStatus := order.Status
@@ -321,12 +330,13 @@ func SubmitOrder(c *fiber.Ctx) error {
 
 	store.GetStore().SaveOrder(order)
 
-	detail := "提交订单至审核"
+	detail := "提交订单至审核【提交时无阻断项】"
 	addAuditLog(order.ID, order.OrderNo, user, "提交审核", detail, oldStatus, order.Status, c.IP())
 
 	return c.JSON(fiber.Map{
 		"order":        order,
 		"blockReasons": order.BlockReasons,
+		"nextAction":   order.NextAction,
 	})
 }
 
@@ -345,51 +355,47 @@ func SupervisorProcess(c *fiber.Ctx) error {
 
 	order := store.GetStore().GetOrder(id)
 	if order == nil {
-		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
-			"error": "订单不存在",
-		})
+		return c.Status(fiber.StatusNotFound).JSON(buildErrorResponse(nil, "订单不存在", "请确认订单ID是否正确"))
 	}
 
 	if order.Version != req.Version {
-		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
-			"error":        "订单已被修改，请刷新后重试",
-			"blockReasons": order.BlockReasons,
-			"nextStep":     "刷新页面获取最新订单状态后再操作；两个页面同时操作会导致版本冲突",
-		})
+		return c.Status(fiber.StatusConflict).JSON(buildErrorResponse(
+			order,
+			"订单已被修改，版本冲突",
+			"刷新页面获取最新订单状态后再操作；两个页面同时操作同一订单会导致版本冲突",
+		))
 	}
 
 	if order.Status != models.StatusPending {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error":        "当前状态无法进行审核",
-			"blockReasons": order.BlockReasons,
-			"nextStep":     "请检查订单状态，仅待审核状态可执行此操作",
-		})
+		return c.Status(fiber.StatusBadRequest).JSON(buildErrorResponse(
+			order,
+			"当前状态无法进行审核",
+			"仅待审核状态可执行审核操作，请检查订单状态",
+		))
 	}
 
 	if !req.Pass && req.Opinion == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error":    "退回必须填写处理意见",
-			"nextStep": "请在下方填写退回原因和补正要求后再提交",
-		})
+		return c.Status(fiber.StatusBadRequest).JSON(buildErrorResponse(
+			order,
+			"退回必须填写处理意见",
+			"请填写退回原因和补正要求后再提交",
+		))
 	}
-
-	blockReasons := store.ComputeBlockReasons(order)
-	hasHardBlocks := store.HasHardBlockReasons(blockReasons)
 
 	if req.Pass {
 		if order.IsOverdue {
-			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-				"error":        "订单已逾期，主管无法直接通过，请退回登记员补正或联系复核负责人人工处置",
-				"blockReasons": blockReasons,
-				"nextStep":     "退回登记员补正材料/刊登/库存；如属紧急订单，由复核负责人执行人工处置流程并记录审批文件",
-			})
+			return c.Status(fiber.StatusBadRequest).JSON(buildErrorResponse(
+				order,
+				"订单已逾期，主管无法直接通过",
+				order.NextAction,
+			))
 		}
-		if hasHardBlocks {
-			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-				"error":        "存在阻断项，不能审核通过：" + summarizeBlockReasons(blockReasons),
-				"blockReasons": blockReasons,
-				"nextStep":     "退回登记员补正或解除阻断后再审核通过；如属特殊情况，由复核负责人执行人工处置",
-			})
+		if store.HasHardBlocks(order) {
+			return c.Status(fiber.StatusBadRequest).JSON(buildErrorResponse(
+				order,
+				"存在阻断项，不能审核通过："+summarizeBlockReasons(store.ComputeBlockReasons(order)),
+				order.NextAction,
+			))
 		}
 	}
 
@@ -417,13 +423,20 @@ func SupervisorProcess(c *fiber.Ctx) error {
 	store.GetStore().SaveOrder(order)
 
 	action := "审核通过"
+	detail := req.Opinion
 	if !req.Pass {
 		action = "审核退回"
+		if len(order.BlockReasons) > 0 {
+			detail += "【阻断项：" + summarizeBlockReasons(order.BlockReasons) + "】"
+		}
+	} else {
+		detail += "【提交时无阻断项，审核通过】"
 	}
-	addAuditLog(order.ID, order.OrderNo, user, action, req.Opinion, oldStatus, order.Status, c.IP())
+	addAuditLog(order.ID, order.OrderNo, user, action, detail, oldStatus, order.Status, c.IP())
 	return c.JSON(fiber.Map{
 		"order":        order,
 		"blockReasons": order.BlockReasons,
+		"nextAction":   order.NextAction,
 	})
 }
 
@@ -442,45 +455,39 @@ func ReviewerProcess(c *fiber.Ctx) error {
 
 	order := store.GetStore().GetOrder(id)
 	if order == nil {
-		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
-			"error": "订单不存在",
-		})
+		return c.Status(fiber.StatusNotFound).JSON(buildErrorResponse(nil, "订单不存在", "请确认订单ID是否正确"))
 	}
 
 	if order.Version != req.Version {
-		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
-			"error":        "订单已被修改，请刷新后重试",
-			"blockReasons": order.BlockReasons,
-			"nextStep":     "刷新页面获取最新订单状态后再操作；两个页面同时操作会导致版本冲突",
-		})
+		return c.Status(fiber.StatusConflict).JSON(buildErrorResponse(
+			order,
+			"订单已被修改，版本冲突",
+			"刷新页面获取最新订单状态后再操作；两个页面同时操作同一订单会导致版本冲突",
+		))
 	}
 
 	if order.Status != models.StatusProcessing {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error":        "当前状态无法进行复核",
-			"blockReasons": order.BlockReasons,
-			"nextStep":     "请检查订单状态，仅待复核状态可执行此操作",
-		})
+		return c.Status(fiber.StatusBadRequest).JSON(buildErrorResponse(
+			order,
+			"当前状态无法进行复核",
+			"仅待复核状态可执行复核操作，请检查订单状态",
+		))
 	}
 
 	if !req.Pass && req.Opinion == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error":    "退回必须填写处理意见",
-			"nextStep": "请在下方填写退回原因和补正要求后再提交",
-		})
+		return c.Status(fiber.StatusBadRequest).JSON(buildErrorResponse(
+			order,
+			"退回必须填写处理意见",
+			"请填写退回原因和补正要求后再提交",
+		))
 	}
 
-	blockReasons := store.ComputeBlockReasons(order)
-	hasHardBlocks := store.HasHardBlockReasons(blockReasons)
-
-	if req.Pass {
-		if hasHardBlocks {
-			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-				"error":        "存在阻断项，不能直接复核通过：" + summarizeBlockReasons(blockReasons),
-				"blockReasons": blockReasons,
-				"nextStep":     "退回登记员补正；如为逾期或特殊订单，请使用人工处置流程并记录审批文件后归档",
-			})
-		}
+	if req.Pass && store.HasHardBlocks(order) {
+		return c.Status(fiber.StatusBadRequest).JSON(buildErrorResponse(
+			order,
+			"存在阻断项，不能直接复核通过："+summarizeBlockReasons(store.ComputeBlockReasons(order)),
+			order.NextAction,
+		))
 	}
 
 	oldStatus := order.Status
@@ -509,13 +516,20 @@ func ReviewerProcess(c *fiber.Ctx) error {
 	store.GetStore().SaveOrder(order)
 
 	action := "复核通过并归档"
+	detail := req.Opinion
 	if !req.Pass {
 		action = "复核退回"
+		if len(order.BlockReasons) > 0 {
+			detail += "【阻断项：" + summarizeBlockReasons(order.BlockReasons) + "】"
+		}
+	} else {
+		detail += "【复核时无阻断项，归档成功】"
 	}
-	addAuditLog(order.ID, order.OrderNo, user, action, req.Opinion, oldStatus, order.Status, c.IP())
+	addAuditLog(order.ID, order.OrderNo, user, action, detail, oldStatus, order.Status, c.IP())
 	return c.JSON(fiber.Map{
 		"order":        order,
 		"blockReasons": order.BlockReasons,
+		"nextAction":   order.NextAction,
 	})
 }
 
@@ -540,51 +554,47 @@ func ManualDisposition(c *fiber.Ctx) error {
 
 	order := store.GetStore().GetOrder(id)
 	if order == nil {
-		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
-			"error": "订单不存在",
-		})
+		return c.Status(fiber.StatusNotFound).JSON(buildErrorResponse(nil, "订单不存在", "请确认订单ID是否正确"))
 	}
 
 	if order.Version != req.Version {
-		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
-			"error":        "订单已被修改，请刷新后重试",
-			"blockReasons": order.BlockReasons,
-			"nextStep":     "刷新页面获取最新订单状态后再操作；两个页面同时操作会导致版本冲突",
-		})
+		return c.Status(fiber.StatusConflict).JSON(buildErrorResponse(
+			order,
+			"订单已被修改，版本冲突",
+			"刷新页面获取最新订单状态后再操作；两个页面同时操作同一订单会导致版本冲突",
+		))
 	}
 
 	if order.Status != models.StatusProcessing {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error":        "只有待复核的订单可以进行人工处置",
-			"blockReasons": order.BlockReasons,
-			"nextStep":     "请检查订单状态，仅待复核状态可执行人工处置",
-		})
+		return c.Status(fiber.StatusBadRequest).JSON(buildErrorResponse(
+			order,
+			"只有待复核的订单可以进行人工处置",
+			"请检查订单状态，仅待复核状态可执行人工处置",
+		))
 	}
 
-	blockReasons := store.ComputeBlockReasons(order)
-
 	if req.Action == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error":        "请选择处置动作（归档或退回）",
-			"blockReasons": blockReasons,
-			"nextStep":     "选择归档（需审批文件）或退回补正",
-		})
+		return c.Status(fiber.StatusBadRequest).JSON(buildErrorResponse(
+			order,
+			"请选择处置动作",
+			"选择归档（需审批文件）或退回补正",
+		))
 	}
 
 	if req.Reason == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error":        "请填写处置原因",
-			"blockReasons": blockReasons,
-			"nextStep":     "详细说明人工处置的原因和背景",
-		})
+		return c.Status(fiber.StatusBadRequest).JSON(buildErrorResponse(
+			order,
+			"请填写处置原因",
+			"详细说明人工处置的原因和背景",
+		))
 	}
 
 	if req.Action == "archive" && req.ApprovalDoc == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error":        "人工归档必须上传审批文件编号",
-			"blockReasons": blockReasons,
-			"nextStep":     "填写审批文件编号（如 CB-APPROVAL-2026-0610）后再提交",
-		})
+		return c.Status(fiber.StatusBadRequest).JSON(buildErrorResponse(
+			order,
+			"人工归档必须上传审批文件编号",
+			"填写审批文件编号（如 CB-APPROVAL-2026-0610）后再提交",
+		))
 	}
 
 	now := time.Now()
@@ -628,9 +638,13 @@ func ManualDisposition(c *fiber.Ctx) error {
 			Pass:     true,
 		})
 
+		archiveDetail := "原因：" + req.Reason + "；审批文件：" + req.ApprovalDoc
+		if len(order.BlockReasons) > 0 {
+			archiveDetail += "【归档时阻断项：" + summarizeBlockReasons(order.BlockReasons) + "】"
+		}
 		store.GetStore().SaveOrder(order)
 		addAuditLog(order.ID, order.OrderNo, user, "人工处置-归档",
-			"原因："+req.Reason+"；审批文件："+req.ApprovalDoc,
+			archiveDetail,
 			oldStatus, order.Status, c.IP())
 	} else {
 		order.Status = models.StatusReturned
@@ -649,15 +663,20 @@ func ManualDisposition(c *fiber.Ctx) error {
 			Pass:     false,
 		})
 
+		returnDetail := "原因：" + req.Reason
+		if len(order.BlockReasons) > 0 {
+			returnDetail += "【退回时阻断项：" + summarizeBlockReasons(order.BlockReasons) + "】"
+		}
 		store.GetStore().SaveOrder(order)
 		addAuditLog(order.ID, order.OrderNo, user, "人工处置-退回",
-			"原因："+req.Reason,
+			returnDetail,
 			oldStatus, order.Status, c.IP())
 	}
 
 	return c.JSON(fiber.Map{
 		"order":        order,
 		"blockReasons": order.BlockReasons,
+		"nextAction":   order.NextAction,
 	})
 }
 
@@ -676,32 +695,31 @@ func UpdateListingInventory(c *fiber.Ctx) error {
 
 	order := store.GetStore().GetOrder(id)
 	if order == nil {
-		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
-			"error": "订单不存在",
-		})
+		return c.Status(fiber.StatusNotFound).JSON(buildErrorResponse(nil, "订单不存在", "请确认订单ID是否正确"))
 	}
 
 	if order.Version != req.Version {
-		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
-			"error":        "订单已被修改，请刷新后重试",
-			"blockReasons": order.BlockReasons,
-			"nextStep":     "刷新页面获取最新订单状态后再操作；两个页面同时操作会导致版本冲突",
-		})
+		return c.Status(fiber.StatusConflict).JSON(buildErrorResponse(
+			order,
+			"订单已被修改，版本冲突",
+			"刷新页面获取最新订单状态后再操作；两个页面同时操作同一订单会导致版本冲突",
+		))
 	}
 
 	if order.RegistrarID != user.ID {
-		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
-			"error":    "只能修改自己登记的订单",
-			"nextStep": "请联系订单登记员操作",
-		})
+		return c.Status(fiber.StatusForbidden).JSON(buildErrorResponse(
+			order,
+			"无权限修改此订单",
+			"只能修改自己登记的订单；如需操作请联系订单登记员",
+		))
 	}
 
 	if order.Status != models.StatusDraft && order.Status != models.StatusReturned {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error":        "当前状态无法更新刊登或库存状态",
-			"blockReasons": order.BlockReasons,
-			"nextStep":     "请检查订单状态，仅草稿或已退回状态可编辑",
-		})
+		return c.Status(fiber.StatusBadRequest).JSON(buildErrorResponse(
+			order,
+			"当前状态无法更新刊登或库存状态",
+			"仅草稿或已退回状态可编辑，请检查订单状态",
+		))
 	}
 
 	oldListing := order.ListingStatus
@@ -711,9 +729,6 @@ func UpdateListingInventory(c *fiber.Ctx) error {
 	order.InventoryStatus = models.InventoryStatus(req.InventoryStatus)
 	order.InventoryQuantity = req.InventoryQuantity
 	order.ListingURL = req.ListingURL
-
-	blockReasons := store.ComputeBlockReasons(order)
-	hasHardBlocks := store.HasHardBlockReasons(blockReasons)
 
 	detail := "更新刊登状态：" + string(oldListing) + "→" + string(order.ListingStatus) +
 		"；库存状态：" + string(oldInventory) + "→" + string(order.InventoryStatus)
@@ -734,13 +749,13 @@ func UpdateListingInventory(c *fiber.Ctx) error {
 	result := fiber.Map{
 		"order":        order,
 		"blockReasons": order.BlockReasons,
+		"nextAction":   order.NextAction,
 	}
-	if hasHardBlocks {
-		result["warning"] = "更新成功，但仍存在阻断项：" + summarizeBlockReasons(blockReasons) + "。需要全部解除后才能提交。"
+	if store.HasHardBlocks(order) {
+		result["warning"] = "更新成功，但仍存在阻断项：" + summarizeBlockReasons(order.BlockReasons) + "。需要全部解除后才能提交。"
 	}
 
 	return c.JSON(result)
-}
 
 func UpdateMaterials(c *fiber.Ctx) error {
 	user := middleware.GetCurrentUser(c)
@@ -751,41 +766,38 @@ func UpdateMaterials(c *fiber.Ctx) error {
 		Version   int             `json:"version"`
 	}
 	if err := c.BodyParser(&req); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "请求格式错误",
-		})
+		return c.Status(fiber.StatusBadRequest).JSON(buildErrorResponse(nil, "请求格式错误", "请检查提交的材料数据格式"))
 	}
 
 	store.GetStore().CheckAndUpdateOverdue()
 
 	order := store.GetStore().GetOrder(id)
 	if order == nil {
-		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
-			"error": "订单不存在",
-		})
+		return c.Status(fiber.StatusNotFound).JSON(buildErrorResponse(nil, "订单不存在", "请确认订单ID是否正确"))
 	}
 
 	if order.Version != req.Version {
-		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
-			"error":        "订单已被修改，请刷新后重试",
-			"blockReasons": order.BlockReasons,
-			"nextStep":     "刷新页面获取最新订单状态后再操作；两个页面同时操作会导致版本冲突",
-		})
+		return c.Status(fiber.StatusConflict).JSON(buildErrorResponse(
+			order,
+			"订单已被修改，版本冲突",
+			"刷新页面获取最新订单状态后再操作；两个页面同时操作同一订单会导致版本冲突",
+		))
 	}
 
 	if order.RegistrarID != user.ID {
-		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
-			"error":    "只能修改自己登记的订单材料",
-			"nextStep": "请联系订单登记员操作",
-		})
+		return c.Status(fiber.StatusForbidden).JSON(buildErrorResponse(
+			order,
+			"无权限修改此订单材料",
+			"只能修改自己登记的订单材料；如需操作请联系订单登记员",
+		))
 	}
 
 	if order.Status != models.StatusDraft && order.Status != models.StatusReturned {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error":        "当前状态无法修改材料",
-			"blockReasons": order.BlockReasons,
-			"nextStep":     "请检查订单状态，仅草稿或已退回状态可编辑",
-		})
+		return c.Status(fiber.StatusBadRequest).JSON(buildErrorResponse(
+			order,
+			"当前状态无法修改材料",
+			"仅草稿或已退回状态可编辑材料，请检查订单状态",
+		))
 	}
 
 	oldMaterials := order.Materials
@@ -810,18 +822,16 @@ func UpdateMaterials(c *fiber.Ctx) error {
 		})
 	}
 
-	blockReasons := store.ComputeBlockReasons(order)
-	hasHardBlocks := store.HasHardBlockReasons(blockReasons)
-
 	store.GetStore().SaveOrder(order)
 	addAuditLog(order.ID, order.OrderNo, user, "更新材料", "更新订单材料清单", order.Status, order.Status, c.IP())
 
 	result := fiber.Map{
 		"order":        order,
 		"blockReasons": order.BlockReasons,
+		"nextAction":   order.NextAction,
 	}
-	if hasHardBlocks {
-		result["warning"] = "材料更新成功，但仍存在阻断项：" + summarizeBlockReasons(blockReasons) + "。需要全部解除后才能提交。"
+	if store.HasHardBlocks(order) {
+		result["warning"] = "材料更新成功，但仍存在阻断项：" + summarizeBlockReasons(order.BlockReasons) + "。需要全部解除后才能提交。"
 	}
 
 	return c.JSON(result)

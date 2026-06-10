@@ -40,14 +40,10 @@ func BatchSubmitOrders(c *fiber.Ctx) error {
 
 	var req BatchRequest
 	if err := c.BodyParser(&req); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "请求格式错误",
-		})
+		return c.Status(fiber.StatusBadRequest).JSON(buildErrorResponse(nil, "请求格式错误", "请检查提交的批量参数格式"))
 	}
 	if len(req.OrderIDs) == 0 {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "请选择要提交的订单",
-		})
+		return c.Status(fiber.StatusBadRequest).JSON(buildErrorResponse(nil, "请选择要提交的订单", "至少选择一个订单后再提交"))
 	}
 
 	result := &models.BatchResult{
@@ -100,14 +96,11 @@ func BatchSubmitOrders(c *fiber.Ctx) error {
 			continue
 		}
 
-		blockReasons := store.ComputeBlockReasons(order)
-		hasHardBlocks := store.HasHardBlockReasons(blockReasons)
-
-		if hasHardBlocks {
+		if store.HasHardBlocks(order) {
 			item.Success = false
-			item.Reason = "存在阻断项，无法提交：" + summarizeBlockReasons(blockReasons)
-			item.NextStep = "请先解除阻断（补全材料/修复刊登/补库存/等非逾期状态）后再提交；如为逾期订单，请由复核负责人执行人工处置"
-			item.BlockReasons = blockReasons
+			item.Reason = "存在阻断项，无法提交：" + summarizeBlockReasons(store.ComputeBlockReasons(order))
+			item.NextStep = order.NextAction
+			item.BlockReasons = order.BlockReasons
 			result.Items = append(result.Items, item)
 			result.Failed++
 			continue
@@ -141,20 +134,13 @@ func BatchSupervisorProcess(c *fiber.Ctx) error {
 
 	var req BatchRequest
 	if err := c.BodyParser(&req); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "请求格式错误",
-		})
+		return c.Status(fiber.StatusBadRequest).JSON(buildErrorResponse(nil, "请求格式错误", "请检查提交的批量处理参数格式"))
 	}
 	if len(req.OrderIDs) == 0 {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "请选择要处理的订单",
-		})
+		return c.Status(fiber.StatusBadRequest).JSON(buildErrorResponse(nil, "请选择要处理的订单", "至少选择一个订单后再操作"))
 	}
 	if !req.Pass && req.Opinion == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error":    "退回必须填写处理意见",
-			"nextStep": "请填写退回原因和补正要求后再提交",
-		})
+		return c.Status(fiber.StatusBadRequest).JSON(buildErrorResponse(nil, "退回必须填写处理意见", "请填写退回原因和补正要求后再提交"))
 	}
 
 	result := &models.BatchResult{
@@ -199,22 +185,11 @@ func BatchSupervisorProcess(c *fiber.Ctx) error {
 		}
 
 		if req.Pass {
-			blockReasons := store.ComputeBlockReasons(order)
-
-			if order.IsOverdue {
+			if store.HasHardBlocks(order) {
 				item.Success = false
-				item.Reason = "订单已逾期，主管不能直接审核通过"
-				item.NextStep = "请退回登记员补正材料/刊登/库存；如属紧急订单，由复核负责人执行人工处置流程并记录审批文件"
-				item.BlockReasons = blockReasons
-				result.Items = append(result.Items, item)
-				result.Failed++
-				continue
-			}
-			if store.HasHardBlockReasons(blockReasons) {
-				item.Success = false
-				item.Reason = "存在阻断项，不能审核通过：" + summarizeBlockReasons(blockReasons)
-				item.NextStep = "退回登记员补正或解除阻断后再审核通过；如属特殊情况，由复核负责人执行人工处置"
-				item.BlockReasons = blockReasons
+				item.Reason = "存在阻断项，不能审核通过：" + summarizeBlockReasons(store.ComputeBlockReasons(order))
+				item.NextStep = order.NextAction
+				item.BlockReasons = order.BlockReasons
 				result.Items = append(result.Items, item)
 				result.Failed++
 				continue
@@ -261,20 +236,13 @@ func BatchReviewerProcess(c *fiber.Ctx) error {
 
 	var req BatchRequest
 	if err := c.BodyParser(&req); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "请求格式错误",
-		})
+		return c.Status(fiber.StatusBadRequest).JSON(buildErrorResponse(nil, "请求格式错误", "请检查提交的批量处理参数格式"))
 	}
 	if len(req.OrderIDs) == 0 {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "请选择要处理的订单",
-		})
+		return c.Status(fiber.StatusBadRequest).JSON(buildErrorResponse(nil, "请选择要处理的订单", "至少选择一个订单后再操作"))
 	}
 	if !req.Pass && req.Opinion == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error":    "退回必须填写处理意见",
-			"nextStep": "请填写退回原因和补正要求后再提交",
-		})
+		return c.Status(fiber.StatusBadRequest).JSON(buildErrorResponse(nil, "退回必须填写处理意见", "请填写退回原因和补正要求后再提交"))
 	}
 
 	result := &models.BatchResult{
@@ -319,13 +287,11 @@ func BatchReviewerProcess(c *fiber.Ctx) error {
 		}
 
 		if req.Pass {
-			blockReasons := store.ComputeBlockReasons(order)
-
-			if store.HasHardBlockReasons(blockReasons) {
+			if store.HasHardBlocks(order) {
 				item.Success = false
-				item.Reason = "存在阻断项，不能直接复核通过：" + summarizeBlockReasons(blockReasons)
-				item.NextStep = "请退回登记员补正；如为逾期或特殊订单，请进入订单详情使用人工处置流程并记录审批文件后归档"
-				item.BlockReasons = blockReasons
+				item.Reason = "存在阻断项，不能直接复核通过：" + summarizeBlockReasons(store.ComputeBlockReasons(order))
+				item.NextStep = order.NextAction
+				item.BlockReasons = order.BlockReasons
 				result.Items = append(result.Items, item)
 				result.Failed++
 				continue

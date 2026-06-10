@@ -57,6 +57,21 @@ export function OrderDetailPage() {
     }
   };
 
+  const handleApiError = (e: any) => {
+    const details = e.details || {};
+    const blocks: BlockReason[] = details.blockReasons || [];
+    if (order && blocks.length > 0) {
+      setOrder({ ...order, blockReasons: blocks });
+    }
+    const msg = details.error || e.message || '操作失败';
+    const step = details.nextStep || details.nextAction || '';
+    const blockMsg = blocks.length > 0
+      ? `\n\n阻断原因（${blocks.length}项）：\n${blocks.map(b => `· [${BLOCK_FIELD_TEXT[b.field]}] ${b.reason}`).join('\n')}`
+      : '';
+    const stepMsg = step ? `\n\n下一步：${step}` : '';
+    alert(msg + blockMsg + stepMsg);
+  };
+
   useEffect(() => {
     loadData();
   }, [id]);
@@ -126,16 +141,7 @@ export function OrderDetailPage() {
       setOrder(result.order);
       setMaterials(result.order.materials);
     } catch (e: any) {
-      const blocks: BlockReason[] = e.details?.blockReasons || [];
-      if (blocks.length > 0 && order) {
-        setOrder({ ...order, blockReasons: blocks });
-      }
-      const msg = e.details?.error || e.message || '提交失败';
-      const detail = e.details?.nextStep ? `\n下一步：${e.details.nextStep}` : '';
-      const blockMsg = blocks.length > 0
-        ? `\n\n阻断原因：\n${blocks.map(b => `· [${BLOCK_FIELD_TEXT[b.field]}] ${b.reason}`).join('\n')}`
-        : '';
-      alert(msg + blockMsg + detail);
+      handleApiError(e);
     } finally {
       setProcessing(false);
     }
@@ -155,7 +161,7 @@ export function OrderDetailPage() {
         alert('材料保存成功');
       }
     } catch (e: any) {
-      alert(e.details?.error || e.message || '保存失败');
+      handleApiError(e);
     } finally {
       setProcessing(false);
     }
@@ -184,7 +190,7 @@ export function OrderDetailPage() {
         alert('刊登/库存信息保存成功');
       }
     } catch (e: any) {
-      alert(e.details?.error || e.message || '保存失败');
+      handleApiError(e);
     } finally {
       setProcessing(false);
     }
@@ -202,16 +208,7 @@ export function OrderDetailPage() {
       setOrder(result.order);
       alert(pass ? '审核通过，已转交复核' : '已退回登记员补正');
     } catch (e: any) {
-      const blocks: BlockReason[] = e.details?.blockReasons || [];
-      if (blocks.length > 0 && order) {
-        setOrder({ ...order, blockReasons: blocks });
-      }
-      const msg = e.details?.error || e.message || '操作失败';
-      const detail = e.details?.nextStep ? `\n下一步：${e.details.nextStep}` : '';
-      const blockMsg = blocks.length > 0
-        ? `\n\n阻断原因：\n${blocks.map(b => `· [${BLOCK_FIELD_TEXT[b.field]}] ${b.reason}`).join('\n')}`
-        : '';
-      alert(msg + blockMsg + detail);
+      handleApiError(e);
     } finally {
       setProcessing(false);
     }
@@ -229,16 +226,7 @@ export function OrderDetailPage() {
       setOrder(result.order);
       alert(pass ? '复核通过，已归档' : '已退回登记员补正');
     } catch (e: any) {
-      const blocks: BlockReason[] = e.details?.blockReasons || [];
-      if (blocks.length > 0 && order) {
-        setOrder({ ...order, blockReasons: blocks });
-      }
-      const msg = e.details?.error || e.message || '操作失败';
-      const detail = e.details?.nextStep ? `\n下一步：${e.details.nextStep}` : '';
-      const blockMsg = blocks.length > 0
-        ? `\n\n阻断原因：\n${blocks.map(b => `· [${BLOCK_FIELD_TEXT[b.field]}] ${b.reason}`).join('\n')}`
-        : '';
-      alert(msg + blockMsg + detail);
+      handleApiError(e);
     } finally {
       setProcessing(false);
     }
@@ -269,7 +257,7 @@ export function OrderDetailPage() {
       setManualApprovalDoc('');
       alert(manualAction === 'archive' ? '人工处置完成，已归档' : '人工处置完成，已退回补正');
     } catch (e: any) {
-      alert(e.details?.error || e.message || '人工处置失败');
+      handleApiError(e);
     } finally {
       setProcessing(false);
     }

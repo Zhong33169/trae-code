@@ -132,6 +132,64 @@ export function OrderListPage() {
     return orders.filter(o => selectedIds.has(o.id));
   };
 
+  const selectedOrders = getSelectedOrders();
+  const selectedBlockedCount = selectedOrders.filter(o => o.blockReasons?.some(b => b.level === 'error')).length;
+  const selectedOverdueCount = selectedOrders.filter(o => o.isOverdue).length;
+
+  const selectedAllowedActions: string[] = [];
+  const selectedForbiddenActions: { action: string; reason: string }[] = [];
+
+  if (user?.role === 'registrar') {
+    const allDraftOrReturned = selectedOrders.every(o => o.status === 'draft' || o.status === 'returned');
+    const hasBlocked = selectedOrders.some(o => o.blockReasons?.some(b => b.level === 'error'));
+    if (allDraftOrReturned) {
+      if (hasBlocked) {
+        selectedForbiddenActions.push({ action: '批量提交', reason: `${selectedBlockedCount}单有阻断项，需解除后再提交` });
+      } else {
+        selectedAllowedActions.push('批量提交');
+      }
+    } else {
+      selectedForbiddenActions.push({ action: '批量提交', reason: '存在非草稿/已退回状态的订单' });
+    }
+  }
+
+  if (user?.role === 'supervisor') {
+    const allPending = selectedOrders.every(o => o.status === 'pending');
+    const hasBlocked = selectedOrders.some(o => o.blockReasons?.some(b => b.level === 'error'));
+    const hasOverdue = selectedOrders.some(o => o.isOverdue);
+    if (allPending) {
+      if (hasBlocked || hasOverdue) {
+        const reasons: string[] = [];
+        if (hasOverdue) reasons.push(`${selectedOverdueCount}单逾期`);
+        if (hasBlocked) reasons.push(`${selectedBlockedCount}单有阻断`);
+        selectedForbiddenActions.push({ action: '批量通过', reason: reasons.join('、') + '，请逐单退回或人工处置' });
+        selectedAllowedActions.push('批量退回');
+      } else {
+        selectedAllowedActions.push('批量通过');
+        selectedAllowedActions.push('批量退回');
+      }
+    } else {
+      selectedForbiddenActions.push({ action: '批量审核', reason: '存在非待审核状态的订单' });
+    }
+  }
+
+  if (user?.role === 'reviewer') {
+    const allProcessing = selectedOrders.every(o => o.status === 'processing');
+    const hasBlocked = selectedOrders.some(o => o.blockReasons?.some(b => b.level === 'error'));
+    if (allProcessing) {
+      if (hasBlocked) {
+        selectedForbiddenActions.push({ action: '批量通过', reason: `${selectedBlockedCount}单有阻断，需逐单人工处置` });
+        selectedAllowedActions.push('批量退回');
+      } else {
+        selectedAllowedActions.push('批量通过');
+        selectedAllowedActions.push('批量退回');
+      }
+      selectedAllowedActions.push('人工处置（逐单）');
+    } else {
+      selectedForbiddenActions.push({ action: '批量复核', reason: '存在非待复核状态的订单' });
+    }
+  }
+
   const renderBlockBadges = (blocks: BlockReason[]) => {
     const errors = blocks.filter(b => b.level === 'error');
     if (errors.length === 0) return null;
@@ -260,6 +318,42 @@ export function OrderListPage() {
           </button>
         </div>
       </div>
+
+      {selectedIds.size > 0 && (
+        <div className="card selection-summary">
+          <div className="card-title" style={{ marginBottom: '8px' }}>
+            已选中 {selectedIds.size} 单
+            {selectedBlockedCount > 0 && (
+              <span style={{ color: '#cf1322', marginLeft: '12px', fontSize: '13px' }}>
+                其中 {selectedBlockedCount} 单存在阻断项
+              </span>
+            )}
+            {selectedOverdueCount > 0 && (
+              <span style={{ color: '#cf1322', marginLeft: '8px', fontSize: '13px' }}>
+                {selectedOverdueCount} 单已逾期
+              </span>
+            )}
+          </div>
+          {selectedAllowedActions.length > 0 && (
+            <div style={{ marginBottom: '6px' }}>
+              <span style={{ color: '#389e0d', fontWeight: 500, marginRight: '8px' }}>✓ 允许动作：</span>
+              {selectedAllowedActions.map((a, i) => (
+                <span key={i} style={{ marginRight: '16px', color: '#389e0d' }}>{a}</span>
+              ))}
+            </div>
+          )}
+          {selectedForbiddenActions.length > 0 && (
+            <div>
+              <span style={{ color: '#cf1322', fontWeight: 500, marginRight: '8px' }}>✕ 禁止动作：</span>
+              {selectedForbiddenActions.map((a, i) => (
+                <span key={i} style={{ marginRight: '16px', color: '#cf1322' }}>
+                  {a.action}（{a.reason}）
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="order-table">
         <table>

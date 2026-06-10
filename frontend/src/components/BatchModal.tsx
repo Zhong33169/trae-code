@@ -32,6 +32,20 @@ export function BatchModal({ mode, orders, onClose, onSuccess }: BatchModalProps
     o.isOverdue || (o.blockReasons && o.blockReasons.some(b => b.level === 'error'))
   ).length;
 
+  const willSucceedCount = pass
+    ? orders.filter(o => !o.isOverdue && !(o.blockReasons?.some(b => b.level === 'error'))).length
+    : orders.length;
+
+  const willFailCount = pass ? blockedOrdersCount : 0;
+
+  const getActionName = () => {
+    switch (mode) {
+      case 'submit': return '提交';
+      case 'supervisor': return pass ? '审核通过' : '退回';
+      case 'reviewer': return pass ? '复核通过' : '退回';
+    }
+  };
+
   const toggleExpand = (idx: number) => {
     const newSet = new Set(expandedItems);
     if (newSet.has(idx)) {
@@ -129,55 +143,98 @@ export function BatchModal({ mode, orders, onClose, onSuccess }: BatchModalProps
             <>
               <div style={{ marginBottom: '12px' }}>
                 共选择 <strong>{orders.length}</strong> 个订单进行{getTitle().replace('批量', '')}
-                {blockedOrdersCount > 0 && (
+                <div style={{ marginTop: '8px', display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
                   <span style={{
-                    marginLeft: '12px',
-                    padding: '2px 8px',
-                    borderRadius: '3px',
-                    background: '#fff1f0',
-                    color: '#cf1322',
-                    border: '1px solid #ffa39e',
+                    padding: '4px 10px',
+                    borderRadius: '4px',
+                    background: '#f6ffed',
+                    color: '#389e0d',
+                    border: '1px solid #b7eb8f',
                     fontSize: '12px',
                   }}>
-                    含 {blockedOrdersCount} 单有阻断/逾期（将被批量通过自动跳过）
+                    ✓ 可执行{getActionName()}：{willSucceedCount} 单
                   </span>
-                )}
+                  {willFailCount > 0 && (
+                    <span style={{
+                      padding: '4px 10px',
+                      borderRadius: '4px',
+                      background: '#fff1f0',
+                      color: '#cf1322',
+                      border: '1px solid #ffa39e',
+                      fontSize: '12px',
+                    }}>
+                      ✕ 将跳过/失败：{willFailCount} 单（逾期或硬阻断）
+                    </span>
+                  )}
+                </div>
               </div>
 
               <div style={{
-                maxHeight: '200px',
+                maxHeight: '260px',
                 overflowY: 'auto',
                 border: '1px solid #e8e8e8',
                 borderRadius: '6px',
-                padding: '4px 8px',
                 marginBottom: '16px',
               }}>
-                {orders.map(order => {
-                  const hasBlock = order.isOverdue || (order.blockReasons && order.blockReasons.some(b => b.level === 'error'));
+                {orders.map((order, idx) => {
+                  const hasHardBlock = order.isOverdue || (order.blockReasons?.some(b => b.level === 'error'));
+                  const willSkip = pass && hasHardBlock;
                   return (
                     <div key={order.id} style={{
-                      padding: '8px 6px',
+                      padding: '10px 12px',
                       borderBottom: '1px solid #f0f0f0',
                       fontSize: '13px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
+                      background: willSkip ? '#fffbf0' : 'transparent',
                     }}>
-                      <div>
-                        <span style={{ fontWeight: '500' }}>{order.orderNo}</span>
-                        <span style={{ color: '#666', marginLeft: '12px' }}>{order.productName}</span>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <div>
+                          <span style={{ fontWeight: '500' }}>{order.orderNo}</span>
+                          <span style={{ color: '#666', marginLeft: '12px' }}>{order.productName}</span>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          {willSkip ? (
+                            <span style={{
+                              padding: '2px 8px',
+                              borderRadius: '3px',
+                              background: '#fff1f0',
+                              color: '#cf1322',
+                              border: '1px solid #ffa39e',
+                              fontSize: '11px',
+                            }}>
+                              将跳过
+                            </span>
+                          ) : (
+                            <span style={{
+                              padding: '2px 8px',
+                              borderRadius: '3px',
+                              background: '#f6ffed',
+                              color: '#389e0d',
+                              border: '1px solid #b7eb8f',
+                              fontSize: '11px',
+                            }}>
+                              可执行
+                            </span>
+                          )}
+                          {hasHardBlock && (
+                            <button
+                              className="btn btn-default btn-sm"
+                              style={{ fontSize: '11px', padding: '1px 6px' }}
+                              onClick={(e) => { e.stopPropagation(); toggleExpand(idx); }}
+                            >
+                              {expandedItems.has(idx) ? '收起' : '原因▼'}
+                            </button>
+                          )}
+                        </div>
                       </div>
-                      {hasBlock && (
-                        <span style={{
-                          padding: '1px 6px',
-                          borderRadius: '3px',
-                          background: '#fff1f0',
-                          color: '#cf1322',
-                          border: '1px solid #ffa39e',
-                          fontSize: '11px',
-                        }}>
-                          {order.isOverdue ? '已逾期' : '有阻断'}
-                        </span>
+                      {expandedItems.has(idx) && hasHardBlock && order.blockReasons && (
+                        <div style={{ marginTop: '8px' }}>
+                          {renderBlockReasons(order.blockReasons.filter(b => b.level === 'error'))}
+                          {order.nextAction && (
+                            <div style={{ marginTop: '6px', fontSize: '12px', color: '#1890ff' }}>
+                              下一步：{order.nextAction}
+                            </div>
+                          )}
+                        </div>
                       )}
                     </div>
                   );
