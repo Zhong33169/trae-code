@@ -134,7 +134,7 @@ export function switchUser(userId) {
 
 export function updateFilters(newFilters) {
   filterParams.update((p) => ({ ...p, ...newFilters, page: 1 }));
-  loadReservations();
+  refreshAll();
 }
 
 export function selectReservation(id) {

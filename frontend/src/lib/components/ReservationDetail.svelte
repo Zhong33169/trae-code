@@ -280,7 +280,7 @@
           <h4>审批流程</h4>
           <div class="flow-steps">
             {#each reservation.flow_steps as step (step.key)}
-              <div class="flow-step" class:{step.status}>
+              <div class="flow-step" class:done={step.status === 'done'} class:current={step.status === 'current'} class:rejected={step.status === 'rejected'} class:pending={step.status === 'pending'}>
                 <div class="step-dot" />
                 <div class="step-content">
                   <div class="step-label">{step.label}</div>
@@ -289,6 +289,9 @@
                   {/if}
                   {#if step.time}
                     <div class="step-time">{formatTime(step.time)}</div>
+                  {/if}
+                  {#if step.comment}
+                    <div class="step-comment">{step.comment}</div>
                   {/if}
                 </div>
               </div>
@@ -762,13 +765,26 @@
   .flow-steps {
     display: flex;
     gap: 0;
+    position: relative;
+  }
+
+  .flow-steps::before {
+    content: '';
+    position: absolute;
+    top: 22px;
+    left: 10%;
+    right: 10%;
+    height: 2px;
+    background: #e0e0e0;
+    z-index: 0;
   }
 
   .flow-step {
     flex: 1;
     position: relative;
-    padding: 10px;
+    padding: 10px 4px;
     text-align: center;
+    z-index: 1;
   }
 
   .flow-step .step-dot {
@@ -779,37 +795,110 @@
     background: #ddd;
     position: relative;
     z-index: 1;
+    border: 3px solid white;
+    box-shadow: 0 0 0 2px #ddd;
+    transition: all 0.3s ease;
   }
 
   .flow-step.done .step-dot {
     background: #27ae60;
+    box-shadow: 0 0 0 2px #27ae60;
+  }
+
+  .flow-step.done .step-dot::after {
+    content: '✓';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: white;
+    font-size: 12px;
+    font-weight: bold;
   }
 
   .flow-step.current .step-dot {
     background: #f39c12;
-    box-shadow: 0 0 0 4px rgba(243, 156, 18, 0.3);
+    box-shadow: 0 0 0 4px rgba(243, 156, 18, 0.3), 0 0 0 2px #f39c12;
+    animation: pulse 2s infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% {
+      box-shadow: 0 0 0 4px rgba(243, 156, 18, 0.3), 0 0 0 2px #f39c12;
+    }
+    50% {
+      box-shadow: 0 0 0 8px rgba(243, 156, 18, 0.1), 0 0 0 2px #f39c12;
+    }
   }
 
   .flow-step.rejected .step-dot {
     background: #e74c3c;
+    box-shadow: 0 0 0 2px #e74c3c;
+  }
+
+  .flow-step.rejected .step-dot::after {
+    content: '✕';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: white;
+    font-size: 12px;
+    font-weight: bold;
+  }
+
+  .flow-step.pending .step-dot {
+    background: #fafafa;
+    box-shadow: 0 0 0 2px #ddd;
   }
 
   .step-label {
     font-size: 12px;
     font-weight: 500;
     color: #333;
+    margin-bottom: 2px;
+  }
+
+  .flow-step.done .step-label {
+    color: #27ae60;
+  }
+
+  .flow-step.current .step-label {
+    color: #f39c12;
+    font-weight: 600;
+  }
+
+  .flow-step.rejected .step-label {
+    color: #e74c3c;
+  }
+
+  .flow-step.pending .step-label {
+    color: #999;
   }
 
   .step-actor {
     font-size: 11px;
     color: #666;
-    margin-top: 4px;
+    margin-top: 2px;
   }
 
   .step-time {
     font-size: 11px;
     color: #999;
     margin-top: 2px;
+  }
+
+  .step-comment {
+    font-size: 10px;
+    color: #888;
+    margin-top: 2px;
+    font-style: italic;
+    max-width: 100px;
+    margin-left: auto;
+    margin-right: auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .tabs {

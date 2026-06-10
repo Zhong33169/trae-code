@@ -539,14 +539,21 @@ def batch_operation(request, payload: BatchOperationIn):
 
         if reservation.version != expected_ver:
             fail_count += 1
+            missing = reservation.get_missing_evidence()
             results.append({
                 'id': res_id,
                 'reservation_no': reservation.reservation_no,
                 'success': False,
                 'error': '版本号不匹配',
                 'code': 'version_conflict',
+                'errors': [
+                    f'当前版本为 {reservation.version}，你提交的版本为 {expected_ver}',
+                    '可能有其他人已修改此预约单，请刷新页面获取最新版本'
+                ],
+                'previous_status': reservation.status,
                 'current_version': reservation.version,
                 'expected_version': expected_ver,
+                'missing_evidence': missing,
             })
             continue
 
@@ -555,6 +562,7 @@ def batch_operation(request, payload: BatchOperationIn):
             if not can_op:
                 fail_count += 1
                 detailed_errors = _get_detailed_errors(reservation, user, 'lab_review')
+                missing = reservation.get_missing_evidence()
                 results.append({
                     'id': res_id,
                     'reservation_no': reservation.reservation_no,
@@ -564,6 +572,7 @@ def batch_operation(request, payload: BatchOperationIn):
                     'errors': detailed_errors,
                     'previous_status': reservation.status,
                     'current_version': reservation.version,
+                    'missing_evidence': missing,
                 })
                 continue
             missing = reservation.get_missing_evidence()
@@ -621,6 +630,7 @@ def batch_operation(request, payload: BatchOperationIn):
             if not can_op:
                 fail_count += 1
                 detailed_errors = _get_detailed_errors(reservation, user, 'lab_review')
+                missing = reservation.get_missing_evidence()
                 results.append({
                     'id': res_id,
                     'reservation_no': reservation.reservation_no,
@@ -630,6 +640,7 @@ def batch_operation(request, payload: BatchOperationIn):
                     'errors': detailed_errors,
                     'previous_status': reservation.status,
                     'current_version': reservation.version,
+                    'missing_evidence': missing,
                 })
                 continue
 
@@ -670,6 +681,7 @@ def batch_operation(request, payload: BatchOperationIn):
             if not can_op:
                 fail_count += 1
                 detailed_errors = _get_detailed_errors(reservation, user, 'college_confirm')
+                missing = reservation.get_missing_evidence()
                 results.append({
                     'id': res_id,
                     'reservation_no': reservation.reservation_no,
@@ -679,6 +691,7 @@ def batch_operation(request, payload: BatchOperationIn):
                     'errors': detailed_errors,
                     'previous_status': reservation.status,
                     'current_version': reservation.version,
+                    'missing_evidence': missing,
                 })
                 continue
 
@@ -719,6 +732,7 @@ def batch_operation(request, payload: BatchOperationIn):
             if not can_op:
                 fail_count += 1
                 detailed_errors = _get_detailed_errors(reservation, user, 'college_confirm')
+                missing = reservation.get_missing_evidence()
                 results.append({
                     'id': res_id,
                     'reservation_no': reservation.reservation_no,
@@ -728,6 +742,7 @@ def batch_operation(request, payload: BatchOperationIn):
                     'errors': detailed_errors,
                     'previous_status': reservation.status,
                     'current_version': reservation.version,
+                    'missing_evidence': missing,
                 })
                 continue
 

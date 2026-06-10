@@ -1,6 +1,6 @@
 <script>
   import { createEventDispatcher } from 'svelte';
-  import { currentUser, refreshData } from '$lib/stores.js';
+  import { currentUser, refreshAll } from '$lib/stores.js';
   import { api } from '$lib/api.js';
   import { ROLES, RESERVATION_STATUS } from '$lib/constants.js';
 
@@ -53,7 +53,7 @@
         errorMsg = `成功 ${result.success_count} 条，失败 ${result.fail_count} 条\n\n失败详情：\n${failReasons}`;
       }
       
-      refreshData();
+      refreshAll();
       dispatch('complete', { result });
       
       if (result.fail_count === 0) {
