@@ -91,6 +91,22 @@ export default function BatchList() {
     return "bg-gray-100 text-gray-800";
   };
 
+  const getOpTypeColor = (type: string) => {
+    if (type === "register") return "bg-yellow-100 text-yellow-800";
+    if (type === "verify") return "bg-green-100 text-green-800";
+    if (type === "review") return "bg-purple-100 text-purple-800";
+    return "bg-gray-100 text-gray-800";
+  };
+
+  const parseDetail = (item: BatchItem) => {
+    try {
+      if (item.result_data) {
+        return JSON.parse(item.result_data);
+      }
+    } catch (_) {}
+    return null;
+  };
+
   const getBatchStatusLabel = (status: string) => {
     if (status === "completed") return "已完成";
     if (status === "processing") return "处理中";
@@ -194,7 +210,9 @@ export default function BatchList() {
                           <span className="text-sm font-medium text-blue-600">{batch.batch_no}</span>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {BATCH_OP_MAP[batch.operation_type] || batch.operation_type}
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${getOpTypeColor(batch.operation_type)}`}>
+                            {BATCH_OP_MAP[batch.operation_type] || batch.operation_type}
+                          </span>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                           {batch.operator_name}

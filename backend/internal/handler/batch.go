@@ -44,11 +44,12 @@ func (h *BatchHandler) BatchRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ip := util.GetClientIP(r)
 	batch, err := h.service.BatchRegister(service.BatchOperationRequest{
 		TransferIDs:     req.TransferIDs,
 		EvidenceContent: req.EvidenceContent,
 		Remark:          req.Remark,
-	}, user)
+	}, user, ip)
 
 	if errors.Is(err, service.ErrForbidden) {
 		util.RespondError(w, http.StatusForbidden, err.Error())
@@ -79,11 +80,12 @@ func (h *BatchHandler) BatchVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ip := util.GetClientIP(r)
 	batch, err := h.service.BatchVerify(service.BatchOperationRequest{
 		TransferIDs:     req.TransferIDs,
 		EvidenceContent: req.EvidenceContent,
 		Remark:          req.Remark,
-	}, user)
+	}, user, ip)
 
 	if errors.Is(err, service.ErrForbidden) {
 		util.RespondError(w, http.StatusForbidden, err.Error())
@@ -114,11 +116,12 @@ func (h *BatchHandler) BatchReview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ip := util.GetClientIP(r)
 	batch, err := h.service.BatchReview(service.BatchOperationRequest{
 		TransferIDs:     req.TransferIDs,
 		EvidenceContent: req.EvidenceContent,
 		Remark:          req.Remark,
-	}, user)
+	}, user, ip)
 
 	if errors.Is(err, service.ErrForbidden) {
 		util.RespondError(w, http.StatusForbidden, err.Error())
@@ -169,7 +172,8 @@ func (h *BatchHandler) RetryBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := h.service.RetryBatch(batchNo, user)
+	ip := util.GetClientIP(r)
+	result, err := h.service.RetryBatch(batchNo, user, ip)
 	if errors.Is(err, service.ErrForbidden) {
 		util.RespondError(w, http.StatusForbidden, err.Error())
 		return

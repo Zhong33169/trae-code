@@ -12,16 +12,18 @@ import (
 )
 
 type BatchService struct {
-	db         *sql.DB
+	db          *sql.DB
 	transferSvc *TransferService
-	mu         sync.Mutex
-	counter    int
+	auditSvc    *AuditService
+	mu          sync.Mutex
+	counter     int
 }
 
 func NewBatchService(db *sql.DB) *BatchService {
 	return &BatchService{
 		db:          db,
 		transferSvc: NewTransferService(db),
+		auditSvc:    NewAuditService(db),
 		counter:     0,
 	}
 }
@@ -45,7 +47,7 @@ type BatchDetailResult struct {
 	Items  []model.BatchItem     `json:"items"`
 }
 
-func (s *BatchService) BatchRegister(req BatchOperationRequest, user *model.User) (*model.BatchOperation, error) {
+func (s *BatchService) BatchRegister(req BatchOperationRequest, user *model.User, ip string) (*model.BatchOperation, error) {
 	if user.Role != model.RoleReceptionAssistant {
 		return nil, ErrForbidden
 	}
@@ -87,16 +89,35 @@ func (s *BatchService) BatchRegister(req BatchOperationRequest, user *model.User
 		}
 	}
 
+	newValue, _ := json.Marshal(map[string]interface{}{
+		"batch_no":         batchNo,
+		"operation_type":   "register",
+		"total_count":      len(req.TransferIDs),
+		"evidence_content": req.EvidenceContent,
+		"remark":           req.Remark,
+		"transfer_ids":     req.TransferIDs,
+	})
+
+	_, err = tx.Exec(
+		`INSERT INTO audit_logs
+		 (user_id, user_name, role, action, target_type, target_id, old_value, new_value, ip_address)
+		 VALUES (?, ?, ?, 'batch_create', 'batch', ?, '', ?, ?)`,
+		user.ID, user.Name, user.Role, batchID, string(newValue), ip,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("insert audit: %w", err)
+	}
+
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit: %w", err)
 	}
 
-	go s.processBatch(batchID, req.EvidenceContent, req.Remark, user, model.BatchOpRegister)
+	go s.processBatch(batchID, req.EvidenceContent, req.Remark, user, model.BatchOpRegister, ip)
 
 	return s.getBatchByID(batchID)
 }
 
-func (s *BatchService) BatchVerify(req BatchOperationRequest, user *model.User) (*model.BatchOperation, error) {
+func (s *BatchService) BatchVerify(req BatchOperationRequest, user *model.User, ip string) (*model.BatchOperation, error) {
 	if user.Role != model.RoleAttendingPhysician {
 		return nil, ErrForbidden
 	}
@@ -138,16 +159,35 @@ func (s *BatchService) BatchVerify(req BatchOperationRequest, user *model.User) 
 		}
 	}
 
+	newValue, _ := json.Marshal(map[string]interface{}{
+		"batch_no":         batchNo,
+		"operation_type":   "verify",
+		"total_count":      len(req.TransferIDs),
+		"evidence_content": req.EvidenceContent,
+		"remark":           req.Remark,
+		"transfer_ids":     req.TransferIDs,
+	})
+
+	_, err = tx.Exec(
+		`INSERT INTO audit_logs
+		 (user_id, user_name, role, action, target_type, target_id, old_value, new_value, ip_address)
+		 VALUES (?, ?, ?, 'batch_create', 'batch', ?, '', ?, ?)`,
+		user.ID, user.Name, user.Role, batchID, string(newValue), ip,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("insert audit: %w", err)
+	}
+
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit: %w", err)
 	}
 
-	go s.processBatch(batchID, req.EvidenceContent, req.Remark, user, model.BatchOpVerify)
+	go s.processBatch(batchID, req.EvidenceContent, req.Remark, user, model.BatchOpVerify, ip)
 
 	return s.getBatchByID(batchID)
 }
 
-func (s *BatchService) BatchReview(req BatchOperationRequest, user *model.User) (*model.BatchOperation, error) {
+func (s *BatchService) BatchReview(req BatchOperationRequest, user *model.User, ip string) (*model.BatchOperation, error) {
 	if user.Role != model.RolePharmacyAdmin {
 		return nil, ErrForbidden
 	}
@@ -189,16 +229,35 @@ func (s *BatchService) BatchReview(req BatchOperationRequest, user *model.User) 
 		}
 	}
 
+	newValue, _ := json.Marshal(map[string]interface{}{
+		"batch_no":         batchNo,
+		"operation_type":   "review",
+		"total_count":      len(req.TransferIDs),
+		"evidence_content": req.EvidenceContent,
+		"remark":           req.Remark,
+		"transfer_ids":     req.TransferIDs,
+	})
+
+	_, err = tx.Exec(
+		`INSERT INTO audit_logs
+		 (user_id, user_name, role, action, target_type, target_id, old_value, new_value, ip_address)
+		 VALUES (?, ?, ?, 'batch_create', 'batch', ?, '', ?, ?)`,
+		user.ID, user.Name, user.Role, batchID, string(newValue), ip,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("insert audit: %w", err)
+	}
+
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit: %w", err)
 	}
 
-	go s.processBatch(batchID, req.EvidenceContent, req.Remark, user, model.BatchOpReview)
+	go s.processBatch(batchID, req.EvidenceContent, req.Remark, user, model.BatchOpReview, ip)
 
 	return s.getBatchByID(batchID)
 }
 
-func (s *BatchService) processBatch(batchID int64, evidenceContent, remark string, user *model.User, opType string) {
+func (s *BatchService) processBatch(batchID int64, evidenceContent, remark string, user *model.User, opType string, ip string) {
 	items, err := s.getBatchItems(batchID)
 	if err != nil {
 		return
@@ -206,6 +265,7 @@ func (s *BatchService) processBatch(batchID int64, evidenceContent, remark strin
 
 	successCount := 0
 	failCount := 0
+	failedItems := []map[string]interface{}{}
 
 	for _, item := range items {
 		resultData := ""
@@ -240,6 +300,11 @@ func (s *BatchService) processBatch(batchID int64, evidenceContent, remark strin
 			successCount++
 		} else {
 			failCount++
+			failedItems = append(failedItems, map[string]interface{}{
+				"transfer_id": item.TransferID,
+				"transfer_no": item.TransferNo,
+				"error":       errMsg,
+			})
 		}
 
 		s.db.Exec(
@@ -251,6 +316,21 @@ func (s *BatchService) processBatch(batchID int64, evidenceContent, remark strin
 	s.db.Exec(
 		`UPDATE batch_operations SET success_count = ?, fail_count = ?, status = 'completed' WHERE id = ?`,
 		successCount, failCount, batchID,
+	)
+
+	newValue, _ := json.Marshal(map[string]interface{}{
+		"operation_type": opType,
+		"total_count":    len(items),
+		"success_count":  successCount,
+		"fail_count":     failCount,
+		"failed_items":   failedItems,
+	})
+
+	s.db.Exec(
+		`INSERT INTO audit_logs
+		 (user_id, user_name, role, action, target_type, target_id, old_value, new_value, ip_address)
+		 VALUES (?, ?, ?, 'batch_complete', 'batch', ?, '', ?, ?)`,
+		user.ID, user.Name, user.Role, batchID, string(newValue), ip,
 	)
 }
 
@@ -339,7 +419,7 @@ func (s *BatchService) GetBatch(batchNo string) (*BatchDetailResult, error) {
 	}, nil
 }
 
-func (s *BatchService) RetryBatch(batchNo string, user *model.User) (*BatchDetailResult, error) {
+func (s *BatchService) RetryBatch(batchNo string, user *model.User, ip string) (*BatchDetailResult, error) {
 	batch, err := s.GetBatch(batchNo)
 	if err != nil {
 		return nil, err
@@ -373,6 +453,14 @@ func (s *BatchService) RetryBatch(batchNo string, user *model.User) (*BatchDetai
 		return nil, errors.New("没有需要重试的失败项")
 	}
 
+	oldValue, _ := json.Marshal(map[string]interface{}{
+		"batch_no":      batch.Batch.BatchNo,
+		"operation_type": opType,
+		"retry_count":   len(failedItems),
+		"prev_success":  batch.Batch.SuccessCount,
+		"prev_fail":     batch.Batch.FailCount,
+	})
+
 	s.db.Exec(
 		`UPDATE batch_operations SET status = 'processing' WHERE id = ?`,
 		batch.Batch.ID,
@@ -385,12 +473,26 @@ func (s *BatchService) RetryBatch(batchNo string, user *model.User) (*BatchDetai
 		)
 	}
 
-	go s.retryBatchItems(batch.Batch.ID, user, opType)
+	newValue, _ := json.Marshal(map[string]interface{}{
+		"batch_no":       batch.Batch.BatchNo,
+		"operation_type": opType,
+		"retry_count":    len(failedItems),
+		"failed_items":   failedItems,
+	})
+
+	s.db.Exec(
+		`INSERT INTO audit_logs
+		 (user_id, user_name, role, action, target_type, target_id, old_value, new_value, ip_address)
+		 VALUES (?, ?, ?, 'batch_retry', 'batch', ?, ?, ?, ?)`,
+		user.ID, user.Name, user.Role, batch.Batch.ID, string(oldValue), string(newValue), ip,
+	)
+
+	go s.retryBatchItems(batch.Batch.ID, user, opType, ip)
 
 	return s.GetBatch(batchNo)
 }
 
-func (s *BatchService) retryBatchItems(batchID int64, user *model.User, opType string) {
+func (s *BatchService) retryBatchItems(batchID int64, user *model.User, opType string, ip string) {
 	items, err := s.getBatchItems(batchID)
 	if err != nil {
 		return
@@ -398,6 +500,7 @@ func (s *BatchService) retryBatchItems(batchID int64, user *model.User, opType s
 
 	successCount := 0
 	failCount := 0
+	failedItems := []map[string]interface{}{}
 
 	for _, item := range items {
 		if item.Status != model.BatchItemStatusPending {
@@ -412,6 +515,11 @@ func (s *BatchService) retryBatchItems(batchID int64, user *model.User, opType s
 		transfer, err := s.transferSvc.GetByID(item.TransferID)
 		if err != nil {
 			failCount++
+			failedItems = append(failedItems, map[string]interface{}{
+				"transfer_id": item.TransferID,
+				"transfer_no": item.TransferNo,
+				"error":       err.Error(),
+			})
 			s.db.Exec(
 				`UPDATE batch_items SET status = 'failed', error_message = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
 				err.Error(), item.ID,
@@ -432,6 +540,11 @@ func (s *BatchService) retryBatchItems(batchID int64, user *model.User, opType s
 
 		if opErr != nil {
 			failCount++
+			failedItems = append(failedItems, map[string]interface{}{
+				"transfer_id": item.TransferID,
+				"transfer_no": item.TransferNo,
+				"error":       opErr.Error(),
+			})
 			s.db.Exec(
 				`UPDATE batch_items SET status = 'failed', error_message = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
 				opErr.Error(), item.ID,
@@ -449,6 +562,22 @@ func (s *BatchService) retryBatchItems(batchID int64, user *model.User, opType s
 	s.db.Exec(
 		`UPDATE batch_operations SET success_count = ?, fail_count = ?, status = 'completed' WHERE id = ?`,
 		successCount, failCount, batchID,
+	)
+
+	newValue, _ := json.Marshal(map[string]interface{}{
+		"operation_type": opType,
+		"total_count":    len(items),
+		"success_count":  successCount,
+		"fail_count":     failCount,
+		"failed_items":   failedItems,
+		"retry":          true,
+	})
+
+	s.db.Exec(
+		`INSERT INTO audit_logs
+		 (user_id, user_name, role, action, target_type, target_id, old_value, new_value, ip_address)
+		 VALUES (?, ?, ?, 'batch_retry_complete', 'batch', ?, '', ?, ?)`,
+		user.ID, user.Name, user.Role, batchID, string(newValue), ip,
 	)
 }
 

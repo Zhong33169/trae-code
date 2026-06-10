@@ -15,6 +15,16 @@ func NewAuditService(db *sql.DB) *AuditService {
 	return &AuditService{db: db}
 }
 
+func (s *AuditService) Log(user *model.User, action, targetType string, targetID int64, oldValue, newValue, ipAddress string) error {
+	_, err := s.db.Exec(
+		`INSERT INTO audit_logs
+		 (user_id, user_name, role, action, target_type, target_id, old_value, new_value, ip_address)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		user.ID, user.Name, user.Role, action, targetType, targetID, oldValue, newValue, ipAddress,
+	)
+	return err
+}
+
 type AuditListFilter struct {
 	Page     int
 	PageSize int

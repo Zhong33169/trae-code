@@ -29,7 +29,7 @@ func main() {
 	}
 	defer database.Close()
 
-	if err := db.Seed(database); err != nil {
+	if err := db.SeedData(database); err != nil {
 		log.Fatalf("failed to seed db: %v", err)
 	}
 
