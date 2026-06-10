@@ -3,6 +3,9 @@ import { useParams, useNavigate } from 'react-router-dom';
 import api from '../api';
 import { useAuth } from '../context/AuthContext';
 import dayjs from 'dayjs';
+import AddMaterialModal from '../components/AddMaterialModal';
+import FeedbackModal from '../components/FeedbackModal';
+import Toast from '../components/Toast';
 
 const statusLabels = {
   draft: '草稿',
@@ -30,12 +33,22 @@ const actionLabels = {
   finalize_pass: '复核通过',
   finalize_reject: '复核驳回',
   add_feedback: '添加反馈',
+  add_material: '添加材料',
+  delete_material: '删除材料',
 };
 
 const roleLabels = {
   registrar: '课程服务登记员',
   reviewer: '课程服务审核主管',
   finalizer: 'K12培训机构复核负责人',
+};
+
+const materialTypeLabels = {
+  application: '申请单',
+  certificate: '证明材料',
+  schedule: '排班信息',
+  record: '记录凭证',
+  other: '其他材料'
 };
 
 function OrderDetail() {
@@ -47,6 +60,14 @@ function OrderDetail() {
   const [opinion, setOpinion] = useState('');
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState('');
+  const [addMaterialVisible, setAddMaterialVisible] = useState(false);
+  const [feedbackVisible, setFeedbackVisible] = useState(false);
+  const [toast, setToast] = useState({ visible: false, type: 'info', message: '' });
+
+  const showToast = (type, message) => {
+    setToast({ visible: true, type, message });
+    setTimeout(() => setToast({ visible: false, type: 'info', message: '' }), 3000);
+  };
 
   const fetchOrder = async () => {
     setLoading(true);
@@ -66,16 +87,21 @@ function OrderDetail() {
   }, [id]);
 
   const canSubmit = user?.role === 'registrar' && ['draft', 'returned'].includes(order?.status);
+  const canEditMaterial = user?.role === 'registrar' && ['draft', 'returned'].includes(order?.status) && user?.username === order?.register_by;
   const canReview = user?.role === 'reviewer' && ['pending_review', 'reviewing'].includes(order?.status);
   const canFinalize = user?.role === 'finalizer' && ['pending_finalize', 'finalizing'].includes(order?.status);
+  const canAddFeedback = ['reviewer', 'finalizer'].includes(user?.role) && 
+    ['pending_review', 'pending_finalize', 'reviewing', 'finalizing'].includes(order?.status);
 
   const handleSubmit = async () => {
     setProcessing(true);
     try {
-      await api.post(`/orders/${id}/submit`, { opinion, materials: order?.materials || [] });
-      fetchOrder();
+      const res = await api.post(`/orders/${id}/submit`, { opinion, materials: [] });
+      setOrder(res.data);
+      setOpinion('');
+      showToast('success', '提交审核成功！');
     } catch (err) {
-      alert(err.response?.data?.detail || '操作失败');
+      showToast('error', err.response?.data?.detail || '操作失败');
     } finally {
       setProcessing(false);
     }
@@ -84,11 +110,12 @@ function OrderDetail() {
   const handleReview = async (approved) => {
     setProcessing(true);
     try {
-      await api.post(`/orders/${id}/review`, { approved, opinion });
-      fetchOrder();
+      const res = await api.post(`/orders/${id}/review`, { approved, opinion });
+      setOrder(res.data);
       setOpinion('');
+      showToast('success', approved ? '审核通过成功！' : '已驳回');
     } catch (err) {
-      alert(err.response?.data?.detail || '操作失败');
+      showToast('error', err.response?.data?.detail || '操作失败');
     } finally {
       setProcessing(false);
     }
@@ -97,19 +124,60 @@ function OrderDetail() {
   const handleFinalize = async (approved) => {
     setProcessing(true);
     try {
-      await api.post(`/orders/${id}/finalize`, { approved, opinion });
-      fetchOrder();
+      const res = await api.post(`/orders/${id}/finalize`, { approved, opinion });
+      setOrder(res.data);
       setOpinion('');
+      showToast('success', approved ? '复核归档成功！' : '已驳回');
     } catch (err) {
-      alert(err.response?.data?.detail || '操作失败');
+      showToast('error', err.response?.data?.detail || '操作失败');
     } finally {
       setProcessing(false);
     }
   };
 
+  const handleDeleteMaterial = async (materialId) => {
+    if (!confirm('确定要删除这份材料吗？')) return;
+    try {
+      const res = await api.delete(`/orders/${id}/materials/${materialId}`);
+      setOrder(res.data);
+      showToast('success', '材料已删除');
+    } catch (err) {
+      showToast('error', err.response?.data?.detail || '删除失败');
+    }
+  };
+
+  const handleMaterialAdded = (updatedOrder) => {
+    setOrder(updatedOrder);
+    setAddMaterialVisible(false);
+    showToast('success', '材料添加成功');
+  };
+
+  const handleFeedbackSubmitted = (updatedOrder) => {
+    setOrder(updatedOrder);
+    setFeedbackVisible(false);
+    showToast('success', '课后反馈已提交');
+  };
+
+  const formatTimeRemaining = (info) => {
+    if (!info || info.deadline === undefined) return null;
+    if (info.expired) {
+      return <span style={{ color: '#ff4d4f' }}>已超时</span>;
+    }
+    const hours = info.remaining_hours;
+    if (hours < 1) {
+      return <span style={{ color: '#fa8c16' }}>{Math.round(hours * 60)} 分钟</span>;
+    }
+    if (hours < 6) {
+      return <span style={{ color: '#fa8c16' }}>{hours.toFixed(1)} 小时</span>;
+    }
+    return <span>{hours.toFixed(1)} 小时</span>;
+  };
+
   if (loading) return <div className="loading">加载中...</div>;
   if (error) return <div className="alert alert-error">{error}</div>;
   if (!order) return <div className="empty-state">服务单不存在</div>;
+
+  const time_info = order.time_info || {};
 
   return (
     <div>
@@ -122,6 +190,14 @@ function OrderDetail() {
           {statusLabels[order.status]}
         </span>
       </div>
+
+      {time_info.deadline && (
+        <div className={`alert ${time_info.expired ? 'alert-error' : 'alert-warning'}`} style={{ marginBottom: '16px' }}>
+          ⏱️ 办理时限：截止 {time_info.deadline}
+          （剩余 {formatTimeRemaining(time_info)}）
+          ，共 {time_info.limit_hours} 小时
+        </div>
+      )}
 
       <div className="detail-container">
         <div>
@@ -141,6 +217,10 @@ function OrderDetail() {
                 <span className="value">{dayjs(order.created_at).format('YYYY-MM-DD HH:mm')}</span>
               </div>
               <div className="info-item">
+                <span className="label">版本号：</span>
+                <span className="value">v{order.version}</span>
+              </div>
+              <div className="info-item">
                 <span className="label">登记人：</span>
                 <span className="value">{order.register_by || '-'}</span>
               </div>
@@ -151,6 +231,16 @@ function OrderDetail() {
               <div className="info-item">
                 <span className="label">复核人：</span>
                 <span className="value">{order.finalizer_by || '-'}</span>
+              </div>
+              <div className="info-item">
+                <span className="label">材料状态：</span>
+                <span className="value">
+                  {order.material_complete ? (
+                    <span style={{ color: '#52c41a' }}>✓ 齐全</span>
+                  ) : (
+                    <span style={{ color: '#fa8c16' }}>⚠ 不完整</span>
+                  )}
+                </span>
               </div>
             </div>
           </div>
@@ -260,38 +350,76 @@ function OrderDetail() {
           </div>
 
           <div className="card">
-            <h3>📎 材料清单</h3>
+            <h3 style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span>📎 材料清单</span>
+              {canEditMaterial && (
+                <button 
+                  className="btn btn-sm" 
+                  style={{ width: 'auto', padding: '6px 12px', fontSize: '12px' }}
+                  onClick={() => setAddMaterialVisible(true)}
+                >
+                  + 添加材料
+                </button>
+              )}
+            </h3>
+            
+            {order.missing_materials && order.missing_materials.length > 0 && (
+              <div className="alert alert-warning" style={{ marginBottom: '12px' }}>
+                ⚠️ 缺少必备材料：{order.missing_materials.join('、')}
+              </div>
+            )}
+
             {order.materials && order.materials.length > 0 ? (
               <ul className="material-list">
                 {order.materials.map((mat) => (
                   <li key={mat.id}>
                     <span>
-                      <span className="material-type">{mat.material_type}</span>
+                      <span className="material-type">
+                        {materialTypeLabels[mat.material_type] || mat.material_type}
+                      </span>
                       {' '}{mat.material_name}
+                      <span style={{ fontSize: '12px', color: '#999', marginLeft: '8px' }}>
+                        {mat.uploaded_by} · {dayjs(mat.uploaded_at).format('MM-DD HH:mm')}
+                      </span>
                     </span>
-                    <span style={{ fontSize: '12px', color: '#999' }}>
-                      {mat.uploaded_by} · {dayjs(mat.uploaded_at).format('MM-DD HH:mm')}
-                    </span>
+                    {canEditMaterial && (
+                      <span 
+                        className="action-link" 
+                        style={{ color: '#ff4d4f' }}
+                        onClick={() => handleDeleteMaterial(mat.id)}
+                      >
+                        删除
+                      </span>
+                    )}
                   </li>
                 ))}
               </ul>
             ) : (
               <div className="empty-state" style={{ padding: '20px' }}>暂无上传材料</div>
             )}
-            {order.material_complete === 0 && order.status !== 'completed' && (
-              <div className="alert alert-warning" style={{ marginTop: '12px' }}>
-                ⚠️ 材料不完整，提交审核前需上传齐全
-              </div>
-            )}
           </div>
 
           <div className="card">
-            <h3>📝 课后反馈</h3>
+            <h3 style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span>📝 课后反馈</span>
+              {canAddFeedback && (
+                <button 
+                  className="btn btn-sm" 
+                  style={{ width: 'auto', padding: '6px 12px', fontSize: '12px' }}
+                  onClick={() => setFeedbackVisible(true)}
+                >
+                  + 录入反馈
+                </button>
+              )}
+            </h3>
             {order.feedback ? (
               <div className="feedback-card">
                 <div className="feedback-row">
                   <span className="label">出勤情况：</span>
-                  <span className="value">{order.feedback.attendance === 'attended' ? '正常出勤' : order.feedback.attendance}</span>
+                  <span className="value">
+                    {order.feedback.attendance === 'attended' ? '正常出勤' : 
+                     order.feedback.attendance === 'absent' ? '缺勤' : order.feedback.attendance}
+                  </span>
                 </div>
                 <div className="feedback-row">
                   <span className="label">课堂表现：</span>
@@ -491,6 +619,28 @@ function OrderDetail() {
           </div>
         </div>
       </div>
+
+      {addMaterialVisible && (
+        <AddMaterialModal
+          visible={addMaterialVisible}
+          onClose={() => setAddMaterialVisible(false)}
+          orderId={order.id}
+          onSuccess={handleMaterialAdded}
+        />
+      )}
+
+      {feedbackVisible && (
+        <FeedbackModal
+          visible={feedbackVisible}
+          onClose={() => setFeedbackVisible(false)}
+          orderId={order.id}
+          onSuccess={handleFeedbackSubmitted}
+        />
+      )}
+
+      {toast.visible && (
+        <Toast type={toast.type} message={toast.message} />
+      )}
     </div>
   );
 }

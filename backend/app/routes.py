@@ -5,12 +5,14 @@ import aiosqlite
 
 from app.config import DB_PATH
 from app.auth import create_access_token, verify_password, hash_password, get_current_user
-from app.schemas import LoginRequest
+from app.schemas import LoginRequest, MaterialCreate, FeedbackCreate
 from app.services import (
     get_order_detail, scan_qr_code, create_service_order,
     submit_for_review, review_order, finalize_order,
     add_feedback, get_statistics, batch_review, batch_finalize,
-    MATERIAL_REQUIRED, ORDER_STATUSES, ROLES
+    add_material, delete_material,
+    check_time_limit, check_materials_complete,
+    MATERIAL_REQUIRED, ORDER_STATUSES, ROLES, MATERIAL_TYPES
 )
 
 async def login(request: Request):
@@ -105,6 +107,12 @@ async def list_orders(request: Request):
             order_dict["course_name"] = course["name"]
             order_dict["course_subject"] = course["subject"]
         
+        material_complete = await check_materials_complete(db, row["id"])
+        order_dict["material_complete"] = material_complete
+        
+        time_info = await check_time_limit(db, row["id"])
+        order_dict["time_info"] = time_info
+        
         orders.append(order_dict)
     
     await db.close()
@@ -180,7 +188,6 @@ async def submit_order(request: Request):
     opinion = body.get("opinion")
     materials = body.get("materials", [])
     
-    from app.schemas import MaterialCreate
     material_objs = [MaterialCreate(**m) for m in materials]
     
     db = await aiosqlite.connect(DB_PATH)
@@ -241,7 +248,6 @@ async def add_feedback_endpoint(request: Request):
     order_id = int(request.path_params["order_id"])
     body = await request.json()
     
-    from app.schemas import FeedbackCreate
     feedback_data = FeedbackCreate(**body)
     
     db = await aiosqlite.connect(DB_PATH)
@@ -249,6 +255,40 @@ async def add_feedback_endpoint(request: Request):
     
     try:
         result = await add_feedback(db, order_id, feedback_data, user)
+        await db.close()
+        return JSONResponse(result)
+    except Exception as e:
+        await db.close()
+        raise
+
+async def add_material_endpoint(request: Request):
+    user = await get_current_user(request)
+    order_id = int(request.path_params["order_id"])
+    body = await request.json()
+    
+    material_data = MaterialCreate(**body)
+    
+    db = await aiosqlite.connect(DB_PATH)
+    db.row_factory = aiosqlite.Row
+    
+    try:
+        result = await add_material(db, order_id, material_data, user)
+        await db.close()
+        return JSONResponse(result)
+    except Exception as e:
+        await db.close()
+        raise
+
+async def delete_material_endpoint(request: Request):
+    user = await get_current_user(request)
+    order_id = int(request.path_params["order_id"])
+    material_id = int(request.path_params["material_id"])
+    
+    db = await aiosqlite.connect(DB_PATH)
+    db.row_factory = aiosqlite.Row
+    
+    try:
+        result = await delete_material(db, order_id, material_id, user)
         await db.close()
         return JSONResponse(result)
     except Exception as e:
@@ -370,6 +410,7 @@ async def get_constants(request: Request):
         "order_statuses": ORDER_STATUSES,
         "roles": ROLES,
         "material_required": MATERIAL_REQUIRED,
+        "material_types": MATERIAL_TYPES,
         "service_types": {
             "makeup_class": "补课",
             "drop_class": "退课",
@@ -389,6 +430,9 @@ routes = [
     Route("/api/orders/{order_id:int}/review", review_order_endpoint, methods=["POST"]),
     Route("/api/orders/{order_id:int}/finalize", finalize_order_endpoint, methods=["POST"]),
     Route("/api/orders/{order_id:int}/feedback", add_feedback_endpoint, methods=["POST"]),
+    
+    Route("/api/orders/{order_id:int}/materials", add_material_endpoint, methods=["POST"]),
+    Route("/api/orders/{order_id:int}/materials/{material_id:int}", delete_material_endpoint, methods=["DELETE"]),
     
     Route("/api/orders/scan", scan, methods=["POST"]),
     Route("/api/orders/batch/review", batch_review_endpoint, methods=["POST"]),

@@ -28,8 +28,16 @@ function BatchOperationModal({ visible, onClose, selectedIds, role, onSuccess })
       setResult(res.data);
       if (res.data.failed.length === 0) {
         setTimeout(() => {
-          onSuccess && onSuccess();
+          onSuccess && onSuccess({
+            success_count: res.data.success.length,
+            skipped_count: res.data.failed.length,
+          });
         }, 1500);
+      } else {
+        onSuccess && onSuccess({
+          success_count: res.data.success.length,
+          skipped_count: res.data.failed.length,
+        });
       }
     } catch (err) {
       alert(err.response?.data?.detail || '操作失败');

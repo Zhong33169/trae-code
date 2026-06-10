@@ -5,6 +5,8 @@ import { useAuth } from '../context/AuthContext';
 import ScanModal from '../components/ScanModal';
 import CreateOrderModal from '../components/CreateOrderModal';
 import BatchOperationModal from '../components/BatchOperationModal';
+import Toast from '../components/Toast';
+import dayjs from 'dayjs';
 
 const statusLabels = {
   draft: '草稿',
@@ -40,6 +42,27 @@ function OrderList() {
   const [createModalVisible, setCreateModalVisible] = useState(false);
   const [batchModalVisible, setBatchModalVisible] = useState(false);
   const [selectedIds, setSelectedIds] = useState([]);
+  const [toast, setToast] = useState({ visible: false, type: 'info', message: '' });
+
+  const showToast = (type, message) => {
+    setToast({ visible: true, type, message });
+    setTimeout(() => setToast({ visible: false, type: 'info', message: '' }), 3000);
+  };
+
+  const formatTimeRemaining = (info) => {
+    if (!info || info.deadline === undefined) return <span style={{ color: '#999' }}>-</span>;
+    if (info.expired) {
+      return <span style={{ color: '#ff4d4f', fontWeight: 500 }}>已超时</span>;
+    }
+    const hours = info.remaining_hours;
+    if (hours < 1) {
+      return <span style={{ color: '#fa8c16' }}>{Math.round(hours * 60)} 分钟</span>;
+    }
+    if (hours < 6) {
+      return <span style={{ color: '#fa8c16' }}>{hours.toFixed(1)} 小时</span>;
+    }
+    return <span style={{ color: '#52c41a' }}>{hours.toFixed(0)} 小时</span>;
+  };
 
   const fetchOrders = async () => {
     setLoading(true);
@@ -191,6 +214,8 @@ function OrderList() {
               <th>学员</th>
               <th>课程</th>
               <th>服务类型</th>
+              <th>材料</th>
+              <th>剩余时限</th>
               <th>状态</th>
               <th>创建时间</th>
               <th>操作</th>
@@ -198,9 +223,9 @@ function OrderList() {
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan="8" className="loading">加载中...</td></tr>
+              <tr><td colSpan="10" className="loading">加载中...</td></tr>
             ) : orders.length === 0 ? (
-              <tr><td colSpan="8" className="empty-state">暂无数据</td></tr>
+              <tr><td colSpan="10" className="empty-state">暂无数据</td></tr>
             ) : (
               orders.map((order) => (
                 <tr key={order.id}>
@@ -218,11 +243,19 @@ function OrderList() {
                   <td>{order.course_name}</td>
                   <td>{serviceTypeLabels[order.service_type] || order.service_type}</td>
                   <td>
+                    {order.material_complete ? (
+                      <span style={{ color: '#52c41a' }}>✓ 齐全</span>
+                    ) : (
+                      <span style={{ color: '#fa8c16' }}>⚠ 不完整</span>
+                    )}
+                  </td>
+                  <td>{formatTimeRemaining(order.time_info)}</td>
+                  <td>
                     <span className={`status-badge status-${order.status}`}>
                       {statusLabels[order.status] || order.status}
                     </span>
                   </td>
-                  <td>{order.created_at?.substring(0, 16)}</td>
+                  <td>{dayjs(order.created_at).format('YYYY-MM-DD HH:mm')}</td>
                   <td>
                     <span className="action-link" onClick={() => navigate(`/orders/${order.id}`)}>
                       查看详情
@@ -292,6 +325,7 @@ function OrderList() {
           onSuccess={() => {
             setCreateModalVisible(false);
             handleRefresh();
+            showToast('success', '服务单创建成功！');
           }}
         />
       )}
@@ -302,12 +336,18 @@ function OrderList() {
           onClose={() => setBatchModalVisible(false)}
           selectedIds={selectedIds}
           role={user?.role}
-          onSuccess={() => {
+          onSuccess={(result) => {
             setBatchModalVisible(false);
             setSelectedIds([]);
             handleRefresh();
+            const msg = user?.role === 'reviewer' ? '批量审核' : '批量复核';
+            showToast('success', `${msg}完成：成功 ${result?.success_count || 0} 条，跳过 ${result?.skipped_count || 0} 条`);
           }}
         />
+      )}
+
+      {toast.visible && (
+        <Toast type={toast.type} message={toast.message} />
       )}
     </div>
   );

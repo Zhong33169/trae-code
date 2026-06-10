@@ -1,6 +1,6 @@
 import uuid
 import aiosqlite
-from datetime import datetime
+from datetime import datetime, timedelta
 from starlette.exceptions import HTTPException
 from app.config import DB_PATH
 from app.schemas import (
@@ -30,6 +30,19 @@ MATERIAL_REQUIRED = {
     "drop_class": ["退课申请单", "缴费凭证", "学员档案"],
     "transfer_class": ["转课申请单", "原课程证明", "新课程排班"],
     "trial_class": ["试听申请单", "学员信息表", "课程安排"]
+}
+
+MATERIAL_TYPES = {
+    "application": "申请单",
+    "certificate": "证明材料",
+    "schedule": "排班信息",
+    "record": "记录凭证",
+    "other": "其他材料"
+}
+
+TIME_LIMITS = {
+    "registrar_review": 24,
+    "reviewer_finalize": 48,
 }
 
 async def get_db():
@@ -69,6 +82,62 @@ async def check_materials_complete(db, order_id):
         if not found:
             return False
     return True
+
+async def get_missing_materials(db, order_id):
+    cursor = await db.execute("SELECT service_type FROM service_orders WHERE id = ?", (order_id,))
+    order = await cursor.fetchone()
+    if not order:
+        return []
+    required = MATERIAL_REQUIRED.get(order["service_type"], [])
+    if not required:
+        return []
+    cursor = await db.execute("SELECT material_name FROM service_materials WHERE order_id = ?", (order_id,))
+    materials = [row["material_name"] for row in await cursor.fetchall()]
+    missing = []
+    for req in required:
+        found = False
+        for mat in materials:
+            if req in mat or mat in req:
+                found = True
+                break
+        if not found:
+            missing.append(req)
+    return missing
+
+async def check_time_limit(db, order_id):
+    cursor = await db.execute(
+        """SELECT status, created_at, register_time, review_time, time_limit_hours 
+           FROM service_orders WHERE id = ?""",
+        (order_id,)
+    )
+    order = await cursor.fetchone()
+    if not order:
+        return {"expired": False, "remaining": None, "deadline": None}
+    
+    now = datetime.now()
+    start_time = None
+    limit_hours = order["time_limit_hours"] or 24
+    
+    if order["status"] in ["pending_review", "reviewing"]:
+        start_str = order["register_time"] or order["created_at"]
+        start_time = datetime.strptime(start_str.split(".")[0], "%Y-%m-%d %H:%M:%S") if isinstance(start_str, str) else start_str
+    elif order["status"] in ["pending_finalize", "finalizing"]:
+        start_str = order["review_time"] or order["created_at"]
+        start_time = datetime.strptime(start_str.split(".")[0], "%Y-%m-%d %H:%M:%S") if isinstance(start_str, str) else start_str
+    else:
+        return {"expired": False, "remaining": None, "deadline": None}
+    
+    if start_time:
+        deadline = start_time + timedelta(hours=limit_hours)
+        remaining = deadline - now
+        return {
+            "expired": now > deadline,
+            "remaining_hours": remaining.total_seconds() / 3600 if remaining.total_seconds() > 0 else 0,
+            "deadline": deadline.strftime("%Y-%m-%d %H:%M:%S"),
+            "limit_hours": limit_hours
+        }
+    
+    return {"expired": False, "remaining": None, "deadline": None}
 
 async def scan_qr_code(db, qr_code, current_user):
     cursor = await db.execute("SELECT * FROM service_orders WHERE qr_code = ?", (qr_code,))
@@ -125,6 +194,15 @@ async def scan_qr_code(db, qr_code, current_user):
                 "order": dict(order) if order else None
             }
     
+    time_info = await check_time_limit(db, order["id"])
+    if time_info.get("expired"):
+        return {
+            "valid": False,
+            "message": f"办理超时：该服务单已超过 {time_info['limit_hours']} 小时办理时限，请联系管理员处理",
+            "error_code": "TIME_EXPIRED",
+            "order": dict(order) if order else None
+        }
+    
     order_detail = await get_order_detail(db, order["id"])
     return {
         "valid": True,
@@ -160,6 +238,10 @@ async def get_order_detail(db, order_id):
     materials = await cursor.fetchall()
     order_dict["materials"] = [dict(m) for m in materials]
     
+    missing = await get_missing_materials(db, order_id)
+    order_dict["missing_materials"] = missing
+    order_dict["material_complete"] = 0 if missing else 1
+    
     cursor = await db.execute("SELECT * FROM feedbacks WHERE order_id = ? ORDER BY created_at DESC LIMIT 1", (order_id,))
     feedback = await cursor.fetchone()
     order_dict["feedback"] = dict(feedback) if feedback else None
@@ -168,7 +250,88 @@ async def get_order_detail(db, order_id):
     audit_logs = await cursor.fetchall()
     order_dict["audit_logs"] = [dict(a) for a in audit_logs]
     
+    time_info = await check_time_limit(db, order_id)
+    order_dict["time_info"] = time_info
+    
     return order_dict
+
+async def add_material(db, order_id, material_data: MaterialCreate, user):
+    cursor = await db.execute("SELECT * FROM service_orders WHERE id = ?", (order_id,))
+    order = await cursor.fetchone()
+    if not order:
+        raise HTTPException(status_code=404, detail="服务单不存在")
+    
+    if order["status"] not in ["draft", "returned"]:
+        raise HTTPException(status_code=400, detail=f"当前状态「{ORDER_STATUSES.get(order['status'])}」不可添加材料")
+    
+    if user["role"] != "registrar":
+        raise HTTPException(status_code=403, detail="只有登记员可以添加材料")
+    
+    if user["username"] != order["register_by"]:
+        raise HTTPException(status_code=403, detail="只有登记人本人可以补正材料")
+    
+    current_version = order["version"]
+    
+    cursor = await db.execute(
+        """INSERT INTO service_materials (order_id, material_type, material_name, file_url, uploaded_by)
+           VALUES (?, ?, ?, ?, ?)""",
+        (order_id, material_data.material_type, material_data.material_name, 
+         material_data.file_url, user["username"])
+    )
+    material_id = cursor.lastrowid
+    
+    await db.execute(
+        "UPDATE service_orders SET version = version + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND version = ?",
+        (order_id, current_version)
+    )
+    
+    cursor = await db.execute("SELECT changes() as cnt")
+    result = await cursor.fetchone()
+    if result["cnt"] == 0:
+        raise HTTPException(status_code=409, detail="并发冲突：服务单已被他人修改，请刷新后重试")
+    
+    await add_audit_log(db, order_id, "add_material", user["username"], user["role"],
+                       order["status"], order["status"], f"添加材料：{material_data.material_name}")
+    
+    await db.commit()
+    return await get_order_detail(db, order_id)
+
+async def delete_material(db, order_id, material_id, user):
+    cursor = await db.execute("SELECT * FROM service_orders WHERE id = ?", (order_id,))
+    order = await cursor.fetchone()
+    if not order:
+        raise HTTPException(status_code=404, detail="服务单不存在")
+    
+    if order["status"] not in ["draft", "returned"]:
+        raise HTTPException(status_code=400, detail=f"当前状态「{ORDER_STATUSES.get(order['status'])}」不可删除材料")
+    
+    if user["role"] != "registrar":
+        raise HTTPException(status_code=403, detail="只有登记员可以删除材料")
+    
+    cursor = await db.execute("SELECT * FROM service_materials WHERE id = ? AND order_id = ?", (material_id, order_id))
+    material = await cursor.fetchone()
+    if not material:
+        raise HTTPException(status_code=404, detail="材料不存在")
+    
+    current_version = order["version"]
+    
+    await db.execute("DELETE FROM service_materials WHERE id = ? AND order_id = ?", (material_id, order_id))
+    
+    await db.execute(
+        "UPDATE service_orders SET version = version + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND version = ?",
+        (order_id, current_version)
+    )
+    
+    cursor = await db.execute("SELECT changes() as cnt")
+    result = await cursor.fetchone()
+    if result["cnt"] == 0:
+        raise HTTPException(status_code=409, detail="并发冲突：服务单已被他人修改，请刷新后重试")
+    
+    await add_audit_log(db, order_id, "delete_material", user["username"], user["role"],
+                       order["status"], order["status"], f"删除材料：{material['material_name']}")
+    
+    await db.commit()
+    return await get_order_detail(db, order_id)
 
 async def create_service_order(db, order_data: ServiceOrderCreate, user):
     order_no = generate_order_no()
@@ -199,8 +362,8 @@ async def create_service_order(db, order_data: ServiceOrderCreate, user):
     cursor = await db.execute(
         """INSERT INTO service_orders 
            (order_no, qr_code, student_id, course_id, schedule_id, service_type, status, 
-            current_handler, register_by, version)
-           VALUES (?, ?, ?, ?, ?, ?, 'draft', ?, ?, 0)""",
+            current_handler, register_by, version, time_limit_hours)
+           VALUES (?, ?, ?, ?, ?, ?, 'draft', ?, ?, 0, 24)""",
         (order_no, qr_code, order_data.student_id, order_data.course_id, 
          order_data.schedule_id, order_data.service_type, user["username"], user["username"])
     )
@@ -221,12 +384,10 @@ async def submit_for_review(db, order_id, user, opinion=None, materials=None):
     if order["status"] not in ["draft", "returned"]:
         raise HTTPException(status_code=400, detail=f"当前状态「{ORDER_STATUSES.get(order['status'])}」不可提交审核")
     
-    current_version = order["version"]
+    if user["username"] != order["register_by"]:
+        raise HTTPException(status_code=403, detail="只有登记人本人可以提交审核")
     
-    cursor = await db.execute("SELECT version FROM service_orders WHERE id = ?", (order_id,))
-    check_order = await cursor.fetchone()
-    if check_order["version"] != current_version:
-        raise HTTPException(status_code=409, detail="数据已被他人修改，请刷新后重试")
+    current_version = order["version"]
     
     if materials:
         for mat in materials:
@@ -236,14 +397,14 @@ async def submit_for_review(db, order_id, user, opinion=None, materials=None):
                 (order_id, mat.material_type, mat.material_name, mat.file_url, user["username"])
             )
     
-    materials_complete = await check_materials_complete(db, order_id)
-    
-    if not materials_complete:
-        required = MATERIAL_REQUIRED.get(order["service_type"], [])
+    missing = await get_missing_materials(db, order_id)
+    if missing:
         raise HTTPException(
             status_code=400, 
-            detail=f"材料不完整，提交审核前需上传以下材料：{', '.join(required)}"
+            detail=f"材料不完整，缺少：{', '.join(missing)}"
         )
+    
+    time_info = await check_time_limit(db, order_id)
     
     await db.execute(
         """UPDATE service_orders 
@@ -275,12 +436,14 @@ async def review_order(db, order_id, user, approved=True, opinion=None):
     if order["status"] not in ["pending_review", "reviewing"]:
         raise HTTPException(status_code=400, detail=f"当前状态「{ORDER_STATUSES.get(order['status'])}」不可审核")
     
-    current_version = order["version"]
+    time_info = await check_time_limit(db, order_id)
+    if time_info.get("expired"):
+        raise HTTPException(
+            status_code=400, 
+            detail=f"办理超时：已超过 {time_info['limit_hours']} 小时办理时限，不能审核"
+        )
     
-    cursor = await db.execute("SELECT version FROM service_orders WHERE id = ?", (order_id,))
-    check_order = await cursor.fetchone()
-    if check_order["version"] != current_version:
-        raise HTTPException(status_code=409, detail="数据已被他人修改，请刷新后重试")
+    current_version = order["version"]
     
     if approved:
         new_status = "pending_finalize"
@@ -322,12 +485,14 @@ async def finalize_order(db, order_id, user, approved=True, opinion=None):
     if order["status"] not in ["pending_finalize", "finalizing"]:
         raise HTTPException(status_code=400, detail=f"当前状态「{ORDER_STATUSES.get(order['status'])}」不可复核")
     
-    current_version = order["version"]
+    time_info = await check_time_limit(db, order_id)
+    if time_info.get("expired"):
+        raise HTTPException(
+            status_code=400, 
+            detail=f"办理超时：已超过 {time_info['limit_hours']} 小时办理时限，不能复核"
+        )
     
-    cursor = await db.execute("SELECT version FROM service_orders WHERE id = ?", (order_id,))
-    check_order = await cursor.fetchone()
-    if check_order["version"] != current_version:
-        raise HTTPException(status_code=409, detail="数据已被他人修改，请刷新后重试")
+    current_version = order["version"]
     
     if approved:
         cursor = await db.execute("SELECT COUNT(*) as cnt FROM feedbacks WHERE order_id = ?", (order_id,))
@@ -374,12 +539,27 @@ async def add_feedback(db, order_id, feedback_data: FeedbackCreate, user):
     if order["status"] not in ["pending_review", "pending_finalize", "reviewing", "finalizing"]:
         raise HTTPException(status_code=400, detail=f"当前状态「{ORDER_STATUSES.get(order['status'])}」不可添加反馈")
     
+    if user["role"] not in ["reviewer", "finalizer"]:
+        raise HTTPException(status_code=403, detail="只有审核或复核人员可以提交课后反馈")
+    
+    current_version = order["version"]
+    
     await db.execute(
         """INSERT INTO feedbacks (order_id, attendance, performance, homework, teacher_comment, feedback_time, feedback_by)
            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)""",
         (order_id, feedback_data.attendance, feedback_data.performance, 
          feedback_data.homework, feedback_data.teacher_comment, user["username"])
     )
+    
+    await db.execute(
+        "UPDATE service_orders SET version = version + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND version = ?",
+        (order_id, current_version)
+    )
+    
+    cursor = await db.execute("SELECT changes() as cnt")
+    result = await cursor.fetchone()
+    if result["cnt"] == 0:
+        raise HTTPException(status_code=409, detail="并发冲突：服务单已被他人修改，请刷新后重试")
     
     await add_audit_log(db, order_id, "add_feedback", user["username"], user["role"],
                        order["status"], order["status"], "添加课后反馈")
