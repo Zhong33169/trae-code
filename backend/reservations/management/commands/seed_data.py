@@ -594,7 +594,7 @@ class Command(BaseCommand):
         self.stdout.write(f'  共创建 {len(reservations_data)} 条预约单')
 
         # ============================================
-        # 添加批量操作审计样例（模拟批量操作痕迹）
+        # 添加批量操作审计样例（幂等补写 - 避免重复）
         # ============================================
         self.stdout.write('\n  添加批量操作审计样例...')
 
@@ -604,120 +604,229 @@ class Command(BaseCommand):
         ta_wang = User.objects.get(username='ta_wang')
         ta_li = User.objects.get(username='ta_li')
 
-        # 样例 1：批量审核通过成功（刘管理员批量审核 2、3、12 号预约单）
-        batch_success_reservations = [
-            LabReservation.objects.get(reservation_no='LAB202506010002'),
-            LabReservation.objects.get(reservation_no='LAB202506010012'),
-        ]
+        # ========== 样例 1：批量审核通过成功（刘管理员批量审核 2、12 号预约单） ==========
+        batch_success_reservations_nos = ['LAB202506010002', 'LAB202506010012']
+        batch_success_count = 0
 
-        for idx, r in enumerate(batch_success_reservations, 1):
-            AuditLog.objects.create(
+        for idx, no in enumerate(batch_success_reservations_nos, 1):
+            r = LabReservation.objects.get(reservation_no=no)
+            # 幂等检查：是否已有批量审核通过记录
+            has_log = AuditLog.objects.filter(
                 reservation=r,
                 action=AuditLog.ACTION_LAB_REVIEW_PASS,
                 actor=labadmin_liu,
-                comment='批量审核通过',
-                previous_status=LabReservation.STATUS_SUBMITTED,
-                new_status=LabReservation.STATUS_LAB_REVIEWED,
-                reason=f'批量操作第 {idx}/{len(batch_success_reservations)} 条，材料齐全，审核通过',
-            )
+                comment='批量审核通过'
+            ).exists()
 
-        # 样例 2：批量审核失败痕迹（张管理员尝试批量操作，但部分失败）
-        batch_fail_reservations = [
-            LabReservation.objects.get(reservation_no='LAB202506010001'),
-            LabReservation.objects.get(reservation_no='LAB202506010003'),
-            LabReservation.objects.get(reservation_no='LAB202506010008'),
-        ]
+            if not has_log:
+                # 同步预约单状态和版本
+                if r.status != LabReservation.STATUS_LAB_REVIEWED:
+                    r.status = LabReservation.STATUS_LAB_REVIEWED
+                    r.lab_reviewed_at = timezone.now()
+                    r.lab_reviewer = labadmin_liu
+                    r.lab_review_comment = '批量审核通过'
+                    r.version = r.version + 1 if r.version == 1 else r.version
+                    r.save()
 
-        for r in batch_fail_reservations:
-            # 添加批量尝试的审计记录（操作失败）
-            missing = r.get_missing_evidence()
-            if missing:
-                labels = {'experiment_plan': '实验预约方案', 'material_application': '耗材申领单', 'safety_confirmation': '安全确认书'}
-                missing_labels = [labels.get(m, m) for m in missing]
-                fail_reason = f'证据不完整：缺少{"、".join(missing_labels)}'
-            else:
-                fail_reason = '状态不允许操作'
+                AuditLog.objects.create(
+                    reservation=r,
+                    action=AuditLog.ACTION_LAB_REVIEW_PASS,
+                    actor=labadmin_liu,
+                    comment='批量审核通过',
+                    previous_status=LabReservation.STATUS_SUBMITTED,
+                    new_status=LabReservation.STATUS_LAB_REVIEWED,
+                    reason=f'批量操作第 {idx}/{len(batch_success_reservations_nos)} 条，材料齐全，审核通过',
+                )
+                batch_success_count += 1
 
-            AuditLog.objects.create(
+        if batch_success_count:
+            self.stdout.write(f'  添加 {batch_success_count} 条批量审核通过审计样例')
+        else:
+            self.stdout.write('  批量审核通过样例已存在（跳过）')
+
+        # ========== 样例 2：批量审核失败痕迹（张管理员尝试批量操作，但部分失败） ==========
+        batch_fail_reservations_nos = ['LAB202506010001', 'LAB202506010003', 'LAB202506010008']
+        batch_fail_count = 0
+
+        for no in batch_fail_reservations_nos:
+            r = LabReservation.objects.get(reservation_no=no)
+            # 幂等检查
+            has_log = AuditLog.objects.filter(
                 reservation=r,
                 action=AuditLog.ACTION_LAB_REVIEW_PASS,
                 actor=labadmin_zhang,
-                comment='批量审核尝试（失败）',
-                previous_status=r.status,
-                new_status=r.status,
-                reason=f'批量操作失败：{fail_reason}',
-            )
+                comment='批量审核尝试（失败）'
+            ).exists()
 
-        # 样例 3：学院批量退回样例（赵院长批量退回 2 条预约单）
-        batch_reject_reservations = [
-            LabReservation.objects.get(reservation_no='LAB202506010004'),
-            LabReservation.objects.get(reservation_no='LAB202506010010'),
-        ]
+            if not has_log:
+                missing = r.get_missing_evidence()
+                if missing:
+                    labels = {'experiment_plan': '实验预约方案', 'material_application': '耗材申领单', 'safety_confirmation': '安全确认书'}
+                    missing_labels = [labels.get(m, m) for m in missing]
+                    fail_reason = f'证据不完整：缺少{"、".join(missing_labels)}'
+                else:
+                    fail_reason = '状态不允许操作'
 
-        for idx, r in enumerate(batch_reject_reservations, 1):
-            AuditLog.objects.create(
+                AuditLog.objects.create(
+                    reservation=r,
+                    action=AuditLog.ACTION_LAB_REVIEW_PASS,
+                    actor=labadmin_zhang,
+                    comment='批量审核尝试（失败）',
+                    previous_status=r.status,
+                    new_status=r.status,
+                    reason=f'批量操作失败：{fail_reason}',
+                )
+                batch_fail_count += 1
+
+        if batch_fail_count:
+            self.stdout.write(f'  添加 {batch_fail_count} 条批量审核失败审计样例')
+        else:
+            self.stdout.write('  批量审核失败样例已存在（跳过）')
+
+        # ========== 样例 3：学院批量退回样例（赵院长批量退回 2 条预约单） ==========
+        batch_reject_reservations_nos = ['LAB202506010004', 'LAB202506010010']
+        batch_reject_count = 0
+
+        for idx, no in enumerate(batch_reject_reservations_nos, 1):
+            r = LabReservation.objects.get(reservation_no=no)
+            # 幂等检查
+            has_log = AuditLog.objects.filter(
                 reservation=r,
                 action=AuditLog.ACTION_COLLEGE_REJECT,
                 actor=college_zhao,
-                comment='批量退回',
-                previous_status=LabReservation.STATUS_LAB_REVIEWED,
-                new_status=LabReservation.STATUS_COLLEGE_REJECTED,
-                reason=f'批量退回第 {idx}/{len(batch_reject_reservations)} 条：实验方案与教学计划不符，请重新提交',
-            )
+                comment='批量退回'
+            ).exists()
+
+            if not has_log:
+                # 同步预约单状态和版本
+                if r.status != LabReservation.STATUS_COLLEGE_REJECTED:
+                    r.status = LabReservation.STATUS_COLLEGE_REJECTED
+                    r.rejection_reason = '实验方案与教学计划不符，请重新提交'
+                    r.rejected_by = college_zhao
+                    r.rejected_at = timezone.now()
+                    r.version = r.version + 1 if r.version <= 2 else r.version
+                    r.save()
+
+                AuditLog.objects.create(
+                    reservation=r,
+                    action=AuditLog.ACTION_COLLEGE_REJECT,
+                    actor=college_zhao,
+                    comment='批量退回',
+                    previous_status=LabReservation.STATUS_LAB_REVIEWED,
+                    new_status=LabReservation.STATUS_COLLEGE_REJECTED,
+                    reason=f'批量退回第 {idx}/{len(batch_reject_reservations_nos)} 条：实验方案与教学计划不符，请重新提交',
+                )
+                batch_reject_count += 1
+
+        if batch_reject_count:
+            self.stdout.write(f'  添加 {batch_reject_count} 条批量退回审计样例')
+        else:
+            self.stdout.write('  批量退回样例已存在（跳过）')
 
         # ============================================
-        # 添加补录退回审计样例
+        # 添加补录退回审计样例（幂等补写）
         # ============================================
         self.stdout.write('\n  添加补录退回审计样例...')
+        suppl_count = 0
 
-        # 样例：王助教补录后被实验室管理员退回
+        # ========== 样例：王助教补录后被实验室管理员退回 ==========
         r_supp_reject = LabReservation.objects.get(reservation_no='LAB202506010006')
 
-        # 记录补录操作
-        AuditLog.objects.create(
+        # 检查并添加补录记录
+        has_suppl_log1 = AuditLog.objects.filter(
             reservation=r_supp_reject,
             action=AuditLog.ACTION_SUPPLEMENT,
             actor=ta_wang,
-            comment='补录耗材申领单',
-            previous_status=LabReservation.STATUS_LAB_REJECTED,
-            new_status=LabReservation.STATUS_LAB_REJECTED,
-            reason='补充缺失的耗材申领单，希望重新审核',
-        )
+            comment='补录耗材申领单'
+        ).exists()
 
-        # 记录再次被退回
-        AuditLog.objects.create(
+        if not has_suppl_log1:
+            # 同步版本号
+            if r_supp_reject.version <= 2:
+                r_supp_reject.version = 3
+                r_supp_reject.save()
+
+            AuditLog.objects.create(
+                reservation=r_supp_reject,
+                action=AuditLog.ACTION_SUPPLEMENT,
+                actor=ta_wang,
+                comment='补录耗材申领单',
+                previous_status=LabReservation.STATUS_LAB_REJECTED,
+                new_status=LabReservation.STATUS_LAB_REJECTED,
+                reason='补充缺失的耗材申领单，希望重新审核',
+            )
+            suppl_count += 1
+
+        # 检查并添加再次退回记录
+        has_reject_log1 = AuditLog.objects.filter(
             reservation=r_supp_reject,
             action=AuditLog.ACTION_LAB_REJECT,
             actor=labadmin_zhang,
-            comment='再次审核退回',
-            previous_status=LabReservation.STATUS_LAB_REJECTED,
-            new_status=LabReservation.STATUS_LAB_REJECTED,
-            reason='补录的耗材申领单规格不符合要求，请重新核对实验所需耗材清单',
-        )
+            comment='再次审核退回'
+        ).exists()
 
-        # 样例：李助教补录后被学院退回
+        if not has_reject_log1:
+            AuditLog.objects.create(
+                reservation=r_supp_reject,
+                action=AuditLog.ACTION_LAB_REJECT,
+                actor=labadmin_zhang,
+                comment='再次审核退回',
+                previous_status=LabReservation.STATUS_LAB_REJECTED,
+                new_status=LabReservation.STATUS_LAB_REJECTED,
+                reason='补录的耗材申领单规格不符合要求，请重新核对实验所需耗材清单',
+            )
+            suppl_count += 1
+
+        # ========== 样例：李助教补录后被学院退回 ==========
         r_supp_reject2 = LabReservation.objects.get(reservation_no='LAB202506010009')
 
-        # 记录补录操作
-        AuditLog.objects.create(
+        # 检查并添加补录记录
+        has_suppl_log2 = AuditLog.objects.filter(
             reservation=r_supp_reject2,
             action=AuditLog.ACTION_SUPPLEMENT,
             actor=ta_li,
-            comment='补录安全确认书',
-            previous_status=LabReservation.STATUS_COLLEGE_REJECTED,
-            new_status=LabReservation.STATUS_COLLEGE_REJECTED,
-            reason='补充安全责任确认书',
-        )
+            comment='补录安全确认书'
+        ).exists()
 
-        # 记录再次被学院退回
-        AuditLog.objects.create(
+        if not has_suppl_log2:
+            # 同步版本号
+            if r_supp_reject2.version <= 2:
+                r_supp_reject2.version = 3
+                r_supp_reject2.save()
+
+            AuditLog.objects.create(
+                reservation=r_supp_reject2,
+                action=AuditLog.ACTION_SUPPLEMENT,
+                actor=ta_li,
+                comment='补录安全确认书',
+                previous_status=LabReservation.STATUS_COLLEGE_REJECTED,
+                new_status=LabReservation.STATUS_COLLEGE_REJECTED,
+                reason='补充安全责任确认书',
+            )
+            suppl_count += 1
+
+        # 检查并添加再次学院退回记录
+        has_reject_log2 = AuditLog.objects.filter(
             reservation=r_supp_reject2,
             action=AuditLog.ACTION_COLLEGE_REJECT,
             actor=college_zhao,
-            comment='学院退回',
-            previous_status=LabReservation.STATUS_COLLEGE_REJECTED,
-            new_status=LabReservation.STATUS_COLLEGE_REJECTED,
-            reason='补录的安全确认书缺少指导教师签字，请完善后重新提交',
-        )
+            comment='学院退回'
+        ).exists()
 
-        self.stdout.write(f'  共添加 {len(batch_success_reservations) + len(batch_fail_reservations) + len(batch_reject_reservations) + 4} 条批量/补录审计样例')
+        if not has_reject_log2:
+            AuditLog.objects.create(
+                reservation=r_supp_reject2,
+                action=AuditLog.ACTION_COLLEGE_REJECT,
+                actor=college_zhao,
+                comment='学院退回',
+                previous_status=LabReservation.STATUS_COLLEGE_REJECTED,
+                new_status=LabReservation.STATUS_COLLEGE_REJECTED,
+                reason='补录的安全确认书缺少指导教师签字，请完善后重新提交',
+            )
+            suppl_count += 1
+
+        total = batch_success_count + batch_fail_count + batch_reject_count + suppl_count
+        if total > 0:
+            self.stdout.write(f'  共添加 {total} 条批量/补录审计样例')
+        else:
+            self.stdout.write('  所有审计样例已存在（全部跳过）')

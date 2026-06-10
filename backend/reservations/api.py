@@ -531,9 +531,14 @@ def batch_operation(request, payload: BatchOperationIn):
             fail_count += 1
             results.append({
                 'id': res_id,
+                'reservation_no': None,
                 'success': False,
                 'error': '预约单不存在',
                 'code': 'not_found',
+                'errors': ['预约单不存在或已被删除'],
+                'previous_status': None,
+                'current_version': None,
+                'missing_evidence': [],
             })
             continue
 
@@ -551,6 +556,7 @@ def batch_operation(request, payload: BatchOperationIn):
                     '可能有其他人已修改此预约单，请刷新页面获取最新版本'
                 ],
                 'previous_status': reservation.status,
+                'current_status': reservation.status,
                 'current_version': reservation.version,
                 'expected_version': expected_ver,
                 'missing_evidence': missing,
@@ -571,6 +577,7 @@ def batch_operation(request, payload: BatchOperationIn):
                     'code': 'cannot_operate',
                     'errors': detailed_errors,
                     'previous_status': reservation.status,
+                    'current_status': reservation.status,
                     'current_version': reservation.version,
                     'missing_evidence': missing,
                 })
@@ -588,6 +595,7 @@ def batch_operation(request, payload: BatchOperationIn):
                     'code': 'insufficient_evidence',
                     'errors': [f'缺少证据：{"、".join(missing_labels)}'],
                     'previous_status': reservation.status,
+                    'current_status': reservation.status,
                     'current_version': reservation.version,
                     'missing_evidence': missing,
                 })
@@ -619,10 +627,13 @@ def batch_operation(request, payload: BatchOperationIn):
                 'success': True,
                 'action': 'lab_review_pass',
                 'previous_status': previous_status,
+                'current_status': LabReservation.STATUS_LAB_REVIEWED,
                 'new_status': LabReservation.STATUS_LAB_REVIEWED,
                 'previous_version': expected_ver,
+                'current_version': reservation.version,
                 'new_version': reservation.version,
                 'comment': payload.comment,
+                'missing_evidence': [],
             })
 
         elif payload.operation == 'lab_reject':
@@ -639,6 +650,7 @@ def batch_operation(request, payload: BatchOperationIn):
                     'code': 'cannot_operate',
                     'errors': detailed_errors,
                     'previous_status': reservation.status,
+                    'current_status': reservation.status,
                     'current_version': reservation.version,
                     'missing_evidence': missing,
                 })
@@ -670,10 +682,13 @@ def batch_operation(request, payload: BatchOperationIn):
                 'success': True,
                 'action': 'lab_reject',
                 'previous_status': previous_status,
+                'current_status': LabReservation.STATUS_LAB_REJECTED,
                 'new_status': LabReservation.STATUS_LAB_REJECTED,
                 'previous_version': expected_ver,
+                'current_version': reservation.version,
                 'new_version': reservation.version,
                 'comment': payload.comment,
+                'missing_evidence': [],
             })
 
         elif payload.operation == 'college_confirm_pass':
@@ -690,6 +705,7 @@ def batch_operation(request, payload: BatchOperationIn):
                     'code': 'cannot_operate',
                     'errors': detailed_errors,
                     'previous_status': reservation.status,
+                    'current_status': reservation.status,
                     'current_version': reservation.version,
                     'missing_evidence': missing,
                 })
@@ -721,10 +737,13 @@ def batch_operation(request, payload: BatchOperationIn):
                 'success': True,
                 'action': 'college_confirm_pass',
                 'previous_status': previous_status,
+                'current_status': LabReservation.STATUS_CONFIRMED,
                 'new_status': LabReservation.STATUS_CONFIRMED,
                 'previous_version': expected_ver,
+                'current_version': reservation.version,
                 'new_version': reservation.version,
                 'comment': payload.comment,
+                'missing_evidence': [],
             })
 
         elif payload.operation == 'college_reject':
@@ -741,6 +760,7 @@ def batch_operation(request, payload: BatchOperationIn):
                     'code': 'cannot_operate',
                     'errors': detailed_errors,
                     'previous_status': reservation.status,
+                    'current_status': reservation.status,
                     'current_version': reservation.version,
                     'missing_evidence': missing,
                 })
@@ -772,10 +792,13 @@ def batch_operation(request, payload: BatchOperationIn):
                 'success': True,
                 'action': 'college_reject',
                 'previous_status': previous_status,
+                'current_status': LabReservation.STATUS_COLLEGE_REJECTED,
                 'new_status': LabReservation.STATUS_COLLEGE_REJECTED,
                 'previous_version': expected_ver,
+                'current_version': reservation.version,
                 'new_version': reservation.version,
                 'comment': payload.comment,
+                'missing_evidence': [],
             })
 
     return {

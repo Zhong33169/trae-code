@@ -10,6 +10,11 @@
     updateFilters,
     filterParams,
     loadReservations,
+    selectedIds,
+    isAllSelected,
+    toggleSelectId,
+    toggleSelectAll,
+    clearSelection,
   } from '$lib/stores.js';
   import { STATUS_LABELS, STATUS_COLORS, RESERVATION_STATUS } from '$lib/constants.js';
   import ReservationDetail from '$lib/components/ReservationDetail.svelte';
@@ -17,7 +22,6 @@
   import FilterBar from '$lib/components/FilterBar.svelte';
   import BatchToolbar from '$lib/components/BatchToolbar.svelte';
 
-  let selectedIds = new Set();
   let showDetail = false;
 
   $: reservations = $listData.items;
@@ -40,32 +44,12 @@
     selectReservation(null);
   }
 
-  function toggleSelect(id, event) {
-    event.stopPropagation();
-    const newSet = new Set(selectedIds);
-    if (newSet.has(id)) {
-      newSet.delete(id);
-    } else {
-      newSet.add(id);
-    }
-    selectedIds = newSet;
-  }
-
-  function toggleSelectAll() {
-    if (selectedIds.size === reservations.length) {
-      selectedIds = new Set();
-    } else {
-      selectedIds = new Set(reservations.map((r) => r.id));
-    }
-  }
-
   function handleFilterChange(filters) {
     updateFilters(filters);
-    selectedIds = new Set();
   }
 
   function handleBatchComplete() {
-    selectedIds = new Set();
+    clearSelection();
     refreshAll();
   }
 
@@ -96,7 +80,7 @@
     <FilterBar on:change={(e) => handleFilterChange(e.detail)} />
 
     <BatchToolbar
-      {selectedIds}
+      selectedIds={$selectedIds}
       {reservations}
       on:complete={handleBatchComplete}
     />
@@ -113,7 +97,7 @@
           <label class="checkbox-label">
             <input
               type="checkbox"
-              checked={selectedIds.size === reservations.length && reservations.length > 0}
+              checked={$isAllSelected}
               on:change={toggleSelectAll}
             />
             <span>全选</span>
@@ -126,15 +110,15 @@
         {#each reservations as r (r.id)}
           <div
             class="reservation-card"
-            class:selected={selectedIds.has(r.id)}
+            class:selected={$selectedIds.has(r.id)}
             class:has-supplementary={r.supplementary_count > 0}
             on:click={() => handleSelect(r.id)}
           >
-            <div class="card-checkbox" on:click|stopPropagation={(e) => toggleSelect(r.id, e)}>
+            <div class="card-checkbox" on:click|stopPropagation={() => toggleSelectId(r.id)}>
               <input
                 type="checkbox"
-                checked={selectedIds.has(r.id)}
-                on:change={(e) => toggleSelect(r.id, e)}
+                checked={$selectedIds.has(r.id)}
+                on:change|stopPropagation={() => toggleSelectId(r.id)}
               />
             </div>
             <div class="card-main">

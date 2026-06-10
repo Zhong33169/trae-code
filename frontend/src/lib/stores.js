@@ -18,6 +18,42 @@ export const currentUser = derived(currentUserId, ($id) => {
 
 export const selectedReservationId = writable(null);
 
+export const selectedIds = writable(new Set());
+
+export const isAllSelected = derived(
+  [selectedIds, listData],
+  ([$selectedIds, $listData]) => {
+    const items = $listData.items;
+    return items.length > 0 && $selectedIds.size === items.length;
+  }
+);
+
+export function toggleSelectId(id) {
+  selectedIds.update((set) => {
+    const newSet = new Set(set);
+    if (newSet.has(id)) {
+      newSet.delete(id);
+    } else {
+      newSet.add(id);
+    }
+    return newSet;
+  });
+}
+
+export function toggleSelectAll() {
+  const items = get(listData).items;
+  const allSelected = get(isAllSelected);
+  if (allSelected) {
+    selectedIds.set(new Set());
+  } else {
+    selectedIds.set(new Set(items.map((r) => r.id)));
+  }
+}
+
+export function clearSelection() {
+  selectedIds.set(new Set());
+}
+
 export const filterParams = writable({
   status: '',
   keyword: '',
@@ -129,11 +165,13 @@ export function switchUser(userId) {
   currentUserId.set(userId);
   selectedReservationId.set(null);
   filterParams.update((p) => ({ ...p, page: 1 }));
+  clearSelection();
   refreshAll();
 }
 
 export function updateFilters(newFilters) {
   filterParams.update((p) => ({ ...p, ...newFilters, page: 1 }));
+  clearSelection();
   refreshAll();
 }
 

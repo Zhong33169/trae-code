@@ -326,30 +326,75 @@
 
       <div class="tab-content">
         {#if activeTab === 'info'}
-          <div class="timeline">
-            {#each auditLogs as log (log.id)}
-              <div class="timeline-item">
-                <div class="timeline-dot" />
-                <div class="timeline-content">
-                  <div class="timeline-header">
-                    <span class="log-action">{log.action_display}</span>
-                    <span class="log-time">{formatTime(log.action_time)}</span>
-                  </div>
-                  <div class="log-actor">操作人：{log.actor}</div>
-                  {#if log.comment}
-                    <div class="log-comment">说明：{log.comment}</div>
-                  {/if}
-                  {#if log.reason}
-                    <div class="log-reason">原因：{log.reason}</div>
-                  {/if}
-                  {#if log.previous_status && log.new_status}
-                    <div class="log-status-change">
-                      {STATUS_LABELS[log.previous_status] || '-'} → {STATUS_LABELS[log.new_status]}
+          <div class="timeline-wrapper">
+            {#if auditLogs.length === 0}
+              <div class="empty">暂无操作记录</div>
+            {:else}
+              <div class="timeline">
+                {#each auditLogs as log (log.id)}
+                  <div
+                    class="timeline-item"
+                    class:action-pass={log.action === 'lab_review_pass' || log.action === 'college_confirm'}
+                    class:action-reject={log.action === 'lab_reject' || log.action === 'college_reject'}
+                    class:action-supplement={log.action === 'supplement'}
+                    class:action-submit={log.action === 'submit'}
+                    class:action-create={log.action === 'create'}
+                    class:action-update={log.action === 'update'}
+                    class:status-no-change={log.previous_status === log.new_status}
+                  >
+                    <div class="timeline-line-left" />
+                    <div class="timeline-dot">
+                      {#if log.action === 'create'}
+                        <span class="dot-icon">+</span>
+                      {:else if log.action === 'submit'}
+                        <span class="dot-icon">→</span>
+                      {:else if log.action === 'lab_review_pass' || log.action === 'college_confirm'}
+                        <span class="dot-icon">✓</span>
+                      {:else if log.action === 'lab_reject' || log.action === 'college_reject'}
+                        <span class="dot-icon">✕</span>
+                      {:else if log.action === 'supplement'}
+                        <span class="dot-icon">+</span>
+                      {:else}
+                        <span class="dot-icon">•</span>
+                      {/if}
                     </div>
-                  {/if}
-                </div>
+                    <div class="timeline-line-right" />
+                    <div class="timeline-content">
+                      <div class="timeline-header">
+                        <span class="log-action" class:fail={log.previous_status === log.new_status}>
+                          {log.action_display}
+                          {#if log.previous_status === log.new_status}
+                            <span class="fail-tag">（未变更）</span>
+                          {/if}
+                        </span>
+                        <span class="log-time">{formatTime(log.action_time)}</span>
+                      </div>
+                      <div class="log-actor-row">
+                        <span class="log-actor">操作人：<strong>{log.actor}</strong></span>
+                      </div>
+                      {#if log.previous_status && log.new_status}
+                        <div class="log-status-change" class:no-change={log.previous_status === log.new_status}>
+                          <span class="status-label">状态流转：</span>
+                          <span class="status-old">{STATUS_LABELS[log.previous_status] || '-'}</span>
+                          <span class="status-arrow">→</span>
+                          <span class="status-new">{STATUS_LABELS[log.new_status]}</span>
+                        </div>
+                      {/if}
+                      {#if log.comment}
+                        <div class="log-comment">
+                          <span class="log-label">说明：</span>{log.comment}
+                        </div>
+                      {/if}
+                      {#if log.reason}
+                        <div class="log-reason">
+                          <span class="log-label">原因：</span>{log.reason}
+                        </div>
+                      {/if}
+                    </div>
+                  </div>
+                {/each}
               </div>
-            {/each}
+            {/if}
           </div>
         {/if}
 
@@ -931,64 +976,269 @@
     overflow-y: auto;
   }
 
+  .timeline-wrapper {
+    padding: 8px 0;
+  }
+
   .timeline {
-    padding-left: 8px;
+    position: relative;
+    padding-left: 0;
   }
 
   .timeline-item {
     display: flex;
-    gap: 12px;
-    margin-bottom: 16px;
+    gap: 10px;
+    margin-bottom: 20px;
     position: relative;
+    padding-bottom: 4px;
+  }
+
+  .timeline-item:last-child {
+    margin-bottom: 0;
+  }
+
+  .timeline-line-left,
+  .timeline-line-right {
+    display: none;
   }
 
   .timeline-dot {
-    width: 12px;
-    height: 12px;
+    width: 30px;
+    height: 30px;
     border-radius: 50%;
-    background: #2d5a87;
+    background: #e8e8e8;
     flex-shrink: 0;
-    margin-top: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2;
+    border: 3px solid white;
+    box-shadow: 0 0 0 2px #ddd;
+    transition: all 0.3s ease;
+    position: absolute;
+    left: 0;
+    top: 0;
+  }
+
+  .dot-icon {
+    font-size: 12px;
+    font-weight: bold;
+    color: #888;
+  }
+
+  .timeline-item.action-create .timeline-dot {
+    background: #5dade2;
+    box-shadow: 0 0 0 2px #5dade2;
+  }
+  .timeline-item.action-create .dot-icon {
+    color: white;
+  }
+
+  .timeline-item.action-submit .timeline-dot {
+    background: #aed6f1;
+    box-shadow: 0 0 0 2px #aed6f1;
+  }
+  .timeline-item.action-submit .dot-icon {
+    color: #1a5276;
+  }
+
+  .timeline-item.action-pass .timeline-dot {
+    background: #27ae60;
+    box-shadow: 0 0 0 2px #27ae60;
+  }
+  .timeline-item.action-pass .dot-icon {
+    color: white;
+  }
+
+  .timeline-item.action-reject .timeline-dot {
+    background: #e74c3c;
+    box-shadow: 0 0 0 2px #e74c3c;
+  }
+  .timeline-item.action-reject .dot-icon {
+    color: white;
+  }
+
+  .timeline-item.action-supplement .timeline-dot {
+    background: #f39c12;
+    box-shadow: 0 0 0 2px #f39c12;
+  }
+  .timeline-item.action-supplement .dot-icon {
+    color: white;
+  }
+
+  .timeline-item.status-no-change .timeline-dot {
+    background: #bdc3c7;
+    box-shadow: 0 0 0 2px #95a5a6;
   }
 
   .timeline-content {
     flex: 1;
+    margin-left: 42px;
+    padding: 10px 12px;
+    background: #fafafa;
+    border-radius: 6px;
+    border: 1px solid #eee;
+    border-left: 3px solid #ccc;
+    transition: all 0.2s;
+  }
+
+  .timeline-item.action-pass .timeline-content {
+    border-left-color: #27ae60;
+    background: #f0faf4;
+  }
+
+  .timeline-item.action-reject .timeline-content {
+    border-left-color: #e74c3c;
+    background: #fdf2f2;
+  }
+
+  .timeline-item.action-supplement .timeline-content {
+    border-left-color: #f39c12;
+    background: #fffaf0;
+  }
+
+  .timeline-item.action-create .timeline-content {
+    border-left-color: #5dade2;
+    background: #f4f9fd;
+  }
+
+  .timeline-item.action-submit .timeline-content {
+    border-left-color: #3498db;
+    background: #f5f9fe;
+  }
+
+  .timeline-item.status-no-change .timeline-content {
+    border-left-color: #95a5a6;
+    background: #f8f9fa;
+    opacity: 0.85;
   }
 
   .timeline-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 4px;
+    margin-bottom: 6px;
   }
 
   .log-action {
     font-size: 13px;
+    font-weight: 600;
+    color: #2c3e50;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .log-action.fail {
+    color: #7f8c8d;
+  }
+
+  .fail-tag {
+    font-size: 10px;
     font-weight: 500;
-    color: #1e3a5f;
+    background: #ecf0f1;
+    color: #7f8c8d;
+    padding: 1px 6px;
+    border-radius: 8px;
   }
 
   .log-time {
     font-size: 11px;
     color: #999;
+    white-space: nowrap;
   }
 
-  .log-actor,
-  .log-comment,
-  .log-reason,
+  .log-actor-row {
+    margin-bottom: 4px;
+  }
+
+  .log-actor {
+    font-size: 12px;
+    color: #555;
+  }
+
+  .log-actor strong {
+    color: #2c3e50;
+  }
+
   .log-status-change {
     font-size: 12px;
+    color: #27ae60;
+    font-weight: 500;
+    margin: 4px 0;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-wrap: wrap;
+  }
+
+  .log-status-change.no-change {
+    color: #95a5a6;
+  }
+
+  .status-label {
     color: #666;
-    margin-top: 2px;
+    font-weight: 400;
+  }
+
+  .status-old {
+    background: #fff3e0;
+    padding: 1px 8px;
+    border-radius: 10px;
+    font-size: 11px;
+    color: #e65100;
+  }
+
+  .status-arrow {
+    color: #999;
+  }
+
+  .status-new {
+    background: #e8f5e9;
+    padding: 1px 8px;
+    border-radius: 10px;
+    font-size: 11px;
+    color: #2e7d32;
+    font-weight: 600;
+  }
+
+  .log-status-change.no-change .status-new {
+    background: #f5f5f5;
+    color: #757575;
+  }
+
+  .log-comment,
+  .log-reason {
+    font-size: 12px;
+    margin-top: 4px;
+    line-height: 1.5;
+  }
+
+  .log-comment {
+    color: #555;
+    background: white;
+    padding: 6px 8px;
+    border-radius: 4px;
+    border: 1px dashed #ddd;
   }
 
   .log-reason {
-    color: #e67e22;
+    color: #d35400;
+    background: #fff8e1;
+    padding: 6px 8px;
+    border-radius: 4px;
+    border-left: 3px solid #f39c12;
   }
 
-  .log-status-change {
-    color: #27ae60;
+  .log-label {
     font-weight: 500;
+    color: #666;
+  }
+
+  .timeline-item.status-no-change .log-reason {
+    background: #f8f9fa;
+    border-left-color: #95a5a6;
+    color: #555;
   }
 
   .supplementary-list .supp-item {
