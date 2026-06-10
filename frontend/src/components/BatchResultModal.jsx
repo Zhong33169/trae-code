@@ -7,6 +7,8 @@ export default function BatchResultModal({ result, onClose, type = 'audit' }) {
   const successRecords = result.success_records || []
   const failedItems = result.failed_items || []
 
+  const responsibleRoleName = type === 'audit' ? '晨检审核主管' : '幼儿园复核负责人'
+
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal modal-large" onClick={(e) => e.stopPropagation()}>
@@ -15,7 +17,34 @@ export default function BatchResultModal({ result, onClose, type = 'audit' }) {
           <button className="modal-close" onClick={onClose}>×</button>
         </div>
         <div className="modal-body">
+          {result.batch_no && (
+            <div style={{ marginBottom: '16px', padding: '12px 16px', background: '#ecf5ff', borderRadius: '6px', border: '1px solid #d9ecff' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                <div>
+                  <span style={{ fontSize: '12px', color: '#606266' }}>批次号：</span>
+                  <span style={{ fontWeight: 600, color: '#409eff', fontFamily: 'monospace' }}>{result.batch_no}</span>
+                </div>
+                <div>
+                  <span style={{ fontSize: '12px', color: '#606266' }}>责任岗位：</span>
+                  <span className={`role-badge role-${type === 'audit' ? 'auditor' : 'reviewer'}`}>
+                    {responsibleRoleName}
+                  </span>
+                </div>
+                {result.operator_name && (
+                  <div>
+                    <span style={{ fontSize: '12px', color: '#606266' }}>操作人：</span>
+                    <span style={{ color: '#303133' }}>{result.operator_name}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           <div className="batch-summary">
+            <div className="summary-item total">
+              <div className="summary-label">总计</div>
+              <div className="summary-value">{result.total_count !== undefined ? result.total_count : (result.success_count || 0) + (result.fail_count || 0)}</div>
+            </div>
             <div className="summary-item success">
               <div className="summary-label">成功</div>
               <div className="summary-value">{result.success_count || 0}</div>
@@ -23,10 +52,6 @@ export default function BatchResultModal({ result, onClose, type = 'audit' }) {
             <div className="summary-item failed">
               <div className="summary-label">失败</div>
               <div className="summary-value">{result.fail_count || 0}</div>
-            </div>
-            <div className="summary-item total">
-              <div className="summary-label">总计</div>
-              <div className="summary-value">{(result.success_count || 0) + (result.fail_count || 0)}</div>
             </div>
           </div>
 
@@ -37,7 +62,10 @@ export default function BatchResultModal({ result, onClose, type = 'audit' }) {
                 {failedItems.map((item, idx) => (
                   <div key={idx} className="failed-item">
                     <span className="failed-id">#{item.id}</span>
-                    <span className="failed-error">{item.error}</span>
+                    <span className="failed-name" style={{ marginLeft: '8px', color: '#606266' }}>
+                      {item.child_name}
+                    </span>
+                    <span className="failed-error" style={{ marginLeft: 'auto' }}>{item.error}</span>
                   </div>
                 ))}
               </div>
@@ -59,6 +87,11 @@ export default function BatchResultModal({ result, onClose, type = 'audit' }) {
                   >
                     <span className="success-id">#{item.id}</span>
                     <span className="success-name">{item.child_name}</span>
+                    {item.to_status_name && (
+                      <span style={{ marginLeft: 'auto', fontSize: '12px', color: '#67c23a' }}>
+                        {item.to_status_name}
+                      </span>
+                    )}
                   </div>
                 ))}
               </div>

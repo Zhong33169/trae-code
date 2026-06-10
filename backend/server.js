@@ -916,23 +916,37 @@ app.put('/api/records/batch/review-pass', authenticate, requireRole('reviewer'),
     const now = nowIso();
     let successCount = 0;
     let failCount = 0;
-    const successRecords = [];
-    const failedItems = [];
+    const details = [];
 
     for (const record of records) {
+      const detail = {
+        id: record.id,
+        record_id: record.id,
+        child_id: record.child_id,
+        child_name: record.child_name,
+        result: 'fail',
+        from_status: record.status,
+        from_status_name: STATUS_NAMES[record.status] || record.status,
+        to_status: null,
+        to_status_name: null,
+        error: null,
+        abnormal_reason: null,
+        responsible_role: 'reviewer',
+        responsible_role_name: ROLE_NAMES['reviewer'],
+        remark: review_note || '',
+      };
+
       try {
         if (!canPerformAction(req.user.role, record.status, 'review_pass')) {
-          const errorMsg = `当前状态为「${STATUS_NAMES[record.status]}」，不能复核归档`;
-          failedItems.push({
-            id: record.id,
-            child_id: record.child_id,
-            child_name: record.child_name,
-            error: errorMsg,
-          });
+          detail.error = `当前状态为「${STATUS_NAMES[record.status]}」，不能复核归档`;
+          detail.remark = '状态校验失败：' + detail.error;
           failCount++;
-          await addBatchDetail(batchId, record.id, record.child_id, record.child_name, 'fail', errorMsg, record.status, null, null, 'reviewer', review_note || '');
+          details.push(detail);
+          await addBatchDetail(batchId, record.id, record.child_id, record.child_name, 'fail', detail.error, record.status, null, null, 'reviewer', review_note || '');
           continue;
         }
+
+        await db.exec('BEGIN');
 
         await db.run(
           `UPDATE morning_check_records
@@ -942,25 +956,27 @@ app.put('/api/records/batch/review-pass', authenticate, requireRole('reviewer'),
         );
 
         await addOperationLog(record.id, req.user.id, req.user.name, req.user.role, '批量复核归档', record.status, 'archived', review_note || '', batchId);
+
         await addBatchDetail(batchId, record.id, record.child_id, record.child_name, 'success', null, record.status, 'archived', null, 'reviewer', review_note || '');
 
+        await db.exec('COMMIT');
+
+        detail.result = 'success';
+        detail.to_status = 'archived';
+        detail.to_status_name = STATUS_NAMES['archived'];
+        detail.error = null;
         successCount++;
-        successRecords.push({
-          id: record.id,
-          child_id: record.child_id,
-          child_name: record.child_name,
-          status: 'archived',
-          status_name: STATUS_NAMES['archived'],
-        });
+        details.push(detail);
       } catch (err) {
+        try { await db.exec('ROLLBACK'); } catch (e) { /* ignore */ }
+        detail.result = 'fail';
+        detail.error = err.message;
+        detail.remark = '处理异常：' + err.message;
         failCount++;
-        failedItems.push({
-          id: record.id,
-          child_id: record.child_id,
-          child_name: record.child_name,
-          error: err.message,
-        });
-        await addBatchDetail(batchId, record.id, record.child_id, record.child_name, 'fail', err.message, record.status, null, null, 'reviewer', review_note || '');
+        details.push(detail);
+        try {
+          await addBatchDetail(batchId, record.id, record.child_id, record.child_name, 'fail', err.message, record.status, null, null, 'reviewer', review_note || '');
+        } catch (e) { /* ignore */ }
       }
     }
 
@@ -969,11 +985,17 @@ app.put('/api/records/batch/review-pass', authenticate, requireRole('reviewer'),
     res.json({
       batch_no: batchNo,
       batch_id: batchId,
+      batch_type: 'review',
+      batch_type_name: '批量复核',
+      operator_name: req.user.name,
+      operator_role: req.user.role,
       message: `批量复核完成：成功 ${successCount} 条，失败 ${failCount} 条`,
+      total_count: records.length,
       success_count: successCount,
       fail_count: failCount,
-      success_records: successRecords,
-      failed_items: failedItems,
+      details,
+      success_records: details.filter(d => d.result === 'success'),
+      failed_items: details.filter(d => d.result === 'fail'),
     });
   } catch (err) {
     res.status(500).json({ error: '批量复核失败：' + err.message });

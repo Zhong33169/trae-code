@@ -443,23 +443,42 @@ export default function Records({ user }) {
                       )}
                       {expandedBatchId === batch.id && batchDetail && batchDetail.id === batch.id && (
                         <div className="batch-detail-list">
-                          <div style={{ fontSize: '13px', fontWeight: 500, marginBottom: '8px', color: '#606266' }}>
-                            处理明细
+                          <div style={{ fontSize: '13px', fontWeight: 500, marginBottom: '12px', color: '#606266' }}>
+                            处理明细（共 {batchDetail.details?.length || 0} 条）
                           </div>
                           {batchDetail.details?.map(detail => (
                             <div key={detail.id} className="batch-detail-item">
-                              <div className="batch-detail-name">
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
                                 <span className={`batch-result ${detail.result}`}>
                                   {detail.result_name}
                                 </span>
-                                <span style={{ marginLeft: '8px' }}>
-                                  {detail.child_name}（#{detail.record_id}）
+                                <span style={{ fontWeight: 500, color: '#303133' }}>
+                                  {detail.child_name}
+                                </span>
+                                <span style={{ fontSize: '12px', color: '#909399' }}>
+                                  #{detail.record_id}
                                 </span>
                               </div>
-                              <div className="batch-detail-status">
-                                {detail.from_status && detail.to_status && (
-                                  <span>{detail.from_status_name} → {detail.to_status_name}</span>
+                              <div style={{ flex: 1, fontSize: '12px', color: '#606266', textAlign: 'center' }}>
+                                {detail.from_status_name && detail.to_status_name && (
+                                  <span>
+                                    {detail.from_status_name} → <span style={{ color: '#67c23a' }}>{detail.to_status_name}</span>
+                                  </span>
                                 )}
+                              </div>
+                              <div style={{ flex: 1, fontSize: '12px', color: '#606266', textAlign: 'center' }}>
+                                {detail.responsible_role_name && (
+                                  <span className={`role-badge role-${detail.responsible_role}`}>
+                                    {detail.responsible_role_name}
+                                  </span>
+                                )}
+                              </div>
+                              <div style={{ flex: 2, fontSize: '12px', textAlign: 'right' }}>
+                                {detail.error_message ? (
+                                  <span style={{ color: '#f56c6c' }}>{detail.error_message}</span>
+                                ) : detail.remark ? (
+                                  <span style={{ color: '#909399' }}>{detail.remark}</span>
+                                ) : null}
                               </div>
                               <button
                                 className="btn btn-small"
