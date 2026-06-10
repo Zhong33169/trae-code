@@ -13,6 +13,8 @@ import { OrderListComponent } from './components/order-list/order-list.component
 import { OrderDetailComponent } from './components/order-detail/order-detail.component';
 import { OrderCreateComponent } from './components/order-create/order-create.component';
 import { TimelineComponent } from './components/timeline/timeline.component';
+import { ReviewListComponent } from './components/review-list/review-list.component';
+import { ReviewDetailComponent } from './components/review-detail/review-detail.component';
 
 @NgModule({
   declarations: [
@@ -23,6 +25,8 @@ import { TimelineComponent } from './components/timeline/timeline.component';
     OrderDetailComponent,
     OrderCreateComponent,
     TimelineComponent,
+    ReviewListComponent,
+    ReviewDetailComponent,
   ],
   imports: [
     BrowserModule,

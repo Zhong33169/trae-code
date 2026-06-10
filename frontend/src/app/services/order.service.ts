@@ -1,12 +1,13 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
-import { RepairOrder, RiskLevel } from '../models';
+import { RepairOrder, RiskLevel, RiskReview, ReviewDetailResponse } from '../models';
 import { environment } from '../../environments/environment';
 
 @Injectable({ providedIn: 'root' })
 export class OrderService {
   private readonly baseUrl = `${environment.apiBaseUrl}/orders`;
+  private readonly reviewsUrl = `${environment.apiBaseUrl}/reviews`;
   constructor(private http: HttpClient) {}
 
   getOrders(params?: {
@@ -83,5 +84,13 @@ export class OrderService {
     reason: string;
   }): Observable<RepairOrder> {
     return this.http.post<RepairOrder>(`${this.baseUrl}/${id}/risk-change`, payload);
+  }
+
+  getReviews(): Observable<RiskReview[]> {
+    return this.http.get<RiskReview[]>(this.reviewsUrl);
+  }
+
+  getReview(id: number): Observable<ReviewDetailResponse> {
+    return this.http.get<ReviewDetailResponse>(`${this.reviewsUrl}/${id}`);
   }
 }

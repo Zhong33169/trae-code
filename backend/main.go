@@ -75,6 +75,12 @@ func main() {
 		r.Get("/overview", handlers.GetOverviewStats)
 	})
 
+	r.Route("/api/reviews", func(r chi.Router) {
+		r.Use(middleware.AuthMiddleware)
+		r.Get("/", handlers.ListRiskReviews)
+		r.Get("/{id}", handlers.GetRiskReview)
+	})
+
 	addr := fmt.Sprintf("0.0.0.0:%d", cfg.Port)
 	log.Printf("========================================")
 	log.Printf("维修管理系统后端服务启动")

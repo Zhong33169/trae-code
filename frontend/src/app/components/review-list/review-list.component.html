@@ -1,0 +1,77 @@
+<div class="page-container">
+  <div class="page-header">
+    <h2>📊 月末风险处置复盘</h2>
+    <p class="page-subtitle">按批次查看缺证据提交、补正重提、风险升降级成败的时间线与责任人</p>
+  </div>
+
+  <div *ngIf="loading" class="loading">加载中...</div>
+
+  <div *ngIf="!loading && reviews.length === 0" class="empty">
+    暂无月末复盘数据
+  </div>
+
+  <div class="review-grid" *ngIf="!loading && reviews.length > 0">
+    <div
+      class="review-card"
+      *ngFor="let rv of reviews"
+      (click)="goDetail(rv.id)"
+    >
+      <div class="review-card-header">
+        <div class="review-batch">
+          <span class="batch-icon">🗂️</span>
+          <strong>{{ rv.batch_no }}</strong>
+          <span [ngClass]="['badge', statusBadge(rv.status)]">
+            {{ REVIEW_STATUS_NAMES[rv.status] }}
+          </span>
+        </div>
+        <div class="review-month">{{ rv.review_month }}</div>
+      </div>
+
+      <div class="review-card-title">{{ rv.title }}</div>
+
+      <div class="review-meta">
+        <span>📅 周期：{{ formatDate(rv.start_date) }} ~ {{ formatDate(rv.end_date) }}</span>
+      </div>
+
+      <div class="review-stats">
+        <div class="stat-item">
+          <div class="stat-num">{{ rv.total_orders }}</div>
+          <div class="stat-label">工单总数</div>
+        </div>
+        <div class="stat-item high">
+          <div class="stat-num">{{ rv.high_risk_count }}</div>
+          <div class="stat-label">高风险</div>
+        </div>
+        <div class="stat-item medium">
+          <div class="stat-num">{{ rv.medium_risk_count }}</div>
+          <div class="stat-label">中风险</div>
+        </div>
+        <div class="stat-item low">
+          <div class="stat-num">{{ rv.low_risk_count }}</div>
+          <div class="stat-label">低风险</div>
+        </div>
+        <div class="stat-item danger">
+          <div class="stat-num">{{ rv.fail_count }}</div>
+          <div class="stat-label">操作失败</div>
+        </div>
+        <div class="stat-item warning">
+          <div class="stat-num">{{ rv.returned_count }}</div>
+          <div class="stat-label">退回补正</div>
+        </div>
+        <div class="stat-item up">
+          <div class="stat-num">{{ rv.risk_up_count }}</div>
+          <div class="stat-label">风险升级</div>
+        </div>
+        <div class="stat-item down">
+          <div class="stat-num">{{ rv.risk_down_count }}</div>
+          <div class="stat-label">风险降级</div>
+        </div>
+      </div>
+
+      <div class="review-card-footer">
+        <span>创建：{{ formatDate(rv.created_at) }}</span>
+        <span *ngIf="rv.reviewed_at">已复盘：{{ formatDate(rv.reviewed_at) }}</span>
+      </div>
+    </div>
+  </div>
+</div>

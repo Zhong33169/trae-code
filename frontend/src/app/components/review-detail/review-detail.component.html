@@ -1,0 +1,247 @@
+<div class="page-container">
+  <div class="page-header">
+    <button class="btn btn-link back-btn" (click)="goBack()">
+      ← 返回复盘列表
+    </button>
+    <div class="page-title-row" *ngIf="review">
+      <h2>
+        📊 {{ review.title }}
+        <span [ngClass]="['badge', getReviewStatusBadge(review.status)]" style="margin-left: 12px;">
+          {{ REVIEW_STATUS_NAMES[review.status as ReviewStatus] }}
+        </span>
+      </h2>
+      <div class="review-meta-line">
+        <span>批次号：<strong>{{ review.batch_no }}</strong></span>
+        <span>月份：<strong>{{ review.review_month }}</strong></span>
+        <span>周期：<strong>{{ formatDate(review.start_date) }} ~ {{ formatDate(review.end_date) }}</strong></span>
+      </div>
+    </div>
+  </div>
+
+  <div *ngIf="loading" class="loading">加载中...</div>
+  <div *ngIf="errorMsg" class="error-msg">{{ errorMsg }}</div>
+
+  <ng-container *ngIf="!loading && review">
+    <div class="summary-section">
+      <div class="summary-cards">
+        <div class="summary-card">
+          <div class="summary-num">{{ review.total_orders }}</div>
+          <div class="summary-label">工单总数</div>
+        </div>
+        <div class="summary-card high">
+          <div class="summary-num">{{ review.high_risk_count }}</div>
+          <div class="summary-label">高风险</div>
+        </div>
+        <div class="summary-card medium">
+          <div class="summary-num">{{ review.medium_risk_count }}</div>
+          <div class="summary-label">中风险</div>
+        </div>
+        <div class="summary-card low">
+          <div class="summary-num">{{ review.low_risk_count }}</div>
+          <div class="summary-label">低风险</div>
+        </div>
+        <div class="summary-card danger">
+          <div class="summary-num">{{ review.fail_count }}</div>
+          <div class="summary-label">操作失败</div>
+        </div>
+        <div class="summary-card warning">
+          <div class="summary-num">{{ review.returned_count }}</div>
+          <div class="summary-label">退回补正</div>
+        </div>
+        <div class="summary-card overdue">
+          <div class="summary-num">{{ review.overdue_count }}</div>
+          <div class="summary-label">逾期工单</div>
+        </div>
+        <div class="summary-card up">
+          <div class="summary-num">{{ review.risk_up_count }}</div>
+          <div class="summary-label">风险升级</div>
+        </div>
+        <div class="summary-card down">
+          <div class="summary-num">{{ review.risk_down_count }}</div>
+          <div class="summary-label">风险降级</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="two-column">
+      <div class="col">
+        <div class="panel">
+          <div class="panel-title">❌ 失败原因汇总（按原因/责任人）</div>
+          <div *ngIf="failureReasons.length === 0" class="empty-inline">
+            本批次无操作失败记录
+          </div>
+          <table *ngIf="failureReasons.length > 0" class="data-table">
+            <thead>
+              <tr>
+                <th style="width: 60px;">次数</th>
+                <th>失败原因</th>
+                <th style="width: 100px;">责任角色</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr *ngFor="let f of failureReasons">
+                <td><strong>{{ f.count }}</strong></td>
+                <td>{{ f.reason }}</td>
+                <td>
+                  <span class="badge badge-warning">
+                    {{ getOperatorRoleName(f.operator_role) }}
+                  </span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title">⚠️ 版本冲突汇总</div>
+          <div *ngIf="versionConflicts.length === 0" class="empty-inline">
+            本批次无版本冲突
+          </div>
+          <table *ngIf="versionConflicts.length > 0" class="data-table">
+            <thead>
+              <tr>
+                <th style="width: 60px;">次数</th>
+                <th>期望版本</th>
+                <th>当前版本</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr *ngFor="let c of versionConflicts">
+                <td><strong>{{ c.count }}</strong></td>
+                <td>v{{ c.expected_version }}</td>
+                <td>v{{ c.current_version }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title">👥 当前处理人分布与失败统计</div>
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>处理角色</th>
+                <th style="width: 100px;">在办工单数</th>
+                <th style="width: 100px;">失败次数</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr *ngFor="let h of handlers">
+                <td><strong>{{ getHandlerName(h.handler) }}</strong></td>
+                <td>{{ h.order_count }}</td>
+                <td>
+                  <span [ngClass]="['badge', h.fail_count > 0 ? 'badge-danger' : 'badge-success']">
+                    {{ h.fail_count }}
+                  </span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="col">
+        <div class="panel">
+          <div class="panel-title">📝 复盘结论</div>
+          <div class="conclusion-text">{{ review.conclusion || '（暂无）' }}</div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title">📋 审计备注</div>
+          <div class="conclusion-text">{{ review.audit_remark || '（暂无）' }}</div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title">🔗 本批次工单列表</div>
+          <div *ngIf="orders.length === 0" class="empty-inline">无关联工单</div>
+          <div *ngFor="let o of orders" class="order-row" (click)="goOrder(o.id)">
+            <div class="order-main">
+              <span class="order-no">{{ o.order_no }}</span>
+              <span [ngClass]="['badge', getStatusBadge(o.status)]">{{ getStatusName(o.status) }}</span>
+              <span [ngClass]="['badge', RISK_BADGE_CLASSES[o.risk_level]]">{{ RISK_NAMES[o.risk_level] }}</span>
+            </div>
+            <div class="order-sub">
+              <span>{{ o.customer_name }} · {{ o.vehicle_plate }}</span>
+            </div>
+            <div *ngIf="o.review_conclusion" class="order-conclusion">
+              📌 {{ o.review_conclusion }}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="timeline-section">
+      <div class="panel">
+        <div class="panel-title">⏱️ 证据留痕时间线（缺证据 / 补正重提 / 风险升降级）</div>
+
+        <div class="timeline-group">
+          <div class="timeline-group-title">🚫 缺证据提交失败</div>
+          <div *ngIf="getEvidenceSubmitFailures().length === 0" class="empty-inline">无</div>
+          <div *ngFor="let op of getEvidenceSubmitFailures()" class="timeline-item">
+            <div class="timeline-dot fail"></div>
+            <div class="timeline-content">
+              <div class="timeline-head">
+                <span class="timeline-order" (click)="goOrder(op.order_id)">{{ getOrderNoById(op.order_id) }}</span>
+                <span class="badge badge-danger">{{ getOperatorRoleName(op.operator_role) }}</span>
+                <span class="timeline-time">{{ formatDate(op.created_at) }}</span>
+              </div>
+              <div class="timeline-opinion">{{ op.opinion }}</div>
+              <div *ngIf="op.evidence_check" class="timeline-evidence">
+                证据校验：{{ op.evidence_check }}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="timeline-group">
+          <div class="timeline-group-title">🔄 补正与重提</div>
+          <div *ngIf="getRectifyResubmitOps().length === 0" class="empty-inline">无</div>
+          <div *ngFor="let op of getRectifyResubmitOps()" class="timeline-item">
+            <div class="timeline-dot resubmit"></div>
+            <div class="timeline-content">
+              <div class="timeline-head">
+                <span class="timeline-order" (click)="goOrder(op.order_id)">{{ getOrderNoById(op.order_id) }}</span>
+                <span class="badge badge-primary">{{ op.action === 'rectify' ? '补正' : '重提' }}</span>
+                <span class="badge badge-warning">{{ getOperatorRoleName(op.operator_role) }}</span>
+                <span class="timeline-time">{{ formatDate(op.created_at) }}</span>
+              </div>
+              <div class="timeline-opinion">{{ op.opinion }}</div>
+              <div *ngIf="op.evidence_check" class="timeline-evidence">
+                证据校验：{{ op.evidence_check }}
+              </div>
+              <div class="timeline-status">
+                状态流转：{{ getStatusName(op.from_status) }} → {{ getStatusName(op.to_status) }}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="timeline-group">
+          <div class="timeline-group-title">📈 风险升级 / 降级（成功与失败）</div>
+          <div *ngIf="getRiskChangeOps().length === 0" class="empty-inline">无</div>
+          <div *ngFor="let op of getRiskChangeOps()" class="timeline-item">
+            <div [ngClass]="['timeline-dot', op.result === '失败' ? 'fail' : 'risk']"></div>
+            <div class="timeline-content">
+              <div class="timeline-head">
+                <span class="timeline-order" (click)="goOrder(op.order_id)">{{ getOrderNoById(op.order_id) }}</span>
+                <span [ngClass]="['badge', op.result === '失败' ? 'badge-danger' : 'badge-success']">
+                  {{ op.result === '失败' ? '变更失败' : '变更成功' }}
+                </span>
+                <span class="badge badge-warning">{{ getOperatorRoleName(op.operator_role) }}</span>
+                <span class="timeline-time">{{ formatDate(op.created_at) }}</span>
+              </div>
+              <div class="timeline-opinion">{{ op.opinion }}</div>
+              <div class="timeline-risk">
+                风险变更：<strong>{{ op.risk_change }}</strong>
+              </div>
+              <div *ngIf="op.evidence_check" class="timeline-evidence">
+                证据校验：{{ op.evidence_check }}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </ng-container>
+</div>

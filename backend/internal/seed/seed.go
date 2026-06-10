@@ -761,6 +761,120 @@ func InitSeedData(db *gorm.DB) error {
 		}
 	}
 
+	reviewedAt1 := now.Add(-time.Hour * 24 * 5)
+	closedAt1 := now.Add(-time.Hour * 24 * 4)
+	reviewedAt2 := now.Add(-time.Hour * 2)
+	reviewerID := reviewer.ID
+
+	seedReviews := []*models.RiskReview{
+		{
+			BatchNo:         "REV-202605",
+			ReviewMonth:     "2026-05",
+			Title:           "2026年5月维修工单风险处置月末复盘",
+			Status:          models.ReviewClosed,
+			TotalOrders:     3,
+			HighRiskCount:   1,
+			MediumRiskCount: 1,
+			LowRiskCount:    1,
+			FailCount:       2,
+			OverdueCount:    0,
+			ReturnedCount:   1,
+			RiskUpCount:     1,
+			RiskDownCount:   0,
+			Conclusion:      "5月整体风险处置良好：1)高风险事故车已升级处置流程；2)登记员提交缺证据问题较突出，需加强培训；3)退回补正率16%，下月目标降至10%以内。",
+			AuditRemark:     "复核负责人王复核确认，复盘结论已同步至车间晨会。",
+			CreatedByID:     reviewer.ID,
+			ReviewedByID:    &reviewerID,
+			StartDate:       now.AddDate(0, -1, -3),
+			EndDate:         now.AddDate(0, -1, 28),
+			ReviewedAt:      &reviewedAt1,
+			ClosedAt:        &closedAt1,
+			CreatedAt:       now.Add(-time.Hour * 24 * 7),
+			UpdatedAt:       now.Add(-time.Hour * 24 * 4),
+		},
+		{
+			BatchNo:         "REV-202606",
+			ReviewMonth:     "2026-06",
+			Title:           "2026年6月维修工单风险处置月末复盘（进行中）",
+			Status:          models.ReviewReviewed,
+			TotalOrders:     5,
+			HighRiskCount:   2,
+			MediumRiskCount: 2,
+			LowRiskCount:    1,
+			FailCount:       3,
+			OverdueCount:    1,
+			ReturnedCount:   2,
+			RiskUpCount:     2,
+			RiskDownCount:   1,
+			Conclusion:      "6月复盘结论（草稿）：1)缺证据提交已由上月2起降至本月1起，登记员培训效果显现；2)风险降级失败2起，主要原因是降级必备证据（底盘探伤、验收单、安全评估）不齐；3)逾期工单1起（宝马X5阀体延误），已制定配件到货预警机制。",
+			AuditRemark:     "待复核负责人最终签字确认。",
+			CreatedByID:     supervisor.ID,
+			ReviewedByID:    &reviewerID,
+			StartDate:       now.AddDate(0, 0, -9),
+			EndDate:         now.AddDate(0, 0, 0),
+			ReviewedAt:      &reviewedAt2,
+			CreatedAt:       now.Add(-time.Hour * 24),
+			UpdatedAt:       now.Add(-time.Hour * 1),
+		},
+	}
+
+	for i, rv := range seedReviews {
+		if err := db.Create(rv).Error; err != nil {
+			return fmt.Errorf("创建复盘记录 %d 失败: %w", i+1, err)
+		}
+		log.Printf("创建月末复盘批次: %s - %s", rv.BatchNo, rv.Title)
+	}
+
+	batchMayOrders := []uint{6}
+	for _, oid := range batchMayOrders {
+		db.Model(&models.RepairOrder{}).Where("id = ?", oid).Updates(map[string]interface{}{
+			"review_batch":      "REV-202605",
+			"review_status":     models.ReviewClosed,
+			"review_conclusion": "常规大保养工单流程规范，证据齐全，风险分级准确，作为标杆案例保留。",
+			"audit_remark":      "归档后复核通过，无需整改。",
+			"reviewed_by_id":    reviewer.ID,
+			"reviewed_at":       reviewedAt1,
+		})
+	}
+
+	batchJuneOrders := []uint{1, 2, 3, 4, 5, 7, 8}
+	for _, oid := range batchJuneOrders {
+		updates := map[string]interface{}{
+			"review_batch":  "REV-202606",
+			"review_status": models.ReviewReviewed,
+			"reviewed_at":   reviewedAt2,
+		}
+		switch oid {
+		case 1:
+			updates["review_conclusion"] = "草稿工单，登记员尚未提交证据，需要重点督促。"
+			updates["audit_remark"] = "登记员需在24小时内补充行驶证照片并提交审核。"
+		case 2:
+			updates["review_conclusion"] = "中风险常规故障工单，流程顺畅无异常。"
+			updates["audit_remark"] = "证据齐全，处理及时。"
+		case 3:
+			updates["review_conclusion"] = "高风险事故车升级处置后，尝试降级被拒绝，风险控制执行到位。"
+			updates["audit_remark"] = "需在维修完成后补充底盘探伤报告，确认无隐藏损伤。"
+			updates["reviewed_by_id"] = reviewer.ID
+		case 4:
+			updates["review_conclusion"] = "厂家召回工单，低风险，处理规范。"
+			updates["audit_remark"] = "VIN码匹配召回范围，手续齐全。"
+		case 5:
+			updates["review_conclusion"] = "退回补正后重提工单：首次因缺证据被退回，补正后证据齐全重新提交。"
+			updates["audit_remark"] = "登记员已完成培训，电池高压安全证据提交规范。"
+		case 7:
+			updates["review_conclusion"] = "高风险变速箱维修工单，因配件延误转为逾期，风险降级失败后维持高风险。"
+			updates["audit_remark"] = "配件到货预警机制需加强，建议建立常用阀体库存。"
+			updates["reviewed_by_id"] = reviewer.ID
+		case 8:
+			updates["review_conclusion"] = "复核退回返工工单：Autopilot校准不合格，需重新校准后再提交。"
+			updates["audit_remark"] = "智能驾驶雷达校准必须使用特斯拉原厂工具，禁止简化流程。"
+			updates["reviewed_by_id"] = reviewer.ID
+		}
+		db.Model(&models.RepairOrder{}).Where("id = ?", oid).Updates(updates)
+	}
+
+	log.Println("复盘批次与工单关联数据初始化完成！")
+
 	log.Println("种子数据初始化完成！")
 	log.Printf("用户ID映射: registrar=%d, supervisor=%d, reviewer=%d",
 		registrar.ID, supervisor.ID, reviewer.ID)

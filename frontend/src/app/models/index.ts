@@ -24,6 +24,65 @@ export type RiskLevel = 'low' | 'medium' | 'high';
 
 export type OrderStage = 'appointment' | 'dispatch' | 'delivery';
 
+export type ReviewStatus = 'pending' | 'reviewing' | 'reviewed' | 'closed';
+
+export interface RiskReview {
+  id: number;
+  batch_no: string;
+  review_month: string;
+  title: string;
+  status: ReviewStatus;
+  total_orders: number;
+  high_risk_count: number;
+  medium_risk_count: number;
+  low_risk_count: number;
+  fail_count: number;
+  overdue_count: number;
+  returned_count: number;
+  risk_up_count: number;
+  risk_down_count: number;
+  conclusion: string;
+  audit_remark: string;
+  created_by_id: number;
+  created_by?: User;
+  reviewed_by_id?: number;
+  reviewed_by?: User;
+  start_date: string;
+  end_date: string;
+  reviewed_at?: string;
+  closed_at?: string;
+  created_at: string;
+  updated_at: string;
+  orders?: RepairOrder[];
+}
+
+export interface FailureSummary {
+  reason: string;
+  count: number;
+  operator_role: UserRole;
+}
+
+export interface ConflictSummary {
+  expected_version: number;
+  current_version: number;
+  count: number;
+}
+
+export interface HandlerSummary {
+  handler: string;
+  order_count: number;
+  fail_count: number;
+}
+
+export interface ReviewDetailResponse {
+  review: RiskReview;
+  orders: RepairOrder[];
+  operations: OrderOperation[];
+  failure_reasons: FailureSummary[];
+  version_conflicts: ConflictSummary[];
+  handlers: HandlerSummary[];
+}
+
 export interface OrderOperation {
   id: number;
   order_id: number;
@@ -72,6 +131,13 @@ export interface RepairOrder {
   last_opinion: string;
   last_result: string;
   operations?: OrderOperation[];
+  review_batch?: string;
+  review_status?: ReviewStatus;
+  review_conclusion?: string;
+  audit_remark?: string;
+  reviewed_by_id?: number;
+  reviewed_by?: User;
+  reviewed_at?: string;
 }
 
 export interface OverviewStats {
@@ -170,3 +236,17 @@ export const EVIDENCE_OPTIONS: string[] = [
   '估价单',
   '结算单',
 ];
+
+export const REVIEW_STATUS_NAMES: Record<ReviewStatus, string> = {
+  pending: '待复盘',
+  reviewing: '复盘中',
+  reviewed: '已复盘',
+  closed: '已关闭',
+};
+
+export const REVIEW_STATUS_BADGE: Record<ReviewStatus, string> = {
+  pending: 'badge-default',
+  reviewing: 'badge-warning',
+  reviewed: 'badge-primary',
+  closed: 'badge-success',
+};

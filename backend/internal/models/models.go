@@ -30,6 +30,11 @@ const (
 	StageAppointment = "appointment"
 	StageDispatch    = "dispatch"
 	StageDelivery    = "delivery"
+
+	ReviewPending   = "pending"
+	ReviewReviewing = "reviewing"
+	ReviewReviewed  = "reviewed"
+	ReviewClosed    = "closed"
 )
 
 type User struct {
@@ -74,6 +79,14 @@ type RepairOrder struct {
 	LastOpinion        string         `gorm:"type:text" json:"last_opinion"`
 	LastResult         string         `gorm:"type:text" json:"last_result"`
 	Operations         []OrderOperation `gorm:"foreignKey:OrderID" json:"operations,omitempty"`
+
+	ReviewBatch        string         `gorm:"size:20;index" json:"review_batch"`
+	ReviewStatus       string         `gorm:"size:20;default:pending" json:"review_status"`
+	ReviewConclusion   string         `gorm:"type:text" json:"review_conclusion"`
+	AuditRemark        string         `gorm:"type:text" json:"audit_remark"`
+	ReviewedByID       *uint          `json:"reviewed_by_id,omitempty"`
+	ReviewedBy         *User          `gorm:"foreignKey:ReviewedByID" json:"reviewed_by,omitempty"`
+	ReviewedAt         *time.Time     `json:"reviewed_at,omitempty"`
 }
 
 type OrderOperation struct {
@@ -92,4 +105,35 @@ type OrderOperation struct {
 	VersionChecked int            `json:"version_checked"`
 	IpAddress      string         `gorm:"size:50" json:"ip_address"`
 	CreatedAt      time.Time      `json:"created_at"`
+}
+
+type RiskReview struct {
+	ID              uint           `gorm:"primaryKey" json:"id"`
+	BatchNo         string         `gorm:"uniqueIndex;size:20;not null" json:"batch_no"`
+	ReviewMonth     string         `gorm:"size:10;index;not null" json:"review_month"`
+	Title           string         `gorm:"size:200" json:"title"`
+	Status          string         `gorm:"size:20;default:pending" json:"status"`
+	TotalOrders     int            `gorm:"default:0" json:"total_orders"`
+	HighRiskCount   int            `gorm:"default:0" json:"high_risk_count"`
+	MediumRiskCount int            `gorm:"default:0" json:"medium_risk_count"`
+	LowRiskCount    int            `gorm:"default:0" json:"low_risk_count"`
+	FailCount       int            `gorm:"default:0" json:"fail_count"`
+	OverdueCount    int            `gorm:"default:0" json:"overdue_count"`
+	ReturnedCount   int            `gorm:"default:0" json:"returned_count"`
+	RiskUpCount     int            `gorm:"default:0" json:"risk_up_count"`
+	RiskDownCount   int            `gorm:"default:0" json:"risk_down_count"`
+	Conclusion      string         `gorm:"type:text" json:"conclusion"`
+	AuditRemark     string         `gorm:"type:text" json:"audit_remark"`
+	CreatedByID     uint           `json:"created_by_id"`
+	CreatedBy       *User          `gorm:"foreignKey:CreatedByID" json:"created_by,omitempty"`
+	ReviewedByID    *uint          `json:"reviewed_by_id,omitempty"`
+	ReviewedBy      *User          `gorm:"foreignKey:ReviewedByID" json:"reviewed_by,omitempty"`
+	StartDate       time.Time      `json:"start_date"`
+	EndDate         time.Time      `json:"end_date"`
+	ReviewedAt      *time.Time     `json:"reviewed_at,omitempty"`
+	ClosedAt        *time.Time     `json:"closed_at,omitempty"`
+	CreatedAt       time.Time      `json:"created_at"`
+	UpdatedAt       time.Time      `json:"updated_at"`
+	DeletedAt       gorm.DeletedAt `gorm:"index" json:"-"`
+	Orders          []RepairOrder  `gorm:"-" json:"orders,omitempty"`
 }
