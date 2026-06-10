@@ -175,6 +175,12 @@ export class OrderDetailComponent implements OnInit {
       if (s === 'high_risk_escalated') {
         actions.push({ key: 'supervisor_approve', label: '审批通过', cls: 'btn-success' });
         actions.push({ key: 'supervisor_reject', label: '审批拒绝', cls: 'btn-danger' });
+        actions.push({ key: 'change_risk', label: '调整风险', cls: 'btn-warning' });
+      }
+      if (s === 'reviewer_rejected') {
+        actions.push({ key: 'supervisor_approve', label: '重做后再提交复核', cls: 'btn-success' });
+        actions.push({ key: 'supervisor_reject', label: '退回登记员处理', cls: 'btn-danger' });
+        actions.push({ key: 'change_risk', label: '调整风险', cls: 'btn-warning' });
       }
       if (s === 'supervisor_approved') {
         actions.push({ key: 'change_risk', label: '调整风险', cls: 'btn-warning' });
@@ -191,9 +197,15 @@ export class OrderDetailComponent implements OnInit {
       }
     }
 
+    // 风险调整入口严格按角色+状态控制：只有主管/复核员 + 非归档 + 当前是处理人才能显示
     const hasRiskAction = actions.some((a) => a.key === 'change_risk');
-    if (!hasRiskAction && !['archived'].includes(s)) {
-      actions.push({ key: 'change_risk', label: '调整风险', cls: 'btn-warning' });
+    if (!hasRiskAction && !['archived', 'draft'].includes(s)) {
+      const canAdjustRisk =
+        (this.currentRole === 'supervisor' && this.order.current_handler === 'supervisor') ||
+        (this.currentRole === 'reviewer' && this.order.current_handler === 'reviewer');
+      if (canAdjustRisk) {
+        actions.push({ key: 'change_risk', label: '调整风险', cls: 'btn-warning' });
+      }
     }
 
     return actions;

@@ -152,7 +152,7 @@ export class OrderListComponent implements OnInit {
         return ['draft', 'returned_to_registrar'].includes(o.status) && o.created_by_id === userId;
       }
       if (userRole === 'supervisor') {
-        return ['submitted', 'resubmitted', 'high_risk_escalated'].includes(o.status);
+        return ['submitted', 'resubmitted', 'high_risk_escalated', 'reviewer_rejected'].includes(o.status);
       }
       if (userRole === 'reviewer') {
         return ['supervisor_approved', 'high_risk_escalated'].includes(o.status);

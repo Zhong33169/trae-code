@@ -74,6 +74,7 @@ func GetOverviewStats(w http.ResponseWriter, r *http.Request) {
 		models.StatusSubmitted,
 		models.StatusResubmitted,
 		models.StatusHighRiskEscalated,
+		models.StatusReviewerRejected,
 	}).Where("current_handler = ?", models.RoleSupervisor).
 		Count(&stats.TodoByRole.Supervisor)
 
@@ -113,6 +114,7 @@ func GetOverviewStats(w http.ResponseWriter, r *http.Request) {
 			models.StatusSubmitted,
 			models.StatusResubmitted,
 			models.StatusHighRiskEscalated,
+			models.StatusReviewerRejected,
 		}).Where("current_handler = ?", models.RoleSupervisor).Count(&stats.MyTodo)
 	case models.RoleReviewer:
 		db.Where("status = ?", models.StatusSupervisorApproved).

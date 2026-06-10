@@ -191,7 +191,7 @@ func ListOrders(w http.ResponseWriter, r *http.Request) {
 				currentUser.ID, models.RoleRegistrar)
 		case models.RoleSupervisor:
 			query = query.Where("status IN ? OR current_handler = ?",
-				[]string{models.StatusSubmitted, models.StatusResubmitted, models.StatusHighRiskEscalated},
+				[]string{models.StatusSubmitted, models.StatusResubmitted, models.StatusHighRiskEscalated, models.StatusReviewerRejected},
 				models.RoleSupervisor)
 		case models.RoleReviewer:
 			query = query.Where("status = ? OR current_handler = ?",
@@ -398,7 +398,12 @@ func SupervisorReview(w http.ResponseWriter, r *http.Request) {
 		Result:         req.Result,
 	}
 
-	validStatuses := []string{models.StatusSubmitted, models.StatusResubmitted, models.StatusHighRiskEscalated}
+	validStatuses := []string{
+		models.StatusSubmitted,
+		models.StatusResubmitted,
+		models.StatusHighRiskEscalated,
+		models.StatusReviewerRejected,
+	}
 	statusValid := false
 	for _, s := range validStatuses {
 		if order.Status == s {
@@ -433,11 +438,21 @@ func SupervisorReview(w http.ResponseWriter, r *http.Request) {
 	case "approve":
 		newStatus = models.StatusSupervisorApproved
 		newHandler = models.RoleReviewer
-		newStage = models.StageDispatch
+		if fromStatus == models.StatusReviewerRejected {
+			newStage = models.StageDispatch
+		} else {
+			newStage = models.StageDispatch
+		}
 	case "reject":
-		newStatus = models.StatusReturnedToRegistrar
-		newHandler = models.RoleRegistrar
-		newStage = models.StageAppointment
+		if fromStatus == models.StatusReviewerRejected {
+			newStatus = models.StatusReturnedToRegistrar
+			newHandler = models.RoleRegistrar
+			newStage = models.StageAppointment
+		} else {
+			newStatus = models.StatusReturnedToRegistrar
+			newHandler = models.RoleRegistrar
+			newStage = models.StageAppointment
+		}
 	case "escalate_risk":
 		newStatus = models.StatusHighRiskEscalated
 		newHandler = models.RoleSupervisor
@@ -680,6 +695,27 @@ func RectifyOrder(w http.ResponseWriter, r *http.Request) {
 		order.EvidenceList = req.EvidenceList
 	}
 
+	// 证据双校验：标记 + 清单非空
+	evidenceListStr := strings.Trim(order.EvidenceList, " []\"\",")
+	if !order.EvidenceSubmitted {
+		op.ToStatus = fromStatus
+		op.Result = "失败"
+		op.EvidenceCheck = "未提交必填证据(evidence_submitted=false)"
+		op.Opinion = "补正时未勾选必填证据标记"
+		database.DB.Create(op)
+		http.Error(w, `{"error": "请先勾选必填证据"}`, http.StatusBadRequest)
+		return
+	}
+	if evidenceListStr == "" {
+		op.ToStatus = fromStatus
+		op.Result = "失败"
+		op.EvidenceCheck = "证据清单为空(evidence_list=[])"
+		op.Opinion = "补正时证据清单为空，请至少勾选一项必填证据"
+		database.DB.Create(op)
+		http.Error(w, `{"error": "证据清单为空，请至少勾选一项必填证据"}`, http.StatusBadRequest)
+		return
+	}
+
 	newStatus := models.StatusResubmitted
 	order.Status = newStatus
 	order.CurrentHandler = models.RoleSupervisor
@@ -745,6 +781,51 @@ func RiskChange(w http.ResponseWriter, r *http.Request) {
 		RiskChange:     fmt.Sprintf("%s->%s", req.FromLevel, req.ToLevel),
 	}
 
+	// 1. 角色校验：只有主管和复核员可以调整风险
+	if currentUser.Role != models.RoleSupervisor && currentUser.Role != models.RoleReviewer {
+		op.Result = "失败"
+		op.Opinion = fmt.Sprintf("角色%s无权限调整风险等级", currentUser.Role)
+		database.DB.Create(op)
+		http.Error(w, `{"error": "只有主管和复核员可以调整风险等级"}`, http.StatusForbidden)
+		return
+	}
+
+	// 2. 当前处理人校验：必须是当前工单的处理人
+	if order.CurrentHandler != "" && order.CurrentHandler != currentUser.Role {
+		op.Result = "失败"
+		op.Opinion = fmt.Sprintf("当前处理人是%s，角色%s无权调整", order.CurrentHandler, currentUser.Role)
+		database.DB.Create(op)
+		http.Error(w, fmt.Sprintf(`{"error": "当前工单由%s办理，请切换到对应角色操作"}`, order.CurrentHandler), http.StatusForbidden)
+		return
+	}
+
+	// 3. 状态校验：已归档工单不可调整风险
+	if order.Status == models.StatusArchived {
+		op.Result = "失败"
+		op.Opinion = "已归档工单不可调整风险"
+		database.DB.Create(op)
+		http.Error(w, `{"error": "已归档工单不可调整风险"}`, http.StatusBadRequest)
+		return
+	}
+
+	// 4. 版本号校验
+	if req.Version != order.Version {
+		op.Result = "失败"
+		op.Opinion = fmt.Sprintf("版本冲突：期望%d，当前%d", req.Version, order.Version)
+		database.DB.Create(op)
+		http.Error(w, fmt.Sprintf(`{"error": "版本冲突：期望%d，当前%d"}`, req.Version, order.Version), http.StatusConflict)
+		return
+	}
+
+	// 5. 原因必填校验
+	if strings.TrimSpace(req.Reason) == "" {
+		op.Result = "失败"
+		op.Opinion = "风险调整原因不能为空"
+		database.DB.Create(op)
+		http.Error(w, `{"error": "请填写风险调整原因"}`, http.StatusBadRequest)
+		return
+	}
+
 	validLevels := map[string]bool{models.RiskLow: true, models.RiskMedium: true, models.RiskHigh: true}
 	if !validLevels[req.ToLevel] {
 		op.Result = "失败"
@@ -759,14 +840,6 @@ func RiskChange(w http.ResponseWriter, r *http.Request) {
 		op.Opinion = fmt.Sprintf("源风险等级不匹配：期望%s，当前%s", req.FromLevel, fromRisk)
 		database.DB.Create(op)
 		http.Error(w, `{"error": "源风险等级不匹配"}`, http.StatusBadRequest)
-		return
-	}
-
-	if req.Version != order.Version {
-		op.Result = "失败"
-		op.Opinion = fmt.Sprintf("版本冲突：期望%d，当前%d", req.Version, order.Version)
-		database.DB.Create(op)
-		http.Error(w, fmt.Sprintf(`{"error": "版本冲突：期望%d，当前%d"}`, req.Version, order.Version), http.StatusConflict)
 		return
 	}
 
