@@ -3,6 +3,12 @@ import { getOrderDetail, performAction, updateOrder, addEvidence, deleteEvidence
 import OrderForm from './OrderForm';
 import EvidenceManager from './EvidenceManager';
 
+const LOG_TABS = [
+  { key: 'operation', label: '操作记录' },
+  { key: 'field', label: '字段变更' },
+  { key: 'evidence', label: '证据变更' }
+];
+
 export default function OrderDetail({ orderId, userId, userRole, onBack, onActionComplete }) {
   const [detail, setDetail] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -12,6 +18,7 @@ export default function OrderDetail({ orderId, userId, userRole, onBack, onActio
   const [toast, setToast] = useState(null);
   const [isEditing, setIsEditing] = useState(false);
   const [evidenceSubmitting, setEvidenceSubmitting] = useState(false);
+  const [activeLogTab, setActiveLogTab] = useState('operation');
 
   const loadDetail = () => {
     if (!orderId || !userId) return;
@@ -34,6 +41,10 @@ export default function OrderDetail({ orderId, userId, userRole, onBack, onActio
     setTimeout(() => setToast(null), 3000);
   };
 
+  const triggerRefresh = () => {
+    onActionComplete && onActionComplete();
+  };
+
   const handleAction = async (action) => {
     const actionDef = detail.availableActions.find(a => a.key === action);
     if (!actionDef) return;
@@ -53,9 +64,14 @@ export default function OrderDetail({ orderId, userId, userRole, onBack, onActio
       });
       if (res.success) {
         showToast('操作成功', 'success');
-        setDetail(res);
+        setDetail(prev => ({
+          ...prev,
+          ...res,
+          fieldChanges: res.fieldChanges || prev.fieldChanges,
+          evidenceChanges: res.evidenceChanges || prev.evidenceChanges
+        }));
         setSelectedAction(null);
-        onActionComplete && onActionComplete();
+        triggerRefresh();
       } else {
         showToast(res.message || '操作失败', 'error');
       }
@@ -84,10 +100,15 @@ export default function OrderDetail({ orderId, userId, userRole, onBack, onActio
       });
       if (res.success) {
         showToast('操作成功', 'success');
-        setDetail(res);
+        setDetail(prev => ({
+          ...prev,
+          ...res,
+          fieldChanges: res.fieldChanges || prev.fieldChanges,
+          evidenceChanges: res.evidenceChanges || prev.evidenceChanges
+        }));
         setSelectedAction(null);
         setOpinion('');
-        onActionComplete && onActionComplete();
+        triggerRefresh();
       } else {
         showToast(res.message || '操作失败', 'error');
       }
@@ -105,8 +126,16 @@ export default function OrderDetail({ orderId, userId, userRole, onBack, onActio
       if (res.success) {
         showToast('保存成功', 'success');
         setIsEditing(false);
-        loadDetail();
-        onActionComplete && onActionComplete();
+        if (res.changed) {
+          setDetail(prev => ({
+            ...prev,
+            order: res.order,
+            logs: res.logs,
+            fieldChanges: res.fieldChanges,
+            evidenceCheck: res.evidenceCheck
+          }));
+          triggerRefresh();
+        }
       } else {
         showToast(res.message || '保存失败', 'error');
       }
@@ -126,8 +155,12 @@ export default function OrderDetail({ orderId, userId, userRole, onBack, onActio
         setDetail(prev => ({
           ...prev,
           evidences: res.evidences,
-          evidenceCheck: res.evidenceCheck
+          evidenceCheck: res.evidenceCheck,
+          order: res.order,
+          logs: res.logs,
+          evidenceChanges: res.evidenceChanges
         }));
+        triggerRefresh();
         return true;
       } else {
         showToast(res.message || '添加失败', 'error');
@@ -150,8 +183,12 @@ export default function OrderDetail({ orderId, userId, userRole, onBack, onActio
         setDetail(prev => ({
           ...prev,
           evidences: res.evidences,
-          evidenceCheck: res.evidenceCheck
+          evidenceCheck: res.evidenceCheck,
+          order: res.order,
+          logs: res.logs,
+          evidenceChanges: res.evidenceChanges
         }));
+        triggerRefresh();
       } else {
         showToast(res.message || '删除失败', 'error');
       }
@@ -168,6 +205,7 @@ export default function OrderDetail({ orderId, userId, userRole, onBack, onActio
     if (action.includes('reject')) return 'log-reject';
     if (action === 'submit') return 'log-submit';
     if (action.includes('start_')) return 'log-process';
+    if (action.includes('amendment') || action.includes('edit_draft') || action.includes('evidence_')) return 'log-process';
     return '';
   };
 
@@ -192,6 +230,27 @@ export default function OrderDetail({ orderId, userId, userRole, onBack, onActio
     return map[action] || '确认操作';
   };
 
+  const getActionLabel = (action) => {
+    const map = {
+      submit: '提交审核',
+      resubmit: '重新提交',
+      start_audit: '开始审核',
+      audit_pass: '审核通过',
+      audit_return: '退回补正',
+      audit_reject: '审核驳回',
+      start_review: '开始复核',
+      review_archive: '复核归档',
+      review_reject: '复核驳回',
+      amendment: '补正修改',
+      edit_draft: '草稿编辑',
+      add_evidence_amendment: '补正添加证据',
+      add_evidence_draft: '草稿添加证据',
+      delete_evidence_amendment: '补正删除证据',
+      delete_evidence_draft: '草稿删除证据'
+    };
+    return map[action] || action;
+  };
+
   if (loading || !detail) {
     return (
       <div className="detail-container">
@@ -204,7 +263,113 @@ export default function OrderDetail({ orderId, userId, userRole, onBack, onActio
     );
   }
 
-  const { order, evidences, logs, availableActions, evidenceCheck, canEdit } = detail;
+  const { order, evidences, logs, availableActions, evidenceCheck, canEdit, fieldChanges = [], evidenceChanges = [] } = detail;
+
+  const renderOperationLogs = () => (
+    <div className="log-list">
+      {logs.length === 0 ? (
+        <div className="empty-state">暂无操作记录</div>
+      ) : (
+        logs.map(log => (
+          <div key={log.id} className={`log-item ${getLogClass(log.action)}`}>
+            <div className="log-dot"></div>
+            <div className="log-content">
+              <div className="log-header">
+                <span className="log-operator">
+                  {log.operator_name}（{log.operatorRoleLabel}）
+                </span>
+                <span className="log-time">{log.created_at?.slice(0, 19) || ''}</span>
+              </div>
+              <div className="log-action">
+                <strong>{getActionLabel(log.action)}</strong>
+                {log.fromStatusLabel && log.toStatusLabel && log.fromStatusLabel !== log.toStatusLabel && (
+                  <span style={{ marginLeft: 8 }}>
+                    （{log.fromStatusLabel} → {log.toStatusLabel}）
+                  </span>
+                )}
+                {log.version_from !== log.version_to && (
+                  <span style={{ marginLeft: 8, color: '#999', fontSize: 12 }}>
+                    v{log.version_from} → v{log.version_to}
+                  </span>
+                )}
+              </div>
+              {log.opinion && (
+                <div className="log-opinion">说明：{log.opinion}</div>
+              )}
+            </div>
+          </div>
+        ))
+      )}
+    </div>
+  );
+
+  const renderFieldChanges = () => (
+    <div className="log-list">
+      {fieldChanges.length === 0 ? (
+        <div className="empty-state">暂无字段变更记录</div>
+      ) : (
+        fieldChanges.map(change => (
+          <div key={change.id} className="log-item log-process">
+            <div className="log-dot"></div>
+            <div className="log-content">
+              <div className="log-header">
+                <span className="log-operator">
+                  {change.field_name}
+                </span>
+                <span className="log-time">{change.created_at?.slice(0, 19) || ''}</span>
+              </div>
+              <div className="log-action">
+                修改人：{change.changed_by_name || change.changed_by}
+                {change.change_reason && <span style={{ marginLeft: 8 }}>（{change.change_reason}）</span>}
+              </div>
+              <div className="log-opinion">
+                <span style={{ color: '#e53935', textDecoration: 'line-through' }}>
+                  {change.old_value || '(空)'}
+                </span>
+                <span style={{ margin: '0 8px' }}>→</span>
+                <span style={{ color: '#43a047', fontWeight: 500 }}>
+                  {change.new_value || '(空)'}
+                </span>
+              </div>
+              {change.version_from !== change.version_to && (
+                <div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>
+                  版本：v{change.version_from} → v{change.version_to}
+                </div>
+              )}
+            </div>
+          </div>
+        ))
+      )}
+    </div>
+  );
+
+  const renderEvidenceChanges = () => (
+    <div className="log-list">
+      {evidenceChanges.length === 0 ? (
+        <div className="empty-state">暂无证据变更记录</div>
+      ) : (
+        evidenceChanges.map(change => (
+          <div key={change.id} className={`log-item ${change.change_type === 'add' ? 'log-pass' : 'log-return'}`}>
+            <div className="log-dot"></div>
+            <div className="log-content">
+              <div className="log-header">
+                <span className="log-operator">
+                  {change.changeTypeLabel || change.change_type}证据
+                </span>
+                <span className="log-time">{change.created_at?.slice(0, 19) || ''}</span>
+              </div>
+              <div className="log-action">
+                {change.evidenceTypeLabel}：<strong>{change.evidence_name}</strong>
+              </div>
+              <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>
+                操作人：{change.changed_by_name || change.changed_by}
+              </div>
+            </div>
+          </div>
+        ))
+      )}
+    </div>
+  );
 
   return (
     <div>
@@ -224,7 +389,7 @@ export default function OrderDetail({ orderId, userId, userRole, onBack, onActio
             <div className="last-opinion">
               <div className="last-opinion-header">
                 上一处理人：{order.last_handler}（{order.lastHandlerRoleLabel}）
-                ｜ 结果：{order.last_result === 'passed' ? '通过' : 
+                ｜ 结果：{order.last_result === 'passed' ? '通过' :
                         order.last_result === 'returned' ? '退回补正' :
                         order.last_result === 'rejected' ? '驳回' :
                         order.last_result === 'archived' ? '归档' :
@@ -350,43 +515,20 @@ export default function OrderDetail({ orderId, userId, userRole, onBack, onActio
           </div>
 
           <div className="detail-card">
-            <h3>操作记录</h3>
-            <div className="log-list">
-              {logs.length === 0 ? (
-                <div className="empty-state">暂无操作记录</div>
-              ) : (
-                logs.map(log => (
-                  <div key={log.id} className={`log-item ${getLogClass(log.action)}`}>
-                    <div className="log-dot"></div>
-                    <div className="log-content">
-                      <div className="log-header">
-                        <span className="log-operator">
-                          {log.operator_name}（{log.operatorRoleLabel}）
-                        </span>
-                        <span className="log-time">{log.created_at?.slice(0, 19) || ''}</span>
-                      </div>
-                      <div className="log-action">
-                        {log.fromStatusLabel && log.toStatusLabel ? (
-                          <>
-                            状态从 <strong>{log.fromStatusLabel}</strong> 变为 <strong>{log.toStatusLabel}</strong>
-                          </>
-                        ) : (
-                          <span>{log.action}</span>
-                        )}
-                        {log.version_from !== log.version_to && (
-                          <span style={{ marginLeft: 8, color: '#999', fontSize: 12 }}>
-                            (v{log.version_from} → v{log.version_to})
-                          </span>
-                        )}
-                      </div>
-                      {log.opinion && (
-                        <div className="log-opinion">意见：{log.opinion}</div>
-                      )}
-                    </div>
-                  </div>
-                ))
-              )}
+            <div className="tabs">
+              {LOG_TABS.map(tab => (
+                <div
+                  key={tab.key}
+                  className={`tab ${activeLogTab === tab.key ? 'active' : ''}`}
+                  onClick={() => setActiveLogTab(tab.key)}
+                >
+                  {tab.label}
+                </div>
+              ))}
             </div>
+            {activeLogTab === 'operation' && renderOperationLogs()}
+            {activeLogTab === 'field' && renderFieldChanges()}
+            {activeLogTab === 'evidence' && renderEvidenceChanges()}
           </div>
         </div>
 

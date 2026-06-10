@@ -531,9 +531,33 @@ const addEvidence = async (orderId, type, name, userId) => {
       VALUES (?, ?, ?, ?, ?)
     `).run(id, orderId, type, name.trim(), userId);
 
+    const newVersion = order.version + 1;
+    const isReturned = order.status === 'returned';
+    const action = isReturned ? 'add_evidence_amendment' : 'add_evidence_draft';
+    const actionLabel = isReturned ? '补正添加证据' : '草稿添加证据';
+    const logId = uuidv4();
+
     await logEvidenceChange(db, orderId, id, 'add', type, name.trim(), userId, user.role);
 
-    db.prepare(`UPDATE prescription_orders SET updated_at = datetime('now', 'localtime') WHERE id = ?`).run(orderId);
+    db.prepare(`
+      UPDATE prescription_orders 
+      SET version = ?, updated_at = datetime('now', 'localtime') 
+      WHERE id = ?
+    `).run(newVersion, orderId);
+
+    db.prepare(`
+      INSERT INTO operation_logs
+      (id, order_id, action, operator_id, operator_name, operator_role,
+       from_status, to_status, opinion, result, version_from, version_to)
+      VALUES
+      (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      logId, orderId, action, userId, user.name, user.role,
+      order.status, order.status,
+      `添加证据：${getEvidenceTypeLabel(type)} - ${name.trim()}`,
+      'updated',
+      order.version, newVersion
+    );
 
     db.run('COMMIT');
     db.saveToDisk();
@@ -541,12 +565,19 @@ const addEvidence = async (orderId, type, name, userId) => {
     const evidence = db.prepare('SELECT * FROM evidences WHERE id = ?').get(id);
     const evidences = await getOrderEvidences(orderId);
     const evidenceCheck = await validateRequiredEvidences(orderId, order.risk_level);
+    const updatedOrder = await getOrderById(orderId);
+    const logs = await getOrderLogs(orderId);
+    const evidenceChanges = await getEvidenceChanges(orderId);
 
     return {
       success: true,
       evidence: { ...evidence, typeLabel: getEvidenceTypeLabel(evidence.type) },
       evidences,
-      evidenceCheck
+      evidenceCheck,
+      order: updatedOrder,
+      logs,
+      evidenceChanges,
+      version: newVersion
     };
   } catch (e) {
     try { db.run('ROLLBACK'); } catch (_) {}
@@ -588,19 +619,53 @@ const deleteEvidence = async (evidenceId, userId) => {
   try {
     db.run('BEGIN');
 
+    const newVersion = order.version + 1;
+    const isReturned = order.status === 'returned';
+    const action = isReturned ? 'delete_evidence_amendment' : 'delete_evidence_draft';
+    const logId = uuidv4();
+
     await logEvidenceChange(db, evidence.order_id, evidenceId, 'delete', evidence.type, evidence.name, userId, user.role);
 
     db.prepare('DELETE FROM evidences WHERE id = ?').run(evidenceId);
 
-    db.prepare(`UPDATE prescription_orders SET updated_at = datetime('now', 'localtime') WHERE id = ?`).run(evidence.order_id);
+    db.prepare(`
+      UPDATE prescription_orders 
+      SET version = ?, updated_at = datetime('now', 'localtime') 
+      WHERE id = ?
+    `).run(newVersion, evidence.order_id);
+
+    db.prepare(`
+      INSERT INTO operation_logs
+      (id, order_id, action, operator_id, operator_name, operator_role,
+       from_status, to_status, opinion, result, version_from, version_to)
+      VALUES
+      (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      logId, evidence.order_id, action, userId, user.name, user.role,
+      order.status, order.status,
+      `删除证据：${getEvidenceTypeLabel(evidence.type)} - ${evidence.name}`,
+      'updated',
+      order.version, newVersion
+    );
 
     db.run('COMMIT');
     db.saveToDisk();
 
     const evidences = await getOrderEvidences(evidence.order_id);
     const evidenceCheck = await validateRequiredEvidences(evidence.order_id, order.risk_level);
+    const updatedOrder = await getOrderById(evidence.order_id);
+    const logs = await getOrderLogs(evidence.order_id);
+    const evidenceChanges = await getEvidenceChanges(evidence.order_id);
 
-    return { success: true, evidences, evidenceCheck };
+    return {
+      success: true,
+      evidences,
+      evidenceCheck,
+      order: updatedOrder,
+      logs,
+      evidenceChanges,
+      version: newVersion
+    };
   } catch (e) {
     try { db.run('ROLLBACK'); } catch (_) {}
     await logAuditFailure(evidence.order_id, 'delete_evidence', userId, user.role, 'db_error', e.message, { evidenceId });
@@ -715,23 +780,57 @@ const updateOrderBasic = async (orderId, data, userId, version = undefined) => {
     return { success: true, changed: false };
   }
 
+  const newVersion = order.version + 1;
+  const isReturned = order.status === 'returned';
+  const action = isReturned ? 'amendment' : 'edit_draft';
+  const actionLabel = isReturned ? '补正修改' : '草稿编辑';
+  const logId = uuidv4();
+
   try {
     db.run('BEGIN');
 
+    updateFields.push(`version = ?`);
+    updateValues.push(newVersion);
     updateFields.push(`updated_at = datetime('now', 'localtime')`);
     const sql = `UPDATE prescription_orders SET ${updateFields.join(', ')} WHERE id = ?`;
     updateValues.push(orderId);
     db.prepare(sql).run(...updateValues);
 
     for (const cf of changedFields) {
-      await logFieldChange(db, orderId, cf.label, cf.oldVal, cf.newVal, userId, user.role, '补正修改', order.version, order.version);
+      await logFieldChange(db, orderId, cf.label, cf.oldVal, cf.newVal, userId, user.role, actionLabel, order.version, newVersion);
     }
+
+    db.prepare(`
+      INSERT INTO operation_logs
+      (id, order_id, action, operator_id, operator_name, operator_role,
+       from_status, to_status, opinion, result, version_from, version_to)
+      VALUES
+      (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      logId, orderId, action, userId, user.name, user.role,
+      order.status, order.status,
+      `修改字段：${changedFields.map(cf => cf.label).join('、')}`,
+      'updated',
+      order.version, newVersion
+    );
 
     db.run('COMMIT');
     db.saveToDisk();
 
     const updatedOrder = await getOrderById(orderId);
-    return { success: true, changed: true, order: updatedOrder };
+    const logs = await getOrderLogs(orderId);
+    const fieldChanges = await getFieldChanges(orderId);
+    const evidenceCheck = await validateRequiredEvidences(orderId, updatedOrder.risk_level);
+
+    return {
+      success: true,
+      changed: true,
+      order: updatedOrder,
+      logs,
+      fieldChanges,
+      evidenceCheck,
+      version: newVersion
+    };
   } catch (e) {
     try { db.run('ROLLBACK'); } catch (_) {}
     await logAuditFailure(orderId, 'update', userId, user.role, 'db_error', e.message, data);
@@ -742,24 +841,32 @@ const updateOrderBasic = async (orderId, data, userId, version = undefined) => {
 const getFieldChanges = async (orderId) => {
   const db = await getDb();
   const changes = db.prepare(`
-    SELECT * FROM field_changes 
-    WHERE order_id = ? 
-    ORDER BY created_at DESC, id DESC
+    SELECT fc.*, u.name as changed_by_name
+    FROM field_changes fc
+    LEFT JOIN users u ON fc.changed_by = u.id
+    WHERE fc.order_id = ? 
+    ORDER BY fc.created_at DESC, fc.id DESC
   `).all(orderId);
-  return changes;
+  return changes.map(c => ({
+    ...c,
+    changedByRoleLabel: c.changed_by_role ? getRoleLabel(c.changed_by_role) : null
+  }));
 };
 
 const getEvidenceChanges = async (orderId) => {
   const db = await getDb();
   const changes = db.prepare(`
-    SELECT * FROM evidence_changes 
-    WHERE order_id = ? 
-    ORDER BY created_at DESC, id DESC
+    SELECT ec.*, u.name as changed_by_name
+    FROM evidence_changes ec
+    LEFT JOIN users u ON ec.changed_by = u.id
+    WHERE ec.order_id = ? 
+    ORDER BY ec.created_at DESC, ec.id DESC
   `).all(orderId);
   return changes.map(c => ({
     ...c,
     evidenceTypeLabel: c.evidence_type ? getEvidenceTypeLabel(c.evidence_type) : null,
-    changeTypeLabel: c.change_type === 'add' ? '添加' : c.change_type === 'delete' ? '删除' : c.change_type
+    changeTypeLabel: c.change_type === 'add' ? '添加' : c.change_type === 'delete' ? '删除' : c.change_type,
+    changedByRoleLabel: c.changed_by_role ? getRoleLabel(c.changed_by_role) : null
   }));
 };
 
