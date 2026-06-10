@@ -1,0 +1,135 @@
+<div class="page-header">
+  <div class="page-title-row">
+    <h2 class="page-title">工单管理</h2>
+    <button class="btn btn-primary" (click)="goCreate()">
+      ➕ 新建工单
+    </button>
+  </div>
+</div>
+
+<div class="card">
+  <div class="tabs">
+    <div
+      class="tab"
+      *ngFor="let tab of tabs"
+      [class.active]="activeTab === tab.key"
+      (click)="changeTab(tab.key)"
+    >
+      {{ tab.label }}
+      <span class="tab-count">{{ tab.count }}</span>
+    </div>
+  </div>
+
+  <div class="filters">
+    <div class="filter-item">
+      <label class="filter-label">关键字</label>
+      <input
+        class="form-input"
+        [(ngModel)]="keyword"
+        (keyup.enter)="applyFiltersAndNavigate()"
+        placeholder="搜索工单号/客户/车牌"
+      />
+    </div>
+    <div class="filter-item">
+      <label class="filter-label">状态 (status)</label>
+      <select class="form-select" [(ngModel)]="filterStatus" (change)="applyFiltersAndNavigate()">
+        <option value="">全部状态</option>
+        <option *ngFor="let s of STATUS_NAMES | keyvalue" [value]="s.key">
+          {{ s.value }}
+        </option>
+      </select>
+    </div>
+    <div class="filter-item">
+      <label class="filter-label">风险 (risk)</label>
+      <select class="form-select" [(ngModel)]="filterRisk" (change)="applyFiltersAndNavigate()">
+        <option value="">全部风险</option>
+        <option *ngFor="let r of RISK_NAMES | keyvalue" [value]="r.key">
+          {{ r.value }}
+        </option>
+      </select>
+    </div>
+    <div class="filter-item">
+      <label class="filter-label">阶段 (stage)</label>
+      <select class="form-select" [(ngModel)]="filterStage" (change)="applyFiltersAndNavigate()">
+        <option value="">全部阶段</option>
+        <option *ngFor="let s of STAGE_NAMES | keyvalue" [value]="s.key">
+          {{ s.value }}
+        </option>
+      </select>
+    </div>
+    <div class="filter-actions">
+      <button class="btn btn-sm" (click)="clearFilters()">重置</button>
+      <button class="btn btn-sm btn-primary" (click)="applyFiltersAndNavigate()">查询</button>
+    </div>
+  </div>
+
+  <div *ngIf="loading" class="empty-state">
+    <div class="empty-state-icon">⏳</div>
+    <div class="empty-state-text">加载中...</div>
+  </div>
+
+  <ng-container *ngIf="!loading">
+    <div *ngIf="filteredOrders.length === 0" class="empty-state">
+      <div class="empty-state-icon">📭</div>
+      <div class="empty-state-text">暂无工单数据</div>
+    </div>
+
+    <table *ngIf="filteredOrders.length > 0" class="table">
+      <thead>
+        <tr>
+          <th>工单号 (order_no)</th>
+          <th>客户信息</th>
+          <th>车辆信息</th>
+          <th>预约类型</th>
+          <th>状态 (status)</th>
+          <th>风险 (risk_level)</th>
+          <th>阶段 (stage)</th>
+          <th>当前处理人 (current_handler)</th>
+          <th>创建时间 (created_at)</th>
+          <th>版本 (version)</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr
+          *ngFor="let o of filteredOrders"
+          [class.high-risk]="o.risk_level === 'high'"
+          (click)="goDetail(o.id)"
+          style="cursor: pointer;"
+        >
+          <td><strong>{{ o.order_no }}</strong></td>
+          <td>
+            <div>{{ o.customer_name }}</div>
+            <div style="font-size: 12px; color: var(--color-text-tertiary);">{{ o.phone }}</div>
+          </td>
+          <td>
+            <div>{{ o.vehicle_plate }}</div>
+            <div style="font-size: 12px; color: var(--color-text-tertiary);">{{ o.vehicle_model }}</div>
+          </td>
+          <td>{{ o.appointment_type || '-' }}</td>
+          <td>
+            <span class="badge" [class]="STATUS_BADGE_CLASSES[o.status]">
+              {{ STATUS_NAMES[o.status] }}
+            </span>
+          </td>
+          <td>
+            <span class="badge" [class]="RISK_BADGE_CLASSES[o.risk_level]">
+              {{ RISK_NAMES[o.risk_level] }}
+            </span>
+          </td>
+          <td>{{ STAGE_NAMES[o.stage] }}</td>
+          <td>{{ o.current_handler || '-' }}</td>
+          <td style="font-size: 12px;">{{ formatDate(o.created_at) }}</td>
+          <td>
+            <span *ngIf="o.version" class="badge badge-default">v{{ o.version }}</span>
+          </td>
+          <td>
+            <div class="actions" (click)="$event.stopPropagation()">
+              <button class="btn btn-sm btn-primary" (click)="goDetail(o.id)">查看</button>
+            </div>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </ng-container>
+</div>

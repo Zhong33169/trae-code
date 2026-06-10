@@ -1,0 +1,62 @@
+<div class="timeline-header-section">
+  <span>📜</span>
+  <span class="timeline-section-title">操作记录（共 {{ operations.length }} 条）</span>
+</div>
+
+<div *ngIf="!operations || operations.length === 0" class="timeline-empty">
+  暂无操作记录
+</div>
+
+<div class="timeline" *ngIf="operations && operations.length > 0">
+  <div class="timeline-item" *ngFor="let op of operations">
+    <div class="timeline-dot" [ngClass]="getDotClass(op)"></div>
+
+    <div class="timeline-content">
+      <div class="timeline-header">
+        <div class="timeline-user">
+          <div class="op-avatar">{{ op.operator_name?.charAt(0) || '?' }}</div>
+          <span class="op-name">{{ op.operator_name || '未知用户' }}</span>
+          <span class="badge badge-primary">{{ ROLE_NAMES[op.operator_role] || op.operator_role }}</span>
+        </div>
+        <div class="timeline-time">
+          ⏱️ {{ formatDate(op.created_at) }}
+        </div>
+      </div>
+
+      <div class="timeline-action">
+        <strong>{{ op.action }}</strong>
+        <span *ngIf="op.from_status && op.to_status" class="timeline-status-change">
+          <span class="badge">{{ getStatusName(op.from_status) }}</span>
+          <span class="timeline-arrow">→</span>
+          <span class="badge badge-primary">{{ getStatusName(op.to_status) }}</span>
+        </span>
+        <span *ngIf="op.version_checked" class="version-tag">
+          🔖 版本 v{{ op.version_checked }}
+        </span>
+        <span *ngIf="op.ip_address" class="ip-tag" title="IP 地址">
+          🌐 {{ op.ip_address }}
+        </span>
+      </div>
+
+      <div *ngIf="op.opinion" class="timeline-opinion" [ngClass]="getOpinionClass(op)">
+        💬 {{ op.opinion }}
+      </div>
+
+      <div class="timeline-result">
+        <span *ngIf="op.result" class="result-tag">
+          📝 处理结果：{{ op.result }}
+        </span>
+        <span *ngIf="op.risk_change" class="timeline-risk-change"
+              [class.up]="hasRiskUp(op.risk_change)"
+              [class.down]="hasRiskDown(op.risk_change)">
+          ⚠️ 风险：{{ op.risk_change }}
+        </span>
+        <span *ngIf="op.evidence_check" class="evidence-check"
+              [class.pass]="evidencePass(op.evidence_check)"
+              [class.fail]="!evidencePass(op.evidence_check)">
+          {{ evidencePass(op.evidence_check) ? '✅' : '❌' }} 证据：{{ op.evidence_check }}
+        </span>
+      </div>
+    </div>
+  </div>
+</div>

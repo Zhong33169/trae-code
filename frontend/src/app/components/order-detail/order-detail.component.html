@@ -1,0 +1,388 @@
+<div class="back-btn" (click)="goBack()">← 返回工单列表</div>
+
+<div *ngIf="loading" class="empty-state">
+  <div class="empty-state-icon">⏳</div>
+  <div class="empty-state-text">加载中...</div>
+</div>
+
+<div *ngIf="errorMsg && !loading" class="empty-state">
+  <div class="empty-state-icon">❌</div>
+  <div class="empty-state-text">{{ errorMsg }}</div>
+  <button class="btn btn-primary" style="margin-top: 16px;" (click)="goBack()">返回列表</button>
+</div>
+
+<ng-container *ngIf="!loading && order">
+  <div class="card">
+    <div class="order-title-row">
+      <div class="order-title">
+        📋 工单详情：{{ order.order_no }}
+      </div>
+      <div class="order-badges">
+        <span class="badge" [class]="STATUS_BADGE_CLASSES[order.status]">
+          {{ STATUS_NAMES[order.status] }}
+        </span>
+        <span class="badge" [class]="RISK_BADGE_CLASSES[order.risk_level]">
+          {{ RISK_NAMES[order.risk_level] }}
+        </span>
+        <span *ngIf="order.version" class="badge badge-default">
+          🔖 版本 v{{ order.version }}
+        </span>
+      </div>
+    </div>
+
+    <div class="stage-flow">
+      <div
+        *ngFor="let stg of stages; let idx = index"
+        class="stage-item"
+        [class.active]="getStageStatus(stg.key) === 'active'"
+        [class.done]="getStageStatus(stg.key) === 'done'"
+      >
+        <div class="stage-dot">
+          <span *ngIf="getStageStatus(stg.key) === 'done'">✓</span>
+          <span *ngIf="getStageStatus(stg.key) !== 'done'">{{ idx + 1 }}</span>
+        </div>
+        <div class="stage-label">{{ stg.icon }} {{ stg.label }}</div>
+      </div>
+    </div>
+
+    <div *ngIf="hasLastOpinion()" class="last-opinion" [class]="lastOpinionClass">
+      <div class="last-opinion-title">
+        📌 上一步处理结果
+      </div>
+      <div class="last-opinion-content" *ngIf="order.last_opinion">
+        {{ order.last_opinion }}
+      </div>
+      <div class="last-opinion-result" *ngIf="order.last_result">
+        处理结论：<strong>{{ order.last_result }}</strong>
+      </div>
+    </div>
+
+    <div class="detail-layout">
+      <div class="detail-block">
+        <div class="detail-section-title">👤 客户信息</div>
+        <div class="detail-grid">
+          <span class="detail-label">客户姓名</span>
+          <span class="detail-value">{{ order.customer_name }}</span>
+          <span class="detail-label">联系电话</span>
+          <span class="detail-value">{{ order.phone }}</span>
+          <span class="detail-label">创建人</span>
+          <span class="detail-value">
+            {{ order.created_by?.real_name || (order.created_by_id ? 'ID:' + order.created_by_id : '-') }}
+            <span *ngIf="order.created_by" class="badge badge-primary" style="margin-left: 6px;">
+              {{ ROLE_NAMES[order.created_by.role] }}
+            </span>
+          </span>
+          <span class="detail-label">当前处理人</span>
+          <span class="detail-value">{{ order.current_handler || '-' }}</span>
+        </div>
+      </div>
+
+      <div class="detail-block">
+        <div class="detail-section-title">🚗 车辆信息</div>
+        <div class="detail-grid">
+          <span class="detail-label">车牌号</span>
+          <span class="detail-value"><strong>{{ order.vehicle_plate }}</strong></span>
+          <span class="detail-label">车型</span>
+          <span class="detail-value">{{ order.vehicle_model }}</span>
+          <span class="detail-label">里程数</span>
+          <span class="detail-value">{{ order.mileage ? (order.mileage | number) + ' km' : '-' }}</span>
+          <span class="detail-label">预约类型</span>
+          <span class="detail-value">{{ order.appointment_type || '-' }}</span>
+        </div>
+      </div>
+
+      <div class="detail-block">
+        <div class="detail-section-title">📅 时间信息</div>
+        <div class="detail-grid">
+          <span class="detail-label">创建时间</span>
+          <span class="detail-value">{{ formatDate(order.created_at) }}</span>
+          <span class="detail-label">更新时间</span>
+          <span class="detail-value">{{ formatDate(order.updated_at) }}</span>
+          <span class="detail-label">期望完工</span>
+          <span class="detail-value">{{ order.deadline ? formatDate(order.deadline) : '-' }}</span>
+          <span class="detail-label">指派技师</span>
+          <span class="detail-value">{{ order.assigned_technician || '-' }}</span>
+        </div>
+      </div>
+
+      <div class="detail-block">
+        <div class="detail-section-title">💰 费用信息</div>
+        <div class="detail-grid">
+          <span class="detail-label">预估费用</span>
+          <span class="detail-value">
+            <span *ngIf="order.estimated_cost != null; else empty">¥{{ order.estimated_cost | number }}</span>
+            <ng-template #empty>-</ng-template>
+          </span>
+          <span class="detail-label">最终费用</span>
+          <span class="detail-value">
+            <span *ngIf="order.final_cost != null; else empty2">¥{{ order.final_cost | number }}</span>
+            <ng-template #empty2>-</ng-template>
+          </span>
+          <span class="detail-label">维修项目</span>
+          <span class="detail-value">{{ order.repair_items || '-' }}</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="detail-block" style="margin-bottom: 24px;">
+      <div class="detail-section-title">📝 问题描述</div>
+      <div class="problem-desc">{{ order.problem_description || '-' }}</div>
+    </div>
+
+    <div *ngIf="order.risk_reason" class="detail-block" style="margin-bottom: 24px;">
+      <div class="detail-section-title">⚠️ 风险说明</div>
+      <div class="risk-desc" [class.high]="order.risk_level === 'high'" [class.medium]="order.risk_level === 'medium'">
+        {{ order.risk_reason }}
+      </div>
+    </div>
+
+    <div class="detail-block" style="margin-bottom: 24px;">
+      <div class="detail-section-title">
+        📎 证据资料
+        <span class="badge" [class]="order.evidence_submitted ? 'badge-success' : 'badge-default'" style="margin-left: 8px;">
+          {{ order.evidence_submitted ? '已提交' : '未提交' }}
+        </span>
+      </div>
+      <div *ngIf="getEvidenceList().length === 0" class="evidence-empty">
+        暂未勾选证据项
+      </div>
+      <div *ngIf="getEvidenceList().length > 0" class="evidence-tags">
+        <span class="evidence-tag" *ngFor="let ev of getEvidenceList()">
+          ✅ {{ ev }}
+        </span>
+      </div>
+    </div>
+
+    <div class="action-panel" *ngIf="availableActions.length > 0">
+      <div class="action-panel-title">
+        🎯 可用操作
+        <span *ngIf="canEdit()" class="badge badge-success" style="margin-left: 8px;">可编辑</span>
+      </div>
+      <div class="action-buttons">
+        <button
+          *ngFor="let act of availableActions"
+          class="btn"
+          [ngClass]="act.cls"
+          (click)="openAction(act.key)"
+          [disabled]="activeAction !== null"
+        >
+          {{ act.label }}
+        </button>
+      </div>
+
+      <div *ngIf="activeAction" class="action-form">
+        <div class="action-form-title">
+          {{
+            activeAction === 'submit' ? '提交审批' :
+            activeAction === 'resubmit' ? '补正后重新提交' :
+            activeAction === 'supervisor_approve' ? '主管通过审批' :
+            activeAction === 'supervisor_reject' ? '主管退回登记员' :
+            activeAction === 'reviewer_approve' ? '复核员通过审批' :
+            activeAction === 'reviewer_reject' ? '复核员拒绝审批' :
+            activeAction === 'change_risk' ? '调整风险等级' :
+            activeAction === 'archive' ? '归档工单' : ''
+          }}
+        </div>
+
+        <div *ngIf="order.version != null" class="form-group" style="display: none;">
+          <input type="hidden" [value]="order.version" />
+        </div>
+        <div class="version-hint" style="font-size: 12px; color: var(--color-text-tertiary); margin-bottom: 12px;">
+          当前版本号：v{{ order.version || 0 }}
+        </div>
+
+        <ng-container *ngIf="activeAction === 'resubmit'">
+          <div class="rectify-section">
+            <div class="rectify-title">✏️ 补正工单信息（可修改）</div>
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">客户姓名</label>
+                <input class="form-input" formControlName="customer_name" [formGroup]="rectifyForm" />
+              </div>
+              <div class="form-group">
+                <label class="form-label">联系电话</label>
+                <input class="form-input" formControlName="phone" [formGroup]="rectifyForm" />
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">车牌号</label>
+                <input class="form-input" formControlName="vehicle_plate" [formGroup]="rectifyForm" />
+              </div>
+              <div class="form-group">
+                <label class="form-label">车型</label>
+                <input class="form-input" formControlName="vehicle_model" [formGroup]="rectifyForm" />
+              </div>
+              <div class="form-group">
+                <label class="form-label">里程数 (km)</label>
+                <input class="form-input" type="number" formControlName="mileage" [formGroup]="rectifyForm" />
+              </div>
+            </div>
+            <div class="form-group">
+              <label class="form-label">问题描述</label>
+              <textarea class="form-textarea" formControlName="problem_description" rows="3" [formGroup]="rectifyForm"></textarea>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">维修项目</label>
+                <textarea class="form-textarea" formControlName="repair_items" rows="2" [formGroup]="rectifyForm"></textarea>
+              </div>
+              <div class="form-group">
+                <label class="form-label">预估费用 (元)</label>
+                <input class="form-input" type="number" formControlName="estimated_cost" [formGroup]="rectifyForm" />
+              </div>
+            </div>
+            <div class="form-group">
+              <label class="form-label" style="margin-bottom: 12px;">📎 勾选证据资料（evidence_submitted: true）</label>
+              <div class="evidence-checklist">
+                <label
+                  class="evidence-option"
+                  *ngFor="let ev of EVIDENCE_OPTIONS"
+                  [class.checked]="hasResubmitEvidence(ev)"
+                >
+                  <input type="checkbox" [checked]="hasResubmitEvidence(ev)" (change)="toggleResubmitEvidence(ev)" />
+                  <span>{{ ev }}</span>
+                </label>
+              </div>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label required">补正说明</label>
+            <textarea
+              class="form-textarea"
+              formControlName="opinion"
+              rows="3"
+              [formGroup]="rectifyForm"
+              placeholder="请说明补正的内容及理由"
+            ></textarea>
+            <div *ngIf="rectifyForm.get('opinion')?.touched && rectifyForm.get('opinion')?.invalid" class="form-error">
+              请填写补正说明
+            </div>
+          </div>
+        </ng-container>
+
+        <ng-container *ngIf="activeAction === 'change_risk'">
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">当前风险等级（from_level）</label>
+              <select class="form-select" formControlName="from_level" [formGroup]="riskForm" disabled>
+                <option value="low">低风险</option>
+                <option value="medium">中风险</option>
+                <option value="high">高风险</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label required">调整为（to_level）</label>
+              <select class="form-select" formControlName="to_level" [formGroup]="riskForm">
+                <option value="low">低风险</option>
+                <option value="medium">中风险</option>
+                <option value="high">高风险</option>
+              </select>
+              <div *ngIf="riskForm.get('to_level')?.touched && riskForm.get('to_level')?.invalid" class="form-error">
+                请选择目标风险等级
+              </div>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label required">调整原因（reason）</label>
+            <textarea
+              class="form-textarea"
+              formControlName="reason"
+              rows="3"
+              [formGroup]="riskForm"
+              placeholder="请详细说明调整风险等级的原因"
+            ></textarea>
+            <div *ngIf="riskForm.get('reason')?.touched && riskForm.get('reason')?.invalid" class="form-error">
+              请填写调整原因
+            </div>
+          </div>
+        </ng-container>
+
+        <ng-container *ngIf="['supervisor_approve', 'supervisor_reject', 'reviewer_approve', 'reviewer_reject'].includes(activeAction)">
+          <div *ngIf="activeAction !== 'archive'" class="form-group">
+            <label class="form-label required">处理意见（opinion）</label>
+            <textarea
+              class="form-textarea"
+              formControlName="opinion"
+              rows="3"
+              [formGroup]="opinionForm"
+              placeholder="请输入处理意见"
+            ></textarea>
+            <div *ngIf="opinionForm.get('opinion')?.touched && opinionForm.get('opinion')?.invalid" class="form-error">
+              请输入处理意见
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">处理结论（result）</label>
+            <input
+              class="form-input"
+              formControlName="result"
+              [formGroup]="opinionForm"
+              placeholder="简要说明处理结论，如：通过/退回原因"
+            />
+          </div>
+          <div *ngIf="activeAction === 'supervisor_approve'" class="form-group">
+            <label class="form-label">风险覆盖（risk_override，可选）</label>
+            <select class="form-select" formControlName="risk_override" [formGroup]="opinionForm">
+              <option value="">不覆盖（保持原风险等级）</option>
+              <option value="low">低风险</option>
+              <option value="medium">中风险</option>
+              <option value="high">高风险</option>
+            </select>
+          </div>
+          <div *ngIf="activeAction === 'reviewer_approve'" class="form-group">
+            <label class="form-label">最终费用（final_cost，可选，元）</label>
+            <input
+              class="form-input"
+              type="number"
+              formControlName="final_cost"
+              [formGroup]="opinionForm"
+              placeholder="如：500"
+              min="0"
+            />
+          </div>
+        </ng-container>
+
+        <ng-container *ngIf="activeAction === 'submit'">
+          <div class="form-group">
+            <label class="form-label required">提交说明</label>
+            <textarea
+              class="form-textarea"
+              formControlName="opinion"
+              rows="3"
+              [formGroup]="opinionForm"
+              placeholder="请输入提交说明"
+            ></textarea>
+            <div *ngIf="opinionForm.get('opinion')?.touched && opinionForm.get('opinion')?.invalid" class="form-error">
+              请输入提交说明
+            </div>
+          </div>
+        </ng-container>
+
+        <ng-container *ngIf="activeAction === 'archive'">
+          <div class="archive-hint" style="padding: 12px 16px; background: #f6ffed; border-radius: 4px; color: #389e0d; margin-bottom: 12px;">
+            ℹ️ 归档操作将通过 reviewer 复核流程完成工单归档
+          </div>
+        </ng-container>
+
+        <div class="form-actions" style="justify-content: flex-end; border: none; padding: 0; margin-top: 16px;">
+          <button type="button" class="btn" (click)="cancelAction()" [disabled]="submitting">
+            取消
+          </button>
+          <button
+            type="button"
+            class="btn btn-primary"
+            (click)="performAction()"
+            [disabled]="submitting"
+          >
+            {{ submitting ? '处理中...' : '确认提交' }}
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <app-timeline [operations]="order.operations || []"></app-timeline>
+  </div>
+</ng-container>

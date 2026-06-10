@@ -1,0 +1,139 @@
+<div class="back-btn" (click)="cancel()">← 返回工单列表</div>
+
+<div class="card">
+  <div class="card-header">
+    <div class="card-title">新建工单</div>
+  </div>
+
+  <form [formGroup]="form" (ngSubmit)="submit()">
+    <h3 class="section-title">👤 客户信息</h3>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label required">客户姓名</label>
+        <input class="form-input" formControlName="customer_name" placeholder="请输入客户姓名" />
+        <div *ngIf="form.get('customer_name')?.touched && form.get('customer_name')?.invalid" class="form-error">
+          请输入客户姓名
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label required">联系电话</label>
+        <input class="form-input" formControlName="phone" placeholder="请输入联系电话" />
+        <div *ngIf="form.get('phone')?.touched && form.get('phone')?.invalid" class="form-error">
+          请输入联系电话
+        </div>
+      </div>
+    </div>
+
+    <h3 class="section-title">🚗 车辆信息</h3>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label required">车牌号</label>
+        <input class="form-input" formControlName="vehicle_plate" placeholder="如：京A12345" />
+        <div *ngIf="form.get('vehicle_plate')?.touched && form.get('vehicle_plate')?.invalid" class="form-error">
+          请输入车牌号
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label required">车型</label>
+        <input class="form-input" formControlName="vehicle_model" placeholder="如：大众帕萨特 2023款" />
+        <div *ngIf="form.get('vehicle_model')?.touched && form.get('vehicle_model')?.invalid" class="form-error">
+          请输入车型
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">里程数 (km)</label>
+        <input class="form-input" type="number" formControlName="mileage" min="0" placeholder="0" />
+      </div>
+    </div>
+
+    <h3 class="section-title">📅 预约信息</h3>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label required">预约类型</label>
+        <select class="form-select" formControlName="appointment_type">
+          <option value="">请选择预约类型</option>
+          <option *ngFor="let t of APPOINTMENT_TYPES" [value]="t">{{ t }}</option>
+        </select>
+        <div *ngIf="form.get('appointment_type')?.touched && form.get('appointment_type')?.invalid" class="form-error">
+          请选择预约类型
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">期望完工时间</label>
+        <input class="form-input" type="datetime-local" formControlName="deadline" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">指派技师</label>
+        <input class="form-input" formControlName="assigned_technician" placeholder="技师姓名（可选）" />
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label required">问题描述</label>
+      <textarea
+        class="form-textarea"
+        formControlName="problem_description"
+        rows="4"
+        placeholder="请详细描述客户报修的问题或故障现象"
+      ></textarea>
+      <div *ngIf="form.get('problem_description')?.touched && form.get('problem_description')?.invalid" class="form-error">
+        请输入问题描述
+      </div>
+    </div>
+
+    <h3 class="section-title">🔧 维修信息</h3>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">维修项目</label>
+        <textarea
+          class="form-textarea"
+          formControlName="repair_items"
+          rows="3"
+          placeholder="列出计划维修的项目（可选）"
+        ></textarea>
+      </div>
+      <div class="form-group">
+        <label class="form-label">预估费用 (元)</label>
+        <input class="form-input" type="number" formControlName="estimated_cost" min="0" placeholder="0" />
+      </div>
+    </div>
+
+    <h3 class="section-title">📎 证据资料</h3>
+    <div class="form-group">
+      <label class="form-checkbox" style="margin-bottom: 12px;">
+        <input type="checkbox" formControlName="evidence_submitted" />
+        <span>客户已提交相关证据资料</span>
+      </label>
+      <div class="evidence-checklist">
+        <label
+          class="evidence-option"
+          *ngFor="let ev of EVIDENCE_OPTIONS"
+          [class.checked]="hasEvidence(ev)"
+        >
+          <input type="checkbox" [checked]="hasEvidence(ev)" (change)="toggleEvidence(ev)" />
+          <span>{{ ev }}</span>
+        </label>
+      </div>
+    </div>
+
+    <div class="form-actions">
+      <button type="button" class="btn" (click)="cancel()">取消</button>
+      <button
+        type="button"
+        class="btn"
+        (click)="submit()"
+        [disabled]="submitting"
+      >
+        {{ submitting ? '处理中...' : '保存为草稿' }}
+      </button>
+      <button
+        type="button"
+        class="btn btn-primary"
+        (click)="saveDraftAndSubmit()"
+        [disabled]="submitting"
+      >
+        {{ submitting ? '处理中...' : '保存并提交审批' }}
+      </button>
+    </div>
+  </form>
+</div>

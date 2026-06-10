@@ -1,0 +1,55 @@
+<header class="header">
+  <div class="header-logo">
+    <div class="header-logo-icon">🔧</div>
+    <span>汽修工单管理系统</span>
+  </div>
+
+  <nav class="header-nav">
+    <a routerLink="/dashboard" routerLinkActive="active">
+      <span>📊</span> 工作台
+    </a>
+    <a routerLink="/orders" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: false }">
+      <span>📋</span> 工单管理
+    </a>
+    <a routerLink="/orders/create" routerLinkActive="active">
+      <span>➕</span> 新建工单
+    </a>
+  </nav>
+
+  <div class="header-user">
+    <div class="user-select-wrapper">
+      <div class="user-select" (click)="toggleDropdown()">
+        <div class="user-avatar">{{ getInitials(currentUser?.real_name) }}</div>
+        <div class="user-info">
+          <span class="user-name">{{ currentUser?.real_name || '加载中...' }}</span>
+          <span class="user-role">{{ ROLE_NAMES[currentUser?.role] || '' }}</span>
+        </div>
+        <span class="dropdown-arrow" [class.open]="userDropdownOpen">▼</span>
+      </div>
+
+      <div class="user-dropdown" *ngIf="userDropdownOpen">
+        <div class="dropdown-header">
+          <span>切换用户</span>
+        </div>
+        <div class="user-list">
+          <div
+            class="user-option"
+            *ngFor="let user of users"
+            [class.active]="user.id === currentUser?.id"
+            (click)="selectUser(user)"
+          >
+            <div class="user-avatar sm">{{ getInitials(user.real_name) }}</div>
+            <div class="user-meta">
+              <div class="user-option-name">{{ user.real_name }}</div>
+              <div class="user-option-role">{{ ROLE_NAMES[user.role] }}</div>
+            </div>
+            <span *ngIf="user.id === currentUser?.id" class="check-icon">✓</span>
+          </div>
+          <div *ngIf="users.length === 0" class="user-option-empty">
+            暂无用户数据
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</header>

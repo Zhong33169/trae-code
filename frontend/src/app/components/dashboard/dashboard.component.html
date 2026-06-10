@@ -1,0 +1,96 @@
+<div *ngIf="loading" class="empty-state">
+  <div class="empty-state-icon">⏳</div>
+  <div class="empty-state-text">加载中...</div>
+</div>
+
+<ng-container *ngIf="!loading && stats">
+  <div class="stats-grid">
+    <div class="stat-card total" (click)="goOrders()">
+      <div class="stat-card-label">工单总数 (total_orders)</div>
+      <div class="stat-card-value">{{ stats.total_orders }}</div>
+      <div class="stat-card-icon">📋</div>
+    </div>
+
+    <div class="stat-card todo" (click)="goOrders({ view: 'todo' })">
+      <div class="stat-card-label">我的待办 (my_todo)</div>
+      <div class="stat-card-value">{{ stats.my_todo }}</div>
+      <div class="stat-card-icon">✅</div>
+    </div>
+
+    <div class="stat-card high-risk" (click)="goOrders({ risk: 'high' })">
+      <div class="stat-card-label">高风险工单 (by_risk.high)</div>
+      <div class="stat-card-value">{{ stats.by_risk.high }}</div>
+      <div class="stat-card-icon">⚠️</div>
+    </div>
+
+    <div class="stat-card overdue" (click)="goOrders({ status: 'overdue' })">
+      <div class="stat-card-label">逾期工单 (by_status.overdue)</div>
+      <div class="stat-card-value">{{ stats.by_status.overdue }}</div>
+      <div class="stat-card-icon">⏰</div>
+    </div>
+  </div>
+
+  <div class="quick-actions">
+    <button class="quick-action-btn primary" (click)="goCreate()">
+      <span>➕</span>
+      <span>新建工单</span>
+    </button>
+    <button class="quick-action-btn" (click)="goOrders({ view: 'todo' })">
+      <span>📝</span>
+      <span>查看我的待办</span>
+    </button>
+    <button class="quick-action-btn" (click)="goOrders({ risk: 'high' })">
+      <span>🔥</span>
+      <span>高风险工单</span>
+    </button>
+    <button class="quick-action-btn" (click)="goOrders()">
+      <span>📂</span>
+      <span>全部工单</span>
+    </button>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">状态分布</div>
+      <button class="btn btn-sm" (click)="loadStats()">🔄 刷新</button>
+    </div>
+
+    <div class="chart-container">
+      <div class="bar-chart">
+        <div class="bar-chart-item" *ngFor="let item of statusBarItems" (click)="goOrders({ status: item.key })">
+          <div class="bar-chart-label">{{ item.label }}</div>
+          <div class="bar-chart-track">
+            <div
+              class="bar-chart-fill"
+              [style.width.%]="(item.count / totalStatusCount) * 100"
+              [style.background]="item.color"
+              [style.minWidth.px]="item.count > 0 ? 32 : 0"
+            >
+              {{ item.count > 0 ? item.count : '' }}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">风险分布</div>
+    </div>
+    <div class="risk-summary">
+      <div class="risk-item low" (click)="goOrders({ risk: 'low' })">
+        <div class="risk-count">{{ stats.by_risk.low }}</div>
+        <div class="risk-label">低风险</div>
+      </div>
+      <div class="risk-item medium" (click)="goOrders({ risk: 'medium' })">
+        <div class="risk-count">{{ stats.by_risk.medium }}</div>
+        <div class="risk-label">中风险</div>
+      </div>
+      <div class="risk-item high" (click)="goOrders({ risk: 'high' })">
+        <div class="risk-count">{{ stats.by_risk.high }}</div>
+        <div class="risk-label">高风险</div>
+      </div>
+    </div>
+  </div>
+</ng-container>
