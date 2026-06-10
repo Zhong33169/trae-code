@@ -26,8 +26,46 @@ func ensureUploadDir() {
 	os.MkdirAll("./data/uploads", 0755)
 }
 
+func checkAttachmentPermission(app *models.LeaseApplication, userID uint, role models.Role, action string) (bool, string) {
+	if app.Status == models.StatusCompleted || app.Status == models.StatusRejected {
+		return false, fmt.Sprintf("当前状态为【%s】，流程已结束，不允许%s附件", models.GetStatusName(app.Status), action)
+	}
+
+	switch role {
+	case models.RoleRegistrar:
+		if app.CreatedBy != userID {
+			return false, fmt.Sprintf("只有申请登记人本人可以%s自己申请的附件", action)
+		}
+		if app.Status != models.StatusDraft && app.Status != models.StatusReturned {
+			return false, fmt.Sprintf("登记员仅在【草稿/已退回】状态可以%s附件，当前状态【%s】不允许", action, models.GetStatusName(app.Status))
+		}
+		return true, ""
+
+	case models.RoleAuditor:
+		allowedStatus := map[models.ApplicationStatus]bool{
+			models.StatusPendingReview:   true,
+			models.StatusReviewed:        true,
+			models.StatusPendingConfirm:  true,
+			models.StatusPendingHandover: true,
+		}
+		if !allowedStatus[app.Status] {
+			return false, fmt.Sprintf("审核主管仅在【待审核/待房态确认/待入住交接】状态可以%s附件，当前状态【%s】不允许", action, models.GetStatusName(app.Status))
+		}
+		return true, ""
+
+	case models.RoleReviewer:
+		if app.Status != models.StatusRoomConfirmed {
+			return false, fmt.Sprintf("复核负责人仅在【待复核归档】状态可以%s附件（归档前补充材料），当前状态【%s】不允许", action, models.GetStatusName(app.Status))
+		}
+		return true, ""
+
+	default:
+		return false, "未知角色，无权限操作附件"
+	}
+}
+
 func UploadAttachment(c *gin.Context) {
-	userID, _, realName, _ := middleware.GetCurrentUser(c)
+	userID, _, realName, role := middleware.GetCurrentUser(c)
 	ensureUploadDir()
 
 	var req UploadAttachmentRequest
@@ -43,8 +81,8 @@ func UploadAttachment(c *gin.Context) {
 		return
 	}
 
-	if app.Status == models.StatusCompleted || app.Status == models.StatusRejected {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": "当前状态不允许上传附件"})
+	if allowed, errMsg := checkAttachmentPermission(&app, userID, role, "上传"); !allowed {
+		c.JSON(http.StatusForbidden, gin.H{"code": 403, "message": errMsg})
 		return
 	}
 
@@ -140,13 +178,13 @@ func DeleteAttachment(c *gin.Context) {
 	var app models.LeaseApplication
 	database.DB.First(&app, attachment.ApplicationID)
 
-	if role == models.RoleRegistrar && attachment.UploadedBy != userID {
-		c.JSON(http.StatusForbidden, gin.H{"code": 403, "message": "只能删除自己上传的附件"})
+	if allowed, errMsg := checkAttachmentPermission(&app, userID, role, "删除"); !allowed {
+		c.JSON(http.StatusForbidden, gin.H{"code": 403, "message": errMsg})
 		return
 	}
 
-	if app.Status == models.StatusCompleted || app.Status == models.StatusRejected {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": "当前状态不允许删除附件"})
+	if role == models.RoleRegistrar && attachment.UploadedBy != userID {
+		c.JSON(http.StatusForbidden, gin.H{"code": 403, "message": "登记员只能删除自己上传的附件"})
 		return
 	}
 

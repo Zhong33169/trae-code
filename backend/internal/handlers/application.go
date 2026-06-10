@@ -31,29 +31,39 @@ type CreateApplicationRequest struct {
 }
 
 type SubmitReviewRequest struct {
-	Remark string `json:"remark"`
+	Remark         string `json:"remark"`
+	OverdueReason  string `json:"overdueReason"`
+	FollowUpAction string `json:"followUpAction"`
 }
 
 type ReviewRequest struct {
-	Action       string `json:"action" binding:"required,oneof=approve return reject"`
-	ReviewResult string `json:"reviewResult"`
-	ReturnReason string `json:"returnReason"`
-	RejectReason string `json:"rejectReason"`
+	Action         string `json:"action" binding:"required,oneof=approve return reject"`
+	ReviewResult   string `json:"reviewResult"`
+	ReturnReason   string `json:"returnReason"`
+	RejectReason   string `json:"rejectReason"`
+	OverdueReason  string `json:"overdueReason"`
+	FollowUpAction string `json:"followUpAction"`
 }
 
 type RoomConfirmRequest struct {
-	Action        string `json:"action" binding:"required,oneof=confirm problem"`
-	ConfirmResult string `json:"confirmResult" binding:"required"`
+	Action         string `json:"action" binding:"required,oneof=confirm problem"`
+	ConfirmResult  string `json:"confirmResult" binding:"required"`
+	OverdueReason  string `json:"overdueReason"`
+	FollowUpAction string `json:"followUpAction"`
 }
 
 type HandoverRequest struct {
 	Action         string `json:"action" binding:"required,oneof=complete problem"`
 	HandoverResult string `json:"handoverResult" binding:"required"`
+	OverdueReason  string `json:"overdueReason"`
+	FollowUpAction string `json:"followUpAction"`
 }
 
 type ArchiveRequest struct {
-	Action string `json:"action" binding:"required,oneof=archive"`
-	Remark string `json:"remark"`
+	Action         string `json:"action" binding:"required,oneof=archive"`
+	Remark         string `json:"remark"`
+	OverdueReason  string `json:"overdueReason"`
+	FollowUpAction string `json:"followUpAction"`
 }
 
 type OverdueRecordRequest struct {
@@ -80,6 +90,58 @@ func checkApplicationOwnership(app *models.LeaseApplication, userID uint, role m
 	default:
 		return false
 	}
+}
+
+func checkNodeOverdueBeforeProceed(
+	c *gin.Context,
+	app *models.LeaseApplication,
+	nodeType models.NodeType,
+	userID uint,
+	realName string,
+	role models.Role,
+	reqOverdueReason string,
+	reqFollowUpAction string,
+	actionName string,
+) (bool, string) {
+	var timeline models.NodeTimeline
+	result := database.DB.Where("application_id = ? AND node_type = ?", app.ID, nodeType).First(&timeline)
+	if result.Error != nil {
+		return true, ""
+	}
+
+	if !timeline.IsOverdue && !app.IsOverdue {
+		return true, ""
+	}
+
+	hasExisting := (timeline.OverdueReason != "" && timeline.FollowUpAction != "") ||
+		(app.OverdueReason != "" && app.FollowUpAction != "")
+
+	hasReqFields := reqOverdueReason != "" && reqFollowUpAction != ""
+
+	if !hasExisting && !hasReqFields {
+		return false, fmt.Sprintf(
+			"当前节点【%s】已超时，必须先记录【超时原因】和【后续处理措施】才能推进%s。可通过详情页【⏰ 记录超时处理】按钮补录，或在本次请求中同步提交。",
+			models.GetNodeName(nodeType), actionName,
+		)
+	}
+
+	if hasReqFields && !hasExisting {
+		now := time.Now()
+		database.SetNodeOverdueRecord(app.ID, nodeType, reqOverdueReason, reqFollowUpAction)
+		database.DB.Model(&models.LeaseApplication{}).Where("id = ?", app.ID).Updates(map[string]interface{}{
+			"overdue_reason":  reqOverdueReason,
+			"follow_up_action": reqFollowUpAction,
+		})
+		database.CreateOperationLog(
+			app.ID, userID, realName, string(role),
+			"overdue_record_sync", "超时记录(推进时补录)",
+			string(app.Status), string(app.Status),
+			fmt.Sprintf("推进%s前补录超时记录：原因=%s，后续措施=%s", actionName, reqOverdueReason, reqFollowUpAction),
+		)
+		_ = now
+	}
+
+	return true, ""
 }
 
 func GetApplicationList(c *gin.Context) {
@@ -410,6 +472,11 @@ func SubmitForReview(c *gin.Context) {
 	var req SubmitReviewRequest
 	c.ShouldBindJSON(&req)
 
+	if allowed, errMsg := checkNodeOverdueBeforeProceed(c, &app, models.NodeContractSigning, userID, realName, role, req.OverdueReason, req.FollowUpAction, "至审核环节"); !allowed {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": errMsg})
+		return
+	}
+
 	now := time.Now()
 	oldStatus := app.Status
 
@@ -465,6 +532,11 @@ func ReviewApplication(c *gin.Context) {
 	var req ReviewRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": "请求参数错误：action 必须为 approve/return/reject"})
+		return
+	}
+
+	if allowed, errMsg := checkNodeOverdueBeforeProceed(c, &app, models.NodeReview, userID, realName, role, req.OverdueReason, req.FollowUpAction, "审核操作"); !allowed {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": errMsg})
 		return
 	}
 
@@ -583,6 +655,11 @@ func ConfirmRoomStatus(c *gin.Context) {
 		return
 	}
 
+	if allowed, errMsg := checkNodeOverdueBeforeProceed(c, &app, models.NodeRoomConfirm, userID, realName, role, req.OverdueReason, req.FollowUpAction, "房态确认操作"); !allowed {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": errMsg})
+		return
+	}
+
 	now := time.Now()
 	oldStatus := app.Status
 
@@ -631,7 +708,7 @@ func CompleteHandover(c *gin.Context) {
 	if app.Status != models.StatusPendingHandover {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"code":    400,
-			"message": fmt.Sprintf("当前状态为【%s】，只有待入住交接状态可以执行入住交接操作", models.GetStatusName(app.Status)),
+			"message": fmt.Sprintf("当前状态为【%s】，只有待入住交接状态可以执行此操作", models.GetStatusName(app.Status)),
 		})
 		return
 	}
@@ -643,12 +720,16 @@ func CompleteHandover(c *gin.Context) {
 	}
 
 	if req.HandoverResult == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": "交接说明不能为空，请详细描述钥匙、门禁、水电表等交接情况"})
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": "交接说明不能为空，请详细记录钥匙、门禁卡及水电表读数等交接内容"})
+		return
+	}
+
+	if allowed, errMsg := checkNodeOverdueBeforeProceed(c, &app, models.NodeHandover, userID, realName, role, req.OverdueReason, req.FollowUpAction, "入住交接操作"); !allowed {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": errMsg})
 		return
 	}
 
 	now := time.Now()
-	oldStatus := app.Status
 
 	database.DB.Model(&app).Updates(map[string]interface{}{
 		"status":              models.StatusRoomConfirmed,
@@ -662,13 +743,19 @@ func CompleteHandover(c *gin.Context) {
 	database.UpdateNodeTimeline(app.ID, models.NodeHandover, "completed", userID, realName, &now)
 	database.UpdateNodeTimeline(app.ID, models.NodeArchive, "processing", 0, "", nil)
 
-	database.CreateOperationLog(app.ID, userID, realName, string(role), "handover", "入住交接完成", string(oldStatus), string(models.StatusRoomConfirmed),
+	database.CreateOperationLog(app.ID, userID, realName, string(role), "handover", "入住交接完成", string(models.StatusPendingHandover), string(models.StatusRoomConfirmed),
 		fmt.Sprintf("入住交接完成，交接说明：%s", req.HandoverResult))
 
 	c.JSON(http.StatusOK, gin.H{
-		"code":    200,
+		"code": 200,
 		"message": "入住交接完成，已流转至复核归档环节",
-		"data":    gin.H{"id": app.ID, "status": models.StatusRoomConfirmed, "statusName": models.GetStatusName(models.StatusRoomConfirmed), "currentNode": models.NodeArchive, "currentNodeName": models.GetNodeName(models.NodeArchive)},
+		"data": gin.H{
+			"id":              app.ID,
+			"status":          models.StatusRoomConfirmed,
+			"statusName":      models.GetStatusName(models.StatusRoomConfirmed),
+			"currentNode":     models.NodeArchive,
+			"currentNodeName": models.GetNodeName(models.NodeArchive),
+		},
 	})
 }
 
@@ -708,6 +795,11 @@ func ArchiveApplication(c *gin.Context) {
 
 	if req.Action != "archive" {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": "归档操作 action 必须为 'archive'"})
+		return
+	}
+
+	if allowed, errMsg := checkNodeOverdueBeforeProceed(c, &app, models.NodeArchive, userID, realName, role, req.OverdueReason, req.FollowUpAction, "复核归档操作"); !allowed {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": errMsg})
 		return
 	}
 

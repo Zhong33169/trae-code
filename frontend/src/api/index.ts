@@ -37,7 +37,7 @@ export const applicationApi = {
 
   update: (id: number, data: any) => put(`/applications/${id}`, data),
 
-  submit: (id: number, data?: { remark?: string }) =>
+  submit: (id: number, data?: { remark?: string; overdueReason?: string; followUpAction?: string }) =>
     post<{ id: number; status: string; statusName: string }>(`/applications/${id}/submit`, data),
 
   review: (id: number, data: {
@@ -45,19 +45,25 @@ export const applicationApi = {
     reviewResult?: string
     returnReason?: string
     rejectReason?: string
+    overdueReason?: string
+    followUpAction?: string
   }) => post<{ id: number; status: string; statusName: string }>(`/applications/${id}/review`, data),
 
   roomConfirm: (id: number, data: {
     action: 'confirm' | 'problem'
     confirmResult: string
+    overdueReason?: string
+    followUpAction?: string
   }) => post<{ id: number; status: string; statusName: string }>(`/applications/${id}/room-confirm`, data),
 
   handover: (id: number, data: {
     action: 'complete' | 'problem'
     handoverResult: string
+    overdueReason?: string
+    followUpAction?: string
   }) => post<{ id: number; status: string; statusName: string }>(`/applications/${id}/handover`, data),
 
-  archive: (id: number, data: { action: 'archive'; remark?: string }) =>
+  archive: (id: number, data: { action: 'archive'; remark?: string; overdueReason?: string; followUpAction?: string }) =>
     post<{ id: number; status: string; statusName: string }>(`/applications/${id}/archive`, data),
 
   recordOverdue: (id: number, data: {

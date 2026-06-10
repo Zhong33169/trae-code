@@ -38,6 +38,35 @@ export default function ApplicationDetail() {
   const [overdueReason, setOverdueReason] = useState('')
   const [followUpAction, setFollowUpAction] = useState('')
 
+  const [submitOverdueReason, setSubmitOverdueReason] = useState('')
+  const [submitFollowUpAction, setSubmitFollowUpAction] = useState('')
+  const [reviewOverdueReason, setReviewOverdueReason] = useState('')
+  const [reviewFollowUpAction, setReviewFollowUpAction] = useState('')
+  const [confirmOverdueReason, setConfirmOverdueReason] = useState('')
+  const [confirmFollowUpAction, setConfirmFollowUpAction] = useState('')
+  const [handoverOverdueReason, setHandoverOverdueReason] = useState('')
+  const [handoverFollowUpAction, setHandoverFollowUpAction] = useState('')
+  const [archiveOverdueReason, setArchiveOverdueReason] = useState('')
+  const [archiveFollowUpAction, setArchiveFollowUpAction] = useState('')
+
+  function isCurrentNodeOverdue() {
+    if (!app || !app.nodeTimelines) return false
+    const tl = app.nodeTimelines.find(t => t.nodeType === app.currentNode)
+    return tl ? (tl.isOverdue || app.isOverdue) : app.isOverdue
+  }
+
+  function hasExistingOverdueRecord() {
+    if (!app || !app.nodeTimelines) return false
+    const tl = app.nodeTimelines.find(t => t.nodeType === app.currentNode)
+    const tlHas = tl && tl.overdueReason && tl.overdueReason.trim() && tl.followUpAction && tl.followUpAction.trim()
+    const appHas = app.overdueReason && app.overdueReason.trim() && app.followUpAction && app.followUpAction.trim()
+    return !!(tlHas || appHas)
+  }
+
+  function requireOverdueRecordInput() {
+    return isCurrentNodeOverdue() && !hasExistingOverdueRecord()
+  }
+
   const [uploadLoading, setUploadLoading] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [uploadCategory, setUploadCategory] = useState('签约资料')
@@ -92,10 +121,16 @@ export default function ApplicationDetail() {
 
   async function handleSubmit() {
     try {
-      await applicationApi.submit(appId, { remark: submitRemark })
+      await applicationApi.submit(appId, {
+        remark: submitRemark,
+        overdueReason: submitOverdueReason,
+        followUpAction: submitFollowUpAction,
+      })
       showToast('提交审核成功', 'success')
       setShowSubmit(false)
       setSubmitRemark('')
+      setSubmitOverdueReason('')
+      setSubmitFollowUpAction('')
       loadDetail()
     } catch (err: any) {
       showToast(err.message || '提交失败', 'error')
@@ -109,15 +144,22 @@ export default function ApplicationDetail() {
     if (reviewAction === 'reject' && !rejectReason.trim()) {
       showToast('请填写拒绝原因', 'warning'); return
     }
+    if (requireOverdueRecordInput() && (!reviewOverdueReason.trim() || !reviewFollowUpAction.trim())) {
+      showToast('当前节点已超时，请填写【超时原因】和【后续处理措施】后再推进', 'warning'); return
+    }
     try {
       await applicationApi.review(appId, {
         action: reviewAction,
         reviewResult: reviewResult,
         returnReason: returnReason,
         rejectReason: rejectReason,
+        overdueReason: reviewOverdueReason,
+        followUpAction: reviewFollowUpAction,
       })
       showToast(reviewAction === 'approve' ? '审核通过，已流转至房态确认' : reviewAction === 'return' ? '已退回租约登记员' : '已拒绝，流程终止', 'success')
       setShowReview(false)
+      setReviewOverdueReason('')
+      setReviewFollowUpAction('')
       loadDetail()
     } catch (err: any) {
       showToast(err.message || '操作失败', 'error')
@@ -126,11 +168,21 @@ export default function ApplicationDetail() {
 
   async function handleRoomConfirm() {
     if (!confirmResult.trim()) { showToast('请填写房态确认结果', 'warning'); return }
+    if (requireOverdueRecordInput() && (!confirmOverdueReason.trim() || !confirmFollowUpAction.trim())) {
+      showToast('当前节点已超时，请填写【超时原因】和【后续处理措施】后再推进', 'warning'); return
+    }
     try {
-      await applicationApi.roomConfirm(appId, { action: 'confirm', confirmResult })
+      await applicationApi.roomConfirm(appId, {
+        action: 'confirm',
+        confirmResult,
+        overdueReason: confirmOverdueReason,
+        followUpAction: confirmFollowUpAction,
+      })
       showToast('房态确认成功，已流转至入住交接', 'success')
       setShowConfirm(false)
       setConfirmResult('')
+      setConfirmOverdueReason('')
+      setConfirmFollowUpAction('')
       loadDetail()
     } catch (err: any) {
       showToast(err.message || '操作失败', 'error')
@@ -139,11 +191,21 @@ export default function ApplicationDetail() {
 
   async function handleHandover() {
     if (!handoverResult.trim()) { showToast('请填写入住交接说明', 'warning'); return }
+    if (requireOverdueRecordInput() && (!handoverOverdueReason.trim() || !handoverFollowUpAction.trim())) {
+      showToast('当前节点已超时，请填写【超时原因】和【后续处理措施】后再推进', 'warning'); return
+    }
     try {
-      await applicationApi.handover(appId, { action: 'complete', handoverResult })
+      await applicationApi.handover(appId, {
+        action: 'complete',
+        handoverResult,
+        overdueReason: handoverOverdueReason,
+        followUpAction: handoverFollowUpAction,
+      })
       showToast('入住交接完成，等待复核归档', 'success')
       setShowHandover(false)
       setHandoverResult('')
+      setHandoverOverdueReason('')
+      setHandoverFollowUpAction('')
       loadDetail()
     } catch (err: any) {
       showToast(err.message || '操作失败', 'error')
@@ -151,11 +213,21 @@ export default function ApplicationDetail() {
   }
 
   async function handleArchive() {
+    if (requireOverdueRecordInput() && (!archiveOverdueReason.trim() || !archiveFollowUpAction.trim())) {
+      showToast('当前节点已超时，请填写【超时原因】和【后续处理措施】后再推进', 'warning'); return
+    }
     try {
-      await applicationApi.archive(appId, { action: 'archive', remark: archiveRemark })
+      await applicationApi.archive(appId, {
+        action: 'archive',
+        remark: archiveRemark,
+        overdueReason: archiveOverdueReason,
+        followUpAction: archiveFollowUpAction,
+      })
       showToast('复核归档成功，流程全部完成', 'success')
       setShowArchive(false)
       setArchiveRemark('')
+      setArchiveOverdueReason('')
+      setArchiveFollowUpAction('')
       loadDetail()
     } catch (err: any) {
       showToast(err.message || '操作失败', 'error')
@@ -212,14 +284,49 @@ export default function ApplicationDetail() {
   }
 
   function canEdit() {
-    return (app.status === 'draft' || app.status === 'returned') && hasRole('registrar')
+    return (app.status === 'draft' || app.status === 'returned') && hasRole('registrar') && app.createdBy === user?.id
   }
 
   function canUploadAttachment() {
     if (app.status === 'completed' || app.status === 'rejected') return false
-    if (hasRole('registrar')) return app.createdBy === user?.id
-    if (hasRole('auditor') || hasRole('reviewer')) return true
+    if (hasRole('registrar')) {
+      if (app.createdBy !== user?.id) return false
+      return app.status === 'draft' || app.status === 'returned'
+    }
+    if (hasRole('auditor')) {
+      return ['pending_review', 'reviewed', 'pending_confirm', 'pending_handover'].includes(app.status)
+    }
+    if (hasRole('reviewer')) {
+      return app.status === 'room_confirmed'
+    }
     return false
+  }
+
+  function canDeleteAttachment(att: AttachmentType) {
+    if (!canUploadAttachment()) return false
+    if (hasRole('registrar')) {
+      return att.uploadedBy === user?.id
+    }
+    return true
+  }
+
+  function getAttachmentPermissionHint() {
+    if (app.status === 'completed' || app.status === 'rejected') {
+      return '流程已结束，不允许上传/删除附件'
+    }
+    if (hasRole('registrar')) {
+      if (app.createdBy !== user?.id) return '登记员只能上传/删除自己申请的附件'
+      if (app.status !== 'draft' && app.status !== 'returned') return '登记员仅在【草稿/已退回】状态可上传附件'
+    }
+    if (hasRole('auditor')) {
+      if (!['pending_review', 'reviewed', 'pending_confirm', 'pending_handover'].includes(app.status)) {
+        return '审核主管仅在【待审核/待房态确认/待入住交接】状态可上传附件'
+      }
+    }
+    if (hasRole('reviewer')) {
+      if (app.status !== 'room_confirmed') return '复核负责人仅在【待复核归档】状态可补充附件'
+    }
+    return ''
   }
 
   function renderProcessFlow() {
@@ -481,6 +588,11 @@ export default function ApplicationDetail() {
                 </div>
               </div>
             )}
+            {!canUploadAttachment() && getAttachmentPermissionHint() && (
+              <div className="alert alert-info" style={{ marginBottom: '16px', fontSize: '12px' }}>
+                💡 {getAttachmentPermissionHint()}
+              </div>
+            )}
             <div className="attachment-list">
               {(app.attachments || []).length === 0 ? (
                 <EmptyState text="暂无附件" />
@@ -501,7 +613,7 @@ export default function ApplicationDetail() {
                     </div>
                     <div className="flex gap-8">
                       <a className="btn btn-sm" href={att.fileUrl} target="_blank" rel="noreferrer">下载</a>
-                      {canUploadAttachment() && (hasRole('auditor') || hasRole('reviewer') || att.uploadedBy === user?.id) && (
+                      {canDeleteAttachment(att) && (
                         <button className="btn btn-sm btn-danger" onClick={() => handleDeleteAttachment(att)}>删除</button>
                       )}
                     </div>
@@ -620,6 +732,19 @@ export default function ApplicationDetail() {
           <label className="form-label">备注说明（可选）</label>
           <textarea className="form-control" value={submitRemark} onChange={e => setSubmitRemark(e.target.value)} placeholder="如有补充说明请填写" />
         </div>
+        {requireOverdueRecordInput() && (
+          <div className="alert alert-error" style={{ marginTop: '16px' }}>
+            <div style={{ fontWeight: 600, marginBottom: '8px' }}>⚠️ 当前节点【{app.currentNodeName}】已超时，必须填写以下信息才能推进</div>
+            <div className="form-group">
+              <label className="form-label required">超时原因</label>
+              <textarea className="form-control" value={submitOverdueReason} onChange={e => setSubmitOverdueReason(e.target.value)} placeholder="请说明超时的具体原因" rows={2} />
+            </div>
+            <div className="form-group">
+              <label className="form-label required">后续处理措施</label>
+              <textarea className="form-control" value={submitFollowUpAction} onChange={e => setSubmitFollowUpAction(e.target.value)} placeholder="请说明将采取的后续措施" rows={2} />
+            </div>
+          </div>
+        )}
       </Modal>
 
       {/* 审核 Modal */}
@@ -709,6 +834,20 @@ export default function ApplicationDetail() {
             </div>
           </div>
         )}
+
+        {requireOverdueRecordInput() && (
+          <div className="alert alert-error" style={{ marginTop: '16px' }}>
+            <div style={{ fontWeight: 600, marginBottom: '8px' }}>⚠️ 当前节点【{app.currentNodeName}】已超时，必须填写以下信息才能推进</div>
+            <div className="form-group">
+              <label className="form-label required">超时原因</label>
+              <textarea className="form-control" value={reviewOverdueReason} onChange={e => setReviewOverdueReason(e.target.value)} placeholder="请说明超时的具体原因" rows={2} />
+            </div>
+            <div className="form-group">
+              <label className="form-label required">后续处理措施</label>
+              <textarea className="form-control" value={reviewFollowUpAction} onChange={e => setReviewFollowUpAction(e.target.value)} placeholder="请说明将采取的后续措施" rows={2} />
+            </div>
+          </div>
+        )}
       </Modal>
 
       {/* 房态确认 */}
@@ -740,6 +879,19 @@ export default function ApplicationDetail() {
           <textarea className="form-control" value={confirmResult} onChange={e => setConfirmResult(e.target.value)}
             placeholder="例：房屋已腾空、水电煤气结清、门锁完好、设备齐全，可正常交付" rows={4} />
         </div>
+        {requireOverdueRecordInput() && (
+          <div className="alert alert-error" style={{ marginTop: '16px' }}>
+            <div style={{ fontWeight: 600, marginBottom: '8px' }}>⚠️ 当前节点【{app.currentNodeName}】已超时，必须填写以下信息才能推进</div>
+            <div className="form-group">
+              <label className="form-label required">超时原因</label>
+              <textarea className="form-control" value={confirmOverdueReason} onChange={e => setConfirmOverdueReason(e.target.value)} placeholder="请说明超时的具体原因" rows={2} />
+            </div>
+            <div className="form-group">
+              <label className="form-label required">后续处理措施</label>
+              <textarea className="form-control" value={confirmFollowUpAction} onChange={e => setConfirmFollowUpAction(e.target.value)} placeholder="请说明将采取的后续措施" rows={2} />
+            </div>
+          </div>
+        )}
       </Modal>
 
       {/* 入住交接 */}
@@ -764,6 +916,19 @@ export default function ApplicationDetail() {
             placeholder="例：已交付钥匙、门禁卡；抄录水电表读数；讲解公寓设施使用注意事项；租客确认签收"
             rows={4} />
         </div>
+        {requireOverdueRecordInput() && (
+          <div className="alert alert-error" style={{ marginTop: '16px' }}>
+            <div style={{ fontWeight: 600, marginBottom: '8px' }}>⚠️ 当前节点【{app.currentNodeName}】已超时，必须填写以下信息才能推进</div>
+            <div className="form-group">
+              <label className="form-label required">超时原因</label>
+              <textarea className="form-control" value={handoverOverdueReason} onChange={e => setHandoverOverdueReason(e.target.value)} placeholder="请说明超时的具体原因" rows={2} />
+            </div>
+            <div className="form-group">
+              <label className="form-label required">后续处理措施</label>
+              <textarea className="form-control" value={handoverFollowUpAction} onChange={e => setHandoverFollowUpAction(e.target.value)} placeholder="请说明将采取的后续措施" rows={2} />
+            </div>
+          </div>
+        )}
       </Modal>
 
       {/* 复核归档 */}
@@ -793,6 +958,19 @@ export default function ApplicationDetail() {
           <textarea className="form-control" value={archiveRemark} onChange={e => setArchiveRemark(e.target.value)}
             placeholder="如有归档说明可填写，无则留空" rows={3} />
         </div>
+        {requireOverdueRecordInput() && (
+          <div className="alert alert-error" style={{ marginTop: '16px' }}>
+            <div style={{ fontWeight: 600, marginBottom: '8px' }}>⚠️ 当前节点【{app.currentNodeName}】已超时，必须填写以下信息才能推进</div>
+            <div className="form-group">
+              <label className="form-label required">超时原因</label>
+              <textarea className="form-control" value={archiveOverdueReason} onChange={e => setArchiveOverdueReason(e.target.value)} placeholder="请说明超时的具体原因" rows={2} />
+            </div>
+            <div className="form-group">
+              <label className="form-label required">后续处理措施</label>
+              <textarea className="form-control" value={archiveFollowUpAction} onChange={e => setArchiveFollowUpAction(e.target.value)} placeholder="请说明将采取的后续措施" rows={2} />
+            </div>
+          </div>
+        )}
       </Modal>
 
       {/* 超时记录 */}
