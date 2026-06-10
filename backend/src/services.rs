@@ -236,26 +236,47 @@ pub async fn submit_record(
     id: i64,
     req: SubmitRequest,
 ) -> Result<BorrowRecord, String> {
+    let user = sqlx::query_as::<_, User>(
+        "SELECT id, username, password, role, name, created_at FROM users WHERE id = ?"
+    )
+    .bind(req.handler_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| e.to_string())?
+    .ok_or_else(|| "处理人不存在".to_string())?;
+
     let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
 
     let record = get_record_for_update(&mut tx, id).await?
         .ok_or_else(|| "记录不存在".to_string())?;
 
     if record.status != "draft" && record.status != "returned_correction" {
-        return Err("只有草稿或退回补正状态可以提交审核".to_string());
+        let err_msg = "只有草稿或退回补正状态可以提交审核".to_string();
+        tx.rollback().await.ok();
+        insert_validation_failed(pool, id, req.handler_id, &user.name, &req.handler_role, &record.status, &err_msg, req.version).await;
+        return Err(err_msg);
     }
 
     if record.version != req.version {
-        return Err(format!("版本冲突：当前版本为{}，您的版本为{}", record.version, req.version));
+        let err_msg = format!("版本冲突：当前版本为{}，您的版本为{}", record.version, req.version);
+        tx.rollback().await.ok();
+        insert_validation_failed(pool, id, req.handler_id, &user.name, &req.handler_role, &record.status, &err_msg, req.version).await;
+        return Err(err_msg);
     }
 
     if req.handler_role != "registrar" {
-        return Err("只有借阅登记员可以提交借阅记录".to_string());
+        let err_msg = "只有借阅登记员可以提交借阅记录".to_string();
+        tx.rollback().await.ok();
+        insert_validation_failed(pool, id, req.handler_id, &user.name, &req.handler_role, &record.status, &err_msg, req.version).await;
+        return Err(err_msg);
     }
 
     if let Some(handler_id) = record.current_handler_id {
         if handler_id != req.handler_id {
-            return Err("当前处理人不匹配".to_string());
+            let err_msg = "当前处理人不匹配".to_string();
+            tx.rollback().await.ok();
+            insert_validation_failed(pool, id, req.handler_id, &user.name, &req.handler_role, &record.status, &err_msg, req.version).await;
+            return Err(err_msg);
         }
     }
 
@@ -268,20 +289,14 @@ pub async fn submit_record(
     .map_err(|e| e.to_string())?;
 
     if required_evidence < 2 {
-        return Err("缺少必填证据项：身份证明和借阅登记单为必填项".to_string());
+        let err_msg = "缺少必填证据项：身份证明和借阅登记单为必填项".to_string();
+        tx.rollback().await.ok();
+        insert_validation_failed(pool, id, req.handler_id, &user.name, &req.handler_role, &record.status, &err_msg, req.version).await;
+        return Err(err_msg);
     }
 
     let from_status = record.status.clone();
     let new_version = record.version + 1;
-
-    let user = sqlx::query_as::<_, User>(
-        "SELECT id, username, password, role, name, created_at FROM users WHERE id = ?"
-    )
-    .bind(req.handler_id)
-    .fetch_optional(&mut *tx)
-    .await
-    .map_err(|e| e.to_string())?
-    .ok_or_else(|| "处理人不存在".to_string())?;
 
     sqlx::query(
         r#"
@@ -574,16 +589,26 @@ pub async fn correct_record(
         }
     }
 
+    let user = sqlx::query_as::<_, User>(
+        "SELECT id, username, password, role, name, created_at FROM users WHERE id = ?"
+    )
+    .bind(req.handler_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|e| e.to_string())?
+    .ok_or_else(|| "处理人不存在".to_string())?;
+
     let borrower_name = req.borrower_name.unwrap_or(record.borrower_name);
     let book_title = req.book_title.unwrap_or(record.book_title);
     let book_isbn = req.book_isbn.or(record.book_isbn);
     let description = req.description.or(record.description);
+    let new_version = record.version + 1;
 
     sqlx::query(
         r#"
         UPDATE borrow_records SET
             borrower_name = ?, book_title = ?, book_isbn = ?, description = ?,
-            updated_at = CURRENT_TIMESTAMP
+            version = ?, updated_at = CURRENT_TIMESTAMP
         WHERE id = ? AND version = ?
         "#
     )
@@ -591,8 +616,30 @@ pub async fn correct_record(
     .bind(book_title)
     .bind(book_isbn)
     .bind(description)
+    .bind(new_version)
     .bind(id)
     .bind(req.version)
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    sqlx::query(
+        r#"
+        INSERT INTO process_records
+        (borrow_record_id, handler_id, handler_name, handler_role, action,
+         from_status, to_status, opinion, version_before, version_after)
+        VALUES (?, ?, ?, ?, 'correct', ?, ?, ?, ?, ?)
+        "#
+    )
+    .bind(id)
+    .bind(req.handler_id)
+    .bind(user.name)
+    .bind(&req.handler_role)
+    .bind(&record.status)
+    .bind(&record.status)
+    .bind(&req.opinion)
+    .bind(req.version)
+    .bind(new_version)
     .execute(&mut *tx)
     .await
     .map_err(|e| e.to_string())?;
@@ -682,4 +729,37 @@ pub async fn add_evidence(
     .map_err(|e| e.to_string())?;
 
     Ok(item)
+}
+
+async fn insert_validation_failed(
+    pool: &SqlitePool,
+    borrow_record_id: i64,
+    handler_id: i64,
+    handler_name: &str,
+    handler_role: &str,
+    from_status: &str,
+    reason: &str,
+    version: i64,
+) {
+    sqlx::query(
+        r#"
+        INSERT INTO process_records
+        (borrow_record_id, handler_id, handler_name, handler_role, action,
+         from_status, to_status, opinion, reject_reason, version_before, version_after)
+        VALUES (?, ?, ?, ?, 'validation_failed', ?, ?, ?, ?, ?, ?)
+        "#
+    )
+    .bind(borrow_record_id)
+    .bind(handler_id)
+    .bind(handler_name)
+    .bind(handler_role)
+    .bind(from_status)
+    .bind(from_status)
+    .bind("提交校验失败")
+    .bind(reason)
+    .bind(version)
+    .bind(version)
+    .execute(pool)
+    .await
+    .ok();
 }

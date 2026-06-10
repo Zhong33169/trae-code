@@ -25,6 +25,7 @@ import {
   EXCEPTION_COLORS,
   ROLE_MAP,
   ACTION_MAP,
+  ACTION_COLORS,
 } from '@/lib/types';
 
 export default function RecordDetailPage() {
@@ -45,6 +46,13 @@ export default function RecordDetailPage() {
     rejectReason: '',
     passed: true,
   });
+  const [correctForm, setCorrectForm] = useState({
+    borrower_name: '',
+    book_title: '',
+    book_isbn: '',
+    description: '',
+    opinion: '',
+  });
   const [evidenceForm, setEvidenceForm] = useState({
     name: '',
     description: '',
@@ -53,6 +61,7 @@ export default function RecordDetailPage() {
   });
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [correcting, setCorrecting] = useState(false);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -96,6 +105,18 @@ export default function RecordDetailPage() {
     const user = users.find((u) => u.id === selectedUserId);
     if (user) setSelectedUser(user);
   }, [selectedUserId, users]);
+
+  useEffect(() => {
+    if (record && record.status === 'returned_correction') {
+      setCorrectForm({
+        borrower_name: record.borrower_name || '',
+        book_title: record.book_title || '',
+        book_isbn: record.book_isbn || '',
+        description: record.description || '',
+        opinion: '',
+      });
+    }
+  }, [record]);
 
   const handleUserChange = (userId: number) => {
     setSelectedUserId(userId);
@@ -208,6 +229,34 @@ export default function RecordDetailPage() {
       }
     } catch (e) {
       setError('添加证据失败');
+    }
+  };
+
+  const handleCorrect = async () => {
+    if (!record || !selectedUser) return;
+    setError('');
+    setCorrecting(true);
+    try {
+      const res = await correctRecord(id, {
+        handler_id: selectedUser.id,
+        handler_role: selectedUser.role,
+        version: record.version,
+        opinion: correctForm.opinion,
+        borrower_name: correctForm.borrower_name || undefined,
+        book_title: correctForm.book_title || undefined,
+        book_isbn: correctForm.book_isbn || undefined,
+        description: correctForm.description || undefined,
+      });
+      if (res.success) {
+        setCorrectForm((f) => ({ ...f, opinion: '' }));
+        loadData();
+      } else {
+        setError(res.message);
+      }
+    } catch (e) {
+      setError('补正失败');
+    } finally {
+      setCorrecting(false);
     }
   };
 
@@ -350,7 +399,7 @@ export default function RecordDetailPage() {
               </div>
             )}
 
-            {canSubmit && (
+            {(canSubmit || canCorrect) && (
               <div className="mt-4 pt-4 border-t">
                 <h3 className="text-sm font-medium text-gray-700 mb-3">添加证据</h3>
                 <div className="grid grid-cols-2 gap-3">
@@ -412,7 +461,7 @@ export default function RecordDetailPage() {
                             <span className="text-xs text-gray-500">
                               {ROLE_MAP[pr.handler_role] || pr.handler_role}
                             </span>
-                            <span className="text-xs px-2 py-0.5 bg-blue-100 text-blue-700 rounded">
+                            <span className={`text-xs px-2 py-0.5 rounded ${ACTION_COLORS[pr.action] || 'bg-blue-100 text-blue-700'}`}>
                               {ACTION_MAP[pr.action] || pr.action}
                             </span>
                           </div>
@@ -637,20 +686,81 @@ export default function RecordDetailPage() {
             )}
 
             {canCorrect && (
-              <div className="space-y-3">
-                <p className="text-sm text-gray-600">
-                  补正借阅记录信息后重新提交
-                </p>
-                <div className="text-sm text-amber-600 bg-amber-50 p-3 rounded">
-                  提示：您可以在补正后提交审核
+              <div className="space-y-4">
+                <div className="text-sm font-medium text-gray-700">补正信息</div>
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-xs text-gray-500 block mb-1">借阅人</label>
+                    <input
+                      type="text"
+                      value={correctForm.borrower_name}
+                      onChange={(e) => setCorrectForm({ ...correctForm, borrower_name: e.target.value })}
+                      className="w-full border rounded px-3 py-2 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-500 block mb-1">书名</label>
+                    <input
+                      type="text"
+                      value={correctForm.book_title}
+                      onChange={(e) => setCorrectForm({ ...correctForm, book_title: e.target.value })}
+                      className="w-full border rounded px-3 py-2 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-500 block mb-1">ISBN</label>
+                    <input
+                      type="text"
+                      value={correctForm.book_isbn}
+                      onChange={(e) => setCorrectForm({ ...correctForm, book_isbn: e.target.value })}
+                      className="w-full border rounded px-3 py-2 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-500 block mb-1">说明</label>
+                    <textarea
+                      value={correctForm.description}
+                      onChange={(e) => setCorrectForm({ ...correctForm, description: e.target.value })}
+                      className="w-full border rounded px-3 py-2 text-sm h-20"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-500 block mb-1">补正意见</label>
+                    <textarea
+                      placeholder="请填写补正说明"
+                      value={correctForm.opinion}
+                      onChange={(e) => setCorrectForm({ ...correctForm, opinion: e.target.value })}
+                      className="w-full border rounded px-3 py-2 text-sm h-20"
+                    />
+                  </div>
                 </div>
                 <button
-                  onClick={handleSubmit}
-                  disabled={submitting}
-                  className="w-full py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-gray-400 text-sm font-medium"
+                  onClick={handleCorrect}
+                  disabled={correcting}
+                  className="w-full py-2 bg-amber-600 text-white rounded hover:bg-amber-700 disabled:bg-gray-400 text-sm font-medium"
                 >
-                  {submitting ? '提交中...' : '重新提交审核'}
+                  {correcting ? '补正中...' : '保存补正'}
                 </button>
+                <div className="relative">
+                  <div className="absolute inset-0 flex items-center">
+                    <div className="w-full border-t border-gray-200"></div>
+                  </div>
+                  <div className="relative flex justify-center text-xs">
+                    <span className="bg-white px-2 text-gray-400">或</span>
+                  </div>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500 mb-2">
+                    补正无误后可直接重新提交审核
+                  </p>
+                  <button
+                    onClick={handleSubmit}
+                    disabled={submitting}
+                    className="w-full py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-gray-400 text-sm font-medium"
+                  >
+                    {submitting ? '提交中...' : '重新提交审核'}
+                  </button>
+                </div>
               </div>
             )}
 

@@ -442,14 +442,23 @@ async fn seed_record_with_process(
                 "借阅登记提交", None, 1, 2).await;
             insert_process_record(pool, record_id, 3, "王审核", "supervisor",
                 "audit_reject", "pending_audit", "returned_correction",
-                "信息有误", Some("书籍ISBN号与系统记录不符，请核实后重新提交"), 2, 3).await;
-            sqlx::query("UPDATE borrow_records SET version = 3, current_handler_id = 1, current_handler_role = 'registrar' WHERE id = ?")
+                "信息有误，需补正", Some("书籍ISBN号与系统记录不符，借阅用途描述不完整，请核实后补充提交"), 2, 3).await;
+            insert_process_record(pool, record_id, 1, "张登记", "registrar",
+                "correct", "returned_correction", "returned_correction",
+                "已补正：更新ISBN号，补充借阅用途说明", None, 3, 4).await;
+            sqlx::query("UPDATE borrow_records SET version = 4, current_handler_id = 1, current_handler_role = 'registrar' WHERE id = ?")
                 .bind(record_id)
                 .execute(pool)
                 .await
                 .unwrap();
         }
         _ => {}
+    }
+
+    if exception_type == Some("missing_evidence") {
+        insert_process_record(pool, record_id, 1, "张登记", "registrar",
+            "validation_failed", "draft", "draft",
+            "提交校验失败", Some("缺少必填证据项：身份证明和借阅登记单为必填项"), 1, 1).await;
     }
 }
 

@@ -100,6 +100,17 @@ export const ACTION_MAP: Record<string, string> = {
   review_pass: '复核通过',
   review_reject: '复核驳回',
   correct: '补正',
+  validation_failed: '校验失败',
+};
+
+export const ACTION_COLORS: Record<string, string> = {
+  submit: 'bg-blue-100 text-blue-700',
+  audit_pass: 'bg-green-100 text-green-700',
+  audit_reject: 'bg-red-100 text-red-700',
+  review_pass: 'bg-green-100 text-green-700',
+  review_reject: 'bg-red-100 text-red-700',
+  correct: 'bg-amber-100 text-amber-700',
+  validation_failed: 'bg-red-100 text-red-700',
 };
 
 export const STATUS_COLORS: Record<string, string> = {
