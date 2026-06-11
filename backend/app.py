@@ -460,13 +460,18 @@ async def batch_action(data: BatchActionRequest) -> dict:
             items.append({"ticket_id": tid, "ticket_no": ticket_no, "success": 0, "error_reason": error_reason, "old_status": old_status, "new_status": None})
             continue
 
-        if data.versions and str(tid) in data.versions:
-            v_result = validate_version(ticket["version"], data.versions[str(tid)])
-            if not v_result.valid:
-                error_reason = v_result.reason
-                errors.append({"ticket_id": tid, "ticket_no": ticket_no, "reason": error_reason})
-                items.append({"ticket_id": tid, "ticket_no": ticket_no, "success": 0, "error_reason": error_reason, "old_status": old_status, "new_status": None})
-                continue
+        if not data.versions or str(tid) not in data.versions:
+            error_reason = "版本号缺失: 批量操作需携带每条巡检单的版本号"
+            errors.append({"ticket_id": tid, "ticket_no": ticket_no, "reason": error_reason})
+            items.append({"ticket_id": tid, "ticket_no": ticket_no, "success": 0, "error_reason": error_reason, "old_status": old_status, "new_status": None})
+            continue
+
+        v_result = validate_version(ticket["version"], data.versions[str(tid)])
+        if not v_result.valid:
+            error_reason = v_result.reason
+            errors.append({"ticket_id": tid, "ticket_no": ticket_no, "reason": error_reason})
+            items.append({"ticket_id": tid, "ticket_no": ticket_no, "success": 0, "error_reason": error_reason, "old_status": old_status, "new_status": None})
+            continue
 
         evidence_count = conn.execute("SELECT COUNT(*) FROM evidence_attachments WHERE ticket_id=?", (tid,)).fetchone()[0]
         e_result = validate_evidence_for_action(data.action, evidence_count)

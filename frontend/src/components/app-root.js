@@ -432,8 +432,13 @@ export class AppRoot extends LitElement {
     if (role === 'supervisor') return [
       { action: 'review', label: '批量开始审核', cls: 'btn-primary' },
       { action: 'approve_review', label: '批量审核通过', cls: 'btn-success' },
+      { action: 'return', label: '批量退回补正', cls: 'btn-warning' },
+      { action: 'reject', label: '批量驳回', cls: 'btn-danger' },
     ];
-    if (role === 'reviewer') return [{ action: 'archive', label: '批量归档', cls: 'btn-success' }];
+    if (role === 'reviewer') return [
+      { action: 'archive', label: '批量归档', cls: 'btn-success' },
+      { action: 'return', label: '批量退回', cls: 'btn-warning' },
+    ];
     return [];
   }
 
