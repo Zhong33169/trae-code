@@ -539,7 +539,7 @@ export class AppRoot extends LitElement {
         .currentUser=${this.currentUser}
         @close=${this._closeDetail}
         @action=${(e) => this._singleAction(t, e.detail.action)}
-        @refresh=${() => this._selectTicket(t)}
+        @refresh=${() => { this._selectTicket(t); this._loadTickets(); }}
         @toast=${(e) => this._showToast(e.detail.msg, e.detail.type)}
       ></ticket-detail>
     `;

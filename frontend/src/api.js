@@ -7,7 +7,8 @@ async function request(url, options = {}) {
   });
   const data = await resp.json();
   if (!resp.ok || data.ok === false) {
-    const err = new Error(data.reason || `请求失败 (${resp.status})`);
+    const reason = data.reason || data.detail || `请求失败 (${resp.status})`;
+    const err = new Error(reason);
     err.status = resp.status;
     err.details = data.details;
     err.responseData = data;

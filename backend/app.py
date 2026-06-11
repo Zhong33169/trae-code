@@ -1,4 +1,5 @@
 from litestar import Litestar, get, post, put
+from litestar.exceptions import HTTPException
 from litestar.status_codes import HTTP_400_BAD_REQUEST, HTTP_403_FORBIDDEN, HTTP_404_NOT_FOUND, HTTP_409_CONFLICT
 from litestar.response import Response
 from litestar.config.cors import CORSConfig
@@ -75,6 +76,7 @@ class EvidenceAddRequest(BaseModel):
 
 class PenInspectionCreateRequest(BaseModel):
     ticket_id: int
+    user_id: int
     pen_area: str
     cleanliness: str
     ventilation: str
@@ -85,6 +87,7 @@ class PenInspectionCreateRequest(BaseModel):
 
 class HealthReportCreateRequest(BaseModel):
     ticket_id: int
+    user_id: int
     animal_id: str
     animal_tag: str
     health_status: str
@@ -95,6 +98,7 @@ class HealthReportCreateRequest(BaseModel):
 
 class TreatmentTrackingCreateRequest(BaseModel):
     ticket_id: int
+    user_id: int
     health_report_id: int
     treatment_type: str
     medication: Optional[str] = ""
@@ -116,6 +120,25 @@ def _get_user_role(user_id: int) -> str:
     if not user:
         return ""
     return user["role"]
+
+
+def _validate_evidence_permission(user_id: int, ticket_id: int) -> None:
+    role = _get_user_role(user_id)
+    if role != "registrar":
+        raise HTTPException(
+            status_code=HTTP_403_FORBIDDEN,
+            detail=f"只有登记员可以录入证据，当前角色为[{ROLE_LABELS.get(role, role)}]",
+        )
+    conn = get_db()
+    ticket = conn.execute("SELECT status FROM inspection_tickets WHERE id=?", (ticket_id,)).fetchone()
+    conn.close()
+    if not ticket:
+        raise HTTPException(status_code=404, detail="巡检单不存在")
+    if ticket["status"] not in ("draft", "returned"):
+        raise HTTPException(
+            status_code=HTTP_400_BAD_REQUEST,
+            detail=f"当前状态[{STATUS_LABELS.get(ticket['status'], '')}]不允许录入证据，仅草稿/退回状态可录入",
+        )
 
 
 @get("/api/users")
@@ -243,8 +266,8 @@ async def create_ticket(data: TicketCreateRequest) -> dict:
     try:
         cur = conn.execute(
             """INSERT INTO inspection_tickets (ticket_no,pen_id,animal_type,animal_count,inspector_name,inspection_date,status,version,created_by)
-            VALUES (?,?,?,?,?,?,1,1,?)""",
-            (ticket_no, data.pen_id, data.animal_type, data.animal_count, data.inspector_name, data.inspection_date, data.created_by),
+            VALUES (?,?,?,?,?,?,?,1,?)""",
+            (ticket_no, data.pen_id, data.animal_type, data.animal_count, data.inspector_name, data.inspection_date, "draft", data.created_by),
         )
         ticket_id = cur.lastrowid
         conn.commit()
@@ -436,15 +459,16 @@ async def batch_action(data: BatchActionRequest) -> dict:
 
 @post("/api/tickets/{ticket_id:int}/evidence")
 async def add_evidence(ticket_id: int, data: EvidenceAddRequest) -> dict:
-    conn = get_db()
-    ticket = conn.execute("SELECT id FROM inspection_tickets WHERE id=?", (ticket_id,)).fetchone()
-    if not ticket:
-        conn.close()
-        return Response({"ok": False, "reason": "巡检单不存在"}, status_code=404)
+    _validate_evidence_permission(data.user_id, ticket_id)
 
+    conn = get_db()
     cur = conn.execute(
         "INSERT INTO evidence_attachments (ticket_id,evidence_type,reference_id,description,uploaded_by) VALUES (?,?,?,?,?)",
         (ticket_id, data.evidence_type, data.reference_id, data.description, data.user_id),
+    )
+    conn.execute(
+        "UPDATE inspection_tickets SET updated_at=datetime('now','localtime') WHERE id=?",
+        (ticket_id,),
     )
     conn.commit()
     conn.close()
@@ -453,37 +477,44 @@ async def add_evidence(ticket_id: int, data: EvidenceAddRequest) -> dict:
 
 @post("/api/tickets/{ticket_id:int}/pen-inspections")
 async def add_pen_inspection(ticket_id: int, data: PenInspectionCreateRequest) -> dict:
-    conn = get_db()
-    ticket = conn.execute("SELECT id FROM inspection_tickets WHERE id=?", (ticket_id,)).fetchone()
-    if not ticket:
-        conn.close()
-        return Response({"ok": False, "reason": "巡检单不存在"}, status_code=404)
+    _validate_evidence_permission(data.user_id, ticket_id)
 
+    conn = get_db()
     cur = conn.execute(
         "INSERT INTO pen_inspections (ticket_id,pen_area,cleanliness,ventilation,temperature,humidity,notes) VALUES (?,?,?,?,?,?,?)",
         (ticket_id, data.pen_area, data.cleanliness, data.ventilation, data.temperature, data.humidity, data.notes),
     )
+    pi_id = cur.lastrowid
+    conn.execute(
+        "INSERT INTO evidence_attachments (ticket_id,evidence_type,reference_id,description,uploaded_by) VALUES (?,'pen_inspection',?,?,?)",
+        (ticket_id, pi_id, f"{data.pen_area}栏舍巡检", data.user_id),
+    )
+    conn.execute(
+        "UPDATE inspection_tickets SET updated_at=datetime('now','localtime') WHERE id=?",
+        (ticket_id,),
+    )
     conn.commit()
     conn.close()
-    return {"ok": True, "data": {"id": cur.lastrowid}}
+    return {"ok": True, "data": {"id": pi_id}}
 
 
 @post("/api/tickets/{ticket_id:int}/health-reports")
 async def add_health_report(ticket_id: int, data: HealthReportCreateRequest) -> dict:
-    conn = get_db()
-    ticket = conn.execute("SELECT id FROM inspection_tickets WHERE id=?", (ticket_id,)).fetchone()
-    if not ticket:
-        conn.close()
-        return Response({"ok": False, "reason": "巡检单不存在"}, status_code=404)
+    _validate_evidence_permission(data.user_id, ticket_id)
 
+    conn = get_db()
     cur = conn.execute(
         "INSERT INTO health_reports (ticket_id,animal_id,animal_tag,health_status,symptoms,diagnosis,reporter_name) VALUES (?,?,?,?,?,?,?)",
         (ticket_id, data.animal_id, data.animal_tag, data.health_status, data.symptoms, data.diagnosis, data.reporter_name),
     )
     hr_id = cur.lastrowid
     conn.execute(
-        "INSERT INTO evidence_attachments (ticket_id,evidence_type,reference_id,description,uploaded_by) VALUES (?,'health_report',?,?,?,1)",
-        (ticket_id, hr_id, f"{data.animal_tag}健康上报", 1),
+        "INSERT INTO evidence_attachments (ticket_id,evidence_type,reference_id,description,uploaded_by) VALUES (?,'health_report',?,?,?)",
+        (ticket_id, hr_id, f"{data.animal_tag}健康上报", data.user_id),
+    )
+    conn.execute(
+        "UPDATE inspection_tickets SET updated_at=datetime('now','localtime') WHERE id=?",
+        (ticket_id,),
     )
     conn.commit()
     conn.close()
@@ -492,16 +523,13 @@ async def add_health_report(ticket_id: int, data: HealthReportCreateRequest) -> 
 
 @post("/api/tickets/{ticket_id:int}/treatment-trackings")
 async def add_treatment_tracking(ticket_id: int, data: TreatmentTrackingCreateRequest) -> dict:
-    conn = get_db()
-    ticket = conn.execute("SELECT id FROM inspection_tickets WHERE id=?", (ticket_id,)).fetchone()
-    if not ticket:
-        conn.close()
-        return Response({"ok": False, "reason": "巡检单不存在"}, status_code=404)
+    _validate_evidence_permission(data.user_id, ticket_id)
 
+    conn = get_db()
     hr = conn.execute("SELECT id FROM health_reports WHERE id=? AND ticket_id=?", (data.health_report_id, ticket_id)).fetchone()
     if not hr:
         conn.close()
-        return Response({"ok": False, "reason": "健康报告不存在或不属于该巡检单"}, status_code=400)
+        raise HTTPException(status_code=400, detail="健康报告不存在或不属于该巡检单")
 
     cur = conn.execute(
         "INSERT INTO treatment_trackings (ticket_id,health_report_id,treatment_type,medication,dosage,administered_by,next_check_date) VALUES (?,?,?,?,?,?,?)",
@@ -509,8 +537,12 @@ async def add_treatment_tracking(ticket_id: int, data: TreatmentTrackingCreateRe
     )
     tt_id = cur.lastrowid
     conn.execute(
-        "INSERT INTO evidence_attachments (ticket_id,evidence_type,reference_id,description,uploaded_by) VALUES (?,'treatment_tracking',?,?,?,1)",
-        (ticket_id, tt_id, "治疗跟踪记录", 1),
+        "INSERT INTO evidence_attachments (ticket_id,evidence_type,reference_id,description,uploaded_by) VALUES (?,'treatment_tracking',?,?,?)",
+        (ticket_id, tt_id, "治疗跟踪记录", data.user_id),
+    )
+    conn.execute(
+        "UPDATE inspection_tickets SET updated_at=datetime('now','localtime') WHERE id=?",
+        (ticket_id,),
     )
     conn.commit()
     conn.close()
@@ -538,6 +570,13 @@ async def get_stats() -> dict:
     }
 
 
+def _http_exception_handler(request, exc):
+    return Response(
+        {"ok": False, "reason": exc.detail},
+        status_code=exc.status_code,
+    )
+
+
 cors_config = CORSConfig(
     allow_origins=["http://localhost:3007"],
     allow_methods=["*"],
@@ -563,4 +602,5 @@ app = Litestar(
     ],
     cors_config=cors_config,
     on_startup=[init_db, seed_data],
+    exception_handlers={HTTPException: _http_exception_handler},
 )
