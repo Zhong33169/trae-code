@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS operation_records (
     operator_id INTEGER NOT NULL,
     operator_role TEXT NOT NULL,
     operation_type TEXT NOT NULL,
+    is_success INTEGER NOT NULL DEFAULT 1,
     from_stage TEXT,
     to_stage TEXT,
     from_status TEXT,

@@ -64,7 +64,10 @@ def seed_sample_data():
                     ("住址证明", "水电费账单", 1, 1),
                     ("收入证明", "工资流水", 0, 0),
                 ],
-                "description": "【正常】低风险，待客户经理签收处理",
+                "description": "【正常】低风险，待客户经理签收处理（含失败操作留痕）",
+                "failed_operations": [
+                    ("开户预约", "待签收", "low", users["li"], "运营主管", "越权操作被拒：运营主管无权处理开户预约阶段的申请"),
+                ],
             },
             {
                 "name": "李四",
@@ -362,18 +365,40 @@ def seed_sample_data():
                         """
                         INSERT INTO operation_records (
                             application_id, operator_id, operator_role, operation_type,
-                            from_stage, to_stage, from_status, to_status,
+                            is_success, from_stage, to_stage, from_status, to_status,
                             from_risk_level, to_risk_level, remark,
                             version_before, version_after
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             app_id, sample["handler_id"],
                             "运营主管" if "资料审核" in str(from_stage) or "资料审核" in str(to_stage) else "客户经理",
                             "状态流转" if from_status != to_status else "阶段推进",
+                            1,
                             from_stage, to_stage, from_status, to_status,
                             from_risk, to_risk, remark,
                             sample["version"] - 1, sample["version"],
+                        )
+                    )
+
+            if "failed_operations" in sample:
+                for fop in sample["failed_operations"]:
+                    f_stage, f_status, f_risk, f_operator_id, f_operator_role, f_reason = fop
+                    cursor.execute(
+                        """
+                        INSERT INTO operation_records (
+                            application_id, operator_id, operator_role, operation_type,
+                            is_success, from_stage, to_stage, from_status, to_status,
+                            from_risk_level, to_risk_level, remark,
+                            version_before, version_after
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            app_id, f_operator_id, f_operator_role, "操作失败",
+                            0,
+                            f_stage, None, f_status, None,
+                            f_risk, None, f_reason,
+                            sample["version"], sample["version"],
                         )
                     )
 
@@ -384,7 +409,7 @@ def seed_sample_data():
         print(f"✓ 成功加载 {len(samples)} 条样例开户申请")
         print("=" * 60)
         print("\n样例数据概览:")
-        print(f"  正常通过: 3条 (张三、赵六流程中，吴九已完成，冯十一待归档)")
+        print(f"  正常通过: 4条 (张三含失败留痕、赵六流程中，吴九已完成，冯十一待归档)")
         print(f"  缺证据: 2条 (王五-经营资料、郑十-工商资料)")
         print(f"  逾期: 2条 (王五超期2天、周八超期1天)")
         print(f"  退回补正: 3条 (王五、周八、郑十)")
@@ -392,6 +417,7 @@ def seed_sample_data():
         print(f"  高风险识别: 2条 (李四、孙七)")
         print(f"  风险等级变更留痕: 3条 (李四、孙七升级，冯十一降级)")
         print(f"  高风险降级追溯: 1条 (冯十一: 高→中→低完整降级链路)")
+        print(f"  失败操作留痕: 1条 (张三-运营主管越权操作被拒，原状态保留)")
 
     except Exception as e:
         print(f"\n✗ 错误: {e}")

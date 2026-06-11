@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import type { AccountApplication, UserRole, RiskLevel } from '@/lib/types';
 import { submitOperation } from '@/lib/api';
 import UserSelector from './UserSelector';
@@ -52,6 +52,15 @@ export default function OperationForm({ application, onSuccess }: OperationFormP
   const [evidenceIds, setEvidenceIds] = useState<number[]>([]);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  useEffect(() => {
+    if (message?.type === 'success') {
+      const timer = setTimeout(() => {
+        setMessage(null);
+      }, 4000);
+      return () => clearTimeout(timer);
+    }
+  }, [message]);
 
   const getAvailableActions = (): ActionType[] => {
     const actions: ActionType[] = ['sign_receive'];
@@ -122,7 +131,7 @@ export default function OperationForm({ application, onSuccess }: OperationFormP
         const statusChanged = res.data?.status !== application.status;
         const stageChanged = res.data?.stage !== application.stage;
         const riskChanged = res.data?.risk_level !== application.risk_level;
-        
+
         let successMsg = res.message || '操作成功';
         if (res.data) {
           const changes: string[] = [];
@@ -134,11 +143,15 @@ export default function OperationForm({ application, onSuccess }: OperationFormP
           }
           successMsg += ` [版本 v${application.version} → v${newVersion}]`;
         }
-        
+
         setMessage({ type: 'success', text: successMsg });
-        setTimeout(() => {
-          onSuccess(res.data);
-        }, 1500);
+        onSuccess(res.data);
+        setSelectedAction('');
+        setRemark('');
+        setReturnedReason('');
+        setNewRiskLevel('');
+        setRiskChangeReason('');
+        setEvidenceIds([]);
       } else {
         setMessage({ type: 'error', text: res.message || '操作失败' });
       }

@@ -54,6 +54,7 @@ export interface OperationRecord {
   operator_role: UserRole;
   operator_name?: string;
   operation_type: string;
+  is_success: number;
   from_stage?: ApplicationStage;
   to_stage?: ApplicationStage;
   from_status?: ApplicationStatus;

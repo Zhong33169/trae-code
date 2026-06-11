@@ -17,9 +17,12 @@ export default function HomePage() {
     risk_level?: string;
   }>({});
   const [error, setError] = useState<string | null>(null);
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
 
   const loadData = useCallback(async () => {
-    setLoading(true);
+    if (isInitialLoad) {
+      setLoading(true);
+    }
     setError(null);
     try {
       const [appsRes, statsRes] = await Promise.all([
@@ -37,8 +40,9 @@ export default function HomePage() {
       setError(err.message || '加载数据失败，请检查后端服务是否启动');
     } finally {
       setLoading(false);
+      setIsInitialLoad(false);
     }
-  }, [filters]);
+  }, [filters, isInitialLoad]);
 
   useEffect(() => {
     loadData();

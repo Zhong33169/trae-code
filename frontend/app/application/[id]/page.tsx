@@ -31,10 +31,13 @@ export default function ApplicationDetailPage() {
   const [activeTab, setActiveTab] = useState<'info' | 'operations'>('info');
   const [error, setError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
 
   const loadData = useCallback(async () => {
     if (!appId) return;
-    setLoading(true);
+    if (isInitialLoad) {
+      setLoading(true);
+    }
     setError(null);
     try {
       const [appRes, opsRes, riskRes] = await Promise.all([
@@ -60,8 +63,9 @@ export default function ApplicationDetailPage() {
       setError(err.message || '加载数据失败');
     } finally {
       setLoading(false);
+      setIsInitialLoad(false);
     }
-  }, [appId, refreshKey]);
+  }, [appId, refreshKey, isInitialLoad]);
 
   useEffect(() => {
     loadData();

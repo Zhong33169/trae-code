@@ -49,17 +49,24 @@ export default function OperationTimeline({ operations, riskLogs }: OperationTim
     }
   };
 
+  const isOpFailed = (event: any) => {
+    if (event.type !== 'operation') return false;
+    return event.is_success === 0 || event.operation_type === '操作失败';
+  };
+
   return (
     <div className="relative">
       <div className="absolute left-4 top-0 bottom-0 w-0.5 bg-gray-200"></div>
       <div className="space-y-4">
-        {allEvents.map((event, index) => (
+        {allEvents.map((event, index) => {
+          const failed = isOpFailed(event);
+          return (
           <div key={`${event.type}-${event.id}`} className="relative pl-10">
             <div
               className={`absolute left-0 w-8 h-8 rounded-full flex items-center justify-center ${
                 event.type === 'risk'
                   ? 'bg-amber-500'
-                  : event.operation_type === '操作失败'
+                  : failed
                   ? 'bg-red-500'
                   : 'bg-blue-500'
               }`}
@@ -72,7 +79,7 @@ export default function OperationTimeline({ operations, riskLogs }: OperationTim
                     clipRule="evenodd"
                   />
                 </svg>
-              ) : event.operation_type === '操作失败' ? (
+              ) : failed ? (
                 <svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 20 20">
                   <path
                     fillRule="evenodd"
@@ -91,13 +98,31 @@ export default function OperationTimeline({ operations, riskLogs }: OperationTim
               )}
             </div>
 
-            <div className="bg-gray-50 rounded-lg p-3 border border-gray-100">
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-sm font-medium text-gray-900">
-                  {event.type === 'risk'
-                    ? `风险等级变更`
-                    : event.operation_type}
-                </span>
+            <div className={`rounded-lg p-3 border ${
+              failed
+                ? 'bg-red-50 border-red-200'
+                : event.type === 'risk'
+                ? 'bg-amber-50 border-amber-200'
+                : 'bg-gray-50 border-gray-100'
+            }`}>
+              <div className="flex items-center justify-between mb-1 flex-wrap gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium text-gray-900">
+                    {event.type === 'risk'
+                      ? `风险等级变更`
+                      : event.operation_type}
+                  </span>
+                  {failed && (
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-red-200 text-red-800 font-medium">
+                      ❌ 失败
+                    </span>
+                  )}
+                  {!failed && event.type === 'operation' && (
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700 font-medium">
+                      ✅ 成功
+                    </span>
+                  )}
+                </div>
                 <span className="text-xs text-gray-500">
                   {new Date(event.sortTime).toLocaleString('zh-CN')}
                 </span>
@@ -108,6 +133,11 @@ export default function OperationTimeline({ operations, riskLogs }: OperationTim
                 <span className="font-medium">
                   {event.operator_name}（{event.operator_role}）
                 </span>
+                {(event as any).version_before !== undefined && event.type === 'operation' && (
+                  <span className="ml-3 font-mono bg-gray-200 px-1.5 py-0.5 rounded text-gray-700">
+                    v{(event as any).version_before} → v{(event as any).version_after}
+                  </span>
+                )}
               </div>
 
               {event.type === 'risk' ? (
@@ -147,11 +177,6 @@ export default function OperationTimeline({ operations, riskLogs }: OperationTim
                         </span>
                       </div>
                     )}
-                  {(event.version_before || event.version_after) && (
-                    <div className="text-xs text-gray-500 mb-1">
-                      版本：v{event.version_before} → v{event.version_after}
-                    </div>
-                  )}
                 </>
               )}
 

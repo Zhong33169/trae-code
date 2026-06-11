@@ -1,4 +1,4 @@
-from typing import Optional, Tuple, List, Dict
+from typing import Optional, Tuple, List, Dict, Any
 from datetime import datetime
 from ..database import get_sqlite_conn
 from ..schemas.models import (
@@ -21,6 +21,30 @@ from .application_no import generate_application_no
 STAGE_ORDER = ["开户预约", "资料审核", "账户启用"]
 
 
+def _isoformat(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, str):
+        return value
+    return str(value)
+
+
+def _dict_to_evidence(ev: tuple) -> Dict:
+    return {
+        "id": ev[0],
+        "application_id": ev[1],
+        "evidence_type": ev[2],
+        "evidence_name": ev[3],
+        "is_provided": ev[4],
+        "is_required": ev[5],
+        "verified_at": _isoformat(ev[6]),
+        "verified_by": ev[7],
+        "created_at": _isoformat(ev[8]),
+    }
+
+
 def _dict_to_application(row: tuple, evidences: Optional[List] = None) -> Dict:
     return {
         "id": row[0],
@@ -37,13 +61,13 @@ def _dict_to_application(row: tuple, evidences: Optional[List] = None) -> Dict:
         "current_handler_name": row[19] if len(row) > 19 and row[19] else None,
         "current_handler_role": row[20] if len(row) > 20 and row[20] else None,
         "version": row[11],
-        "deadline": datetime.fromisoformat(row[12]) if row[12] else None,
+        "deadline": _isoformat(row[12]),
         "is_overdue": row[13],
         "is_evidence_missing": row[14],
         "is_returned": row[15],
         "returned_reason": row[16],
-        "created_at": datetime.fromisoformat(row[17]),
-        "updated_at": datetime.fromisoformat(row[18]),
+        "created_at": _isoformat(row[17]),
+        "updated_at": _isoformat(row[18]),
         "evidences": evidences,
     }
 
@@ -88,20 +112,7 @@ def get_application_list(
                 (row[0],)
             )
             ev_rows = ev_cursor.fetchall()
-            app["evidences"] = [
-                {
-                    "id": ev[0],
-                    "application_id": ev[1],
-                    "evidence_type": ev[2],
-                    "evidence_name": ev[3],
-                    "is_provided": ev[4],
-                    "is_required": ev[5],
-                    "verified_at": datetime.fromisoformat(ev[6]) if ev[6] else None,
-                    "verified_by": ev[7],
-                    "created_at": datetime.fromisoformat(ev[8]),
-                }
-                for ev in ev_rows
-            ]
+            app["evidences"] = [_dict_to_evidence(ev) for ev in ev_rows]
             result.append(app)
         return result
     finally:
@@ -129,23 +140,33 @@ def get_application_detail(application_id: int) -> Optional[Dict]:
             (application_id,)
         )
         ev_rows = ev_cursor.fetchall()
-        evidences = [
-            {
-                "id": ev[0],
-                "application_id": ev[1],
-                "evidence_type": ev[2],
-                "evidence_name": ev[3],
-                "is_provided": ev[4],
-                "is_required": ev[5],
-                "verified_at": datetime.fromisoformat(ev[6]) if ev[6] else None,
-                "verified_by": ev[7],
-                "created_at": datetime.fromisoformat(ev[8]),
-            }
-            for ev in ev_rows
-        ]
+        evidences = [_dict_to_evidence(ev) for ev in ev_rows]
         return _dict_to_application(row, evidences)
     finally:
         conn.close()
+
+
+def _dict_to_operation(r: tuple) -> Dict:
+    return {
+        "id": r[0],
+        "application_id": r[1],
+        "operator_id": r[2],
+        "operator_role": r[3],
+        "operation_type": r[4],
+        "is_success": r[5],
+        "from_stage": r[6],
+        "to_stage": r[7],
+        "from_status": r[8],
+        "to_status": r[9],
+        "from_risk_level": r[10],
+        "to_risk_level": r[11],
+        "remark": r[12],
+        "evidence_checked": r[13],
+        "version_before": r[14],
+        "version_after": r[15],
+        "created_at": _isoformat(r[16]),
+        "operator_name": r[17] if len(r) > 17 else None,
+    }
 
 
 def get_operation_records(application_id: int) -> List[Dict]:
@@ -162,30 +183,23 @@ def get_operation_records(application_id: int) -> List[Dict]:
             (application_id,)
         )
         rows = cursor.fetchall()
-        return [
-            {
-                "id": r[0],
-                "application_id": r[1],
-                "operator_id": r[2],
-                "operator_role": r[3],
-                "operator_name": r[16] if len(r) > 16 else None,
-                "operation_type": r[4],
-                "from_stage": r[5],
-                "to_stage": r[6],
-                "from_status": r[7],
-                "to_status": r[8],
-                "from_risk_level": r[9],
-                "to_risk_level": r[10],
-                "remark": r[11],
-                "evidence_checked": r[12],
-                "version_before": r[13],
-                "version_after": r[14],
-                "created_at": datetime.fromisoformat(r[15]),
-            }
-            for r in rows
-        ]
+        return [_dict_to_operation(r) for r in rows]
     finally:
         conn.close()
+
+
+def _dict_to_risk_log(r: tuple) -> Dict:
+    return {
+        "id": r[0],
+        "application_id": r[1],
+        "operator_id": r[2],
+        "operator_role": r[3],
+        "from_level": r[4],
+        "to_level": r[5],
+        "change_reason": r[6],
+        "created_at": _isoformat(r[7]),
+        "operator_name": r[9] if len(r) > 9 else None,
+    }
 
 
 def get_risk_level_logs(application_id: int) -> List[Dict]:
@@ -202,20 +216,7 @@ def get_risk_level_logs(application_id: int) -> List[Dict]:
             (application_id,)
         )
         rows = cursor.fetchall()
-        return [
-            {
-                "id": r[0],
-                "application_id": r[1],
-                "operator_id": r[2],
-                "operator_role": r[3],
-                "operator_name": r[9] if len(r) > 9 else None,
-                "from_level": r[4],
-                "to_level": r[5],
-                "change_reason": r[6],
-                "created_at": datetime.fromisoformat(r[7]),
-            }
-            for r in rows
-        ]
+        return [_dict_to_risk_log(r) for r in rows]
     finally:
         conn.close()
 
@@ -452,16 +453,17 @@ def handle_submit_operation(req: OperationSubmitRequest) -> Tuple[bool, str, Opt
             """
             INSERT INTO operation_records (
                 application_id, operator_id, operator_role, operation_type,
-                from_stage, to_stage, from_status, to_status,
+                is_success, from_stage, to_stage, from_status, to_status,
                 from_risk_level, to_risk_level, remark,
                 evidence_checked, version_before, version_after
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 req.application_id,
                 req.operator_id,
                 req.operator_role,
                 operation_type,
+                1,
                 app["stage"],
                 new_stage,
                 app["status"],
@@ -492,16 +494,17 @@ def _record_operation_failed(cursor, req: OperationSubmitRequest, app: Dict, rea
         """
         INSERT INTO operation_records (
             application_id, operator_id, operator_role, operation_type,
-            from_stage, to_stage, from_status, to_status,
+            is_success, from_stage, to_stage, from_status, to_status,
             from_risk_level, to_risk_level, remark,
             evidence_checked, version_before, version_after
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             req.application_id,
             req.operator_id,
             req.operator_role,
             "操作失败",
+            0,
             app["stage"],
             None,
             app["status"],
