@@ -65,6 +65,7 @@ class BatchActionRequest(BaseModel):
     action: str
     user_id: int
     comment: Optional[str] = ""
+    versions: Optional[dict[str, int]] = None
 
 
 class EvidenceAddRequest(BaseModel):
@@ -244,6 +245,16 @@ async def get_ticket_detail(ticket_id: int) -> dict:
     ).fetchall()
     result["evidences"] = [_row_to_dict(r) for r in evidences]
 
+    batch_histories = conn.execute(
+        """SELECT bi.*, bo.batch_no, bo.action as batch_action, bo.operated_at as batch_operated_at, u.display_name as operator_name
+        FROM batch_operation_items bi
+        INNER JOIN batch_operations bo ON bi.batch_id = bo.id
+        LEFT JOIN users u ON bo.operated_by = u.id
+        WHERE bi.ticket_id=? ORDER BY bo.operated_at""",
+        (ticket_id,),
+    ).fetchall()
+    result["batch_histories"] = [_row_to_dict(r) for r in batch_histories]
+
     conn.close()
     return {"ok": True, "data": result}
 
@@ -420,24 +431,49 @@ async def supplement_ticket(ticket_id: int, data: SupplementRequest) -> dict:
 async def batch_action(data: BatchActionRequest) -> dict:
     results: list = []
     errors: list = []
+    items: list = []
     conn = get_db()
+
+    now_str = datetime.datetime.now().strftime("%Y%m%d")
+    batch_count = conn.execute("SELECT COUNT(*) FROM batch_operations WHERE batch_no LIKE ?", (f"PL-{now_str}-%",)).fetchone()[0]
+    batch_no = f"PL-{now_str}-{str(batch_count + 1).zfill(3)}"
 
     for tid in data.ticket_ids:
         ticket = conn.execute("SELECT * FROM inspection_tickets WHERE id=?", (tid,)).fetchone()
+        ticket_no = ticket["ticket_no"] if ticket else None
+        old_status = ticket["status"] if ticket else None
+        error_reason = None
+        success_flag = 0
+        new_status = None
+
         if not ticket:
-            errors.append({"ticket_id": tid, "reason": "巡检单不存在"})
+            error_reason = "巡检单不存在"
+            errors.append({"ticket_id": tid, "reason": error_reason})
+            items.append({"ticket_id": tid, "ticket_no": None, "success": 0, "error_reason": error_reason, "old_status": None, "new_status": None})
             continue
 
         role = _get_user_role(data.user_id)
         w_result = validate_workflow_transition(role, ticket["status"], data.action)
         if not w_result.valid:
-            errors.append({"ticket_id": tid, "ticket_no": ticket["ticket_no"], "reason": w_result.reason})
+            error_reason = w_result.reason
+            errors.append({"ticket_id": tid, "ticket_no": ticket_no, "reason": error_reason})
+            items.append({"ticket_id": tid, "ticket_no": ticket_no, "success": 0, "error_reason": error_reason, "old_status": old_status, "new_status": None})
             continue
+
+        if data.versions and str(tid) in data.versions:
+            v_result = validate_version(ticket["version"], data.versions[str(tid)])
+            if not v_result.valid:
+                error_reason = v_result.reason
+                errors.append({"ticket_id": tid, "ticket_no": ticket_no, "reason": error_reason})
+                items.append({"ticket_id": tid, "ticket_no": ticket_no, "success": 0, "error_reason": error_reason, "old_status": old_status, "new_status": None})
+                continue
 
         evidence_count = conn.execute("SELECT COUNT(*) FROM evidence_attachments WHERE ticket_id=?", (tid,)).fetchone()[0]
         e_result = validate_evidence_for_action(data.action, evidence_count)
         if not e_result.valid:
-            errors.append({"ticket_id": tid, "ticket_no": ticket["ticket_no"], "reason": e_result.reason})
+            error_reason = e_result.reason
+            errors.append({"ticket_id": tid, "ticket_no": ticket_no, "reason": error_reason, "details": e_result.details})
+            items.append({"ticket_id": tid, "ticket_no": ticket_no, "success": 0, "error_reason": error_reason, "old_status": old_status, "new_status": None})
             continue
 
         new_status = ACTION_STATUS_MAP[data.action]
@@ -450,11 +486,24 @@ async def batch_action(data: BatchActionRequest) -> dict:
             "INSERT INTO workflow_logs (ticket_id,action,from_status,to_status,operated_by,comment) VALUES (?,?,?,?,?,?)",
             (tid, data.action, ticket["status"], new_status, data.user_id, data.comment),
         )
-        results.append({"ticket_id": tid, "ticket_no": ticket["ticket_no"], "new_status": new_status, "new_version": new_version})
+        success_flag = 1
+        results.append({"ticket_id": tid, "ticket_no": ticket_no, "new_status": new_status, "new_version": new_version})
+        items.append({"ticket_id": tid, "ticket_no": ticket_no, "success": 1, "error_reason": None, "old_status": old_status, "new_status": new_status})
+
+    batch_cur = conn.execute(
+        "INSERT INTO batch_operations (batch_no,action,operated_by,total_count,success_count,error_count,comment) VALUES (?,?,?,?,?,?,?)",
+        (batch_no, data.action, data.user_id, len(data.ticket_ids), len(results), len(errors), data.comment),
+    )
+    batch_id = batch_cur.lastrowid
+    for it in items:
+        conn.execute(
+            "INSERT INTO batch_operation_items (batch_id,ticket_id,ticket_no,success,error_reason,old_status,new_status) VALUES (?,?,?,?,?,?,?)",
+            (batch_id, it["ticket_id"], it["ticket_no"], it["success"], it["error_reason"], it["old_status"], it["new_status"]),
+        )
 
     conn.commit()
     conn.close()
-    return {"ok": True, "data": {"success": results, "errors": errors}}
+    return {"ok": True, "data": {"batch_id": batch_id, "batch_no": batch_no, "success": results, "errors": errors}}
 
 
 @post("/api/tickets/{ticket_id:int}/evidence")

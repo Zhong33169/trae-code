@@ -84,6 +84,8 @@ export class TicketDetail extends LitElement {
     .timeline-item .action { color: #303133; font-weight: 500; }
     .timeline-item .operator { color: #606266; }
     .timeline-item .comment { color: #e6a23c; font-style: italic; }
+    .timeline-item.timeline-success::before { background: #67c23a; box-shadow: 0 0 0 2px #67c23a; }
+    .timeline-item.timeline-error::before { background: #f56c6c; box-shadow: 0 0 0 2px #f56c6c; }
     .supplement-item {
       background: #fdf6ec; border: 1px solid #faecd8; border-radius: 8px;
       padding: 12px; margin-bottom: 8px;
@@ -329,6 +331,7 @@ export class TicketDetail extends LitElement {
             ${this._renderTreatmentTrackings(t, canAdd)}
             ${this._renderEvidences(t, canAdd)}
             ${this._renderWorkflowLogs(t)}
+            ${this._renderBatchHistories(t)}
           </div>
           <div class="action-bar">
             ${canAdd ? html`
@@ -514,6 +517,32 @@ export class TicketDetail extends LitElement {
               <div class="action">${l.action}</div>
               <div class="operator">${l.operator_name || '-'}: ${STATUS_LABELS[l.from_status] || l.from_status} → ${STATUS_LABELS[l.to_status] || l.to_status}</div>
               ${l.comment ? html`<div class="comment">"${l.comment}"</div>` : ''}
+            </div>
+          `)}
+        </div>
+      </div>
+    `;
+  }
+
+  _renderBatchHistories(t) {
+    const bh = t.batch_histories || [];
+    if (bh.length === 0) return '';
+    return html`
+      <div class="section">
+        <div class="section-title">🔢 批量操作历史 <span class="badge">${bh.length}</span></div>
+        <div class="timeline">
+          ${bh.map(b => html`
+            <div class="timeline-item ${b.success ? 'timeline-success' : 'timeline-error'}">
+              <div class="time">${b.batch_operated_at}</div>
+              <div class="action">
+                ${b.success ? '✅' : '❌'} [${b.batch_no}] ${b.batch_action}
+              </div>
+              <div class="operator">
+                操作人: ${b.operator_name || '-'}
+                ${b.old_status ? html` | ${STATUS_LABELS[b.old_status] || b.old_status}` : ''}
+                ${b.new_status ? html` → ${STATUS_LABELS[b.new_status] || b.new_status}` : ''}
+              </div>
+              ${b.error_reason ? html`<div class="comment" style="color:#f56c6c">❌ 失败原因: ${b.error_reason}</div>` : ''}
             </div>
           `)}
         </div>

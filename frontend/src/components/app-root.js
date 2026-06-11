@@ -255,21 +255,36 @@ export class AppRoot extends LitElement {
     if (!this.currentUser) return;
     this.loading = true;
     try {
+      const versions = {};
+      this.tickets.forEach(t => {
+        if (this.selectedIds.includes(t.id)) versions[String(t.id)] = t.version;
+      });
       const res = await api.batchAction({
         ticket_ids: this.selectedIds,
         action,
         user_id: this.currentUser.id,
         comment: '',
+        versions,
       });
-      if (res.data.errors && res.data.errors.length > 0) {
+      const successCount = res.data.success?.length || 0;
+      const errorCount = res.data.errors?.length || 0;
+      if (errorCount > 0) {
         const msgs = res.data.errors.map(e => `${e.ticket_no || e.ticket_id}: ${e.reason}`).join('\n');
-        this._showToast(`批量操作部分失败:\n${msgs}`, 'warning');
+        this._showToast(`批量操作: 成功${successCount}条, 失败${errorCount}条\n${msgs}`, 'warning');
+      } else if (successCount > 0) {
+        this._showToast(`批量操作成功: 处理 ${successCount} 条 (批次: ${res.data.batch_no})`, 'success');
       }
-      if (res.data.success && res.data.success.length > 0) {
-        this._showToast(`成功处理 ${res.data.success.length} 条`, 'success');
-      }
+      const wasSelected = this.selectedTicket ? [...this.selectedIds] : [];
       this.selectedIds = [];
       await this._loadTickets();
+      if (this.selectedTicket) {
+        const stillSelected = wasSelected.filter(id => res.data.success?.some(s => s.ticket_id === id));
+        if (stillSelected.length > 0) {
+          await this._selectTicket({ id: stillSelected[0] });
+        } else if (wasSelected.length > 0 && this.selectedTicket) {
+          await this._selectTicket(this.selectedTicket);
+        }
+      }
     } catch (e) {
       this._showToast(e.message, 'error');
     }
