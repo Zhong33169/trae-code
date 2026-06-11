@@ -243,11 +243,12 @@ func seedDemoSelections() error {
 			ID: "sel_batch_ok", ProductName: "电动牙刷套装", Category: "数码家电",
 			Brand: "飞利浦", Supplier: "飞利浦官方授权店",
 			Price: 399.0, Commission: 0.20,
-			Description: "爆款个人护理，附件齐全，用于批量通过成功样例",
-			Status: "pending",
+			Description: "爆款个人护理，补正完成附件齐全，用于批量通过成功样例",
+			Status: "missing_attachment",
 			CreatedBy: "u_registrar_1", CreatedByName: "直播选品登记员-小李",
-			CreatedAt: twoDaysAgo, UpdatedAt: twoDaysAgo,
+			CreatedAt: twoDaysAgo, UpdatedAt: yesterday,
 			Deadline: &tomorrow,
+			RejectReason: "初始缺少质检报告，已补正齐全：品牌授权书+质检报告 2 份有效，待审核主管批量通过",
 		},
 		{
 			ID: "sel_allrej", ProductName: "无品牌数据线", Category: "数码家电",
@@ -336,8 +337,9 @@ func seedDemoSelections() error {
 
 		{"audit_15", "sel_batch_ok", "u_registrar_1", "直播选品登记员-小李", "创建选品单", "创建电动牙刷选品，用于批量通过成功样例", twoDaysAgo.Format(time.RFC3339)},
 		{"audit_16", "sel_batch_ok", "u_registrar_1", "直播选品登记员-小李", "上传附件", "附件: 品牌授权书.pdf (授权文件)", twoDaysAgo.Add(30 * time.Minute).Format(time.RFC3339)},
-		{"audit_17", "sel_batch_ok", "u_registrar_1", "直播选品登记员-小李", "上传附件", "附件: 质检报告.pdf (质检文件)", twoDaysAgo.Add(45 * time.Minute).Format(time.RFC3339)},
-		{"audit_18", "sel_batch_ok", "u_registrar_1", "直播选品登记员-小李", "提交审核", "提交至审核主管", twoDaysAgo.Add(time.Hour).Format(time.RFC3339)},
+		{"audit_17", "sel_batch_ok", "u_registrar_1", "直播选品登记员-小李", "提交审核", "资料不全情况下误提交", twoDaysAgo.Add(40 * time.Minute).Format(time.RFC3339)},
+		{"audit_18", "sel_batch_ok", "u_supervisor_1", "直播选品审核主管-王主管", "标记缺材料", "缺少质检报告，要求补正（初始仅 1 份授权书）", twoDaysAgo.Add(time.Hour).Format(time.RFC3339)},
+		{"audit_18b", "sel_batch_ok", "u_registrar_1", "直播选品登记员-小李", "上传附件", "补正上传: 质检报告.pdf (质检文件)，当前有效附件 2 份，待主管批量通过", yesterday.Format(time.RFC3339)},
 
 		{"audit_19", "sel_allrej", "u_registrar_1", "直播选品登记员-小李", "创建选品单", "创建无品牌数据线选品", twoDaysAgo.Format(time.RFC3339)},
 		{"audit_20", "sel_allrej", "u_registrar_1", "直播选品登记员-小李", "上传附件", "附件: 模糊的授权书.jpg (授权文件)", twoDaysAgo.Add(30 * time.Minute).Format(time.RFC3339)},
