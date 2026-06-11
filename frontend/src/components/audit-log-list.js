@@ -293,6 +293,14 @@ export class AuditLogList extends LitElement {
                 <div class="remark-box" style="background:#fff1f2; color:#7f1d1d; border:1px solid #fecdd3;">
                   <b>原因：</b>${log.reason}
                 </div>
+                ${log.detail?.block_reasons?.length ? html`
+                  <div class="detail-box">
+                    <div style="font-weight:600; margin-bottom: 4px; color:#7f1d1d;">阻断原因：</div>
+                    ${log.detail.block_reasons.map(br => html`
+                      <div class="d-item">• ${br}</div>
+                    `)}
+                  </div>
+                ` : ''}
                 ${log.detail?.diffs?.length ? html`
                   <div class="detail-box">
                     <div style="font-weight:600; margin-bottom: 4px;">差异明细：</div>

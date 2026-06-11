@@ -458,6 +458,14 @@ export class BatchList extends LitElement {
           <div class="summary-card ${rec.diff_count === 0 ? 'ok' : 'diff'}"><div class="label">差异项</div><div class="value">${rec.diff_count}</div></div>
           <div class="summary-card ${rec.is_consistent ? 'ok' : 'diff'}"><div class="label">核对</div><div class="value">${rec.is_consistent ? '通过' : '未通过'}</div></div>
         </div>
+        ${rec.block_reasons?.length ? html`
+          <div style="margin-top:8px;">
+            <div style="font-size:12px; font-weight:600; color:#991b1b; margin-bottom:4px;">阻断原因：</div>
+            ${rec.block_reasons.map(r => html`
+              <div style="font-size:12px; color:#991b1b; padding:2px 0;">• ${r}</div>
+            `)}
+          </div>
+        ` : ''}
         ${rec.diffs?.length ? html`
           <div>
             ${rec.diffs.map(d => html`

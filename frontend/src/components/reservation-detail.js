@@ -506,6 +506,31 @@ export class ReservationDetail extends LitElement {
     }, 3000)
   }
 
+  _getBatchOfflineStatuses() {
+    const r = this.reservation
+    if (!r) return []
+    const results = this.reservation.batch_reconcile?.item_results || []
+    if (results.length) {
+      return results.map(item => ({
+        reservation_no: item.reservation_no,
+        status: item.offline_status || item.online_status,
+        attachments: item.offline_attachments || [],
+      }))
+    }
+    return [{
+      reservation_no: r.reservation_no,
+      status: r.offline_status || r.status,
+      attachments: Array.isArray(r.offline_attachment_list) ? r.offline_attachment_list : [],
+    }]
+  }
+
+  _getBatchOfflineCount() {
+    if (this.reservation?.batch_reconcile?.total_offline) {
+      return this.reservation.batch_reconcile.total_offline
+    }
+    return this.reservation?.offline_count || 1
+  }
+
   _canEdit() {
     if (!this.reservation) return false
     if (this.userRole !== 'registrar') return false
@@ -551,14 +576,9 @@ export class ReservationDetail extends LitElement {
   async _handleSubmit() {
     if (!confirm('确认提交该会议预约单进行审核吗？请确保已核对线下台账信息。')) return
     try {
-      const r = this.reservation
       await reservationApi.submit(this.reservationId, {
-        offline_count: r.offline_count || 1,
-        offline_statuses: [{
-          reservation_no: r.reservation_no,
-          status: r.offline_status || r.status,
-          attachments: Array.isArray(r.offline_attachment_list) ? r.offline_attachment_list : [],
-        }],
+        offline_count: this._getBatchOfflineCount(),
+        offline_statuses: this._getBatchOfflineStatuses(),
       })
       this._showMessage('提交成功，已进入审核队列')
       this._loadData()
@@ -631,14 +651,9 @@ export class ReservationDetail extends LitElement {
   async _handleReviewPass() {
     if (!confirm('确认复核通过并归档？归档后将无法修改。请核对线下台账是否一致。')) return
     try {
-      const r = this.reservation
       await reservationApi.review(this.reservationId, 'pass', {
-        offline_count: r.offline_count || 1,
-        offline_statuses: [{
-          reservation_no: r.reservation_no,
-          status: r.offline_status || r.status,
-          attachments: Array.isArray(r.offline_attachment_list) ? r.offline_attachment_list : [],
-        }],
+        offline_count: this._getBatchOfflineCount(),
+        offline_statuses: this._getBatchOfflineStatuses(),
       })
       this._showMessage('复核通过，已归档')
       this._loadData()
@@ -1138,6 +1153,14 @@ export class ReservationDetail extends LitElement {
               </div>
               <div class="block-reason">${log.reason}</div>
               <div class="block-op">操作人：${log.operator || '-'} (${roleMap[log.operator_role] || log.operator_role || '-'})</div>
+              ${log.detail?.block_reasons?.length ? html`
+                <div style="margin-top:6px; font-size:12px;">
+                  <div style="color:#991b1b; font-weight:600; margin-bottom:3px;">阻断原因：</div>
+                  ${log.detail.block_reasons.map(br => html`
+                    <div style="padding:1px 0; color:#991b1b;">• ${br}</div>
+                  `)}
+                </div>
+              ` : ''}
               ${log.detail?.diffs?.length ? html`
                 <div style="margin-top:8px; font-size:12px;">
                   <div style="color:#6b7280; margin-bottom:4px;">差异详情：</div>
@@ -1195,6 +1218,14 @@ export class ReservationDetail extends LitElement {
               <div class="value">${reconcile.is_consistent ? '通过' : '未通过'}</div>
             </div>
           </div>
+          ${reconcile.block_reasons?.length ? html`
+            <div style="margin-bottom:16px;">
+              <div style="font-size:13px; font-weight:600; color:#991b1b; margin-bottom:6px;">阻断原因：</div>
+              ${reconcile.block_reasons.map(br => html`
+                <div style="font-size:12px; color:#991b1b; padding:2px 0;">• ${br}</div>
+              `)}
+            </div>
+          ` : ''}
           ${reconcile.diffs?.length ? html`
             <div style="margin-bottom:16px;">
               <div style="font-size:13px; font-weight:600; margin-bottom:8px;">差异明细：</div>

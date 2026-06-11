@@ -1,6 +1,40 @@
 from typing import Tuple, Optional, Dict, Any, List
 from datetime import datetime
 
+
+def build_offline_statuses_for_batch(
+    batch_items: List[Any],
+    offline_count: int = None,
+    extra_entries: List[Dict[str, Any]] = None,
+) -> Tuple[int, List[Dict[str, Any]]]:
+    offline_statuses = []
+    for r in batch_items:
+        att_raw = r.offline_attachment_list if isinstance(r.offline_attachment_list, list) else []
+        fallback_att = [a.strip() for a in (r.attachment_names or "").split(",") if a.strip()]
+        offline_statuses.append({
+            "reservation_no": r.reservation_no,
+            "status": r.offline_status or r.status,
+            "attachments": att_raw if att_raw else fallback_att,
+        })
+    if extra_entries:
+        offline_statuses.extend(extra_entries)
+    count = offline_count if offline_count and offline_count > 0 else len(offline_statuses)
+    return count, offline_statuses
+
+
+def run_batch_reconcile(
+    batch_items: List[Any],
+    offline_count: Optional[int],
+    offline_statuses: List[Dict[str, Any]],
+    offline_attachments: List[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    count = offline_count if offline_count and offline_count > 0 else len(batch_items)
+    statuses = offline_statuses or []
+    atts = offline_attachments or []
+    if not statuses:
+        count, statuses = build_offline_statuses_for_batch(batch_items, offline_count)
+    return reconcile_offline_online(batch_items, count, statuses, atts)
+
 STATUS_FLOW = {
     "draft": {
         "registrar": ["submit", "update", "delete"],
@@ -123,6 +157,7 @@ def reconcile_offline_online(
     item_results = []
     is_consistent = True
     is_blocked = False
+    block_reasons = []
 
     offline_statuses = offline_statuses or []
     offline_attachments = offline_attachments or []
@@ -137,6 +172,8 @@ def reconcile_offline_online(
             "message": f"线上 {online_count} 条，线下 {offline_count} 条，数量不一致",
         })
         is_consistent = False
+        is_blocked = True
+        block_reasons.append(f"数量不一致（线上{online_count}/线下{offline_count}）")
 
     offline_by_no = {}
     for s in offline_statuses:
@@ -181,6 +218,8 @@ def reconcile_offline_online(
                 })
                 item["is_consistent"] = False
                 is_consistent = False
+                is_blocked = True
+                block_reasons.append(f"{r.reservation_no} 状态不一致")
 
             offline_att_raw = offline.get("attachments", [])
             if isinstance(offline_att_raw, str):
@@ -204,20 +243,23 @@ def reconcile_offline_online(
                 })
                 item["is_consistent"] = False
                 is_consistent = False
+                is_blocked = True
+                block_reasons.append(f"{r.reservation_no} 附件不一致")
         else:
             if online_att_names:
                 item["offline_attachments"] = []
-                if online_att_names:
-                    item["attachment_diffs"].append({
-                        "field": "附件",
-                        "online_value": sorted(online_att_names),
-                        "offline_value": "(未填写)",
-                        "missing_online": [],
-                        "missing_offline": sorted(online_att_names),
-                        "message": "线下未登记附件",
-                    })
-                    item["is_consistent"] = False
-                    is_consistent = False
+                item["attachment_diffs"].append({
+                    "field": "附件",
+                    "online_value": sorted(online_att_names),
+                    "offline_value": "(未填写)",
+                    "missing_online": [],
+                    "missing_offline": sorted(online_att_names),
+                    "message": "线下未登记附件",
+                })
+                item["is_consistent"] = False
+                is_consistent = False
+                is_blocked = True
+                block_reasons.append(f"{r.reservation_no} 线下未登记附件")
 
         item_results.append(item)
 
@@ -232,14 +274,22 @@ def reconcile_offline_online(
             "status": "diff",
             "message": f"批次内存在不同状态：{', '.join(STATUS_LABELS.get(s, s) for s in online_statuses)}，不允许继续提交",
         })
+        block_reasons.append(f"批次内状态不一致({len(online_statuses)}种)")
 
-    message = "线上线下一致，可以继续处理" if is_consistent else "存在差异，请核对后再处理"
-    if is_blocked:
-        message = "批次内状态不一致，已阻断提交。请逐单核对线下台账状态。"
+    if is_consistent:
+        message = "线上线下一致，可以继续处理"
+    elif is_blocked:
+        reason_str = "；".join(block_reasons[:3])
+        if len(block_reasons) > 3:
+            reason_str += f"；共{len(block_reasons)}项差异"
+        message = f"已阻断：{reason_str}"
+    else:
+        message = "存在差异，请核对后再处理"
 
     return {
         "is_consistent": is_consistent,
         "is_blocked": is_blocked,
+        "block_reasons": block_reasons,
         "message": message,
         "total_online": online_count,
         "total_offline": offline_count,

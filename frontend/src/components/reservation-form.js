@@ -191,12 +191,22 @@ export class ReservationForm extends LitElement {
     if (!this._validate(true)) return
     this.loading = true
     try {
-      const offline_statuses = [{
-        reservation_no: 'NEW',
+      const createResult = await reservationApi.create(this.form)
+      const offline_statuses = []
+      if (this.batchWarning?.mismatch_details) {
+        this.batchWarning.mismatch_details.forEach(d => {
+          offline_statuses.push({
+            reservation_no: d.reservation_no,
+            status: d.offline_status || d.status,
+            attachments: Array.isArray(d.offline_attachments) ? d.offline_attachments : (d.online_attachments ? d.online_attachments.split(',').map(a => a.trim()).filter(a => a) : []),
+          })
+        })
+      }
+      offline_statuses.push({
+        reservation_no: createResult.reservation_no,
         status: this.form.offline_status || 'draft',
         attachments: this.form.offline_attachment_list || [],
-      }]
-      const createResult = await reservationApi.create(this.form)
+      })
       await reservationApi.submit(createResult.id, {
         offline_count: this.form.offline_count,
         offline_statuses,
