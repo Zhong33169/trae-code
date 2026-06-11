@@ -306,28 +306,32 @@ func ProcessOrder(c *gin.Context) {
 		return
 	}
 
-	auditConflict := func(detail string) {
+	auditConflict := func(action string, detail string) {
+		actualAction := action
+		if actualAction == "" {
+			actualAction = req.Action
+		}
 		database.DB.Exec(
 			`INSERT INTO operation_records (order_id, handler_id, handler_name, handler_role, action, opinion, result)
-			 VALUES (?, ?, ?, ?, 'advance', ?, 'conflict')`,
-			currentOrder.ID, user.ID, user.DisplayName, user.Role, detail)
+			 VALUES (?, ?, ?, ?, ?, ?, 'conflict')`,
+			currentOrder.ID, user.ID, user.DisplayName, user.Role, actualAction, detail)
 	}
 
 	if req.Version != currentOrder.Version {
-		auditConflict(fmt.Sprintf("版本冲突：提交版本 v%d ≠ 当前版本 v%d", req.Version, currentOrder.Version))
+		auditConflict("", fmt.Sprintf("版本冲突：提交版本 v%d ≠ 当前版本 v%d", req.Version, currentOrder.Version))
 		c.JSON(http.StatusConflict, gin.H{"error": "版本冲突，请刷新后重试", "current_version": currentOrder.Version})
 		return
 	}
 
 	if currentOrder.CurrentHandlerID != req.HandlerID {
-		auditConflict(fmt.Sprintf("当前处理人不匹配，应为用户 %d (%s)", currentOrder.CurrentHandlerID, currentOrder.CurrentHandlerName))
+		auditConflict("", fmt.Sprintf("当前处理人不匹配，应为用户 %d (%s)", currentOrder.CurrentHandlerID, currentOrder.CurrentHandlerName))
 		c.JSON(http.StatusForbidden, gin.H{"error": "您不是当前处理人"})
 		return
 	}
 
 	expectedRole := models.ExpectedRoleForStatus[currentOrder.Status]
 	if expectedRole != "" && user.Role != expectedRole {
-		auditConflict(fmt.Sprintf("角色不匹配：当前状态「%s」需要角色「%s」，操作者为「%s」",
+		auditConflict("", fmt.Sprintf("角色不匹配：当前状态「%s」需要角色「%s」，操作者为「%s」",
 			currentOrder.Status, expectedRole, user.Role))
 		c.JSON(http.StatusForbidden, gin.H{"error": fmt.Sprintf("当前状态「%s」需要角色「%s」处理", models.StatusLabels[currentOrder.Status], models.RoleLabels[expectedRole])})
 		return
@@ -341,6 +345,7 @@ func ProcessOrder(c *gin.Context) {
 
 	newStatus, actionOk := allowedActions[req.Action]
 	if !actionOk {
+		auditConflict("", fmt.Sprintf("操作不支持：当前状态「%s」没有操作「%s」", currentOrder.Status, req.Action))
 		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("当前状态「%s」不支持操作「%s」", models.StatusLabels[currentOrder.Status], models.ActionLabels[req.Action])})
 		return
 	}
@@ -370,8 +375,13 @@ func ProcessOrder(c *gin.Context) {
 			currentOrder.ID, user.ID, user.DisplayName, user.Role, req.Action, reason, r)
 	}
 
+	evidenceTriggerActions := map[string]bool{
+		"advance": true,
+		"approve": true,
+		"correct": true,
+	}
 	mustHaveEvidence := []string{}
-	if req.Action == "advance" || req.Action == "approve" {
+	if evidenceTriggerActions[req.Action] {
 		mustHaveEvidence = append(mustHaveEvidence, models.RiskEvidenceRequirement[currentOrder.RiskLevel]...)
 	}
 
@@ -398,9 +408,9 @@ func ProcessOrder(c *gin.Context) {
 
 	for _, e := range mustHaveEvidence {
 		if !hasEvidence[e] {
-			reason := fmt.Sprintf("缺少%s，当前风险等级（%s）推进必须提供%s",
-				evidenceName[e], models.RiskLevelLabels[currentOrder.RiskLevel], evidenceName[e])
-			writeFailedRecord("returned", reason)
+			reason := fmt.Sprintf("缺少%s，当前风险等级（%s）执行「%s」必须提供%s",
+				evidenceName[e], models.RiskLevelLabels[currentOrder.RiskLevel], models.ActionLabels[req.Action], evidenceName[e])
+			writeFailedRecord("conflict", reason)
 			c.JSON(http.StatusBadRequest, gin.H{"error": reason})
 			return
 		}
@@ -445,7 +455,7 @@ func ProcessOrder(c *gin.Context) {
 	}
 	affected, _ := res.RowsAffected()
 	if affected == 0 {
-		auditConflict("并发更新冲突：版本校验失败，状态已被他人修改")
+		auditConflict("", "并发更新冲突：版本校验失败，状态已被他人修改")
 		c.JSON(http.StatusConflict, gin.H{"error": "并发冲突，请刷新后重试"})
 		return
 	}

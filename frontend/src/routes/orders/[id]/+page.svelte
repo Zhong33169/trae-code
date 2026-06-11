@@ -114,6 +114,28 @@
   function resultColor(r) { return RESULT_MAP[r]?.color || '#666'; }
   function actionLabel(a) { return ACTION_MAP[a]?.label || a; }
   function actionIcon(a) { return ACTION_MAP[a]?.icon || ''; }
+
+  function roleFor(status) {
+    const map = {
+      registered: 'warehouse_keeper',
+      verifying:  'temp_supervisor',
+      reviewing:  'warehouse_manager',
+      archived:   'warehouse_manager'
+    };
+    return map[status];
+  }
+
+  function opinionPlaceholder(action) {
+    switch (action) {
+      case 'approve': return '请写明复核通过意见，例如：证据齐全、同意归档...';
+      case 'reject':  return '请写明驳回原因，例如：证据不完整、数据异常、需重新核验...';
+      case 'return':  return '请写明退回补正的内容，例如：缺少温度记录、质量报告缺失...';
+      case 'advance': return '请写明推进意见，例如：核验通过、证据齐全...';
+      case 'correct': return '请写明补正内容，例如：已补齐温度记录/质量报告...';
+      case 'force_fix': return '请写明强制修复的原因和处理方案...';
+      default: return '请填写处理意见...';
+    }
+  }
 </script>
 
 {#if loading}
@@ -368,30 +390,6 @@
     </div>
   </div>
 {/if}
-
-<script>
-  function roleFor(status) {
-    const map = {
-      registered: 'warehouse_keeper',
-      verifying:  'temp_supervisor',
-      reviewing:  'warehouse_manager',
-      archived:   'warehouse_manager'
-    };
-    return map[status];
-  }
-
-  function opinionPlaceholder(action) {
-    switch (action) {
-      case 'approve': return '请写明复核通过意见，例如：证据齐全、同意归档...';
-      case 'reject':  return '请写明驳回原因，例如：证据不完整、数据异常、需重新核验...';
-      case 'return':  return '请写明退回补正的内容，例如：缺少温度记录、质量报告缺失...';
-      case 'advance': return '请写明推进意见，例如：核验通过、证据齐全...';
-      case 'correct': return '请写明补正内容，例如：已补齐温度记录/质量报告...';
-      case 'force_fix': return '请写明强制修复的原因和处理方案...';
-      default: return '请填写处理意见...';
-    }
-  }
-</script>
 
 <style>
   .loading, .empty {
