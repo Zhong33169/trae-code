@@ -568,20 +568,25 @@ def create_application(data: Dict) -> Tuple[bool, str, Optional[Dict]]:
             """
             INSERT INTO operation_records (
                 application_id, operator_id, operator_role, operation_type,
-                from_stage, to_stage, from_status, to_status, remark,
-                version_before, version_after
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                is_success, from_stage, to_stage, from_status, to_status,
+                from_risk_level, to_risk_level, remark,
+                evidence_checked, version_before, version_after
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 app_id,
                 1,
                 "客户经理",
                 "创建申请",
+                1,
                 None,
                 "开户预约",
                 None,
                 "待签收",
+                None,
+                None,
                 "创建开户申请",
+                None,
                 0,
                 1,
             )
