@@ -168,9 +168,14 @@ func (h *AuditHandler) ListByRecord(c echo.Context) error {
 	list := []models.AuditLog{}
 	for rows.Next() {
 		var l models.AuditLog
+		var recordID sql.NullInt64
 		var userName, oldStatus, newStatus, detail, failureReason sql.NullString
-		rows.Scan(&l.ID, &l.RecordID, &l.UserID, &userName, &l.Action, &oldStatus,
+		rows.Scan(&l.ID, &recordID, &l.UserID, &userName, &l.Action, &oldStatus,
 			&newStatus, &detail, &failureReason, &l.CreatedAt)
+		if recordID.Valid {
+			rid := int(recordID.Int64)
+			l.RecordID = &rid
+		}
 		l.UserName = userName.String
 		l.OldStatus = oldStatus.String
 		l.NewStatus = newStatus.String
@@ -208,9 +213,14 @@ func (h *AuditHandler) ListFailures(c echo.Context) error {
 	list := []models.AuditLog{}
 	for rows.Next() {
 		var l models.AuditLog
+		var recordID sql.NullInt64
 		var userName, oldStatus, newStatus, detail, failureReason sql.NullString
-		rows.Scan(&l.ID, &l.RecordID, &l.UserID, &userName, &l.Action, &oldStatus,
+		rows.Scan(&l.ID, &recordID, &l.UserID, &userName, &l.Action, &oldStatus,
 			&newStatus, &detail, &failureReason, &l.CreatedAt)
+		if recordID.Valid {
+			rid := int(recordID.Int64)
+			l.RecordID = &rid
+		}
 		l.UserName = userName.String
 		l.OldStatus = oldStatus.String
 		l.NewStatus = newStatus.String

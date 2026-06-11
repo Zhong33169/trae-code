@@ -53,7 +53,7 @@ export interface Attachment {
 
 export interface AuditLog {
   id: number;
-  checkin_record_id: number;
+  checkin_record_id: number | null;
   user_id: number;
   user_name: string;
   action: string;

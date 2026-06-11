@@ -115,6 +115,6 @@ INSERT OR IGNORE INTO audit_logs (checkin_record_id, user_id, action, old_status
 (1, 2, 'archive', 'pending', 'archived', '批量归档 - 状态不对', '状态不允许从 pending 转为 archived'),
 (4, 2, 'archive', 'archived', 'archived', '批量归档 - 已归档', '状态不允许从 archived 转为 archived'),
 
--- ======== 失败审计样例：字段校验失败 ========
-(0, 1, 'initiate', '', '', '尝试创建记录但必填字段缺失', '创建记录字段校验失败：batch_no: 批次号必填; flight_no: 航班号必填; passenger_name: 旅客姓名必填'),
-(0, 2, 'initiate', '', '', '办理岗尝试创建记录（越权）', '创建权限拒绝：角色 handler 不允许创建记录，允许操作为 [handle,verify,return]');
+-- ======== 失败审计样例：字段校验失败（无关联记录） ========
+(NULL, 1, 'initiate', '', '', '尝试创建记录但必填字段缺失', '创建记录字段校验失败：batch_no: 批次号必填; flight_no: 航班号必填; passenger_name: 旅客姓名必填'),
+(NULL, 2, 'initiate', '', '', '办理岗尝试创建记录（越权）', '创建权限拒绝：角色 handler 不允许创建记录，允许操作为 [handle,verify,return]');

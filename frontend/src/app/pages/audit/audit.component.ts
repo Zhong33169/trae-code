@@ -33,7 +33,10 @@ import { AuditLog, STATUS_LABELS, STATUS_COLORS } from '../../models';
             <tr *ngFor="let log of logs">
               <td class="mono small">{{ log.created_at?.substring(0, 19) }}</td>
               <td><b>{{ log.user_name }}</b></td>
-              <td class="mono">#{{ log.checkin_record_id }}</td>
+              <td>
+                <span *ngIf="log.checkin_record_id !== null" class="mono">#{{ log.checkin_record_id }}</span>
+                <span *ngIf="log.checkin_record_id === null" class="no-record-tag">创建失败/无关联记录</span>
+              </td>
               <td><span class="action-tag">{{ log.action }}</span></td>
               <td>
                 <span *ngIf="log.old_status" class="status-tag small" [style.background]="STATUS_COLORS[log.old_status]">
@@ -49,7 +52,8 @@ import { AuditLog, STATUS_LABELS, STATUS_COLORS } from '../../models';
                 <div class="failure-box">{{ log.failure_reason }}</div>
               </td>
               <td>
-                <button class="btn-link" (click)="goRecord(log.checkin_record_id)">查看记录</button>
+                <button *ngIf="log.checkin_record_id !== null" class="btn-link" (click)="goRecord(log.checkin_record_id)">查看记录</button>
+                <span *ngIf="log.checkin_record_id === null" class="no-link-hint">—</span>
               </td>
             </tr>
           </tbody>
@@ -89,6 +93,8 @@ import { AuditLog, STATUS_LABELS, STATUS_COLORS } from '../../models';
     }
     .btn-link { background: none; border: none; color: #3b82f6; cursor: pointer; padding: 4px; font-size: 13px; }
     .btn-link:hover { text-decoration: underline; }
+    .no-record-tag { background: #fef3c7; color: #92400e; padding: 2px 8px; border-radius: 4px; font-size: 11px; white-space: nowrap; }
+    .no-link-hint { color: #cbd5e1; font-size: 13px; }
     .stats-box { background: #f8fafc; padding: 14px 18px; border-radius: 8px; border: 1px solid #e2e8f0; }
     .stats-box h4 { margin: 0 0 6px; color: #1e293b; }
     .stats-box p { margin: 4px 0; font-size: 13px; color: #475569; }
@@ -110,7 +116,9 @@ export class AuditComponent implements OnInit {
     });
   }
 
-  goRecord(id: number): void {
-    this.router.navigate(['/orders', id]);
+  goRecord(id: number | null): void {
+    if (id !== null) {
+      this.router.navigate(['/orders', id]);
+    }
   }
 }

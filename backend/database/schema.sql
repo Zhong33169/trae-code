@@ -70,7 +70,6 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     detail TEXT,
     failure_reason TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (checkin_record_id) REFERENCES checkin_records(id),
     FOREIGN KEY (user_id) REFERENCES users(id)
 );
 

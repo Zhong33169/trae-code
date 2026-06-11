@@ -58,7 +58,7 @@ type Attachment struct {
 
 type AuditLog struct {
 	ID            int       `json:"id"`
-	RecordID      int       `json:"checkin_record_id"`
+	RecordID      *int      `json:"checkin_record_id"`
 	UserID        int       `json:"user_id"`
 	UserName      string    `json:"user_name"`
 	Action        string    `json:"action"`

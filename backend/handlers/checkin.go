@@ -92,10 +92,14 @@ func actionToStatus(action string) (string, error) {
 }
 
 func writeAuditLog(recordID, userID int, action, oldStatus, newStatus, detail, failureReason string) error {
+	var recID interface{}
+	if recordID > 0 {
+		recID = recordID
+	}
 	_, err := database.DB.Exec(
 		`INSERT INTO audit_logs (checkin_record_id, user_id, action, old_status, new_status, detail, failure_reason)
 		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		recordID, userID, action, oldStatus, newStatus, detail, failureReason,
+		recID, userID, action, oldStatus, newStatus, detail, failureReason,
 	)
 	return err
 }
