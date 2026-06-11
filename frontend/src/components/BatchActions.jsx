@@ -1,4 +1,4 @@
-import { createSignal } from 'solid-js';
+import { createSignal, createMemo } from 'solid-js';
 import { expenseApi } from '../api/expenseApi';
 import { useToast } from '../stores/toastStore';
 import { useAuth } from '../stores/authStore';
@@ -13,6 +13,30 @@ function BatchActions(props) {
   const toast = useToast();
   const { userInfo } = useAuth();
 
+  const selectedItems = createMemo(() => {
+    if (!props.list || !props.selectedIds || props.selectedIds.length === 0) {
+      return [];
+    }
+    return props.list.filter(item => props.selectedIds.includes(item.id));
+  });
+
+  const materialStats = createMemo(() => {
+    const items = selectedItems();
+    if (items.length === 0) {
+      return { total: 0, complete: 0, incomplete: 0, incompleteList: [] };
+    }
+    const incomplete = items.filter(item => {
+      const mi = item.materialInfo || {};
+      return !mi.isComplete;
+    });
+    return {
+      total: items.length,
+      complete: items.length - incomplete.length,
+      incomplete: incomplete.length,
+      incompleteList: incomplete,
+    };
+  });
+
   const openBatchModal = (type) => {
     setBatchType(type);
     setOpinion('');
@@ -21,8 +45,6 @@ function BatchActions(props) {
   };
 
   const handleBatchStartVerify = async () => {
-    if (!confirm(`确定要批量开始核验选中的 ${props.selectedIds.length} 项吗？`)) return;
-
     setLoading(true);
     try {
       const res = await expenseApi.batchStartVerify(props.selectedIds);
@@ -75,8 +97,6 @@ function BatchActions(props) {
       return;
     }
 
-    if (!confirm(`确定要批量驳回选中的 ${props.selectedIds.length} 项吗？`)) return;
-
     setLoading(true);
     try {
       const res = await expenseApi.batchRejectReview(props.selectedIds, reason());
@@ -119,6 +139,8 @@ function BatchActions(props) {
 
   if (!hasBatchAction) return null;
 
+  const stats = materialStats();
+
   return (
     <div>
       <style>{`
@@ -133,12 +155,38 @@ function BatchActions(props) {
           gap: 16px;
         }
         .batch-info { font-size: 13px; color: #1890ff; flex: 1; }
+        .batch-material-info { font-size: 12px; color: #595959; }
+        .batch-material-info .complete { color: #52c41a; }
+        .batch-material-info .incomplete { color: #faad14; }
         .batch-actions { display: flex; gap: 8px; }
+        .batch-warn {
+          background: #fffbe6;
+          border: 1px solid #ffe58f;
+          border-radius: 4px;
+          padding: 12px;
+          margin-bottom: 16px;
+          font-size: 13px;
+          color: #faad14;
+        }
+        .batch-warn-list {
+          margin-top: 8px;
+          padding-left: 20px;
+        }
+        .batch-warn-list li {
+          margin-bottom: 4px;
+          font-size: 12px;
+        }
       `}</style>
 
       <div class="batch-bar">
         <div class="batch-info">
           已选择 <strong>{props.selectedIds.length}</strong> 项报销申请
+          {stats.incomplete > 0 && (
+            <span class="batch-material-info" style="margin-left: 12px;">
+              （材料齐全：<span class="complete">{stats.complete}</span> 项，
+              材料不全：<span class="incomplete">{stats.incomplete}</span> 项）
+            </span>
+          )}
         </div>
         <div class="batch-actions">
           {props.canBatchVerify && (
@@ -180,6 +228,24 @@ function BatchActions(props) {
               <p style={{ marginBottom: '16px' }}>
                 即将对选中的 <strong>{props.selectedIds.length}</strong> 项报销申请执行操作。
               </p>
+
+              {stats.incomplete > 0 && (
+                <div class="batch-warn">
+                  ⚠️ 有 <strong>{stats.incomplete}</strong> 项材料不全，操作时会显示异常原因，请注意查看。
+                  <ul class="batch-warn-list">
+                    {stats.incompleteList.slice(0, 5).map(item => (
+                      <li key={item.id}>
+                        {item.title}（{item.id}）- 缺：
+                        {(item.materialInfo?.missingLabels || []).slice(0, 2).join('、')}
+                        {(item.materialInfo?.missingLabels?.length || 0) > 2 ? '...' : ''}
+                      </li>
+                    ))}
+                    {stats.incompleteList.length > 5 && (
+                      <li>...还有 {stats.incompleteList.length - 5} 项</li>
+                    )}
+                  </ul>
+                </div>
+              )}
 
               {batchType() === 'passReview' && (
                 <div class="form-item">

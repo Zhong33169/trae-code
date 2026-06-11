@@ -1,141 +1,56 @@
-import { createSignal, onMount, For } from 'solid-js';
-import { useParams, useNavigate } from '../router/index.js';
+import { createSignal, createEffect, onMount } from 'solid-js';
 import { expenseApi } from '../api/expenseApi';
-import { useToast } from '../stores/toastStore';
 import { useAuth } from '../stores/authStore';
-import AuditLogList from '../components/AuditLogList.jsx';
-import ActionModal from '../components/ActionModal.jsx';
+import { useToast } from '../stores/toastStore';
+import { useNavigate, useParams } from '../router';
+import AuditLogList from '../components/AuditLogList';
+import ActionModal from '../components/ActionModal';
 
 function ExpenseDetail() {
   const params = useParams();
   const navigate = useNavigate();
-  const toast = useToast();
   const { userInfo } = useAuth();
+  const toast = useToast();
 
   const [expense, setExpense] = createSignal(null);
-  const [auditLogs, setAuditLogs] = createSignal([]);
   const [loading, setLoading] = createSignal(true);
-  const [submitting, setSubmitting] = createSignal(false);
-  const [actionModal, setActionModal] = createSignal({ visible: false, type: '', title: '' });
-  const [activeTab, setActiveTab] = createSignal('info');
+  const [auditLogs, setAuditLogs] = createSignal([]);
+  const [materialConfig, setMaterialConfig] = createSignal(null);
+  const [materialEditMode, setMaterialEditMode] = createSignal(false);
+  const [editMaterials, setEditMaterials] = createSignal([]);
 
-  const loadDetail = async () => {
+  const [modalType, setModalType] = createSignal('');
+  const [modalVisible, setModalVisible] = createSignal(false);
+  const [modalLoading, setModalLoading] = createSignal(false);
+
+  const loadData = async () => {
+    if (!params.id) return;
     setLoading(true);
     try {
-      const res = await expenseApi.getDetail(params.id);
-      if (res.success) {
-        setExpense(res.data);
+      const [expenseRes, logsRes, configRes] = await Promise.all([
+        expenseApi.getDetail(params.id),
+        expenseApi.getAuditLogs(params.id),
+        expenseApi.getMaterialConfig(),
+      ]);
+      if (expenseRes.success) {
+        setExpense(expenseRes.data);
+      }
+      if (logsRes.success) {
+        setAuditLogs(logsRes.data);
+      }
+      if (configRes.success) {
+        setMaterialConfig(configRes.data);
       }
     } catch (err) {
-      toast.error(err.message || '加载详情失败');
+      toast.error(err.message || '加载失败');
     } finally {
       setLoading(false);
     }
   };
 
-  const loadAuditLogs = async () => {
-    try {
-      const res = await expenseApi.getAuditLogs(params.id);
-      if (res.success) {
-        setAuditLogs(res.data);
-      }
-    } catch (err) {
-      console.error('加载审计记录失败:', err);
-    }
-  };
-
   onMount(() => {
-    loadDetail();
-    loadAuditLogs();
+    loadData();
   });
-
-  const refresh = () => {
-    loadDetail();
-    loadAuditLogs();
-  };
-
-  const openActionModal = (type, title) => {
-    setActionModal({ visible: true, type, title });
-  };
-
-  const closeActionModal = () => {
-    setActionModal({ visible: false, type: '', title: '' });
-  };
-
-  const handleAction = async (type, data) => {
-    if (!expense()) return;
-
-    setSubmitting(true);
-    try {
-      let res;
-      const version = expense().version;
-
-      switch (type) {
-        case 'submit':
-          res = await expenseApi.submit(params.id, version);
-          break;
-        case 'startVerify':
-          res = await expenseApi.startVerify(params.id, version);
-          break;
-        case 'passVerify':
-          res = await expenseApi.passVerify(params.id, { ...data, version });
-          break;
-        case 'rejectVerify':
-          res = await expenseApi.rejectVerify(params.id, { ...data, version });
-          break;
-        case 'requestSupplement':
-          res = await expenseApi.requestSupplement(params.id, { ...data, version });
-          break;
-        case 'passReview':
-          res = await expenseApi.passReview(params.id, { ...data, version });
-          break;
-        case 'rejectReview':
-          res = await expenseApi.rejectReview(params.id, { ...data, version });
-          break;
-        default:
-          return;
-      }
-
-      if (res.success) {
-        toast.success('操作成功');
-        closeActionModal();
-        refresh();
-      }
-    } catch (err) {
-      toast.error(err.message || '操作失败');
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const formatDate = (timestamp) => {
-    if (!timestamp) return '-';
-    return new Date(timestamp).toLocaleString('zh-CN', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-    });
-  };
-
-  const formatAmount = (amount) => {
-    return '¥' + Number(amount).toLocaleString('zh-CN', { minimumFractionDigits: 2 });
-  };
-
-  const getStatusTag = (status) => {
-    const map = {
-      draft: { class: 'tag-default', text: '草稿' },
-      submitted: { class: 'tag-info', text: '待核验' },
-      verifying: { class: 'tag-warning', text: '核验中' },
-      pending_review: { class: 'tag-primary', text: '待复核' },
-      approved: { class: 'tag-success', text: '已通过' },
-      rejected: { class: 'tag-danger', text: '已驳回' },
-      archived: { class: 'tag-default', text: '已归档' },
-    };
-    return map[status] || { class: 'tag-default', text: status };
-  };
 
   const canSubmit = () => {
     if (!expense() || !userInfo()) return false;
@@ -159,426 +74,616 @@ function ExpenseDetail() {
     if (!expense() || !userInfo()) return false;
     return expense().status === 'pending_review' && userInfo().role === 'manager';
   };
-
   const canRejectReview = () => canPassReview();
+
+  const canEditMaterials = () => {
+    if (!expense() || !userInfo()) return false;
+    return expense().status === 'draft' && userInfo().role === 'clerk' && expense().creator === userInfo().id;
+  };
+
+  const enterEditMaterial = () => {
+    if (!canEditMaterials()) return;
+    setEditMaterials([...expense().materials]);
+    setMaterialEditMode(true);
+  };
+
+  const cancelEditMaterial = () => {
+    setMaterialEditMode(false);
+    setEditMaterials([]);
+  };
+
+  const toggleEditMaterial = (materialKey) => {
+    setEditMaterials(prev => {
+      if (prev.includes(materialKey)) {
+        return prev.filter(m => m !== materialKey);
+      }
+      return [...prev, materialKey];
+    });
+  };
+
+  const saveMaterials = async () => {
+    if (!expense()) return;
+    setModalLoading(true);
+    try {
+      const res = await expenseApi.updateMaterials(expense().id, {
+        materials: editMaterials(),
+        version: expense().version,
+      });
+      if (res.success) {
+        setExpense(res.data);
+        setMaterialEditMode(false);
+        toast.success('材料更新成功');
+        loadData();
+      }
+    } catch (err) {
+      toast.error(err.message || '保存失败');
+    } finally {
+      setModalLoading(false);
+    }
+  };
+
+  const handleSubmit = async () => {
+    if (!expense()) return;
+    setModalLoading(true);
+    try {
+      const res = await expenseApi.submit(expense().id, expense().version);
+      if (res.success) {
+        toast.success('提交成功');
+        loadData();
+      }
+    } catch (err) {
+      toast.error(err.message || '提交失败');
+    } finally {
+      setModalLoading(false);
+      setModalVisible(false);
+    }
+  };
+
+  const handleStartVerify = async () => {
+    if (!expense()) return;
+    setModalLoading(true);
+    try {
+      const res = await expenseApi.startVerify(expense().id, expense().version);
+      if (res.success) {
+        toast.success('已开始核验');
+        loadData();
+      }
+    } catch (err) {
+      toast.error(err.message || '操作失败');
+    } finally {
+      setModalLoading(false);
+      setModalVisible(false);
+    }
+  };
+
+  const handlePassVerify = async (opinion) => {
+    if (!expense()) return;
+    setModalLoading(true);
+    try {
+      const res = await expenseApi.passVerify(expense().id, { opinion, version: expense().version });
+      if (res.success) {
+        toast.success('核验通过');
+        loadData();
+      }
+    } catch (err) {
+      toast.error(err.message || '操作失败');
+    } finally {
+      setModalLoading(false);
+      setModalVisible(false);
+    }
+  };
+
+  const handleRejectVerify = async (reason) => {
+    if (!expense()) return;
+    setModalLoading(true);
+    try {
+      const res = await expenseApi.rejectVerify(expense().id, { reason, version: expense().version });
+      if (res.success) {
+        toast.success('已驳回');
+        loadData();
+      }
+    } catch (err) {
+      toast.error(err.message || '操作失败');
+    } finally {
+      setModalLoading(false);
+      setModalVisible(false);
+    }
+  };
+
+  const handleRequestSupplement = async (reason) => {
+    if (!expense()) return;
+    setModalLoading(true);
+    try {
+      const res = await expenseApi.requestSupplement(expense().id, { reason, version: expense().version });
+      if (res.success) {
+        toast.success('已要求补材料');
+        loadData();
+      }
+    } catch (err) {
+      toast.error(err.message || '操作失败');
+    } finally {
+      setModalLoading(false);
+      setModalVisible(false);
+    }
+  };
+
+  const handlePassReview = async (opinion) => {
+    if (!expense()) return;
+    setModalLoading(true);
+    try {
+      const res = await expenseApi.passReview(expense().id, { opinion, version: expense().version });
+      if (res.success) {
+        toast.success('复核通过');
+        loadData();
+      }
+    } catch (err) {
+      toast.error(err.message || '操作失败');
+    } finally {
+      setModalLoading(false);
+      setModalVisible(false);
+    }
+  };
+
+  const handleRejectReview = async (reason) => {
+    if (!expense()) return;
+    setModalLoading(true);
+    try {
+      const res = await expenseApi.rejectReview(expense().id, { reason, version: expense().version });
+      if (res.success) {
+        toast.success('已驳回');
+        loadData();
+      }
+    } catch (err) {
+      toast.error(err.message || '操作失败');
+    } finally {
+      setModalLoading(false);
+      setModalVisible(false);
+    }
+  };
+
+  const handleModalConfirm = (value) => {
+    switch (modalType()) {
+      case 'submit':
+        handleSubmit();
+        break;
+      case 'startVerify':
+        handleStartVerify();
+        break;
+      case 'passVerify':
+        handlePassVerify(value);
+        break;
+      case 'rejectVerify':
+        handleRejectVerify(value);
+        break;
+      case 'requestSupplement':
+        handleRequestSupplement(value);
+        break;
+      case 'passReview':
+        handlePassReview(value);
+        break;
+      case 'rejectReview':
+        handleRejectReview(value);
+        break;
+    }
+  };
+
+  const getModalConfig = () => {
+    switch (modalType()) {
+      case 'submit':
+        return {
+          title: '确认提交',
+          content: `确认提交报销申请「${expense()?.title}」？提交后将进入核验流程。`,
+          needInput: false,
+          confirmText: '确认提交',
+        };
+      case 'startVerify':
+        return {
+          title: '确认开始核验',
+          content: `确认开始核验「${expense()?.title}」？核验后将由您负责处理。`,
+          needInput: false,
+          confirmText: '开始核验',
+        };
+      case 'passVerify':
+        return {
+          title: '核验通过',
+          content: `请填写核验意见（至少5个字）：`,
+          needInput: true,
+          inputLabel: '核验意见',
+          inputPlaceholder: '请输入核验意见...',
+          minLength: 5,
+          confirmText: '通过核验',
+        };
+      case 'rejectVerify':
+        return {
+          title: '核验驳回',
+          content: `请填写驳回原因（至少5个字）：`,
+          needInput: true,
+          inputLabel: '驳回原因',
+          inputPlaceholder: '请输入驳回原因...',
+          minLength: 5,
+          confirmText: '确认驳回',
+          danger: true,
+        };
+      case 'requestSupplement':
+        return {
+          title: '要求补材料',
+          content: `请填写补材料说明（至少5个字）：`,
+          needInput: true,
+          inputLabel: '补材料说明',
+          inputPlaceholder: '请输入需要补充的材料说明...',
+          minLength: 5,
+          confirmText: '退回补材料',
+          warning: true,
+        };
+      case 'passReview':
+        return {
+          title: '复核通过',
+          content: `请填写复核意见：`,
+          needInput: true,
+          inputLabel: '复核意见',
+          inputPlaceholder: '请输入复核意见...',
+          minLength: 3,
+          confirmText: '通过复核',
+        };
+      case 'rejectReview':
+        return {
+          title: '复核驳回',
+          content: `请填写驳回原因（至少5个字）：`,
+          needInput: true,
+          inputLabel: '驳回原因',
+          inputPlaceholder: '请输入驳回原因...',
+          minLength: 5,
+          confirmText: '确认驳回',
+          danger: true,
+        };
+    }
+  };
 
   if (loading()) {
     return <div class="loading">加载中...</div>;
   }
 
   if (!expense()) {
-    return <div class="empty-state">报销申请不存在</div>;
+    return <div class="loading">报销申请不存在</div>;
   }
 
-  const statusTag = getStatusTag(expense().status);
-  const deadlineInfo = expense().deadlineInfo;
+  const exp = expense();
+  const mi = exp.materialInfo || {};
+  const materialComplete = mi.isComplete;
+  const deadlineInfo = exp.deadlineInfo || {};
 
   return (
-    <div class="expense-detail">
-      <style>{`
-        .expense-detail { }
-        .detail-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: flex-start;
-          margin-bottom: 20px;
-        }
-        .back-btn {
-          margin-bottom: 16px;
-          display: inline-flex;
-          align-items: center;
-          gap: 4px;
-          color: #595959;
-          cursor: pointer;
-          font-size: 14px;
-        }
-        .back-btn:hover { color: #1890ff; }
-        .detail-title {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          margin-bottom: 8px;
-        }
-        .detail-title h2 {
-          font-size: 20px;
-          font-weight: 600;
-          margin: 0;
-        }
-        .detail-sub {
-          color: #8c8c8c;
-          font-size: 13px;
-        }
-        .detail-actions {
-          display: flex;
-          gap: 8px;
-          flex-wrap: wrap;
-          justify-content: flex-end;
-        }
-        .detail-body {
-          display: grid;
-          grid-template-columns: 1fr 320px;
-          gap: 20px;
-        }
-        @media (max-width: 1024px) {
-          .detail-body { grid-template-columns: 1fr; }
-        }
-        .main-panel { }
-        .side-panel { display: flex; flex-direction: column; gap: 16px; }
-        .info-card {
-          background: #fff;
-          border-radius: 8px;
-          padding: 20px;
-          margin-bottom: 16px;
-          box-shadow: 0 1px 2px rgba(0,0,0,0.05);
-        }
-        .info-card-title {
-          font-size: 15px;
-          font-weight: 600;
-          margin-bottom: 16px;
-          padding-bottom: 12px;
-          border-bottom: 1px solid #f0f0f0;
-        }
-        .info-grid {
-          display: grid;
-          grid-template-columns: repeat(2, 1fr);
-          gap: 16px;
-        }
-        .info-item { }
-        .info-label {
-          font-size: 12px;
-          color: #8c8c8c;
-          margin-bottom: 4px;
-        }
-        .info-value {
-          font-size: 14px;
-          color: #262626;
-          font-weight: 500;
-        }
-        .info-value.amount {
-          color: #ff4d4f;
-          font-size: 18px;
-          font-weight: 600;
-        }
-        .deadline-card {
-          background: #fff;
-          border-radius: 8px;
-          padding: 16px;
-          box-shadow: 0 1px 2px rgba(0,0,0,0.05);
-        }
-        .deadline-card.overdue { border-left: 4px solid #ff4d4f; }
-        .deadline-card.warning { border-left: 4px solid #faad14; }
-        .deadline-card.normal { border-left: 4px solid #52c41a; }
-        .deadline-title {
-          font-size: 13px;
-          color: #595959;
-          margin-bottom: 8px;
-        }
-        .deadline-value {
-          font-size: 14px;
-          margin-bottom: 8px;
-          font-weight: 500;
-        }
-        .deadline-status {
-          font-size: 16px;
-          font-weight: 600;
-        }
-        .deadline-status.overdue { color: #ff4d4f; }
-        .deadline-status.warning { color: #faad14; }
-        .deadline-status.normal { color: #52c41a; }
-        .handler-card {
-          background: #fff;
-          border-radius: 8px;
-          padding: 16px;
-          box-shadow: 0 1px 2px rgba(0,0,0,0.05);
-        }
-        .handler-row {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          margin-bottom: 12px;
-        }
-        .handler-row:last-child { margin-bottom: 0; }
-        .handler-label {
-          font-size: 12px;
-          color: #8c8c8c;
-        }
-        .handler-info {
-          text-align: right;
-        }
-        .handler-name {
-          font-weight: 500;
-          color: #262626;
-        }
-        .handler-dept {
-          font-size: 12px;
-          color: #8c8c8c;
-        }
-        .tabs {
-          display: flex;
-          border-bottom: 1px solid #f0f0f0;
-          margin-bottom: 16px;
-        }
-        .tab-item {
-          padding: 10px 20px;
-          cursor: pointer;
-          font-size: 14px;
-          color: #595959;
-          border-bottom: 2px solid transparent;
-          margin-bottom: -1px;
-        }
-        .tab-item.active {
-          color: #1890ff;
-          border-bottom-color: #1890ff;
-          font-weight: 500;
-        }
-        .opinion-section {
-          margin-top: 16px;
-          padding: 16px;
-          background: #fafafa;
-          border-radius: 8px;
-        }
-        .opinion-title {
-          font-size: 13px;
-          font-weight: 600;
-          color: #595959;
-          margin-bottom: 8px;
-        }
-        .opinion-content {
-          font-size: 14px;
-          color: #262626;
-          line-height: 1.6;
-        }
-        .exception-banner {
-          background: #fff2f0;
-          border: 1px solid #ffccc7;
-          border-radius: 8px;
-          padding: 12px 16px;
-          margin-bottom: 16px;
-          color: #ff4d4f;
-          display: flex;
-          align-items: flex-start;
-          gap: 8px;
-        }
-        .exception-icon { font-size: 18px; }
-      `}</style>
-
-      <div class="back-btn" onClick={() => navigate('/expenses')}>
-        ← 返回列表
+    <div class="page">
+      <div class="page-header">
+        <button class="btn btn-back" onClick={() => navigate('/list')}>
+          ← 返回列表
+        </button>
+        <div class="page-title">报销申请详情</div>
       </div>
 
-      <div class="detail-header">
-        <div>
-          <div class="detail-title">
-            <h2>{expense().title}</h2>
-            <span class={`tag ${statusTag.class}`}>{statusTag.text}</span>
-          </div>
-          <div class="detail-sub">
-            编号：{expense().id} · 创建于 {formatDate(expense().createdAt)}
-          </div>
-        </div>
-        <div class="detail-actions">
-          <button class="btn btn-sm" onClick={refresh}>🔄 刷新</button>
-          {canSubmit() && (
-            <button class="btn btn-primary btn-sm" onClick={() => openActionModal('submit', '提交报销申请')}>
-              提交申请
-            </button>
-          )}
-          {canStartVerify() && (
-            <button class="btn btn-primary btn-sm" onClick={() => openActionModal('startVerify', '开始核验')}>
-              开始核验
-            </button>
-          )}
-          {canPassVerify() && (
-            <>
-              <button class="btn btn-success btn-sm" onClick={() => openActionModal('passVerify', '核验通过')}>
-                核验通过
-              </button>
-              <button class="btn btn-warning btn-sm" onClick={() => openActionModal('requestSupplement', '要求补材料')}>
-                要求补材料
-              </button>
-              <button class="btn btn-danger btn-sm" onClick={() => openActionModal('rejectVerify', '核验驳回')}>
-                核验驳回
-              </button>
-            </>
-          )}
-          {canPassReview() && (
-            <>
-              <button class="btn btn-success btn-sm" onClick={() => openActionModal('passReview', '复核通过')}>
-                复核通过
-              </button>
-              <button class="btn btn-danger btn-sm" onClick={() => openActionModal('rejectReview', '复核驳回')}>
-                复核驳回
-              </button>
-            </>
-          )}
-        </div>
-      </div>
-
-      {expense().exceptionReason && (
-        <div class="exception-banner">
-          <span class="exception-icon">⚠️</span>
-          <div>
-            <div style={{ fontWeight: 500, 'margin-bottom': '4px' }}>异常情况</div>
-            <div>{expense().exceptionReason}</div>
-          </div>
-        </div>
-      )}
-
-      <div class="detail-body">
-        <div class="main-panel">
-          <div class="info-card">
-            <div class="tabs">
-              <div
-                class={`tab-item ${activeTab() === 'info' ? 'active' : ''}`}
-                onClick={() => setActiveTab('info')}
-              >
-                基本信息
-              </div>
-              <div
-                class={`tab-item ${activeTab() === 'materials' ? 'active' : ''}`}
-                onClick={() => setActiveTab('materials')}
-              >
-                材料清单
-              </div>
-              <div
-                class={`tab-item ${activeTab() === 'opinions' ? 'active' : ''}`}
-                onClick={() => setActiveTab('opinions')}
-              >
-                处理意见
+      <div class="detail-grid">
+        <div class="detail-main">
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title">{exp.title}</div>
+              <div class={`status-tag status-${exp.status}`}>
+                {exp.statusLabel}
               </div>
             </div>
 
-            {activeTab() === 'info' && (
-              <div class="info-grid">
-                <div class="info-item">
-                  <div class="info-label">申请人</div>
-                  <div class="info-value">{expense().applicant || '-'}</div>
-                </div>
-                <div class="info-item">
-                  <div class="info-label">所属部门</div>
-                  <div class="info-value">{expense().applicantDept || '-'}</div>
-                </div>
-                <div class="info-item">
-                  <div class="info-label">报销类型</div>
-                  <div class="info-value">{expense().expenseTypeLabel || '-'}</div>
-                </div>
-                <div class="info-item">
-                  <div class="info-label">报销金额</div>
-                  <div class="info-value amount">{formatAmount(expense().amount)}</div>
-                </div>
-                <div class="info-item">
-                  <div class="info-label">创建时间</div>
-                  <div class="info-value">{formatDate(expense().createdAt)}</div>
-                </div>
-                <div class="info-item">
-                  <div class="info-label">更新时间</div>
-                  <div class="info-value">{formatDate(expense().updatedAt)}</div>
-                </div>
-                <div class="info-item">
-                  <div class="info-label">数据版本</div>
-                  <div class="info-value">v{expense().version}</div>
-                </div>
-                <div class="info-item">
-                  <div class="info-label">当前状态</div>
-                  <div class="info-value">
-                    <span class={`tag ${statusTag.class}`}>{statusTag.text}</span>
-                  </div>
-                </div>
+            <div class="info-grid">
+              <div class="info-item">
+                <div class="info-label">申请人</div>
+                <div class="info-value">{exp.applicant}</div>
+              </div>
+              <div class="info-item">
+                <div class="info-label">所属部门</div>
+                <div class="info-value">{exp.applicantDept}</div>
+              </div>
+              <div class="info-item">
+                <div class="info-label">报销类型</div>
+                <div class="info-value">{exp.expenseTypeLabel}</div>
+              </div>
+              <div class="info-item">
+                <div class="info-label">金额</div>
+                <div class="info-value amount">¥ {exp.amount.toLocaleString()}</div>
+              </div>
+            </div>
+
+            <div class="info-grid">
+              <div class="info-item">
+                <div class="info-label">创建人</div>
+                <div class="info-value">{exp.creatorName || '-'}</div>
+              </div>
+              <div class="info-item">
+                <div class="info-label">当前处理人</div>
+                <div class="info-value">{exp.currentHandlerName || '-'}</div>
+              </div>
+              <div class="info-item">
+                <div class="info-label">版本号</div>
+                <div class="info-value">v{exp.version}</div>
+              </div>
+            </div>
+
+            <div class="info-section">
+              <div class="info-label">截止时间</div>
+              <div class={`deadline-display ${deadlineInfo.isOverdue ? 'overdue' : deadlineInfo.isWarning ? 'warning' : ''}`}>
+                {new Date(exp.deadline).toLocaleString()}
+                <span class="deadline-remaining">（{deadlineInfo.text}）</span>
+              </div>
+            </div>
+
+            {exp.exceptionReason && (
+              <div class="exception-section">
+                <div class="exception-label">⚠️ 异常原因</div>
+                <div class="exception-content">{exp.exceptionReason}</div>
               </div>
             )}
 
-            {activeTab() === 'materials' && (
-              <div>
-                {expense().materials && expense().materials.length > 0 ? (
-                  <ul style={{ 'padding-left': '20px' }}>
-                    <For each={expense().materials}>
-                      {(material) => (
-                        <li style={{ 'margin-bottom': '8px' }}>{material}</li>
-                      )}
-                    </For>
-                  </ul>
+            <div class="info-section">
+              <div class="section-header">
+                <div class="info-label">
+                  报销材料
+                  <span class={`material-status-badge ${materialComplete ? 'badge-success' : 'badge-warning'}`}>
+                    {materialComplete ? '材料齐全' : `缺少 ${mi.missingLabels?.length || 0} 项`}
+                  </span>
+                </div>
+                {canEditMaterials() && !materialEditMode() && (
+                  <button class="btn btn-sm btn-outline" onClick={enterEditMaterial}>
+                    编辑材料
+                  </button>
+                )}
+              </div>
+
+              {materialConfig() && (
+                materialEditMode() ? (
+                  <div class="material-edit-box">
+                    <div class="material-subtitle">选择材料（必填）</div>
+                    <div class="material-grid">
+                      {mi.required?.map((key, idx) => (
+                        <div
+                          key={key}
+                          class={`material-checkbox ${editMaterials().includes(key) ? 'selected' : ''}`}
+                          onClick={() => toggleEditMaterial(key)}
+                        >
+                          <div class="checkbox-icon">
+                            {editMaterials().includes(key) ? '✓' : ''}
+                          </div>
+                          <div class="material-name">{mi.requiredLabels?.[idx] || key}</div>
+                          {!editMaterials().includes(key) && (
+                            <div class="material-required-tag">必填</div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                    <div class="material-edit-actions">
+                      <button class="btn" onClick={cancelEditMaterial} disabled={modalLoading()}>
+                        取消
+                      </button>
+                      <button class="btn btn-primary" onClick={saveMaterials} disabled={modalLoading()}>
+                        {modalLoading() ? '保存中...' : '保存材料'}
+                      </button>
+                    </div>
+                  </div>
                 ) : (
-                  <div class="empty-state" style={{ padding: '40px' }}>
-                    暂无材料清单
+                  <div class="material-display">
+                    <div class="material-subtitle">
+                      已上传材料（{mi.uploadedLabels?.length || 0} 项）
+                    </div>
+                    {mi.uploadedLabels?.length > 0 ? (
+                      <div class="material-tag-list">
+                        {mi.uploadedLabels.map((label, idx) => (
+                          <span key={idx} class="material-tag material-tag-uploaded">
+                            ✓ {label}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <div class="material-empty">暂未上传任何材料</div>
+                    )}
+
+                    {mi.missingLabels?.length > 0 && (
+                      <>
+                        <div class="material-subtitle missing">
+                          缺少材料（{mi.missingLabels.length} 项）
+                        </div>
+                        <div class="material-tag-list">
+                          {mi.missingLabels.map((label, idx) => (
+                            <span key={idx} class="material-tag material-tag-missing">
+                              ✗ {label}
+                            </span>
+                          ))}
+                        </div>
+                      </>
+                    )}
                   </div>
-                )}
+                )
+              )}
+            </div>
+
+            {exp.verifyOpinion && (
+              <div class="info-section">
+                <div class="info-label">核验意见</div>
+                <div class="opinion-content">{exp.verifyOpinion}</div>
               </div>
             )}
 
-            {activeTab() === 'opinions' && (
-              <div>
-                {expense().verifyOpinion && (
-                  <div class="opinion-section">
-                    <div class="opinion-title">💡 核验意见（{expense().lastHandlerName || '费用会计'}）</div>
-                    <div class="opinion-content">{expense().verifyOpinion}</div>
-                  </div>
-                )}
-                {expense().reviewOpinion && (
-                  <div class="opinion-section" style={{ 'margin-top': '12px' }}>
-                    <div class="opinion-title">📋 复核意见（财务经理）</div>
-                    <div class="opinion-content">{expense().reviewOpinion}</div>
-                  </div>
-                )}
-                {!expense().verifyOpinion && !expense().reviewOpinion && (
-                  <div class="empty-state" style={{ padding: '40px' }}>
-                    暂无处理意见
-                  </div>
-                )}
+            {exp.reviewOpinion && (
+              <div class="info-section">
+                <div class="info-label">复核意见</div>
+                <div class="opinion-content">{exp.reviewOpinion}</div>
+              </div>
+            )}
+
+            {exp.lastResult && (
+              <div class="info-section">
+                <div class="info-label">最近处理结果</div>
+                <div class="last-result">
+                  <span class="last-result-text">{exp.lastResult}</span>
+                  <span class="last-result-meta">
+                    {exp.lastHandlerName} · {new Date(exp.lastHandleTime).toLocaleString()}
+                  </span>
+                </div>
               </div>
             )}
           </div>
 
-          <div class="info-card">
-            <div class="info-card-title">🔍 审计记录</div>
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title">操作记录</div>
+            </div>
             <AuditLogList logs={auditLogs()} />
           </div>
         </div>
 
-        <div class="side-panel">
-          <div class={`deadline-card ${deadlineInfo.isOverdue ? 'overdue' : deadlineInfo.isWarning ? 'warning' : 'normal'}`}>
-            <div class="deadline-title">⏰ 截止时间</div>
-            <div class="deadline-value">{formatDate(expense().deadline)}</div>
-            <div class={`deadline-status ${deadlineInfo.isOverdue ? 'overdue' : deadlineInfo.isWarning ? 'warning' : 'normal'}`}>
-              {deadlineInfo.isOverdue ? '🔴 ' : deadlineInfo.isWarning ? '🟡 ' : '🟢 '}
-              {deadlineInfo.text}
+        <div class="detail-side">
+          <div class="card action-card">
+            <div class="card-header">
+              <div class="card-title">可用操作</div>
             </div>
-          </div>
+            <div class="action-list">
+              {canSubmit() && (
+                <button
+                  class="action-btn action-primary"
+                  disabled={!materialComplete}
+                  onClick={() => {
+                    if (!materialComplete) {
+                      toast.warning('材料不齐全，无法提交，请先完善材料');
+                      return;
+                    }
+                    setModalType('submit');
+                    setModalVisible(true);
+                  }}
+                >
+                  <div class="action-icon">✓</div>
+                  <div class="action-info">
+                    <div class="action-name">提交申请</div>
+                    <div class="action-desc">
+                      {materialComplete ? '提交后进入核验流程' : '请先完善必填材料'}
+                    </div>
+                  </div>
+                </button>
+              )}
 
-          <div class="handler-card">
-            <div class="handler-row">
-              <span class="handler-label">当前处理人</span>
-              <div class="handler-info">
-                <div class="handler-name">{expense().currentHandlerName || '-'}</div>
-                <div class="handler-dept">{expense().currentHandlerDept || ''}</div>
-              </div>
-            </div>
-            <div class="handler-row">
-              <span class="handler-label">最近处理人</span>
-              <div class="handler-info">
-                <div class="handler-name">{expense().lastHandlerName || '-'}</div>
-                <div class="handler-dept">{formatDate(expense().lastHandleTime)}</div>
-              </div>
-            </div>
-            <div class="handler-row">
-              <span class="handler-label">最近处理结果</span>
-              <div class="handler-info">
-                <div class="handler-name" style={{ 'font-size': '13px', 'font-weight': 'normal' }}>
-                  {expense().lastResult || '-'}
+              {canStartVerify() && (
+                <button
+                  class="action-btn action-primary"
+                  onClick={() => {
+                    setModalType('startVerify');
+                    setModalVisible(true);
+                  }}
+                >
+                  <div class="action-icon">👁</div>
+                  <div class="action-info">
+                    <div class="action-name">开始核验</div>
+                    <div class="action-desc">
+                      {materialComplete ? '材料齐全，可开始核验' : `材料不全（缺${mi.missingLabels?.length || 0}项）`}
+                    </div>
+                  </div>
+                </button>
+              )}
+
+              {canPassVerify() && (
+                <button
+                  class="action-btn action-success"
+                  onClick={() => {
+                    setModalType('passVerify');
+                    setModalVisible(true);
+                  }}
+                >
+                  <div class="action-icon">✓</div>
+                  <div class="action-info">
+                    <div class="action-name">核验通过</div>
+                    <div class="action-desc">材料核验无误，提交复核</div>
+                  </div>
+                </button>
+              )}
+
+              {canRequestSupplement() && (
+                <button
+                  class="action-btn action-warning"
+                  onClick={() => {
+                    setModalType('requestSupplement');
+                    setModalVisible(true);
+                  }}
+                >
+                  <div class="action-icon">📎</div>
+                  <div class="action-info">
+                    <div class="action-name">要求补材料</div>
+                    <div class="action-desc">退回给创建者补充材料</div>
+                  </div>
+                </button>
+              )}
+
+              {canRejectVerify() && (
+                <button
+                  class="action-btn action-danger"
+                  onClick={() => {
+                    setModalType('rejectVerify');
+                    setModalVisible(true);
+                  }}
+                >
+                  <div class="action-icon">✕</div>
+                  <div class="action-info">
+                    <div class="action-name">核验驳回</div>
+                    <div class="action-desc">拒绝此报销申请</div>
+                  </div>
+                </button>
+              )}
+
+              {canPassReview() && (
+                <button
+                  class="action-btn action-success"
+                  onClick={() => {
+                    setModalType('passReview');
+                    setModalVisible(true);
+                  }}
+                >
+                  <div class="action-icon">✓</div>
+                  <div class="action-info">
+                    <div class="action-name">复核通过</div>
+                    <div class="action-desc">
+                      {materialComplete ? '材料齐全，同意报销' : `材料不全（缺${mi.missingLabels?.length || 0}项），酌情处理`}
+                    </div>
+                  </div>
+                </button>
+              )}
+
+              {canRejectReview() && (
+                <button
+                  class="action-btn action-danger"
+                  onClick={() => {
+                    setModalType('rejectReview');
+                    setModalVisible(true);
+                  }}
+                >
+                  <div class="action-icon">✕</div>
+                  <div class="action-info">
+                    <div class="action-name">复核驳回</div>
+                    <div class="action-desc">拒绝此报销申请</div>
+                  </div>
+                </button>
+              )}
+
+              {!canSubmit() && !canStartVerify() && !canPassVerify() && !canPassReview() && (
+                <div class="no-actions">
+                  您当前没有可用的操作
                 </div>
-              </div>
+              )}
             </div>
           </div>
         </div>
       </div>
 
-      <ActionModal
-        visible={actionModal().visible}
-        title={actionModal().title}
-        type={actionModal().type}
-        onClose={closeActionModal}
-        onSubmit={(data) => handleAction(actionModal().type, data)}
-        submitting={submitting()}
-      />
+      {modalVisible() && (
+        <ActionModal
+          visible={modalVisible()}
+          config={getModalConfig()}
+          loading={modalLoading()}
+          onConfirm={handleModalConfirm}
+          onClose={() => setModalVisible(false)}
+        />
+      )}
     </div>
   );
 }

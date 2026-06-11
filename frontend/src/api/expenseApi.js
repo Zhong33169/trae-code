@@ -60,12 +60,20 @@ export const expenseApi = {
     return request('/api/expenses/users');
   },
 
+  getMaterialConfig: () => {
+    return request('/api/expenses/material-config');
+  },
+
   getAuditLogs: (id) => {
     return request(`/api/expenses/${id}/audit-logs`);
   },
 
   create: (data) => {
     return request('/api/expenses', { method: 'POST', body: data });
+  },
+
+  updateMaterials: (id, data) => {
+    return request(`/api/expenses/${id}/update-materials`, { method: 'POST', body: data });
   },
 
   submit: (id, version) => {

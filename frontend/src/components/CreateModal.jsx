@@ -1,9 +1,12 @@
-import { createSignal } from 'solid-js';
+import { createSignal, createEffect } from 'solid-js';
 import { expenseApi } from '../api/expenseApi';
 import { useToast } from '../stores/toastStore';
 
 function CreateModal(props) {
   const [loading, setLoading] = createSignal(false);
+  const [configLoading, setConfigLoading] = createSignal(false);
+  const [materialConfig, setMaterialConfig] = createSignal(null);
+  const [selectedMaterials, setSelectedMaterials] = createSignal([]);
   const [formData, setFormData] = createSignal({
     title: '',
     applicant: '',
@@ -15,8 +18,66 @@ function CreateModal(props) {
 
   const toast = useToast();
 
+  createEffect(() => {
+    if (props.visible && !materialConfig()) {
+      loadMaterialConfig();
+    }
+    if (props.visible) {
+      setSelectedMaterials([]);
+      setFormData({
+        title: '',
+        applicant: '',
+        applicantDept: '',
+        amount: '',
+        expenseType: 'travel',
+        deadlineDays: 3,
+      });
+    }
+  }, () => props.visible);
+
+  const loadMaterialConfig = async () => {
+    setConfigLoading(true);
+    try {
+      const res = await expenseApi.getMaterialConfig();
+      if (res.success) {
+        setMaterialConfig(res.data);
+      }
+    } catch (err) {
+      toast.error('加载材料配置失败');
+    } finally {
+      setConfigLoading(false);
+    }
+  };
+
+  const getRequiredMaterials = () => {
+    if (!materialConfig()) return [];
+    return materialConfig().requiredMaterialLabels[formData().expenseType] || [];
+  };
+
+  const getRequiredMaterialKeys = () => {
+    if (!materialConfig()) return [];
+    return materialConfig().requiredMaterialsByType[formData().expenseType] || [];
+  };
+
+  const getMissingMaterials = () => {
+    const required = getRequiredMaterialKeys();
+    return required.filter(m => !selectedMaterials().includes(m));
+  };
+
+  const toggleMaterial = (materialKey) => {
+    setSelectedMaterials(prev => {
+      if (prev.includes(materialKey)) {
+        return prev.filter(m => m !== materialKey);
+      }
+      return [...prev, materialKey];
+    });
+  };
+
   const handleInputChange = (field, value) => {
     setFormData(prev => ({ ...prev, [field]: value }));
+    if (field === 'expenseType') {
+      setSelectedMaterials([]);
+    }
   };
 
   const handleSubmit = async () => {
@@ -43,8 +104,10 @@ function CreateModal(props) {
         amount: Number(formData().amount),
         expenseType: formData().expenseType,
         deadline,
+        materials: selectedMaterials(),
       });
       if (res.success) {
+        toast.success('创建成功');
         props.onSuccess?.();
       }
     } catch (err) {
@@ -66,9 +129,12 @@ function CreateModal(props) {
     { value: 'other', label: '其他' },
   ];
 
+  const missing = getMissingMaterials();
+  const materialComplete = missing.length === 0;
+
   return (
     <div class="modal-overlay" onClick={() => !loading() && props.onClose?.()}>
-      <div class="modal" onClick={(e) => e.stopPropagation()}>
+      <div class="modal modal-large" onClick={(e) => e.stopPropagation()}>
         <div class="modal-header">新建报销申请</div>
         <div class="modal-body">
           <div class="form-item">
@@ -143,6 +209,53 @@ function CreateModal(props) {
               <option value="14">14天（宽松）</option>
             </select>
           </div>
+
+          {materialConfig() && (
+            <div class="form-item">
+              <label class="form-label">
+                报销材料
+                <span class={`material-status-badge ${materialComplete ? 'badge-success' : 'badge-warning'}`}>
+                  {materialComplete ? '材料齐全' : `缺少 ${missing.length} 项`}
+                </span>
+              </label>
+
+              <div class="material-section">
+                <div class="material-subtitle">必填材料（{getRequiredMaterials().length} 项）</div>
+                {configLoading() ? (
+                  <div class="loading-text">加载中...</div>
+                ) : (
+                  <div class="material-grid">
+                    {getRequiredMaterialKeys().map((key, idx) => (
+                      <div
+                        key={key}
+                        class={`material-checkbox ${selectedMaterials().includes(key) ? 'selected' : ''}`}
+                        onClick={() => toggleMaterial(key)}
+                      >
+                        <div class="checkbox-icon">
+                          {selectedMaterials().includes(key) ? '✓' : ''}
+                        </div>
+                        <div class="material-name">{getRequiredMaterials()[idx]}</div>
+                        {!selectedMaterials().includes(key) && (
+                          <div class="material-required-tag">必填</div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {!materialComplete && (
+                <div class="material-warning">
+                  ⚠️ 缺少材料：{missing.map((m, idx) => {
+                    const allRequired = getRequiredMaterialKeys();
+                    const allLabels = getRequiredMaterials();
+                    const pos = allRequired.indexOf(m);
+                    return allLabels[pos];
+                  }).join('、')}
+                </div>
+              )}
+            </div>
+          )}
         </div>
         <div class="modal-footer">
           <button

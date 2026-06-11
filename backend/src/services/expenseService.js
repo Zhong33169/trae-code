@@ -1,4 +1,13 @@
-import { expenses, users, expenseStatuses, statusLabels, expenseTypeLabels } from '../data/database.js';
+import {
+  expenses,
+  users,
+  expenseStatuses,
+  statusLabels,
+  expenseTypeLabels,
+  requiredMaterialsByType,
+  requiredMaterialLabels,
+  materialTypes,
+} from '../data/database.js';
 import { v4 as uuidv4 } from 'uuid';
 
 const WARN_THRESHOLD = 24 * 60 * 60 * 1000;
@@ -41,11 +50,39 @@ const calcDeadlineInfo = (deadline) => {
   };
 };
 
+const calcMaterialInfo = (exp) => {
+  const required = requiredMaterialsByType[exp.expenseType] || [];
+  const requiredLabels = requiredMaterialLabels[exp.expenseType] || [];
+  const uploaded = exp.materials || [];
+
+  const missing = [];
+  const missingLabels = [];
+  required.forEach((m, idx) => {
+    if (!uploaded.includes(m)) {
+      missing.push(m);
+      missingLabels.push(requiredLabels[idx]);
+    }
+  });
+
+  const isComplete = missing.length === 0;
+
+  return {
+    required,
+    requiredLabels,
+    uploaded,
+    uploadedLabels: uploaded.map(m => materialTypes[m] || m),
+    missing,
+    missingLabels,
+    isComplete,
+  };
+};
+
 const enrichExpense = (exp) => {
   const handler = exp.currentHandler ? getUserById(exp.currentHandler) : null;
   const lastHandler = exp.lastHandler ? getUserById(exp.lastHandler) : null;
   const creator = exp.creator ? getUserById(exp.creator) : null;
   const deadlineInfo = calcDeadlineInfo(exp.deadline);
+  const materialInfo = calcMaterialInfo(exp);
   return {
     ...exp,
     currentHandlerName: handler ? handler.name : null,
@@ -58,6 +95,7 @@ const enrichExpense = (exp) => {
     statusLabel: statusLabels[exp.status] || exp.status,
     expenseTypeLabel: expenseTypeLabels[exp.expenseType] || exp.expenseType,
     deadlineInfo,
+    materialInfo,
   };
 };
 
@@ -144,12 +182,30 @@ const checkPermission = (role, allowedRoles) => {
   }
 };
 
+const checkMaterials = (exp, strict = true) => {
+  const info = calcMaterialInfo(exp);
+  if (!info.isComplete && strict) {
+    throw new Error(`材料不全，缺少：${info.missingLabels.join('、')}`);
+  }
+  return info;
+};
+
+export const getMaterialConfig = () => {
+  return {
+    materialTypes,
+    requiredMaterialsByType,
+    requiredMaterialLabels,
+  };
+};
+
 export const createExpense = (data, userId) => {
   const user = getUserById(userId);
   if (!user) throw new Error('用户不存在');
   if (user.role !== 'clerk') throw new Error('只有报销专员可以创建报销申请');
 
   const day = 24 * 60 * 60 * 1000;
+  const materials = data.materials || [];
+
   const exp = {
     id: uuidv4(),
     title: data.title || '报销申请',
@@ -160,7 +216,7 @@ export const createExpense = (data, userId) => {
     creator: userId,
     currentHandler: userId,
     status: expenseStatuses.DRAFT,
-    materials: data.materials || [],
+    materials,
     deadline: data.deadline ? new Date(data.deadline).getTime() : Date.now() + 3 * day,
     createdAt: Date.now(),
     updatedAt: Date.now(),
@@ -174,8 +230,59 @@ export const createExpense = (data, userId) => {
     reviewOpinion: null,
   };
 
-  addAuditLog(exp, 'create', userId, '创建报销单');
+  const materialInfo = calcMaterialInfo(exp);
+  const materialRemark = materials.length > 0
+    ? `添加材料：${materials.map(m => materialTypes[m] || m).join('、')}`
+    : '待补充材料';
+
+  if (!materialInfo.isComplete) {
+    exp.exceptionReason = `材料不全，缺少：${materialInfo.missingLabels.join('、')}`;
+    exp.lastResult = '草稿，材料待补充';
+  }
+
+  addAuditLog(exp, 'create', userId, `创建报销单，${materialRemark}`);
   expenses.unshift(exp);
+  return enrichExpense(exp);
+};
+
+export const updateMaterials = (id, data, userId, version) => {
+  const exp = expenses.find(e => e.id === id);
+  if (!exp) throw new Error('报销申请不存在');
+  const user = getUserById(userId);
+  if (!user) throw new Error('用户不存在');
+
+  if (exp.status !== expenseStatuses.DRAFT) {
+    throw new Error('只有草稿状态可以修改材料');
+  }
+  if (exp.creator !== userId) {
+    throw new Error('只能修改自己创建的报销单材料');
+  }
+
+  checkVersion(exp, version);
+
+  const oldMaterials = [...exp.materials];
+  exp.materials = data.materials || [];
+
+  const materialInfo = calcMaterialInfo(exp);
+
+  const added = exp.materials.filter(m => !oldMaterials.includes(m));
+  const removed = oldMaterials.filter(m => !exp.materials.includes(m));
+
+  let remark = '更新材料';
+  if (added.length > 0) remark += `，新增：${added.map(m => materialTypes[m] || m).join('、')}`;
+  if (removed.length > 0) remark += `，移除：${removed.map(m => materialTypes[m] || m).join('、')}`;
+
+  if (!materialInfo.isComplete) {
+    exp.exceptionReason = `材料不全，缺少：${materialInfo.missingLabels.join('、')}`;
+    exp.lastResult = '草稿，材料待补充';
+  } else {
+    exp.exceptionReason = null;
+    exp.lastResult = '草稿，材料已齐全';
+  }
+
+  addAuditLog(exp, 'update_materials', userId, remark);
+  updateLastInfo(exp, exp.lastResult, userId);
+
   return enrichExpense(exp);
 };
 
@@ -198,13 +305,15 @@ export const submitExpense = (id, userId, version) => {
     throw new Error('请完善申请人和金额信息');
   }
 
+  const materialInfo = checkMaterials(exp, true);
+
   checkVersion(exp, version);
   exp.status = expenseStatuses.SUBMITTED;
   exp.currentHandler = null;
   exp.exceptionReason = null;
 
-  addAuditLog(exp, 'submit', userId, '提交报销申请');
-  updateLastInfo(exp, '已提交待核验', userId);
+  addAuditLog(exp, 'submit', userId, `提交报销申请，材料齐全：${materialInfo.uploadedLabels.join('、')}`);
+  updateLastInfo(exp, '已提交待核验，材料齐全', userId);
 
   return enrichExpense(exp);
 };
@@ -222,11 +331,22 @@ export const startVerify = (id, userId, version) => {
   }
 
   checkVersion(exp, version);
+  const materialInfo = calcMaterialInfo(exp);
   exp.status = expenseStatuses.VERIFYING;
   exp.currentHandler = userId;
 
-  addAuditLog(exp, 'start_verify', userId, '开始核验');
-  updateLastInfo(exp, '核验中', userId);
+  let remark = '开始核验';
+  if (!materialInfo.isComplete) {
+    exp.exceptionReason = `材料不全，缺少：${materialInfo.missingLabels.join('、')}`;
+    exp.lastResult = '核验中，发现材料不全';
+    remark += `，发现材料不全：${materialInfo.missingLabels.join('、')}`;
+  } else {
+    exp.lastResult = '核验中，材料齐全';
+    remark += '，材料齐全';
+  }
+
+  addAuditLog(exp, 'start_verify', userId, remark);
+  updateLastInfo(exp, exp.lastResult, userId);
 
   return enrichExpense(exp);
 };
@@ -250,14 +370,23 @@ export const passVerify = (id, userId, data = {}, version) => {
     throw new Error('请填写核验意见（至少5个字）');
   }
 
+  const materialInfo = calcMaterialInfo(exp);
+
   checkVersion(exp, version);
   exp.status = expenseStatuses.PENDING_REVIEW;
   exp.currentHandler = null;
   exp.verifyOpinion = data.opinion;
-  exp.exceptionReason = null;
 
-  addAuditLog(exp, 'verify_pass', userId, `核验通过：${data.opinion}`);
-  updateLastInfo(exp, '核验通过，待复核', userId);
+  if (materialInfo.isComplete) {
+    exp.exceptionReason = null;
+    exp.lastResult = '核验通过，材料齐全，待复核';
+  } else {
+    exp.exceptionReason = `材料不全，缺少：${materialInfo.missingLabels.join('、')}，请经理酌情处理`;
+    exp.lastResult = '核验通过，但材料不全，待经理酌情复核';
+  }
+
+  addAuditLog(exp, 'verify_pass', userId, `核验通过：${data.opinion}，材料状态：${materialInfo.isComplete ? '齐全' : '缺少' + materialInfo.missingLabels.join('、')}`);
+  updateLastInfo(exp, exp.lastResult, userId);
 
   return enrichExpense(exp);
 };
@@ -281,13 +410,15 @@ export const rejectVerify = (id, userId, data = {}, version) => {
     throw new Error('请填写驳回原因（至少5个字）');
   }
 
+  const materialInfo = calcMaterialInfo(exp);
+
   checkVersion(exp, version);
   exp.status = expenseStatuses.REJECTED;
   exp.currentHandler = null;
   exp.verifyOpinion = data.reason;
   exp.exceptionReason = data.reason;
 
-  addAuditLog(exp, 'verify_reject', userId, `核验驳回：${data.reason}`);
+  addAuditLog(exp, 'verify_reject', userId, `核验驳回：${data.reason}，材料状态：${materialInfo.isComplete ? '齐全' : '缺少' + materialInfo.missingLabels.join('、')}`);
   updateLastInfo(exp, '核验驳回', userId);
 
   return enrichExpense(exp);
@@ -339,14 +470,16 @@ export const passReview = (id, userId, data = {}, version) => {
     throw new Error('请填写复核意见');
   }
 
+  const materialInfo = calcMaterialInfo(exp);
+
   checkVersion(exp, version);
   exp.status = expenseStatuses.APPROVED;
   exp.currentHandler = null;
   exp.reviewOpinion = data.opinion;
   exp.exceptionReason = null;
 
-  addAuditLog(exp, 'review_pass', userId, `复核通过：${data.opinion}`);
-  updateLastInfo(exp, '复核通过', userId);
+  addAuditLog(exp, 'review_pass', userId, `复核通过：${data.opinion}，材料状态：${materialInfo.isComplete ? '齐全' : '缺少' + materialInfo.missingLabels.join('、')}`);
+  updateLastInfo(exp, '复核通过，流程完成', userId);
 
   return enrichExpense(exp);
 };
@@ -367,13 +500,15 @@ export const rejectReview = (id, userId, data = {}, version) => {
     throw new Error('请填写驳回原因（至少5个字）');
   }
 
+  const materialInfo = calcMaterialInfo(exp);
+
   checkVersion(exp, version);
   exp.status = expenseStatuses.REJECTED;
   exp.currentHandler = null;
   exp.reviewOpinion = data.reason;
   exp.exceptionReason = data.reason;
 
-  addAuditLog(exp, 'review_reject', userId, `复核驳回：${data.reason}`);
+  addAuditLog(exp, 'review_reject', userId, `复核驳回：${data.reason}，材料状态：${materialInfo.isComplete ? '齐全' : '缺少' + materialInfo.missingLabels.join('、')}`);
   updateLastInfo(exp, '复核驳回', userId);
 
   return enrichExpense(exp);

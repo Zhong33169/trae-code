@@ -239,6 +239,10 @@ function ExpenseList() {
         .handler-name { font-weight: 500; }
         .handler-dept { font-size: 12px; color: #8c8c8c; }
         .action-cell { white-space: nowrap; }
+        .material-cell { white-space: nowrap; }
+        .material-complete { color: #52c41a; font-weight: 500; }
+        .material-incomplete { color: #faad14; font-weight: 500; }
+        .material-missing { font-size: 11px; color: #8c8c8c; margin-top: 2px; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .link-btn {
           background: none;
           border: none;
@@ -356,6 +360,7 @@ function ExpenseList() {
                 <th>状态</th>
                 <th>当前处理人</th>
                 <th>截止时间</th>
+                <th>材料状态</th>
                 <th>异常原因</th>
                 <th>最近处理结果</th>
                 <th>操作</th>
@@ -425,6 +430,22 @@ function ExpenseList() {
                           {item.deadlineInfo.isOverdue ? '⚠️ ' : item.deadlineInfo.isWarning ? '⏰ ' : '✅ '}
                           {item.deadlineInfo.text}
                         </div>
+                      </td>
+                      <td class="material-cell">
+                        {item.materialInfo?.isComplete ? (
+                          <div class="material-complete">✅ 齐全</div>
+                        ) : (
+                          <>
+                            <div class="material-incomplete">⚠️ 不全</div>
+                            <div
+                              class="material-missing"
+                              title={(item.materialInfo?.missingLabels || []).join('、')}
+                            >
+                              缺：{(item.materialInfo?.missingLabels || []).slice(0, 2).join('、')}
+                              {(item.materialInfo?.missingLabels?.length || 0) > 2 ? '...' : ''}
+                            </div>
+                          </>
+                        )}
                       </td>
                       <td>
                         {item.exceptionReason ? (

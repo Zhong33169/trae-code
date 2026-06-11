@@ -163,3 +163,17 @@ export const updateDeadline = async (ctx) => {
     return expenseService.updateExpenseDeadline(id, deadline, userId);
   });
 };
+
+export const getMaterialConfig = async (ctx) => {
+  const config = expenseService.getMaterialConfig();
+  ctx.body = { success: true, data: config };
+};
+
+export const updateMaterials = async (ctx) => {
+  handleService(ctx, () => {
+    const { id } = ctx.params;
+    const data = ctx.request.body;
+    const userId = ctx.state.userId;
+    return expenseService.updateMaterials(id, data, userId, data.version);
+  });
+};

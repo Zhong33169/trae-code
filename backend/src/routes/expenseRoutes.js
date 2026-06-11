@@ -1,10 +1,11 @@
 import Router from 'koa-router';
 import * as expenseController from '../controllers/expenseController.js';
-import { authMiddleware, optionalAuthMiddleware } from '../middleware/auth.js';
+import { authMiddleware } from '../middleware/auth.js';
 
 const router = new Router({ prefix: '/api/expenses' });
 
-router.get('/users', optionalAuthMiddleware, expenseController.getUsers);
+router.get('/users', expenseController.getUsers);
+router.get('/material-config', expenseController.getMaterialConfig);
 
 router.use(authMiddleware);
 
@@ -27,5 +28,6 @@ router.post('/:id/request-supplement', expenseController.requestSupplement);
 router.post('/:id/pass-review', expenseController.passReview);
 router.post('/:id/reject-review', expenseController.rejectReview);
 router.post('/:id/update-deadline', expenseController.updateDeadline);
+router.post('/:id/update-materials', expenseController.updateMaterials);
 
 export default router;
