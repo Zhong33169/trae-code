@@ -94,12 +94,16 @@ type ManagerTodoItem struct {
 	CurrentHandlerID    int      `json:"current_handler_id"`
 	CurrentHandlerName  string   `json:"current_handler_name"`
 	CurrentHandlerRole  string   `json:"current_handler_role"`
+	CurrentHandlerRoleLabel string `json:"current_handler_role_label"`
 	Version             int      `json:"version"`
 	EvidenceTemperature bool     `json:"evidence_temperature"`
 	EvidenceQuality     bool     `json:"evidence_quality"`
 	EvidenceQuantity    bool     `json:"evidence_quantity"`
 	UpdatedAt           time.Time `json:"updated_at"`
 
+	TrackingType        string      `json:"tracking_type"`
+	TrackingHint        string      `json:"tracking_hint"`
+	IsReadonly          bool        `json:"is_readonly"`
 	AvailableActions    []ActionDef `json:"available_actions"`
 	LastOpinion         string      `json:"last_opinion"`
 	LastHandlerName     string      `json:"last_handler_name"`
