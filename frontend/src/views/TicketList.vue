@@ -5,10 +5,10 @@
         <h2 class="page-title">工单管理</h2>
       </div>
       <div class="header-right">
-        <el-button type="primary" :icon="Phone" @click="openCallRegister">
+        <el-button v-if="authStore.role === 'agent'" type="primary" :icon="Phone" @click="openCallRegister">
           来电登记
         </el-button>
-        <el-button :icon="Switch" @click="openHandover">
+        <el-button v-if="authStore.role === 'qa_manager' || authStore.role === 'cs_manager'" :icon="Switch" @click="openHandover">
           交接
         </el-button>
         <el-dropdown @command="handleCommand">
@@ -166,7 +166,22 @@
             </template>
           </el-table-column>
           <el-table-column prop="creator_name" label="创建人" width="120" />
-          <el-table-column prop="created_at" label="创建时间" width="180" />
+          <el-table-column prop="created_at" label="创建时间" width="180">
+            <template #default="{ row }">
+              {{ formatDateTime(row.created_at) }}
+            </template>
+          </el-table-column>
+          <el-table-column label="最新交接" width="200">
+            <template #default="{ row }">
+              <div v-if="row.latest_handover_status">
+                <el-tag :type="getHandoverStatusType(row.latest_handover_status)" size="small">
+                  {{ getHandoverStatusLabel(row.latest_handover_status) }}
+                </el-tag>
+                <div class="handover-time">{{ formatDateTime(row.latest_handover_time) }}</div>
+              </div>
+              <span v-else class="text-gray">-</span>
+            </template>
+          </el-table-column>
           <el-table-column label="操作" width="260" fixed="right">
             <template #default="{ row }">
               <el-button type="primary" link @click.stop="goToDetail(row)">
@@ -292,6 +307,7 @@ import {
 import { useAuthStore } from '@/stores/auth'
 import { useTicketStore } from '@/stores/ticket'
 import { getMyHandover } from '@/api/ticket'
+import { formatDateTime } from '@/utils/format'
 import CallRegisterDialog from '@/components/CallRegisterDialog.vue'
 import AssignTicketDialog from '@/components/AssignTicketDialog.vue'
 import CloseTicketDialog from '@/components/CloseTicketDialog.vue'
@@ -412,7 +428,10 @@ function canReturnVisit(row) {
 }
 
 function canHandover(row) {
-  return row.status !== 'closed'
+  if (row.status === 'closed') return false
+  if (authStore.role === 'agent') return true
+  if (authStore.role === 'qa_manager') return true
+  return false
 }
 
 async function fetchPendingHandover() {
@@ -508,6 +527,24 @@ function getStatusType(status) {
     return_visit: 'primary',
     closed: 'success',
     exception: 'danger'
+  }
+  return map[status] || ''
+}
+
+function getHandoverStatusLabel(status) {
+  const map = {
+    pending: '待签收',
+    accepted: '签收完成',
+    rejected: '异常回传'
+  }
+  return map[status] || status
+}
+
+function getHandoverStatusType(status) {
+  const map = {
+    pending: 'warning',
+    accepted: 'success',
+    rejected: 'danger'
   }
   return map[status] || ''
 }
@@ -662,5 +699,15 @@ function getStatusType(status) {
   display: flex;
   justify-content: flex-end;
   margin-top: 16px;
+}
+
+.handover-time {
+  font-size: 12px;
+  color: #909399;
+  margin-top: 4px;
+}
+
+.text-gray {
+  color: #c0c4cc;
 }
 </style>

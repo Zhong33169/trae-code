@@ -55,7 +55,7 @@ pub async fn list_tickets(
     let offset = (page - 1) * page_size;
 
     let mut count_sql = "SELECT COUNT(*) FROM tickets t JOIN users u ON t.created_by = u.id WHERE 1=1".to_string();
-    let mut query_sql = "SELECT t.id, t.title, t.customer_name, t.status, t.created_by, u.name as creator_name, t.created_at FROM tickets t JOIN users u ON t.created_by = u.id WHERE 1=1".to_string();
+    let mut query_sql = "SELECT t.id, t.title, t.customer_name, t.status, t.created_by, u.name as creator_name, t.created_at, (SELECT status FROM handover_records WHERE ticket_id = t.id ORDER BY created_at DESC LIMIT 1) as latest_handover_status, (SELECT handover_time FROM handover_records WHERE ticket_id = t.id ORDER BY created_at DESC LIMIT 1) as latest_handover_time FROM tickets t JOIN users u ON t.created_by = u.id WHERE 1=1".to_string();
 
     let mut params: Vec<String> = Vec::new();
 
@@ -232,7 +232,7 @@ pub async fn update_ticket_status(
 
 fn validate_status_transition(current: &str, next: &str, user: &User) -> Result<()> {
     let valid_transitions: Vec<(&str, &str, &[&str])> = vec![
-        ("incoming", "dispatched", &["agent", "qa_manager", "cs_manager"]),
+        ("incoming", "dispatched", &["qa_manager", "cs_manager"]),
         ("incoming", "closed", &["qa_manager", "cs_manager"]),
         ("dispatched", "return_visit", &["qa_manager", "cs_manager"]),
         ("dispatched", "exception", &["qa_manager", "cs_manager"]),
@@ -276,6 +276,10 @@ pub async fn create_handover(
         return Err(anyhow!("班次和接收人不能为空"));
     }
 
+    if current_user.role == "cs_manager" {
+        return Err(anyhow!("客服经理是最终确认人，不能提交交接"));
+    }
+
     let ticket: Ticket = sqlx::query_as::<_, Ticket>(
         "SELECT * FROM tickets WHERE id = ?"
     )
@@ -285,6 +289,17 @@ pub async fn create_handover(
 
     if current_user.role == "agent" && ticket.created_by != current_user.id {
         return Err(anyhow!("无权操作该工单"));
+    }
+
+    let pending_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM handover_records WHERE ticket_id = ? AND status = 'pending'"
+    )
+    .bind(&req.ticket_id)
+    .fetch_one(pool)
+    .await?;
+
+    if pending_count > 0 {
+        return Err(anyhow!("该工单已有待签收的交接，请先处理"));
     }
 
     let to_user = get_user_by_id(pool, &req.to_user).await?;
@@ -297,6 +312,22 @@ pub async fn create_handover(
 
     if !can_handover {
         return Err(anyhow!("交接接收人角色不正确"));
+    }
+
+    if current_user.role == "qa_manager" {
+        let prev_accepted: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM handover_records 
+             WHERE ticket_id = ? AND status = 'accepted' 
+             AND from_user IN (SELECT id FROM users WHERE role = 'agent')
+             AND to_user IN (SELECT id FROM users WHERE role = 'qa_manager')"
+        )
+        .bind(&req.ticket_id)
+        .fetch_one(pool)
+        .await?;
+
+        if prev_accepted == 0 {
+            return Err(anyhow!("请先完成上一级交接的签收后再提交"));
+        }
     }
 
     let handover_id = new_id();
@@ -363,12 +394,22 @@ pub async fn accept_handover(
     .execute(pool)
     .await?;
 
+    let shift_display = match record.shift.as_str() {
+        "morning" => "早班",
+        "afternoon" => "中班",
+        "night" => "晚班",
+        _ => &record.shift,
+    };
+    let mut log_detail = format!("签收交接（{}）", shift_display);
+    if let Some(remark) = &record.remark {
+        log_detail.push_str(&format!("：{}", remark));
+    }
     add_operation_log(
         pool,
         &record.ticket_id,
         &current_user.id,
         "handover_accept",
-        Some("签收交接"),
+        Some(&log_detail),
     ).await?;
 
     let record: HandoverRecord = sqlx::query_as::<_, HandoverRecord>(
@@ -430,13 +471,19 @@ pub async fn reject_handover(
         .await?;
     }
 
+    let shift_display = match record.shift.as_str() {
+        "morning" => "早班",
+        "afternoon" => "中班",
+        "night" => "晚班",
+        _ => &record.shift,
+    };
     let remark = req.remark.unwrap_or_else(|| "异常回传".to_string());
     add_operation_log(
         pool,
         &record.ticket_id,
         &current_user.id,
         "handover_reject",
-        Some(&format!("异常回传: {}", remark)),
+        Some(&format!("异常回传（{}）：{}", shift_display, remark)),
     ).await?;
 
     let record: HandoverRecord = sqlx::query_as::<_, HandoverRecord>(

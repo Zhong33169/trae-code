@@ -11,9 +11,14 @@
             问题派单
           </el-button>
         </template>
-        <template v-if="canReturnVisit">
-          <el-button type="primary" @click="openClose">
-            {{ closeButtonText }}
+        <template v-if="canStartReturnVisit">
+          <el-button type="primary" @click="openStartReturnVisit">
+            开始回访
+          </el-button>
+        </template>
+        <template v-if="canCloseReturnVisit">
+          <el-button type="success" @click="openCloseReturnVisit">
+            回访关闭
           </el-button>
         </template>
         <template v-if="canHandover">
@@ -164,7 +169,7 @@
       v-model="closeVisible"
       :ticket-id="ticketId"
       :ticket-title="ticket?.title"
-      :target-status="closeTargetStatus"
+      :target-status="ticket?.status === 'dispatched' ? 'return_visit' : 'closed'"
       @success="handleRefresh"
     />
     <HandoverDialog
@@ -260,13 +265,21 @@ const canAssign = computed(() => {
     (authStore.role === 'cs_manager' || authStore.role === 'qa_manager')
 })
 
-const canReturnVisit = computed(() => {
-  return (ticket.value?.status === 'dispatched' || ticket.value?.status === 'return_visit') &&
+const canStartReturnVisit = computed(() => {
+  return ticket.value?.status === 'dispatched' &&
+    (authStore.role === 'cs_manager' || authStore.role === 'qa_manager')
+})
+
+const canCloseReturnVisit = computed(() => {
+  return ticket.value?.status === 'return_visit' &&
     (authStore.role === 'cs_manager' || authStore.role === 'qa_manager')
 })
 
 const canHandover = computed(() => {
-  return ticket.value?.status !== 'closed'
+  if (ticket.value?.status === 'closed') return false
+  if (authStore.role === 'agent') return true
+  if (authStore.role === 'qa_manager') return true
+  return false
 })
 
 const closeTargetStatus = computed(() => {
@@ -284,7 +297,11 @@ const closeButtonText = computed(() => {
 })
 
 function canAcceptHandover(record) {
-  return record.status === 'pending' && record.to_user === authStore.user?.id
+  if (record.status !== 'pending') return false
+  if (record.to_user !== authStore.user?.id) return false
+  if (authStore.role === 'qa_manager' && record.from_role === 'agent') return true
+  if (authStore.role === 'cs_manager' && record.from_role === 'qa_manager') return true
+  return false
 }
 
 onMounted(() => {
@@ -303,7 +320,11 @@ function openAssign() {
   assignVisible.value = true
 }
 
-function openClose() {
+function openStartReturnVisit() {
+  closeVisible.value = true
+}
+
+function openCloseReturnVisit() {
   closeVisible.value = true
 }
 

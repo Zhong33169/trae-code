@@ -100,6 +100,8 @@ pub struct TicketListItem {
     pub created_by: String,
     pub creator_name: String,
     pub created_at: DateTime<Utc>,
+    pub latest_handover_status: Option<String>,
+    pub latest_handover_time: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Object, FromRow)]

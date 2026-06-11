@@ -108,14 +108,13 @@ watch(dialogVisible, async (val) => {
 
 async function fetchUserList() {
   try {
-    const [qaManagers, csManagers] = await Promise.all([
-      getQaManagers(),
-      getCsManagers()
-    ])
-    userList.value = [
-      ...(qaManagers || []),
-      ...(csManagers || [])
-    ]
+    if (authStore.role === 'agent') {
+      userList.value = await getQaManagers() || []
+    } else if (authStore.role === 'qa_manager') {
+      userList.value = await getCsManagers() || []
+    } else {
+      userList.value = []
+    }
   } catch (err) {
     console.error('获取用户列表失败:', err)
     userList.value = []
@@ -143,6 +142,7 @@ async function handleSubmit() {
         if (props.ticketId) {
           submitData.ticket_id = props.ticketId
         }
+        submitData.from_role = authStore.role
         await ticketStore.handleSubmitHandover(submitData)
         ElMessage.success('交接成功')
         emit('success')

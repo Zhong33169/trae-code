@@ -84,6 +84,9 @@ export const useTicketStore = defineStore('ticket', () => {
   async function handleSubmitHandover(data) {
     const res = await submitHandover(data)
     await fetchList()
+    if (detail.value && detail.value.ticket && detail.value.ticket.id === data.ticket_id) {
+      await fetchDetail(data.ticket_id)
+    }
     await fetchStats()
     return res
   }
@@ -91,6 +94,12 @@ export const useTicketStore = defineStore('ticket', () => {
   async function handleAcceptHandover(id) {
     const res = await acceptHandover(id)
     await fetchList()
+    if (detail.value && detail.value.handover_records) {
+      const record = detail.value.handover_records.find(r => r.id === id)
+      if (record && detail.value.ticket) {
+        await fetchDetail(detail.value.ticket.id)
+      }
+    }
     await fetchStats()
     return res
   }
@@ -98,6 +107,12 @@ export const useTicketStore = defineStore('ticket', () => {
   async function handleRejectHandover(id, data) {
     const res = await rejectHandover(id, data)
     await fetchList()
+    if (detail.value && detail.value.handover_records) {
+      const record = detail.value.handover_records.find(r => r.id === id)
+      if (record && detail.value.ticket) {
+        await fetchDetail(detail.value.ticket.id)
+      }
+    }
     await fetchStats()
     return res
   }
