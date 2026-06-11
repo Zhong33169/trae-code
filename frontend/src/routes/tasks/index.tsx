@@ -72,6 +72,25 @@ export default function TaskList() {
     setKeyword("");
     setHasTimeoutFilter(undefined);
     setPage(1);
+    loadTasks();
+  };
+
+  const changePage = (p: number) => {
+    setPage(p);
+    loadTasks();
+  };
+
+  const handleStatusChange = (val: string) => {
+    setStatus(val);
+    setPage(1);
+    loadTasks();
+  };
+
+  const handleTimeoutChange = (val: string) => {
+    if (val === "") setHasTimeoutFilter(undefined);
+    else setHasTimeoutFilter(val === "true");
+    setPage(1);
+    loadTasks();
   };
 
   const totalPages = Math.ceil(total() / pageSize());
@@ -114,7 +133,7 @@ export default function TaskList() {
         <div class="filter-bar">
           <div class="form-item">
             <label class="form-label">状态筛选</label>
-            <select class="form-select" value={status()} onChange={(e) => setStatus(e.target.value)}>
+            <select class="form-select" value={status()} onChange={(e) => handleStatusChange(e.target.value)}>
               {statusOptions().map((opt) => (
                 <option value={opt.value}>{opt.label}</option>
               ))}
@@ -126,11 +145,7 @@ export default function TaskList() {
             <select
               class="form-select"
               value={hasTimeoutFilter() === undefined ? "" : String(hasTimeoutFilter())}
-              onChange={(e) => {
-                const val = e.target.value;
-                if (val === "") setHasTimeoutFilter(undefined);
-                else setHasTimeoutFilter(val === "true");
-              }}
+              onChange={(e) => handleTimeoutChange(e.target.value)}
             >
               <option value="">全部</option>
               <option value="true">已超时</option>
@@ -220,21 +235,21 @@ export default function TaskList() {
             <div class="pagination">
               <button
                 disabled={page() <= 1}
-                onClick={() => setPage(page() - 1)}
+                onClick={() => changePage(page() - 1)}
               >
                 上一页
               </button>
               {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
                 <button
                   class={p === page() ? "active" : ""}
-                  onClick={() => setPage(p)}
+                  onClick={() => changePage(p)}
                 >
                   {p}
                 </button>
               ))}
               <button
                 disabled={page() >= totalPages}
-                onClick={() => setPage(page() + 1)}
+                onClick={() => changePage(page() + 1)}
               >
                 下一页
               </button>

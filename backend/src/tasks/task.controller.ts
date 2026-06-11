@@ -28,8 +28,8 @@ export class TaskController {
   }
 
   @Get(':id')
-  async getTaskDetail(@Param('id') id: string) {
-    const result = await this.taskService.getTaskDetail(parseInt(id, 10));
+  async getTaskDetail(@Param('id') id: string, @Req() req) {
+    const result = await this.taskService.getTaskDetail(parseInt(id, 10), req.user.role);
     return {
       code: 0,
       message: '获取成功',

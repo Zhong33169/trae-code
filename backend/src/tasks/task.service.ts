@@ -135,6 +135,38 @@ export class TaskService {
     }
   }
 
+  private getRoleViewableStatuses(role: UserRole): string[] {
+    switch (role) {
+      case 'registrar':
+        return [
+          'pending_registration',
+          'audit_rejected',
+          'registered',
+          'audit_passed',
+          'review_rejected',
+          'archived',
+        ];
+      case 'auditor':
+        return [
+          'registered',
+          'review_rejected',
+          'audit_rejected',
+          'audit_passed',
+          'archived',
+        ];
+      case 'reviewer':
+        return [
+          'audit_passed',
+          'review_rejected',
+          'archived',
+          'registered',
+          'audit_rejected',
+        ];
+      default:
+        return [];
+    }
+  }
+
   async createTask(dto: CreateTaskDto, userId: number, userName: string, userRole: UserRole) {
     if (userRole !== 'registrar') {
       throw new ForbiddenException('只有种植登记员可以创建种植任务');
@@ -469,18 +501,21 @@ export class TaskService {
     const pageSize = query.pageSize || 10;
     const skip = (page - 1) * pageSize;
 
-    const roleStatuses = this.getRoleDefaultStatuses(userRole);
+    const viewableStatuses = this.getRoleViewableStatuses(userRole);
+    const defaultTodoStatuses = this.getRoleDefaultStatuses(userRole);
 
     const where: any = {};
 
-    if (query.status) {
-      if (roleStatuses.includes(query.status as any)) {
+    if (query.status && query.status !== '__all__') {
+      if (viewableStatuses.includes(query.status as any)) {
         where.status = query.status;
       } else {
-        where.status = In(roleStatuses);
+        where.status = In(defaultTodoStatuses);
       }
+    } else if (query.status === '__all__') {
+      where.status = In(viewableStatuses);
     } else {
-      where.status = In(roleStatuses);
+      where.status = In(defaultTodoStatuses);
     }
 
     if (query.keyword) {
@@ -526,10 +561,17 @@ export class TaskService {
     };
   }
 
-  async getTaskDetail(taskId: number) {
+  async getTaskDetail(taskId: number, userRole?: UserRole) {
     const task = await this.taskRepository.findOne({ where: { id: taskId } });
     if (!task) {
       throw new NotFoundException('种植任务不存在');
+    }
+
+    if (userRole) {
+      const viewableStatuses = this.getRoleViewableStatuses(userRole);
+      if (!viewableStatuses.includes(task.status as any)) {
+        throw new ForbiddenException(`当前岗位无权查看状态为「${task.status}」的任务`);
+      }
     }
 
     const nodes = await this.nodeRepository.find({
@@ -556,9 +598,9 @@ export class TaskService {
     const where: any = {};
 
     if (userRole) {
-      const defaultStatuses = this.getRoleDefaultStatuses(userRole);
-      if (defaultStatuses.length > 0) {
-        where.status = In(defaultStatuses);
+      const viewableStatuses = this.getRoleViewableStatuses(userRole);
+      if (viewableStatuses.length > 0) {
+        where.status = In(viewableStatuses);
       }
     }
 

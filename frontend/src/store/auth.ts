@@ -102,23 +102,27 @@ export interface RoleStatusOption {
 
 export const roleStatusOptions: Record<string, RoleStatusOption[]> = {
   registrar: [
-    { value: "", label: "全部" },
+    { value: "", label: "我的待办（默认）" },
+    { value: "__all__", label: "查看全部（参与任务）" },
     { value: "pending_registration", label: "待登记" },
     { value: "audit_rejected", label: "审核驳回（需补正）" },
     { value: "registered", label: "待审核" },
     { value: "audit_passed", label: "待复核" },
+    { value: "review_rejected", label: "复核驳回" },
     { value: "archived", label: "已归档" },
   ],
   auditor: [
-    { value: "", label: "全部" },
+    { value: "", label: "我的待办（默认）" },
+    { value: "__all__", label: "查看全部（参与任务）" },
     { value: "registered", label: "待审核" },
     { value: "review_rejected", label: "复核驳回（需重审）" },
-    { value: "audit_passed", label: "待复核" },
     { value: "audit_rejected", label: "审核驳回" },
+    { value: "audit_passed", label: "待复核" },
     { value: "archived", label: "已归档" },
   ],
   reviewer: [
-    { value: "", label: "全部" },
+    { value: "", label: "我的待办（默认）" },
+    { value: "__all__", label: "查看全部（参与任务）" },
     { value: "audit_passed", label: "待复核" },
     { value: "review_rejected", label: "复核驳回" },
     { value: "archived", label: "已归档" },
