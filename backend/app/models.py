@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey, Boolean
+from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey, Boolean, JSON
 from sqlalchemy.orm import relationship
 from datetime import datetime
 
@@ -50,6 +50,14 @@ class MeetingReservation(Base):
     return_reason = Column(Text)
     audit_remark = Column(Text)
 
+    offline_count = Column(Integer, default=1)
+    offline_status = Column(String(50))
+    offline_attachment_list = Column(JSON)
+    offline_check_diff = Column(JSON)
+    offline_checked = Column(Boolean, default=False)
+    offline_checked_at = Column(DateTime)
+    offline_checked_by = Column(String(100))
+
     created_by = Column(String(100))
     created_at = Column(DateTime, default=datetime.now)
     updated_by = Column(String(100))
@@ -63,6 +71,7 @@ class MeetingReservation(Base):
     archived_at = Column(DateTime)
 
     audit_logs = relationship("AuditLog", back_populates="reservation", cascade="all, delete-orphan")
+    block_logs = relationship("BlockLog", back_populates="reservation", cascade="all, delete-orphan")
 
 
 class AuditLog(Base):
@@ -70,15 +79,34 @@ class AuditLog(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     reservation_id = Column(Integer, ForeignKey("meeting_reservations.id"))
+    batch_no = Column(String(50), index=True)
     action = Column(String(50), nullable=False)
     status_from = Column(String(50))
     status_to = Column(String(50))
     operator = Column(String(100))
     operator_role = Column(String(50))
     remark = Column(Text)
+    item_results = Column(JSON)
     created_at = Column(DateTime, default=datetime.now)
 
     reservation = relationship("MeetingReservation", back_populates="audit_logs")
+
+
+class BlockLog(Base):
+    __tablename__ = "block_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    reservation_id = Column(Integer, ForeignKey("meeting_reservations.id"))
+    batch_no = Column(String(50), index=True)
+    block_type = Column(String(50), nullable=False)
+    reason = Column(Text, nullable=False)
+    detail = Column(JSON)
+    operator = Column(String(100))
+    operator_role = Column(String(50))
+    item_results = Column(JSON)
+    created_at = Column(DateTime, default=datetime.now)
+
+    reservation = relationship("MeetingReservation", back_populates="block_logs")
 
 
 class BatchRecord(Base):
@@ -87,8 +115,13 @@ class BatchRecord(Base):
     id = Column(Integer, primary_key=True, index=True)
     batch_no = Column(String(50), unique=True, index=True, nullable=False)
     total_count = Column(Integer, default=0)
+    offline_count = Column(Integer, default=0)
     processed_count = Column(Integer, default=0)
     status = Column(String(50), default="processing")
+    check_status = Column(String(50), default="unchecked")
+    check_diff = Column(JSON)
     created_by = Column(String(100))
     created_at = Column(DateTime, default=datetime.now)
+    checked_at = Column(DateTime)
+    checked_by = Column(String(100))
     remark = Column(Text)

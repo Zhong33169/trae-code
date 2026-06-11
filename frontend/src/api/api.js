@@ -50,10 +50,11 @@ export const reservationApi = {
   create: (data) => api.post('/reservations', data),
   update: (id, data) => api.put(`/reservations/${id}`, data),
   delete: (id) => api.delete(`/reservations/${id}`),
-  submit: (id) => api.post(`/reservations/${id}/submit`),
+  submit: (id, data = {}) => api.post(`/reservations/${id}/submit`, data),
   audit: (id, action, data = {}) => api.post(`/reservations/${id}/audit/${action}`, data),
   confirmUsage: (id, data = {}) => api.post(`/reservations/${id}/usage-confirm`, data),
   review: (id, action, data = {}) => api.post(`/reservations/${id}/review/${action}`, data),
+  reconcile: (id, data = {}) => api.post(`/reservations/${id}/reconcile`, data),
   statuses: () => api.get('/reservations/statuses'),
   exceptions: () => api.get('/reservations/exceptions'),
 }
@@ -69,16 +70,23 @@ export const auditApi = {
     const query = new URLSearchParams(params).toString()
     return api.get(`/audit?${query}`)
   },
+  blocks: (params = {}) => {
+    const query = new URLSearchParams(params).toString()
+    return api.get(`/audit/blocks?${query}`)
+  },
   failures: (params = {}) => {
     const query = new URLSearchParams(params).toString()
     return api.get(`/audit/failures?${query}`)
   },
+  traceReservation: (id) => api.get(`/audit/reservation/${id}`),
+  traceBatch: (batchNo) => api.get(`/audit/batch/${encodeURIComponent(batchNo)}`),
 }
 
 export const batchApi = {
   list: () => api.get('/batches'),
   check: (batchNo) => api.get(`/batches/check?batch_no=${encodeURIComponent(batchNo)}`),
   get: (batchNo) => api.get(`/batches/${encodeURIComponent(batchNo)}`),
+  reconcile: (data) => api.post('/batches/reconcile', data),
   statusCheck: (data) => api.post('/batches/status-check', data),
 }
 

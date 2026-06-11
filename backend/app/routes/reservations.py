@@ -6,13 +6,19 @@ import json
 from urllib.parse import unquote
 
 from ..database import get_db
-from ..models import MeetingReservation, AuditLog, BatchRecord
+from ..models import MeetingReservation, AuditLog, BatchRecord, BlockLog
 from ..schemas import (
     MeetingReservationCreate,
     MeetingReservationUpdate,
     MeetingReservationOut,
     MeetingReservationListOut,
-    StatusUpdate,
+)
+from ..permissions import (
+    check_permission,
+    get_next_status,
+    validate_required_fields,
+    reconcile_offline_online,
+    STATUS_LABELS,
 )
 
 
@@ -22,6 +28,37 @@ def get_current_user(request: Request):
         "name": unquote(request.headers.get("X-User-Real-Name", "张登记")),
         "role": request.headers.get("X-User-Role", "registrar"),
     }
+
+
+def add_audit_log(db, reservation_id, batch_no, action, status_from, status_to,
+                 operator, operator_role, remark=None, item_results=None):
+    log = AuditLog(
+        reservation_id=reservation_id,
+        batch_no=batch_no,
+        action=action,
+        status_from=status_from,
+        status_to=status_to,
+        operator=operator,
+        operator_role=operator_role,
+        remark=remark,
+        item_results=item_results,
+    )
+    db.add(log)
+
+
+def add_block_log(db, reservation_id, batch_no, block_type, reason, operator,
+                  operator_role, detail=None, item_results=None):
+    log = BlockLog(
+        reservation_id=reservation_id,
+        batch_no=batch_no,
+        block_type=block_type,
+        reason=reason,
+        detail=detail,
+        operator=operator,
+        operator_role=operator_role,
+        item_results=item_results,
+    )
+    db.add(log)
 
 
 async def list_reservations(request: Request):
@@ -66,18 +103,78 @@ async def get_reservation(request: Request):
     reservation = db.query(MeetingReservation).filter(MeetingReservation.id == rid).first()
     if not reservation:
         return JSONResponse({"detail": "预约单不存在"}, status_code=404)
-    return JSONResponse(MeetingReservationOut.model_validate(reservation).model_dump(mode='json'))
+
+    result = MeetingReservationOut.model_validate(reservation).model_dump(mode='json')
+
+    if reservation.batch_no:
+        batch_items = db.query(MeetingReservation).filter(
+            MeetingReservation.batch_no == reservation.batch_no
+        ).all()
+        reconcile = reconcile_offline_online(
+            batch_items,
+            reservation.offline_count or 1,
+        )
+        result["batch_reconcile"] = reconcile
+
+    return JSONResponse(result)
 
 
 async def create_reservation(request: Request):
     current = get_current_user(request)
+    if current["role"] != "registrar":
+        return JSONResponse({"detail": "仅登记员可创建预约单"}, status_code=403)
+
     body = await request.json()
     db = next(get_db())
 
-    data = MeetingReservationCreate(**body)
+    try:
+        data = MeetingReservationCreate(**body)
+    except Exception as e:
+        return JSONResponse({"detail": f"参数校验失败: {str(e)}"}, status_code=400)
 
     existing_batch = db.query(BatchRecord).filter(BatchRecord.batch_no == data.batch_no).first()
+    batch_items = db.query(MeetingReservation).filter(
+        MeetingReservation.batch_no == data.batch_no
+    ).all()
     is_duplicate = existing_batch is not None
+
+    item_results = []
+    block_reason = None
+    block_detail = None
+
+    if is_duplicate and batch_items:
+        online_statuses = set(r.status for r in batch_items)
+        if len(online_statuses) > 1 and not data.force_submit:
+            block_reason = f"批次 {data.batch_no} 内存在不同状态，不允许继续录入。请先逐单核对线下台账。"
+            block_detail = {
+                "existing_count": len(batch_items),
+                "statuses": list(online_statuses),
+                "message": "重复批次且状态不一致",
+            }
+
+    if block_reason and not data.force_submit:
+        add_block_log(
+            db, None, data.batch_no, "duplicate_batch",
+            block_reason, current["name"], current["role"],
+            detail=block_detail, item_results=item_results,
+        )
+        db.commit()
+        return JSONResponse({
+            "detail": block_reason,
+            "blocked": True,
+            "block_type": "duplicate_batch",
+            "batch_warning": True,
+            "batch_warning_msg": block_reason,
+            "existing_count": len(batch_items) if batch_items else 0,
+            "can_force_submit": True,
+        }, status_code=409)
+
+    is_valid, errors = validate_required_fields(data.model_dump())
+    if not is_valid:
+        return JSONResponse({
+            "detail": "校验失败",
+            "errors": errors,
+        }, status_code=400)
 
     max_id = db.query(MeetingReservation).count() + 1
     reservation_no = f"MR-{datetime.now().strftime('%Y%m%d')}-{max_id:03d}"
@@ -97,6 +194,9 @@ async def create_reservation(request: Request):
         equipment=data.equipment,
         attachment_names=data.attachment_names,
         offline_attachment_count=data.offline_attachment_count,
+        offline_count=data.offline_count,
+        offline_status=data.offline_status,
+        offline_attachment_list=data.offline_attachment_list,
         status="draft",
         created_by=current["name"],
         updated_by=current["name"],
@@ -104,35 +204,34 @@ async def create_reservation(request: Request):
     db.add(reservation)
     db.flush()
 
-    log = AuditLog(
-        reservation_id=reservation.id,
-        action="create",
-        status_from=None,
-        status_to="draft",
-        operator=current["name"],
-        operator_role=current["role"],
-        remark="创建预约单" + ("（批次重复警告）" if is_duplicate else ""),
+    add_audit_log(
+        db, reservation.id, data.batch_no, "create",
+        None, "draft", current["name"], current["role"],
+        remark="创建预约单" + ("（强制录入重复批次）" if is_duplicate and data.force_submit else ""),
     )
-    db.add(log)
 
     if not existing_batch:
         batch = BatchRecord(
             batch_no=data.batch_no,
             total_count=1,
+            offline_count=data.offline_count or 1,
             processed_count=0,
             status="processing",
+            check_status="unchecked",
             created_by=current["name"],
         )
         db.add(batch)
     else:
         existing_batch.total_count += 1
+        existing_batch.offline_count += (data.offline_count or 1)
 
     db.commit()
     db.refresh(reservation)
 
     result = MeetingReservationOut.model_validate(reservation).model_dump(mode='json')
     result["batch_warning"] = is_duplicate
-    result["batch_warning_msg"] = "该批次号已存在，可能存在重复录入。线下台账批次号与线上已有批次重复，请确认是否为同一批数据。" if is_duplicate else None
+    if is_duplicate:
+        result["batch_warning_msg"] = f"批次号已存在，当前有 {len(batch_items) + 1} 条预约单。线下台账批次号与线上数据重复。"
 
     return JSONResponse(result, status_code=201)
 
@@ -147,28 +246,33 @@ async def update_reservation(request: Request):
     if not reservation:
         return JSONResponse({"detail": "预约单不存在"}, status_code=404)
 
-    if reservation.status not in ["draft", "returned"]:
-        return JSONResponse({"detail": "当前状态不允许编辑"}, status_code=400)
+    ok, err = check_permission(reservation.status, current["role"], "update")
+    if not ok:
+        add_block_log(
+            db, rid, reservation.batch_no, "permission_denied",
+            err, current["name"], current["role"],
+        )
+        db.commit()
+        return JSONResponse({"detail": err}, status_code=403)
 
-    data = MeetingReservationUpdate(**body)
+    try:
+        data = MeetingReservationUpdate(**body)
+    except Exception as e:
+        return JSONResponse({"detail": f"参数校验失败: {str(e)}"}, status_code=400)
+
     update_data = data.model_dump(exclude_unset=True)
-
     for key, value in update_data.items():
         setattr(reservation, key, value)
 
     reservation.updated_by = current["name"]
     reservation.updated_at = datetime.now()
 
-    log = AuditLog(
-        reservation_id=reservation.id,
-        action="update",
-        status_from=reservation.status,
-        status_to=reservation.status,
-        operator=current["name"],
-        operator_role=current["role"],
-        remark="更新预约信息",
+    add_audit_log(
+        db, reservation.id, reservation.batch_no, "update",
+        reservation.status, reservation.status,
+        current["name"], current["role"],
+        remark="更新预约信息" + ("（补正退回内容）" if reservation.status == "returned" else ""),
     )
-    db.add(log)
 
     db.commit()
     db.refresh(reservation)
@@ -178,34 +282,76 @@ async def update_reservation(request: Request):
 async def submit_reservation(request: Request):
     rid = int(request.path_params.get("id"))
     current = get_current_user(request)
+    body = await request.json()
     db = next(get_db())
 
     reservation = db.query(MeetingReservation).filter(MeetingReservation.id == rid).first()
     if not reservation:
         return JSONResponse({"detail": "预约单不存在"}, status_code=404)
 
-    if reservation.status not in ["draft", "returned"]:
-        return JSONResponse({"detail": "当前状态不允许提交"}, status_code=400)
+    ok, err = check_permission(reservation.status, current["role"], "submit")
+    if not ok:
+        add_block_log(
+            db, rid, reservation.batch_no, "permission_denied",
+            err, current["name"], current["role"],
+        )
+        db.commit()
+        return JSONResponse({"detail": err}, status_code=403)
 
-    errors = []
-    if not reservation.title:
-        errors.append("会议主题不能为空")
-    if not reservation.meeting_room:
-        errors.append("会议室不能为空")
-    if not reservation.meeting_date:
-        errors.append("会议日期不能为空")
-    if not reservation.start_time or not reservation.end_time:
-        errors.append("会议时间不能为空")
-    if reservation.offline_attachment_count > 0 and not reservation.attachment_names:
-        errors.append("存在线下附件但未上传附件清单")
-    if reservation.participants <= 0:
-        errors.append("参会人数必须大于0")
+    batch_items = db.query(MeetingReservation).filter(
+        MeetingReservation.batch_no == reservation.batch_no
+    ).all()
 
-    if errors:
+    offline_count = body.get("offline_count", reservation.offline_count or len(batch_items))
+    offline_statuses = body.get("offline_statuses", [])
+    force_submit = body.get("force_submit", False)
+
+    reconcile = reconcile_offline_online(batch_items, offline_count, offline_statuses)
+
+    reservation.offline_count = offline_count
+    reservation.offline_check_diff = reconcile
+    reservation.offline_checked = True
+    reservation.offline_checked_at = datetime.now()
+    reservation.offline_checked_by = current["name"]
+
+    if reconcile["is_blocked"] and not force_submit:
+        add_block_log(
+            db, rid, reservation.batch_no, "batch_mismatch",
+            reconcile["message"], current["name"], current["role"],
+            detail=reconcile["diffs"],
+            item_results=reconcile["item_results"],
+        )
+        db.commit()
+        return JSONResponse({
+            "detail": reconcile["message"],
+            "blocked": True,
+            "block_type": "batch_mismatch",
+            "reconcile": reconcile,
+            "can_force_submit": False,
+        }, status_code=409)
+
+    is_valid, errors = validate_required_fields({
+        "title": reservation.title,
+        "meeting_room": reservation.meeting_room,
+        "meeting_date": reservation.meeting_date,
+        "start_time": reservation.start_time,
+        "end_time": reservation.end_time,
+        "participants": reservation.participants,
+        "attachment_names": reservation.attachment_names,
+        "offline_attachment_count": reservation.offline_attachment_count,
+    })
+
+    if not is_valid:
+        add_block_log(
+            db, rid, reservation.batch_no, "missing_fields",
+            "；".join(errors), current["name"], current["role"],
+            detail={"errors": errors},
+        )
+        db.commit()
         return JSONResponse({
             "detail": "提交失败，请检查以下问题",
             "errors": errors,
-            "offline_check": "线下台账对应条目是否完整？请核对纸质材料。"
+            "offline_check": "线下台账对应条目是否完整？请核对纸质材料。",
         }, status_code=400)
 
     old_status = reservation.status
@@ -214,16 +360,19 @@ async def submit_reservation(request: Request):
     reservation.updated_by = current["name"]
     reservation.updated_at = datetime.now()
 
-    log = AuditLog(
-        reservation_id=reservation.id,
-        action="submit",
-        status_from=old_status,
-        status_to="pending_audit",
-        operator=current["name"],
-        operator_role=current["role"],
-        remark="提交审核",
+    batch = db.query(BatchRecord).filter(BatchRecord.batch_no == reservation.batch_no).first()
+    if batch:
+        batch.check_status = "checked" if reconcile["is_consistent"] else "has_diff"
+        batch.check_diff = reconcile
+        batch.checked_at = datetime.now()
+        batch.checked_by = current["name"]
+
+    add_audit_log(
+        db, reservation.id, reservation.batch_no, "submit",
+        old_status, "pending_audit", current["name"], current["role"],
+        remark="提交审核" + ("（强制提交，存在批次差异）" if not reconcile["is_consistent"] else ""),
+        item_results=reconcile["item_results"],
     )
-    db.add(log)
 
     db.commit()
     db.refresh(reservation)
@@ -241,13 +390,18 @@ async def audit_reservation(request: Request):
     if not reservation:
         return JSONResponse({"detail": "预约单不存在"}, status_code=404)
 
-    if reservation.status != "pending_audit":
-        return JSONResponse({"detail": "当前状态不允许审核"}, status_code=400)
-
-    if current["role"] != "auditor":
-        return JSONResponse({"detail": "无审核权限"}, status_code=403)
+    permission_action = "audit_pass" if action == "pass" else "return"
+    ok, err = check_permission(reservation.status, current["role"], permission_action)
+    if not ok:
+        add_block_log(
+            db, rid, reservation.batch_no, "permission_denied",
+            err, current["name"], current["role"],
+        )
+        db.commit()
+        return JSONResponse({"detail": err}, status_code=403)
 
     old_status = reservation.status
+    item_results = None
 
     if action == "pass":
         reservation.status = "approved"
@@ -257,14 +411,23 @@ async def audit_reservation(request: Request):
         log_action = "audit_pass"
         log_remark = "审核通过"
     elif action == "return":
+        return_reason = body.get("return_reason", "")
+        if not return_reason.strip():
+            add_block_log(
+                db, rid, reservation.batch_no, "missing_reason",
+                "退回必须填写原因", current["name"], current["role"],
+            )
+            db.commit()
+            return JSONResponse({"detail": "退回必须填写原因"}, status_code=400)
+
         reservation.status = "returned"
-        reservation.return_reason = body.get("return_reason", "")
+        reservation.return_reason = return_reason
         reservation.exception_type = body.get("exception_type", "info_error")
         reservation.exception_desc = body.get("exception_desc", "")
         reservation.audit_by = current["name"]
         reservation.audit_at = datetime.now()
         log_action = "return"
-        log_remark = body.get("return_reason", "审核退回")
+        log_remark = return_reason
 
         batch = db.query(BatchRecord).filter(BatchRecord.batch_no == reservation.batch_no).first()
         if batch:
@@ -275,16 +438,13 @@ async def audit_reservation(request: Request):
     reservation.updated_by = current["name"]
     reservation.updated_at = datetime.now()
 
-    log = AuditLog(
-        reservation_id=reservation.id,
-        action=log_action,
-        status_from=old_status,
-        status_to=reservation.status,
-        operator=current["name"],
-        operator_role=current["role"],
+    add_audit_log(
+        db, reservation.id, reservation.batch_no, log_action,
+        old_status, reservation.status,
+        current["name"], current["role"],
         remark=log_remark,
+        item_results=item_results,
     )
-    db.add(log)
 
     db.commit()
     db.refresh(reservation)
@@ -301,28 +461,39 @@ async def confirm_usage(request: Request):
     if not reservation:
         return JSONResponse({"detail": "预约单不存在"}, status_code=404)
 
-    if reservation.status != "approved":
-        return JSONResponse({"detail": "当前状态不允许使用确认"}, status_code=400)
+    ok, err = check_permission(reservation.status, current["role"], "usage_confirm")
+    if not ok:
+        add_block_log(
+            db, rid, reservation.batch_no, "permission_denied",
+            err, current["name"], current["role"],
+        )
+        db.commit()
+        return JSONResponse({"detail": err}, status_code=403)
+
+    result = body.get("result", "")
+    if not result.strip():
+        add_block_log(
+            db, rid, reservation.batch_no, "missing_result",
+            "使用确认必须填写结果", current["name"], current["role"],
+        )
+        db.commit()
+        return JSONResponse({"detail": "使用确认必须填写结果"}, status_code=400)
 
     old_status = reservation.status
     reservation.status = "usage_confirmed"
     reservation.usage_confirm = True
     reservation.usage_confirm_time = datetime.now()
     reservation.usage_confirm_user = current["name"]
-    reservation.result = body.get("result", "")
+    reservation.result = result
     reservation.updated_by = current["name"]
     reservation.updated_at = datetime.now()
 
-    log = AuditLog(
-        reservation_id=reservation.id,
-        action="usage_confirm",
-        status_from=old_status,
-        status_to="usage_confirmed",
-        operator=current["name"],
-        operator_role=current["role"],
-        remark="使用确认完成",
+    add_audit_log(
+        db, reservation.id, reservation.batch_no, "usage_confirm",
+        old_status, "usage_confirmed",
+        current["name"], current["role"],
+        remark=f"使用确认完成：{result}",
     )
-    db.add(log)
 
     db.commit()
     db.refresh(reservation)
@@ -340,15 +511,42 @@ async def review_reservation(request: Request):
     if not reservation:
         return JSONResponse({"detail": "预约单不存在"}, status_code=404)
 
-    if reservation.status != "usage_confirmed":
-        return JSONResponse({"detail": "当前状态不允许复核"}, status_code=400)
-
-    if current["role"] != "reviewer":
-        return JSONResponse({"detail": "无复核权限"}, status_code=403)
+    permission_action = "review_pass" if action == "pass" else "return"
+    ok, err = check_permission(reservation.status, current["role"], permission_action)
+    if not ok:
+        add_block_log(
+            db, rid, reservation.batch_no, "permission_denied",
+            err, current["name"], current["role"],
+        )
+        db.commit()
+        return JSONResponse({"detail": err}, status_code=403)
 
     old_status = reservation.status
+    batch = db.query(BatchRecord).filter(BatchRecord.batch_no == reservation.batch_no).first()
 
     if action == "pass":
+        batch_items = db.query(MeetingReservation).filter(
+            MeetingReservation.batch_no == reservation.batch_no
+        ).all()
+        offline_count = body.get("offline_count", reservation.offline_count or len(batch_items))
+        offline_statuses = body.get("offline_statuses", [])
+        reconcile = reconcile_offline_online(batch_items, offline_count, offline_statuses)
+
+        if reconcile["is_blocked"]:
+            add_block_log(
+                db, rid, reservation.batch_no, "batch_mismatch",
+                reconcile["message"], current["name"], current["role"],
+                detail=reconcile["diffs"],
+                item_results=reconcile["item_results"],
+            )
+            db.commit()
+            return JSONResponse({
+                "detail": reconcile["message"],
+                "blocked": True,
+                "block_type": "batch_mismatch",
+                "reconcile": reconcile,
+            }, status_code=409)
+
         reservation.status = "archived"
         reservation.review_by = current["name"]
         reservation.review_at = datetime.now()
@@ -356,34 +554,45 @@ async def review_reservation(request: Request):
         log_action = "archive"
         log_remark = "复核通过，已归档"
 
-        batch = db.query(BatchRecord).filter(BatchRecord.batch_no == reservation.batch_no).first()
         if batch:
             batch.processed_count += 1
-            if batch.processed_count >= batch.total_count:
-                batch.status = "completed"
+            batch.status = "completed" if batch.processed_count >= batch.total_count else batch.status
+            batch.check_status = "checked" if reconcile["is_consistent"] else "has_diff"
+            batch.check_diff = reconcile
+            batch.checked_at = datetime.now()
+            batch.checked_by = current["name"]
+
     elif action == "return":
+        return_reason = body.get("return_reason", "")
+        if not return_reason.strip():
+            add_block_log(
+                db, rid, reservation.batch_no, "missing_reason",
+                "退回必须填写原因", current["name"], current["role"],
+            )
+            db.commit()
+            return JSONResponse({"detail": "退回必须填写原因"}, status_code=400)
+
         reservation.status = "returned"
-        reservation.return_reason = body.get("return_reason", "")
+        reservation.return_reason = return_reason
         reservation.review_by = current["name"]
         reservation.review_at = datetime.now()
         log_action = "review_return"
-        log_remark = body.get("return_reason", "复核退回")
+        log_remark = return_reason
+
+        if batch:
+            batch.status = "returned"
     else:
         return JSONResponse({"detail": "无效的复核操作"}, status_code=400)
 
     reservation.updated_by = current["name"]
     reservation.updated_at = datetime.now()
 
-    log = AuditLog(
-        reservation_id=reservation.id,
-        action=log_action,
-        status_from=old_status,
-        status_to=reservation.status,
-        operator=current["name"],
-        operator_role=current["role"],
+    add_audit_log(
+        db, reservation.id, reservation.batch_no, log_action,
+        old_status, reservation.status,
+        current["name"], current["role"],
         remark=log_remark,
     )
-    db.add(log)
 
     db.commit()
     db.refresh(reservation)
@@ -399,8 +608,14 @@ async def delete_reservation(request: Request):
     if not reservation:
         return JSONResponse({"detail": "预约单不存在"}, status_code=404)
 
-    if reservation.status not in ["draft", "returned"]:
-        return JSONResponse({"detail": "当前状态不允许删除"}, status_code=400)
+    ok, err = check_permission(reservation.status, current["role"], "delete")
+    if not ok:
+        add_block_log(
+            db, rid, reservation.batch_no, "permission_denied",
+            err, current["name"], current["role"],
+        )
+        db.commit()
+        return JSONResponse({"detail": err}, status_code=403)
 
     db.delete(reservation)
     db.commit()
@@ -435,6 +650,47 @@ async def exception_list(request: Request):
     return JSONResponse({"items": exceptions})
 
 
+async def reconcile_reservation(request: Request):
+    rid = int(request.path_params.get("id"))
+    current = get_current_user(request)
+    body = await request.json()
+    db = next(get_db())
+
+    reservation = db.query(MeetingReservation).filter(MeetingReservation.id == rid).first()
+    if not reservation:
+        return JSONResponse({"detail": "预约单不存在"}, status_code=404)
+
+    batch_items = db.query(MeetingReservation).filter(
+        MeetingReservation.batch_no == reservation.batch_no
+    ).all()
+
+    offline_count = body.get("offline_count", reservation.offline_count or len(batch_items))
+    offline_statuses = body.get("offline_statuses", [])
+    offline_attachments = body.get("offline_attachments", [])
+
+    reconcile = reconcile_offline_online(
+        batch_items, offline_count, offline_statuses, offline_attachments
+    )
+
+    reservation.offline_check_diff = reconcile
+    reservation.offline_checked = True
+    reservation.offline_checked_at = datetime.now()
+    reservation.offline_checked_by = current["name"]
+    if body.get("offline_count"):
+        reservation.offline_count = offline_count
+
+    add_audit_log(
+        db, reservation.id, reservation.batch_no, "reconcile",
+        reservation.status, reservation.status,
+        current["name"], current["role"],
+        remark="离线台账核对，" + reconcile["message"],
+        item_results=reconcile["item_results"],
+    )
+
+    db.commit()
+    return JSONResponse(reconcile)
+
+
 routes = [
     Route("/", list_reservations, methods=["GET"]),
     Route("/statuses", status_list, methods=["GET"]),
@@ -447,4 +703,5 @@ routes = [
     Route("/{id:int}/audit/{action}", audit_reservation, methods=["POST"]),
     Route("/{id:int}/usage-confirm", confirm_usage, methods=["POST"]),
     Route("/{id:int}/review/{action}", review_reservation, methods=["POST"]),
+    Route("/{id:int}/reconcile", reconcile_reservation, methods=["POST"]),
 ]

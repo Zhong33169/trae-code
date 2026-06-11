@@ -8,6 +8,8 @@ export class ReservationDetail extends LitElement {
     userName: { type: String },
     reservation: { type: Object },
     auditLogs: { type: Array },
+    blockLogs: { type: Array },
+    traceData: { type: Object },
     loading: { type: Boolean },
     activeTab: { type: String },
     showReturnModal: { type: Boolean },
@@ -18,6 +20,7 @@ export class ReservationDetail extends LitElement {
     editForm: { type: Object },
     message: { type: String },
     messageType: { type: String },
+    offlineForm: { type: Object },
   }
 
   static styles = css`
@@ -403,12 +406,45 @@ export class ReservationDetail extends LitElement {
 
     .equipment-dot.ready { background: #16a34a; }
     .equipment-dot.not-ready { background: #f59e0b; }
+    .section-badge { display: inline-block; padding: 2px 8px; font-size: 12px; border-radius: 4px; margin-left: 6px; font-weight: normal; }
+    .badge-online { background: #dbeafe; color: #1e40af; }
+    .badge-offline { background: #fef3c7; color: #92400e; }
+    .badge-diff { background: #fee2e2; color: #991b1b; }
+    .badge-ok { background: #d1fae5; color: #065f46; }
+    .reconcile-summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 16px 0; }
+    .summary-card { background: white; border: 1px solid #e5e7eb; border-radius: 6px; padding: 12px; text-align: center; }
+    .summary-card .label { font-size: 12px; color: #6b7280; margin-bottom: 4px; }
+    .summary-card .value { font-size: 20px; font-weight: 600; color: #111827; }
+    .summary-card.ok .value { color: #059669; }
+    .summary-card.diff .value { color: #dc2626; }
+    .diff-item { background: white; border: 1px solid #fee2e2; border-left: 4px solid #ef4444; border-radius: 4px; padding: 10px 14px; margin-bottom: 8px; font-size: 13px; }
+    .diff-item .diff-field { font-weight: 600; color: #991b1b; margin-bottom: 4px; }
+    .diff-item .diff-values { color: #6b7280; display: flex; gap: 16px; font-size: 12px; }
+    .diff-item .diff-values span.online { color: #1e40af; }
+    .diff-item .diff-values span.offline { color: #92400e; }
+    .item-reconcile-row { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; gap: 12px; padding: 8px 12px; background: white; border: 1px solid #e5e7eb; border-radius: 4px; margin-bottom: 6px; font-size: 13px; align-items: center; }
+    .item-reconcile-row.header { background: #f3f4f6; font-weight: 600; }
+    .item-reconcile-row.diff { border-color: #fecaca; background: #fef2f2; }
+    .item-reconcile-row .status-tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; }
+    .block-item { background: #fff1f2; border: 1px solid #fecdd3; border-radius: 6px; padding: 12px 16px; margin-bottom: 10px; }
+    .block-item .block-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+    .block-item .block-type { font-weight: 600; color: #9f1239; font-size: 13px; }
+    .block-item .block-time { font-size: 12px; color: #9ca3af; }
+    .block-item .block-reason { font-size: 13px; color: #7f1d1d; margin-bottom: 4px; }
+    .block-item .block-op { font-size: 12px; color: #6b7280; }
+    .rectify-highlight { background: #fef3c7; border: 1px solid #fcd34d; border-radius: 6px; padding: 12px 16px; margin-bottom: 16px; }
+    .rectify-highlight h4 { margin: 0 0 8px 0; color: #92400e; font-size: 14px; }
+    .rectify-highlight ul { margin: 0; padding-left: 20px; font-size: 13px; color: #a16207; }
+    .rectify-tag { display: inline-block; padding: 2px 6px; background: #fecaca; color: #7f1d1d; font-size: 11px; border-radius: 3px; margin-left: 6px; }
+    .offline-form-box { background: #fffbeb; border: 1px solid #fde68a; border-radius: 6px; padding: 16px; margin: 12px 0; }
   `
 
   constructor() {
     super()
     this.reservation = null
     this.auditLogs = []
+    this.blockLogs = []
+    this.traceData = null
     this.loading = true
     this.activeTab = 'basic'
     this.showReturnModal = false
@@ -417,6 +453,7 @@ export class ReservationDetail extends LitElement {
     this.auditRemark = ''
     this.showEditModal = false
     this.editForm = {}
+    this.offlineForm = {}
     this.message = ''
     this.messageType = ''
   }
@@ -436,12 +473,21 @@ export class ReservationDetail extends LitElement {
     if (!this.reservationId) return
     this.loading = true
     try {
-      const [reservation, auditData] = await Promise.all([
+      const [reservation, auditData, traceData, blockData] = await Promise.all([
         reservationApi.get(this.reservationId),
         auditApi.list({ reservation_id: this.reservationId }),
+        auditApi.traceReservation(this.reservationId),
+        auditApi.blocks({ reservation_id: this.reservationId }),
       ])
       this.reservation = reservation
       this.auditLogs = auditData.items
+      this.traceData = traceData
+      this.blockLogs = blockData.items || []
+      this.offlineForm = {
+        offline_count: reservation.offline_count || 1,
+        offline_status: reservation.offline_status || '',
+        offline_attachment_list: reservation.offline_attachment_list || '',
+      }
     } catch (e) {
       console.error('加载详情失败', e)
     } finally {
@@ -737,6 +783,10 @@ export class ReservationDetail extends LitElement {
                @click=${() => { this.activeTab = 'audit'; this.requestUpdate() }}>
             审计备注
           </div>
+          <div class="tab ${this.activeTab === 'reconcile' ? 'active' : ''}"
+               @click=${() => { this.activeTab = 'reconcile'; this.requestUpdate() }}>
+            离线台账核对
+          </div>
         </div>
 
         ${this.activeTab === 'basic' ? this._renderBasicTab() : ''}
@@ -744,6 +794,7 @@ export class ReservationDetail extends LitElement {
         ${this.activeTab === 'attachments' ? this._renderAttachmentsTab() : ''}
         ${this.activeTab === 'result' ? this._renderResultTab() : ''}
         ${this.activeTab === 'audit' ? this._renderAuditTab() : ''}
+        ${this.activeTab === 'reconcile' ? this._renderReconcileTab() : ''}
       </div>
 
       <div class="detail-section">
@@ -1058,7 +1109,176 @@ export class ReservationDetail extends LitElement {
           </div>
         </div>
       </div>
+      ${this.blockLogs?.length ? html`
+        <div style="margin-top: 20px; padding-top: 16px; border-top: 1px solid #e5e7eb;">
+          <div class="section-title" style="font-size:14px; border:none; padding:0; margin-bottom:12px;">
+            🚫 阻断 / 失败记录 (${this.blockLogs.length})
+          </div>
+          ${this.blockLogs.map(log => html`
+            <div class="block-item">
+              <div class="block-head">
+                <span class="block-type">${this._getBlockTypeName(log.block_type)}</span>
+                <span class="block-time">${this._formatTime(log.created_at)}</span>
+              </div>
+              <div class="block-reason">${log.reason}</div>
+              <div class="block-op">操作人：${log.operator || '-'} (${roleMap[log.operator_role] || log.operator_role || '-'})</div>
+              ${log.detail?.diffs?.length ? html`
+                <div style="margin-top:8px; font-size:12px;">
+                  <div style="color:#6b7280; margin-bottom:4px;">差异详情：</div>
+                  ${log.detail.diffs.map(d => html`
+                    <div style="padding:4px 8px; background:#fff; border-radius:3px; margin-bottom:3px;">
+                      <b style="color:#991b1b;">${d.field}</b>：${d.message || ''}
+                    </div>
+                  `)}
+                </div>
+              ` : ''}
+            </div>
+          `)}
+        </div>
+      ` : ''}
     `
+  }
+
+  _renderReconcileTab() {
+    const r = this.reservation
+    const reconcile = r.batch_reconcile || r.offline_check_diff
+    const canEdit = this._canEdit()
+
+    return html`
+      ${r.status === 'returned' && r.return_reason ? html`
+        <div class="rectify-highlight">
+          <h4>⚠️ 需补正内容 <span class="rectify-tag">退回单</span></h4>
+          <ul>
+            <li>${r.return_reason}</li>
+            ${r.exception_desc ? html`<li>异常说明：${r.exception_desc}</li>` : ''}
+          </ul>
+        </div>
+      ` : ''}
+
+      ${reconcile ? html`
+        <div style="background:#fafafa; border:1px solid #e5e7eb; border-radius:6px; padding:16px;">
+          <div style="font-size:14px; font-weight:600; color:${reconcile.is_consistent ? '#065f46' : (reconcile.is_blocked ? '#991b1b' : '#92400e')}; margin-bottom:12px;">
+            ${reconcile.is_consistent ? '✓ 线上线下一致' : (reconcile.is_blocked ? '🚫 批次核对阻断' : '⚠️ 存在差异')}
+            ${reconcile.message ? html` - ${reconcile.message}` : ''}
+          </div>
+          <div class="reconcile-summary">
+            <div class="summary-card">
+              <div class="label">线上数量</div>
+              <div class="value">${reconcile.total_online ?? '-'}</div>
+            </div>
+            <div class="summary-card">
+              <div class="label">线下数量</div>
+              <div class="value">${reconcile.total_offline ?? r.offline_count ?? 1}</div>
+            </div>
+            <div class="summary-card ${reconcile.diff_count === 0 ? 'ok' : 'diff'}">
+              <div class="label">差异项</div>
+              <div class="value">${reconcile.diff_count ?? 0}</div>
+            </div>
+            <div class="summary-card ${reconcile.is_consistent ? 'ok' : 'diff'}">
+              <div class="label">核对结果</div>
+              <div class="value">${reconcile.is_consistent ? '通过' : '未通过'}</div>
+            </div>
+          </div>
+          ${reconcile.diffs?.length ? html`
+            <div style="margin-bottom:16px;">
+              <div style="font-size:13px; font-weight:600; margin-bottom:8px;">差异明细：</div>
+              ${reconcile.diffs.map(d => html`
+                <div class="diff-item">
+                  <div class="diff-field">${d.field}${d.message ? ' - ' + d.message : ''}</div>
+                  <div class="diff-values">
+                    <span class="online">线上：${Array.isArray(d.online_value) ? d.online_value.map(s => statusMap[s] || s).join('、') : (d.online_value ?? '无')}</span>
+                    ${d.offline_value !== undefined && d.offline_value !== null ? html`
+                      <span class="offline">线下：${Array.isArray(d.offline_value) ? d.offline_value.map(s => statusMap[s] || s).join('、') : (d.offline_value ?? '无')}</span>
+                    ` : ''}
+                  </div>
+                </div>
+              `)}
+            </div>
+          ` : ''}
+          ${reconcile.item_results?.length ? html`
+            <div>
+              <div style="font-size:13px; font-weight:600; margin-bottom:8px;">逐单核对：</div>
+              <div class="item-reconcile-row header">
+                <span>预约单 / 标题</span><span>线上状态</span><span>线下状态</span><span>核对</span>
+              </div>
+              ${reconcile.item_results.map(item => html`
+                <div class="item-reconcile-row ${!item.is_consistent ? 'diff' : ''}">
+                  <div>
+                    <div style="font-weight:500;">${item.reservation_no}</div>
+                    <div style="font-size:12px; color:#6b7280;">${item.title}</div>
+                    ${item.status_diffs?.length || item.attachment_diffs?.length ? html`
+                      <div style="font-size:11px; color:#dc2626; margin-top:4px;">
+                        ${item.status_diffs?.map(d => html`<div>${d.message}</div>`)}
+                        ${item.attachment_diffs?.map(d => html`<div>${d.message}</div>`)}
+                      </div>
+                    ` : ''}
+                  </div>
+                  <span><span class="status-tag" style="background:#dbeafe; color:#1e40af;">${statusMap[item.online_status] || item.online_status}</span></span>
+                  <span><span class="status-tag" style="background:#fef3c7; color:#92400e;">${item.offline_status ? (statusMap[item.offline_status] || item.offline_status) : '-'}</span></span>
+                  <span><span class="status-tag" style="background:${item.is_consistent ? '#d1fae5;color:#065f46;' : '#fee2e2;color:#991b1b;'}">${item.is_consistent ? '✓ 一致' : '✗ 差异'}</span></span>
+                </div>
+              `)}
+            </div>
+          ` : ''}
+        </div>
+      ` : html`
+        <div style="color:#9ca3af; text-align:center; padding:20px; background:#fafafa; border-radius:6px;">
+          尚未进行离线台账核对。登记员提交时系统会自动执行核对。
+        </div>
+      `}
+
+      ${canEdit ? html`
+        <div class="offline-form-box">
+          <div style="font-size:14px; font-weight:600; color:#92400e; margin-bottom:12px;">
+            📋 修改线下台账信息（用于补正后重新核对）
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>线下同批次预约单数量 <span class="section-badge badge-offline">线下</span></label>
+              <input type="number" min="1" .value=${this.offlineForm.offline_count || 1}
+                @input=${(e) => { this.offlineForm = {...this.offlineForm, offline_count: parseInt(e.target.value) || 1}; this.requestUpdate() }} />
+            </div>
+            <div class="form-group">
+              <label>线下台账中本单状态 <span class="section-badge badge-offline">线下</span></label>
+              <select .value=${this.offlineForm.offline_status || ''}
+                @change=${(e) => { this.offlineForm = {...this.offlineForm, offline_status: e.target.value}; this.requestUpdate() }}>
+                <option value="">（请选择）</option>
+                ${Object.entries(statusMap).map(([v, l]) => html`<option value=${v}>${l}</option>`)}
+              </select>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>线下附件清单 <span class="section-badge badge-offline">线下</span></label>
+            <textarea placeholder="多个用逗号分隔" .value=${this.offlineForm.offline_attachment_list || ''}
+              @input=${(e) => { this.offlineForm = {...this.offlineForm, offline_attachment_list: e.target.value}; this.requestUpdate() }}></textarea>
+          </div>
+          <button class="primary" @click=${this._handleOfflineReconcile}>重新核对并保存</button>
+        </div>
+      ` : ''}
+    `
+  }
+
+  async _handleOfflineReconcile() {
+    try {
+      await reservationApi.reconcile(this.reservationId, this.offlineForm)
+      this._showMessage('离线台账核对完成')
+      this._loadData()
+    } catch (e) {
+      this._showMessage(e.message, 'error')
+    }
+  }
+
+  _getBlockTypeName(type) {
+    const map = {
+      duplicate_batch: '重复批次阻断',
+      batch_mismatch: '批次不一致阻断',
+      permission_denied: '权限不足阻断',
+      missing_fields: '材料缺失阻断',
+      missing_reason: '退回原因缺失阻断',
+      missing_result: '使用结果缺失阻断',
+      status_mismatch: '状态不一致阻断',
+    }
+    return map[type] || type
   }
 
   _getActionName(action) {

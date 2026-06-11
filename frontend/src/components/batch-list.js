@@ -207,6 +207,23 @@ export class BatchList extends LitElement {
       color: #6b7280;
       margin-top: 4px;
     }
+    .section-badge { display: inline-block; padding: 2px 8px; font-size: 12px; border-radius: 4px; margin-left: 6px; font-weight: normal; }
+    .badge-online { background: #dbeafe; color: #1e40af; }
+    .badge-offline { background: #fef3c7; color: #92400e; }
+    .badge-diff { background: #fee2e2; color: #991b1b; }
+    .badge-ok { background: #d1fae5; color: #065f46; }
+    .reconcile-summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 12px 0; }
+    .reconcile-summary .summary-card { background: white; border: 1px solid #e5e7eb; border-radius: 6px; padding: 12px; text-align: center; }
+    .summary-card .label { font-size: 12px; color: #6b7280; margin-bottom: 4px; }
+    .summary-card .value { font-size: 18px; font-weight: 600; color: #111827; }
+    .summary-card.ok .value { color: #059669; }
+    .summary-card.diff .value { color: #dc2626; }
+    .diff-box { background: #fff1f2; border: 1px solid #fecdd3; border-left: 4px solid #ef4444; border-radius: 4px; padding: 10px 14px; margin: 8px 0; font-size: 12px; }
+    .diff-box .d-title { font-weight: 600; color: #991b1b; margin-bottom: 4px; }
+    .diff-box .d-row { color: #6b7280; display: flex; gap: 16px; font-size: 12px; }
+    .diff-box .d-row span.online { color: #1e40af; }
+    .diff-box .d-row span.offline { color: #92400e; }
+    .rec-tag { display:inline-block; padding:2px 6px; border-radius:3px; font-size:11px; margin-right:4px; }
   `
 
   constructor() {
@@ -325,47 +342,73 @@ export class BatchList extends LitElement {
 
       ${this.showDetail ? html`
         <div class="modal-overlay" @click=${(e) => { if (e.target === e.currentTarget) this._closeDetail() }}>
-          <div class="modal">
+          <div class="modal" style="max-width: 900px;">
             <div class="modal-header">
               <div class="modal-title">批次详情 - ${this.selectedBatch?.batch_no}</div>
               <div class="close-btn" @click=${this._closeDetail}>×</div>
             </div>
 
             ${this.selectedBatch?.warning ? html`
-              <div style="background: #fef3c7; padding: 10px 14px; border-radius: 6px; margin-bottom: 16px; font-size: 13px; color: #92400e;">
-                ⚠️ ${this.selectedBatch.warning}
+              <div style="background: ${this.selectedBatch.blocked ? '#fee2e2' : '#fef3c7'}; padding: 10px 14px; border-radius: 6px; margin-bottom: 16px; font-size: 13px; color: ${this.selectedBatch.blocked ? '#991b1b' : '#92400e'}; border: 1px solid ${this.selectedBatch.blocked ? '#fca5a5' : '#fcd34d'};">
+                ${this.selectedBatch.blocked ? '🚫 阻断：' : '⚠️ '}${this.selectedBatch.warning}
               </div>
             ` : ''}
 
             <div style="margin-bottom: 12px; font-size: 13px; color: #6b7280;">
-              批次状态：${this._getStatusLabel(this.selectedBatch?.batch_status)} |
-              共 ${this.selectedBatch?.total} 条预约单
+              批次状态：${this._getStatusLabel(this.selectedBatch?.batch_status)}
+              <span class="section-badge ${this.selectedBatch?.check_status === 'checked' ? 'badge-ok' : (this.selectedBatch?.check_status === 'blocked' ? 'badge-diff' : 'badge-offline')}">
+                ${this.selectedBatch?.check_status === 'checked' ? '已核对' : (this.selectedBatch?.check_status === 'has_diff' ? '有差异' : (this.selectedBatch?.check_status === 'blocked' ? '已阻断' : '未核对'))}
+              </span>
             </div>
 
+            ${this.selectedBatch?.reconcile ? this._renderReconcile(this.selectedBatch.reconcile) : ''}
+
+            <div style="font-size: 14px; font-weight: 600; margin: 16px 0 8px; color: #374151;">
+              逐单线上线下对比
+            </div>
             <table class="table">
               <thead>
                 <tr>
-                  <th>预约单号</th>
-                  <th>会议主题</th>
-                  <th>会议室</th>
-                  <th>日期</th>
-                  <th>状态</th>
+                  <th>预约单 / 标题</th>
+                  <th>线上状态 <span class="section-badge badge-online">线上</span></th>
+                  <th>线下状态 <span class="section-badge badge-offline">线下</span></th>
+                  <th>线上附件</th>
+                  <th>核对结果</th>
                 </tr>
               </thead>
               <tbody>
-                ${this.batchReservations.map(r => html`
-                  <tr>
-                    <td>${r.reservation_no}</td>
-                    <td>${r.title}</td>
-                    <td>${r.meeting_room}</td>
-                    <td>${r.meeting_date}</td>
-                    <td>
-                      <span class="status-tag status-${r.status}">
-                        ${statusMap[r.status] || r.status}
-                      </span>
-                    </td>
-                  </tr>
-                `)}
+                ${this.batchReservations.map(r => {
+                  const rec = this.selectedBatch?.reconcile?.item_results?.find(x => x.reservation_no === r.reservation_no)
+                  const isDiff = rec && !rec.is_consistent
+                  return html`
+                    <tr style="${isDiff ? 'background:#fff1f2;' : ''}">
+                      <td>
+                        <div style="font-weight:500;">${r.reservation_no}</div>
+                        <div style="font-size:12px; color:#6b7280;">${r.title}</div>
+                        <div style="font-size:11px; color:#9ca3af; margin-top:2px;">${r.meeting_room} ${r.meeting_date}</div>
+                        ${isDiff ? html`
+                          <div style="margin-top:6px;">
+                            ${rec.status_diffs?.map(d => html`<div class="diff-box" style="margin:2px 0;"><div class="d-row"><span class="online">线上：${d.online_value}</span><span class="offline">线下：${d.offline_value}</span></div><div style="color:#991b1b; margin-top:2px;">${d.message}</div></div>`)}
+                            ${rec.attachment_diffs?.map(d => html`<div class="diff-box" style="margin:2px 0;"><div class="d-title">附件：${d.message}</div><div class="d-row"><span class="online">线上：${d.online_value}</span><span class="offline">线下：${d.offline_value}</span></div></div>`)}
+                          </div>
+                        ` : ''}
+                      </td>
+                      <td><span class="status-tag status-${r.status}">${statusMap[r.status] || r.status}</span></td>
+                      <td>${r.offline_status ? html`<span class="status-tag" style="background:#fef3c7; color:#92400e;">${statusMap[r.offline_status] || r.offline_status}</span>` : html`<span style="color:#9ca3af;">未填写</span>`}</td>
+                      <td>
+                        <div style="font-size:12px;">${r.attachment_names || '（无）'}</div>
+                        <div style="font-size:11px; color:#92400e; margin-top:2px;">线下份数：${r.offline_attachment_count || 0}</div>
+                      </td>
+                      <td>
+                        ${rec ? html`
+                          <span class="status-tag" style="background:${rec.is_consistent ? '#d1fae5; color:#065f46;' : '#fee2e2; color:#991b1b;'}">
+                            ${rec.is_consistent ? '✓ 一致' : '✗ 差异'}
+                          </span>
+                        ` : html`<span style="color:#9ca3af;">-</span>`}
+                      </td>
+                    </tr>
+                  `
+                })}
               </tbody>
             </table>
           </div>
@@ -399,6 +442,34 @@ export class BatchList extends LitElement {
       hour: '2-digit',
       minute: '2-digit',
     })
+  }
+
+  _renderReconcile(rec) {
+    if (!rec) return ''
+    return html`
+      <div style="background:#fafafa; border:1px solid #e5e7eb; border-radius:6px; padding:12px 16px;">
+        <div style="font-size:13px; font-weight:600; color:${rec.is_consistent ? '#065f46' : (rec.is_blocked ? '#991b1b' : '#92400e')}; margin-bottom:8px;">
+          ${rec.is_consistent ? '✓ 线上线下一致' : (rec.is_blocked ? '🚫 核对阻断' : '⚠️ 存在差异')}
+          - ${rec.message}
+        </div>
+        <div class="reconcile-summary">
+          <div class="summary-card"><div class="label">线上数量</div><div class="value">${rec.total_online}</div></div>
+          <div class="summary-card"><div class="label">线下数量</div><div class="value">${rec.total_offline}</div></div>
+          <div class="summary-card ${rec.diff_count === 0 ? 'ok' : 'diff'}"><div class="label">差异项</div><div class="value">${rec.diff_count}</div></div>
+          <div class="summary-card ${rec.is_consistent ? 'ok' : 'diff'}"><div class="label">核对</div><div class="value">${rec.is_consistent ? '通过' : '未通过'}</div></div>
+        </div>
+        ${rec.diffs?.length ? html`
+          <div>
+            ${rec.diffs.map(d => html`
+              <div class="diff-box">
+                <div class="d-title">${d.field} - ${d.message || ''}</div>
+                ${d.online_value !== undefined ? html`<div class="d-row"><span class="online">线上：${Array.isArray(d.online_value) ? d.online_value.map(s => statusMap[s] || s).join('、') : (d.online_value ?? '-')}</span><span class="offline">线下：${d.offline_value ?? '-'}</span></div>` : ''}
+              </div>
+            `)}
+          </div>
+        ` : ''}
+      </div>
+    `
   }
 }
 

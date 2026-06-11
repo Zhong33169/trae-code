@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from datetime import datetime
 
 
@@ -27,10 +27,14 @@ class MeetingReservationBase(BaseModel):
     equipment: Optional[str] = None
     attachment_names: Optional[str] = None
     offline_attachment_count: int = 0
+    offline_count: int = 1
+    offline_status: Optional[str] = None
+    offline_attachment_list: Optional[str] = None
 
 
 class MeetingReservationCreate(MeetingReservationBase):
     batch_no: str
+    force_submit: bool = False
 
 
 class MeetingReservationUpdate(BaseModel):
@@ -47,6 +51,9 @@ class MeetingReservationUpdate(BaseModel):
     attachment_names: Optional[str] = None
     offline_attachment_count: Optional[int] = None
     audit_remark: Optional[str] = None
+    offline_count: Optional[int] = None
+    offline_status: Optional[str] = None
+    offline_attachment_list: Optional[str] = None
 
 
 class MeetingReservationOut(MeetingReservationBase):
@@ -63,6 +70,10 @@ class MeetingReservationOut(MeetingReservationBase):
     usage_confirm_user: Optional[str] = None
     return_reason: Optional[str] = None
     audit_remark: Optional[str] = None
+    offline_check_diff: Optional[Dict[str, Any]] = None
+    offline_checked: bool = False
+    offline_checked_at: Optional[datetime] = None
+    offline_checked_by: Optional[str] = None
     created_by: Optional[str] = None
     created_at: datetime
     updated_by: Optional[str] = None
@@ -86,12 +97,30 @@ class MeetingReservationListOut(BaseModel):
 class AuditLogOut(BaseModel):
     id: int
     reservation_id: Optional[int] = None
+    batch_no: Optional[str] = None
     action: str
     status_from: Optional[str] = None
     status_to: Optional[str] = None
     operator: Optional[str] = None
     operator_role: Optional[str] = None
     remark: Optional[str] = None
+    item_results: Optional[List[Dict[str, Any]]] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class BlockLogOut(BaseModel):
+    id: int
+    reservation_id: Optional[int] = None
+    batch_no: Optional[str] = None
+    block_type: str
+    reason: str
+    detail: Optional[Dict[str, Any]] = None
+    operator: Optional[str] = None
+    operator_role: Optional[str] = None
+    item_results: Optional[List[Dict[str, Any]]] = None
     created_at: datetime
 
     class Config:
@@ -112,13 +141,34 @@ class StatusUpdate(BaseModel):
 class BatchCheckResult(BaseModel):
     batch_no: str
     is_duplicate: bool
+    is_blocked: bool = False
     message: str
     existing_count: int = 0
+    statuses: List[str] = []
+    diff_details: Optional[List[Dict[str, Any]]] = None
 
 
-class BatchImportResult(BaseModel):
+class OfflineReconcileRequest(BaseModel):
     batch_no: str
-    total: int
-    success: int
-    failed: int
-    failed_details: List[dict] = []
+    offline_count: int = 0
+    offline_statuses: List[Dict[str, Any]] = []
+    offline_attachments: List[Dict[str, Any]] = []
+
+
+class DiffItem(BaseModel):
+    field: str
+    online_value: Optional[Any] = None
+    offline_value: Optional[Any] = None
+    status: str
+
+
+class BatchReconcileResult(BaseModel):
+    batch_no: str
+    is_consistent: bool = False
+    is_blocked: bool = False
+    message: str
+    total_online: int = 0
+    total_offline: int = 0
+    diff_count: int = 0
+    diffs: List[DiffItem] = []
+    item_results: List[Dict[str, Any]] = []

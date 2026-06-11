@@ -2,7 +2,7 @@ from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 
 from .database import SessionLocal, engine, Base
-from .models import User, MeetingReservation, AuditLog, BatchRecord
+from .models import User, MeetingReservation, AuditLog, BatchRecord, BlockLog
 
 
 USERS = [
@@ -55,6 +55,13 @@ def _seed_reservations(db: Session):
         equipment_ready=True,
         attachment_names="会议议程.pdf,参会名单.xlsx",
         offline_attachment_count=2,
+        offline_count=1,
+        offline_status="archived",
+        offline_attachment_list=["会议议程.pdf", "参会名单.xlsx"],
+        offline_checked=True,
+        offline_checked_at=now - timedelta(days=11),
+        offline_checked_by="张登记",
+        offline_check_diff={"is_consistent": True, "diff_count": 0, "diffs": []},
         status="archived",
         result="会议顺利召开，设备运行正常",
         usage_confirm=True,
@@ -89,6 +96,13 @@ def _seed_reservations(db: Session):
         equipment_ready=False,
         attachment_names="需求文档.pdf",
         offline_attachment_count=1,
+        offline_count=1,
+        offline_status="pending_audit",
+        offline_attachment_list=["需求文档.pdf"],
+        offline_checked=True,
+        offline_checked_at=now - timedelta(days=1),
+        offline_checked_by="张登记",
+        offline_check_diff={"is_consistent": True, "diff_count": 0, "diffs": []},
         status="pending_audit",
         created_by="张登记",
         created_at=now - timedelta(days=2),
@@ -113,7 +127,17 @@ def _seed_reservations(db: Session):
         equipment="投影仪、音响、麦克风",
         equipment_ready=False,
         attachment_names="",
-        offline_attachment_count=0,
+        offline_attachment_count=2,
+        offline_count=1,
+        offline_status="returned",
+        offline_attachment_list=["培训议程.pdf", "参训名单.xlsx"],
+        offline_checked=True,
+        offline_checked_at=now - timedelta(days=1),
+        offline_checked_by="李审核",
+        offline_check_diff={
+            "is_consistent": False, "diff_count": 1,
+            "diffs": [{"field": "附件", "message": "附件数量不一致", "online_value": 0, "offline_value": 2}]
+        },
         status="returned",
         exception_type="missing_materials",
         exception_desc="缺少培训议程、参训人员名单等必要材料",
@@ -129,6 +153,15 @@ def _seed_reservations(db: Session):
     _add_audit_log(db, missing_materials.id, "submit", "draft", "pending_audit", "张登记", "registrar", "提交审核")
     _add_audit_log(db, missing_materials.id, "return", "pending_audit", "returned", "李审核", "auditor",
                     "缺少会议议程和参训人员名单，请补充后重新提交")
+    _add_block_log(
+        db, missing_materials.id, "BATCH-20260611-01", "missing_fields",
+        "缺少会议议程和参训人员名单等必要材料，请补正后重新提交",
+        {"diffs": [{"field": "附件", "message": "线上附件0份，线下台账登记2份", "online_value": 0, "offline_value": 2}]},
+        "李审核", "auditor",
+        [{"reservation_no": "MR-20260611-003", "is_consistent": False,
+          "attachment_diffs": [{"field": "附件", "message": "数量不一致", "online_value": 0, "offline_value": 2}],
+          "status_diffs": []}]
+    )
 
     overdue = MeetingReservation(
         reservation_no="MR-20260520-004",
@@ -146,6 +179,16 @@ def _seed_reservations(db: Session):
         equipment_ready=True,
         attachment_names="经营分析报告.pdf",
         offline_attachment_count=1,
+        offline_count=1,
+        offline_status="archived",
+        offline_attachment_list=["经营分析报告.pdf", "财务数据报表.xlsx"],
+        offline_checked=True,
+        offline_checked_at=now - timedelta(days=5),
+        offline_checked_by="张登记",
+        offline_check_diff={
+            "is_consistent": False, "diff_count": 1,
+            "diffs": [{"field": "附件", "message": "线下多出财务报表", "online_value": 1, "offline_value": 2}]
+        },
         status="overdue",
         exception_type="overdue",
         exception_desc="会议已结束但未进行使用确认，超时未归档",
@@ -176,6 +219,19 @@ def _seed_reservations(db: Session):
         equipment_ready=False,
         attachment_names="供应商名单.xlsx",
         offline_attachment_count=2,
+        offline_count=1,
+        offline_status="approved",
+        offline_attachment_list=["供应商名单.xlsx", "报价单.pdf"],
+        offline_checked=True,
+        offline_checked_at=now - timedelta(days=3),
+        offline_checked_by="李审核",
+        offline_check_diff={
+            "is_consistent": False, "diff_count": 2,
+            "diffs": [
+                {"field": "状态", "message": "线下台账登记审核通过，实际系统被退回", "online_value": "returned", "offline_value": "approved"},
+                {"field": "附件", "message": "线下多出报价单", "online_value": 1, "offline_value": 2}
+            ]
+        },
         status="returned",
         exception_type="info_error",
         exception_desc="会议时间与4楼VIP会议室已有预约冲突",
@@ -192,6 +248,17 @@ def _seed_reservations(db: Session):
     _add_audit_log(db, returned.id, "submit", "draft", "pending_audit", "张登记", "registrar", "提交审核")
     _add_audit_log(db, returned.id, "return", "pending_audit", "returned", "李审核", "auditor",
                     "会议室时间冲突，请调整后重新提交")
+    _add_block_log(
+        db, returned.id, "BATCH-20260605-01", "status_mismatch",
+        "会议室预约时间冲突，线下登记已审核通过，但系统实际已退回。请核对台账后重新录入。",
+        {"diffs": [
+            {"field": "状态", "message": "线上为退回，线下为审核通过", "online_value": "returned", "offline_value": "approved"}
+        ]},
+        "李审核", "auditor",
+        [{"reservation_no": "MR-20260605-005", "is_consistent": False,
+          "status_diffs": [{"field": "状态", "message": "不一致", "online_value": "returned", "offline_value": "approved"}],
+          "attachment_diffs": [{"field": "附件", "message": "数量不一致", "online_value": 1, "offline_value": 2}]}]
+    )
 
     approved = MeetingReservation(
         reservation_no="MR-20260608-006",
@@ -209,6 +276,13 @@ def _seed_reservations(db: Session):
         equipment_ready=True,
         attachment_names="架构方案.pdf,技术选型报告.docx",
         offline_attachment_count=2,
+        offline_count=1,
+        offline_status="approved",
+        offline_attachment_list=["架构方案.pdf", "技术选型报告.docx"],
+        offline_checked=True,
+        offline_checked_at=now - timedelta(days=2),
+        offline_checked_by="张登记",
+        offline_check_diff={"is_consistent": True, "diff_count": 0, "diffs": []},
         status="approved",
         result="",
         created_by="张登记",
@@ -238,6 +312,13 @@ def _seed_reservations(db: Session):
         equipment_ready=True,
         attachment_names="安全报告.pdf,应急预案.docx",
         offline_attachment_count=3,
+        offline_count=1,
+        offline_status="usage_confirmed",
+        offline_attachment_list=["安全报告.pdf", "应急预案.docx", "签到表.pdf"],
+        offline_checked=True,
+        offline_checked_at=now - timedelta(days=2),
+        offline_checked_by="张登记",
+        offline_check_diff={"is_consistent": True, "diff_count": 0, "diffs": []},
         status="usage_confirmed",
         result="会议圆满召开，全员参与安全培训，现场演练效果良好",
         usage_confirm=True,
@@ -271,6 +352,10 @@ def _seed_reservations(db: Session):
         equipment_ready=False,
         attachment_names="",
         offline_attachment_count=0,
+        offline_count=0,
+        offline_status=None,
+        offline_attachment_list=[],
+        offline_checked=False,
         status="draft",
         created_by="张登记",
         created_at=now - timedelta(hours=2),
@@ -293,6 +378,16 @@ def _seed_reservations(db: Session):
         equipment_ready=False,
         attachment_names="",
         offline_attachment_count=0,
+        offline_count=1,
+        offline_status="approved",
+        offline_attachment_list=[],
+        offline_checked=True,
+        offline_checked_at=now - timedelta(days=1),
+        offline_checked_by="张登记",
+        offline_check_diff={
+            "is_consistent": False, "diff_count": 1,
+            "diffs": [{"field": "状态", "message": "批次内状态不一致", "online_value": "draft", "offline_value": "approved"}]
+        },
         status="draft",
         created_by="张登记",
         created_at=now - timedelta(days=1),
@@ -315,49 +410,139 @@ def _seed_reservations(db: Session):
         equipment_ready=False,
         attachment_names="",
         offline_attachment_count=0,
+        offline_count=1,
+        offline_status="archived",
+        offline_attachment_list=[],
+        offline_checked=True,
+        offline_checked_at=now - timedelta(days=1),
+        offline_checked_by="张登记",
+        offline_check_diff={
+            "is_consistent": False, "diff_count": 1,
+            "diffs": [{"field": "状态", "message": "批次内状态不一致", "online_value": "draft", "offline_value": "archived"}]
+        },
         status="draft",
         created_by="张登记",
         created_at=now - timedelta(days=1),
     )
     db.add(duplicate_batch_2)
+    db.flush()
+
+    _add_block_log(
+        db, duplicate_batch_1.id, "BATCH-DUP-001", "duplicate_batch",
+        "批次号 BATCH-DUP-001 内存在状态不一致的预约单（MR-20260609-009 线下状态审核通过，MR-20260609-010 线下状态已归档）。请核对确认后或勾选强制提交继续。",
+        {"diffs": [
+            {"field": "批次号", "message": "重复批次号 BATCH-DUP-001", "online_value": 2, "offline_value": 2},
+            {"field": "数量", "message": "线上2单 vs 线下2单，数量一致", "online_value": 2, "offline_value": 2},
+            {"field": "状态", "message": "批次内状态不一致：线下登记审核通过/已归档，线上均为草稿",
+             "online_value": ["draft", "draft"], "offline_value": ["approved", "archived"]}
+        ]},
+        "张登记", "registrar",
+        [
+            {"reservation_no": "MR-20260609-009", "is_consistent": False,
+             "status_diffs": [{"field": "状态", "message": "不一致", "online_value": "draft", "offline_value": "approved"}],
+             "attachment_diffs": []},
+            {"reservation_no": "MR-20260609-010", "is_consistent": False,
+             "status_diffs": [{"field": "状态", "message": "不一致", "online_value": "draft", "offline_value": "archived"}],
+             "attachment_diffs": []}
+        ]
+    )
 
     batch1 = BatchRecord(
         batch_no="BATCH-20260601-01",
         total_count=1,
         processed_count=1,
+        offline_count=1,
+        check_status="checked",
         status="completed",
         created_by="张登记",
         created_at=now - timedelta(days=15),
+        checked_at=now - timedelta(days=11),
+        checked_by="张登记",
+        check_diff={"is_consistent": True, "diff_count": 0, "diffs": []},
     )
     batch2 = BatchRecord(
         batch_no="BATCH-20260610-01",
         total_count=1,
         processed_count=1,
+        offline_count=1,
+        check_status="checked",
         status="processing",
         created_by="张登记",
         created_at=now - timedelta(days=2),
+        checked_at=now - timedelta(days=1),
+        checked_by="张登记",
+        check_diff={"is_consistent": True, "diff_count": 0, "diffs": []},
     )
     batch3 = BatchRecord(
         batch_no="BATCH-20260611-01",
         total_count=1,
         processed_count=1,
+        offline_count=1,
+        check_status="has_diff",
         status="returned",
         created_by="张登记",
         created_at=now - timedelta(days=3),
+        checked_at=now - timedelta(days=1),
+        checked_by="李审核",
+        check_diff={
+            "is_consistent": False, "diff_count": 1,
+            "diffs": [{"field": "附件", "message": "附件数量不一致", "online_value": 0, "offline_value": 2}]
+        },
     )
     batch_dup = BatchRecord(
         batch_no="BATCH-DUP-001",
         total_count=2,
         processed_count=0,
+        offline_count=2,
+        check_status="blocked",
         status="processing",
         created_by="张登记",
         created_at=now - timedelta(days=1),
+        checked_at=now - timedelta(days=1),
+        checked_by="张登记",
         remark="该批次存在线下线上状态不一致，已暂停处理",
+        check_diff={
+            "is_consistent": False, "diff_count": 1,
+            "diffs": [{"field": "状态", "message": "批次内状态不一致",
+                        "online_value": ["draft", "draft"], "offline_value": ["approved", "archived"]}]
+        },
     )
-    db.add_all([batch1, batch2, batch3, batch_dup])
+    batch5 = BatchRecord(
+        batch_no="BATCH-20260605-01",
+        total_count=1,
+        processed_count=1,
+        offline_count=1,
+        check_status="has_diff",
+        status="returned",
+        created_by="张登记",
+        created_at=now - timedelta(days=5),
+        checked_at=now - timedelta(days=3),
+        checked_by="李审核",
+        check_diff={
+            "is_consistent": False, "diff_count": 2,
+            "diffs": [
+                {"field": "状态", "message": "线上为退回，线下为审核通过", "online_value": "returned", "offline_value": "approved"},
+                {"field": "附件", "message": "线下多出报价单", "online_value": 1, "offline_value": 2}
+            ]
+        },
+    )
+    batch6 = BatchRecord(
+        batch_no="BATCH-20260603-01",
+        total_count=1,
+        processed_count=1,
+        offline_count=1,
+        check_status="checked",
+        status="processing",
+        created_by="张登记",
+        created_at=now - timedelta(days=10),
+        checked_at=now - timedelta(days=2),
+        checked_by="张登记",
+        check_diff={"is_consistent": True, "diff_count": 0, "diffs": []},
+    )
+    db.add_all([batch1, batch2, batch3, batch_dup, batch5, batch6])
 
 
-def _add_audit_log(db, reservation_id, action, status_from, status_to, operator, operator_role, remark=None):
+def _add_audit_log(db, reservation_id, action, status_from, status_to, operator, operator_role, remark=None, batch_no=None, item_results=None):
     log = AuditLog(
         reservation_id=reservation_id,
         action=action,
@@ -366,6 +551,22 @@ def _add_audit_log(db, reservation_id, action, status_from, status_to, operator,
         operator=operator,
         operator_role=operator_role,
         remark=remark,
+        batch_no=batch_no,
+        item_results=item_results,
+    )
+    db.add(log)
+
+
+def _add_block_log(db, reservation_id, batch_no, block_type, reason, detail, operator, operator_role, item_results=None):
+    log = BlockLog(
+        reservation_id=reservation_id,
+        batch_no=batch_no,
+        block_type=block_type,
+        reason=reason,
+        detail=detail,
+        operator=operator,
+        operator_role=operator_role,
+        item_results=item_results,
     )
     db.add(log)
 
