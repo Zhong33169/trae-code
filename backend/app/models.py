@@ -191,6 +191,7 @@ class SalesContract(BaseModel):
         action: str,
         new_status: ContractStatus,
         comment: Optional[str] = None,
+        previous_status: Optional[ContractStatus] = None,
     ) -> None:
         record = AuditRecord(
             contract_id=self.id,
@@ -198,7 +199,7 @@ class SalesContract(BaseModel):
             operator=operator,
             action=action,
             comment=comment,
-            previous_status=self.status,
+            previous_status=previous_status if previous_status is not None else self.status,
             new_status=new_status,
         )
         self.audit_records.append(record)

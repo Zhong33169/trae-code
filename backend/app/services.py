@@ -219,6 +219,7 @@ def submit_to_audit(
     if errors:
         raise ValidationError("提交前请补充以下内容：\n" + "\n".join(errors))
 
+    _prev_status = contract.status
     contract.status = ContractStatus.PENDING_AUDIT
     contract.current_handler_role = Role.AUDITOR
     contract.current_deadline = datetime.now() + timedelta(hours=deadline_hours)
@@ -230,6 +231,7 @@ def submit_to_audit(
         "提交审核",
         ContractStatus.PENDING_AUDIT,
         f"处理时限 {deadline_hours} 小时",
+        previous_status=_prev_status,
     )
     store.update(contract)
     return get_contract_detail(contract_id)
@@ -286,6 +288,7 @@ def audit_pass(
             f"签署日期:{cc.signing_date.strftime('%Y-%m-%d') if cc.signing_date else '未填'}]"
         )
 
+    _prev_status = contract.status
     contract.auditor_comment = comment
     contract.status = ContractStatus.PENDING_REVIEW
     contract.current_handler_role = Role.REVIEWER
@@ -302,6 +305,7 @@ def audit_pass(
         "审核通过，提交复核",
         ContractStatus.PENDING_REVIEW,
         audit_comment,
+        previous_status=_prev_status,
     )
     store.update(contract)
     return get_contract_detail(contract_id)
@@ -325,6 +329,7 @@ def audit_reject(
     if not comment or len(comment.strip()) < 5:
         raise ValidationError("请填写详细的补正意见（至少5个字符）")
 
+    _prev_status = contract.status
     contract.auditor_comment = comment
     contract.status = ContractStatus.NEEDS_CORRECTION
     contract.current_handler_role = Role.REGISTRAR
@@ -337,6 +342,7 @@ def audit_reject(
         "审核退回，需要补正",
         ContractStatus.NEEDS_CORRECTION,
         comment,
+        previous_status=_prev_status,
     )
     store.update(contract)
     return get_contract_detail(contract_id)
@@ -363,6 +369,7 @@ def review_pass(
     if errors:
         raise ValidationError("归档前请确认以下内容：\n" + "\n".join(errors))
 
+    _prev_status = contract.status
     contract.reviewer_comment = comment
     contract.status = ContractStatus.ARCHIVED
     contract.current_handler_role = None
@@ -375,6 +382,7 @@ def review_pass(
         "复核通过，合同归档",
         ContractStatus.ARCHIVED,
         comment,
+        previous_status=_prev_status,
     )
     store.update(contract)
     return get_contract_detail(contract_id)
@@ -398,6 +406,7 @@ def review_reject(
     if not comment or len(comment.strip()) < 5:
         raise ValidationError("请填写详细的驳回意见（至少5个字符）")
 
+    _prev_status = contract.status
     contract.reviewer_comment = comment
     contract.status = ContractStatus.REVIEW_REJECTED
     contract.current_handler_role = Role.AUDITOR
@@ -410,6 +419,7 @@ def review_reject(
         "复核驳回",
         ContractStatus.REVIEW_REJECTED,
         comment,
+        previous_status=_prev_status,
     )
     store.update(contract)
     return get_contract_detail(contract_id)

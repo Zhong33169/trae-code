@@ -120,7 +120,7 @@ def seed_demo_data() -> None:
         "quotation_valid_until": now + timedelta(days=30),
     }
     c1.materials = make_materials()
-    c1.add_audit_record(Role.REGISTRAR, "登记员张三", "提交审核", ContractStatus.PENDING_AUDIT, "材料齐全，请审核")
+    c1.add_audit_record(Role.REGISTRAR, "登记员张三", "提交审核", ContractStatus.PENDING_AUDIT, "材料齐全，请审核", previous_status=ContractStatus.DRAFT)
     store.add(c1)
 
     c2 = SalesContract(
@@ -148,8 +148,8 @@ def seed_demo_data() -> None:
         "quotation_valid_until": now + timedelta(days=15),
     }
     c2.materials = make_materials()
-    c2.add_audit_record(Role.REGISTRAR, "登记员张三", "提交审核", ContractStatus.PENDING_AUDIT)
-    c2.add_audit_record(Role.AUDITOR, "审核主管李四", "退回补正", ContractStatus.NEEDS_CORRECTION, c2.auditor_comment)
+    c2.add_audit_record(Role.REGISTRAR, "登记员张三", "提交审核", ContractStatus.PENDING_AUDIT, previous_status=ContractStatus.DRAFT)
+    c2.add_audit_record(Role.AUDITOR, "审核主管李四", "审核退回，需要补正", ContractStatus.NEEDS_CORRECTION, c2.auditor_comment, previous_status=ContractStatus.PENDING_AUDIT)
     store.add(c2)
 
     c3 = SalesContract(
@@ -193,8 +193,8 @@ def seed_demo_data() -> None:
             note="双方签字盖章齐全",
         )
     ]
-    c3.add_audit_record(Role.REGISTRAR, "登记员张三", "提交审核", ContractStatus.PENDING_AUDIT)
-    c3.add_audit_record(Role.AUDITOR, "审核主管李四", "审核通过", ContractStatus.PENDING_REVIEW, "材料完整，报价合理")
+    c3.add_audit_record(Role.REGISTRAR, "登记员张三", "提交审核", ContractStatus.PENDING_AUDIT, previous_status=ContractStatus.DRAFT)
+    c3.add_audit_record(Role.AUDITOR, "审核主管李四", "审核通过，提交复核", ContractStatus.PENDING_REVIEW, "材料完整，报价合理，合同确认信息齐全", previous_status=ContractStatus.PENDING_AUDIT)
     store.add(c3)
 
     c4 = SalesContract(
@@ -253,9 +253,9 @@ def seed_demo_data() -> None:
         )
     ]
     c5.reviewer_comment = "合同执行完毕，正常归档"
-    c5.add_audit_record(Role.REGISTRAR, "登记员张三", "提交审核", ContractStatus.PENDING_AUDIT)
-    c5.add_audit_record(Role.AUDITOR, "审核主管李四", "审核通过", ContractStatus.PENDING_REVIEW)
-    c5.add_audit_record(Role.REVIEWER, "复核负责人王五", "复核归档", ContractStatus.ARCHIVED, "复核通过")
+    c5.add_audit_record(Role.REGISTRAR, "登记员张三", "提交审核", ContractStatus.PENDING_AUDIT, previous_status=ContractStatus.DRAFT)
+    c5.add_audit_record(Role.AUDITOR, "审核主管李四", "审核通过，提交复核", ContractStatus.PENDING_REVIEW, "材料齐全，报价与确认信息一致", previous_status=ContractStatus.PENDING_AUDIT)
+    c5.add_audit_record(Role.REVIEWER, "复核负责人王五", "复核通过，合同归档", ContractStatus.ARCHIVED, c5.reviewer_comment, previous_status=ContractStatus.PENDING_REVIEW)
     store.add(c5)
 
     c6 = SalesContract(
@@ -297,9 +297,9 @@ def seed_demo_data() -> None:
             uploaded_by="审核主管李四",
         )
     ]
-    c6.add_audit_record(Role.REGISTRAR, "登记员张三", "提交审核", ContractStatus.PENDING_AUDIT)
-    c6.add_audit_record(Role.AUDITOR, "审核主管李四", "审核通过", ContractStatus.PENDING_REVIEW)
-    c6.add_audit_record(Role.REVIEWER, "复核负责人王五", "复核驳回", ContractStatus.REVIEW_REJECTED, c6.reviewer_comment)
+    c6.add_audit_record(Role.REGISTRAR, "登记员张三", "提交审核", ContractStatus.PENDING_AUDIT, previous_status=ContractStatus.DRAFT)
+    c6.add_audit_record(Role.AUDITOR, "审核主管李四", "审核通过，提交复核", ContractStatus.PENDING_REVIEW, "初步审核通过，材料基本齐全", previous_status=ContractStatus.PENDING_AUDIT)
+    c6.add_audit_record(Role.REVIEWER, "复核负责人王五", "复核驳回", ContractStatus.REVIEW_REJECTED, c6.reviewer_comment, previous_status=ContractStatus.PENDING_REVIEW)
     store.add(c6)
 
     c7 = SalesContract(
@@ -326,7 +326,7 @@ def seed_demo_data() -> None:
         "quotation_valid_until": now + timedelta(days=25),
     }
     c7.materials = make_materials()
-    c7.add_audit_record(Role.REGISTRAR, "登记员张三", "提交审核", ContractStatus.PENDING_AUDIT, "大型客户，报价含阶梯优惠")
+    c7.add_audit_record(Role.REGISTRAR, "登记员张三", "提交审核", ContractStatus.PENDING_AUDIT, "大型客户，报价含阶梯优惠", previous_status=ContractStatus.DRAFT)
     store.add(c7)
 
     c8 = SalesContract(
@@ -371,9 +371,10 @@ def seed_demo_data() -> None:
         )
     ]
     c8.auditor_comment = "审核通过：电价和期限与报价一致，材料齐全，提交复核"
-    c8.add_audit_record(Role.REGISTRAR, "登记员张三", "提交审核", ContractStatus.PENDING_AUDIT, "请审核")
+    c8.add_audit_record(Role.REGISTRAR, "登记员张三", "提交审核", ContractStatus.PENDING_AUDIT, "请审核", previous_status=ContractStatus.DRAFT)
     c8.add_audit_record(
         Role.AUDITOR, "审核主管李四", "审核通过，提交复核", ContractStatus.PENDING_REVIEW,
-        "审核通过：电价和期限与报价一致，材料齐全，提交复核\n合同确认信息快照: [确认电价:0.61元/kWh, 确认期限:24月, 结算方式:按月结算，次月15日前付款, 违约条款:逾期付款按日万分之五收取违约金；用电方提前解约需支付剩余电量5%补偿金, 签署日期:" + (now - timedelta(hours=6)).strftime("%Y-%m-%d") + "]"
+        "审核通过：电价和期限与报价一致，材料齐全，提交复核\n合同确认信息快照: [确认电价:0.61元/kWh, 确认期限:24月, 结算方式:按月结算，次月15日前付款, 违约条款:逾期付款按日万分之五收取违约金；用电方提前解约需支付剩余电量5%补偿金, 签署日期:" + (now - timedelta(hours=6)).strftime("%Y-%m-%d") + "]",
+        previous_status=ContractStatus.PENDING_AUDIT,
     )
     store.add(c8)
