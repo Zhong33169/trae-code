@@ -34,7 +34,8 @@ import {
   type BlockCode,
   type ActionTarget,
   type ActionPayload,
-  type Role,
+  normalizeBlockAttempt,
+  normalizeBatchFailure,
 } from "@/lib/api";
 
 const ROLE_CONFIG = {
@@ -80,15 +81,6 @@ const ACTION_BUTTON_CONFIG: Record<ActionTarget, { label: string; icon: any; var
   no_action: { label: "无法处理", icon: Ban, variant: "gray" },
 };
 
-function parseActionPayload(payload: string | null): ActionPayload {
-  if (!payload) return {};
-  try {
-    return JSON.parse(payload);
-  } catch {
-    return {};
-  }
-}
-
 const STAGE_LABELS: Record<string, string> = {
   registration: "登记证据",
   verification: "核验证据",
@@ -130,9 +122,10 @@ function BlockHintCard({
   compact?: boolean
   onAction?: (actionTarget: ActionTarget, payload: ActionPayload) => void
 }) {
-  const actionCfg = ACTION_BUTTON_CONFIG[block.action_target] || ACTION_BUTTON_CONFIG.no_action
+  const b = normalizeBlockAttempt(block)
+  const actionCfg = ACTION_BUTTON_CONFIG[b.action_target] || ACTION_BUTTON_CONFIG.no_action
   const ActionIcon = actionCfg.icon
-  const payload = parseActionPayload(block.action_payload)
+  const payload = b.parsedActionPayload
 
   const variantClasses: Record<string, string> = {
     navy: "bg-navy-700 hover:bg-navy-800 text-white",
@@ -146,9 +139,9 @@ function BlockHintCard({
   }
 
   const statusBadge =
-    block.resolve_status === "resolved"
+    b.resolve_status === "resolved"
       ? { label: "已处理", cls: "bg-green-100 text-green-700" }
-      : block.resolve_status === "ignored"
+      : b.resolve_status === "ignored"
       ? { label: "已忽略", cls: "bg-gray-100 text-gray-600" }
       : { label: "待处理", cls: "bg-amber-100 text-amber-700" }
 
@@ -159,20 +152,20 @@ function BlockHintCard({
           <AlertCircle className="w-3.5 h-3.5 text-amber-600 mt-0.5 shrink-0" />
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-1.5 flex-wrap">
-              <BlockCodeBadge code={block.code} />
-              <span className="text-[10px] text-gray-400">v{block.current_version}</span>
+              <BlockCodeBadge code={b.code} />
+              <span className="text-[10px] text-gray-400">v{b.current_version}</span>
               <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${statusBadge.cls}`}>
                 {statusBadge.label}
               </span>
             </div>
-            <p className="text-[11px] text-amber-900 mt-0.5 truncate">{block.reason}</p>
+            <p className="text-[11px] text-amber-900 mt-0.5 truncate">{b.reason}</p>
           </div>
         </div>
-        {block.action_target !== "no_action" && block.resolve_status === "pending" && onAction && (
+        {b.action_target !== "no_action" && b.resolve_status === "pending" && onAction && (
           <button
             onClick={(e) => {
               e.stopPropagation()
-              onAction(block.action_target, payload)
+              onAction(b.action_target, payload)
             }}
             className={`mt-1.5 w-full flex items-center justify-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-colors ${variantClasses[actionCfg.variant]}`}
           >
@@ -188,23 +181,23 @@ function BlockHintCard({
       <AlertCircle className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 mb-1 flex-wrap">
-          <BlockCodeBadge code={block.code} />
-          <span className="text-xs text-gray-500">当前版本 v{block.current_version}</span>
-          {block.submitted_version !== null && block.submitted_version !== block.current_version && (
-            <span className="text-[10px] text-rose-600">(提交 v{block.submitted_version})</span>
+          <BlockCodeBadge code={b.code} />
+          <span className="text-xs text-gray-500">当前版本 v{b.current_version}</span>
+          {b.submitted_version !== null && b.submitted_version !== b.current_version && (
+            <span className="text-[10px] text-rose-600">(提交 v{b.submitted_version})</span>
           )}
           <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${statusBadge.cls}`}>
             {statusBadge.label}
           </span>
         </div>
-        <p className="text-sm text-amber-900 font-medium">{block.reason}</p>
+        <p className="text-sm text-amber-900 font-medium">{b.reason}</p>
         <p className="text-xs text-amber-700 mt-1 flex items-center gap-1">
           <ArrowRight className="w-3 h-3" />
-          {block.action_hint}
+          {b.action_hint}
         </p>
-        {block.action_target !== "no_action" && block.resolve_status === "pending" && onAction && (
+        {b.action_target !== "no_action" && b.resolve_status === "pending" && onAction && (
           <button
-            onClick={() => onAction(block.action_target, payload)}
+            onClick={() => onAction(b.action_target, payload)}
             className={`mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${variantClasses[actionCfg.variant]}`}
           >
             <ActionIcon className="w-3.5 h-3.5" />
@@ -653,7 +646,8 @@ export default function HomePage() {
                 成功 <span className="font-semibold text-green-600">{batchFailDetail.successes.length}</span> 条，
                 失败 <span className="font-semibold text-red-600">{batchFailDetail.failures.length}</span> 条
               </div>
-              {batchFailDetail.failures.map((f) => {
+              {batchFailDetail.failures.map((rawF) => {
+                const f = normalizeBatchFailure(rawF)
                 const actionCfg = ACTION_BUTTON_CONFIG[f.actionTarget] || ACTION_BUTTON_CONFIG.no_action
                 const ActionIcon = actionCfg.icon
                 const variantClasses: Record<string, string> = {
@@ -687,7 +681,7 @@ export default function HomePage() {
                       <button
                         onClick={() => {
                           setBatchFailDetail(null)
-                          handleBlockAction(f.actionTarget, f.actionPayload)
+                          handleBlockAction(f.actionTarget, f.actionPayload || {})
                         }}
                         className={`mt-2 w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${variantClasses[actionCfg.variant]}`}
                       >

@@ -22,14 +22,65 @@ export interface BlockAttempt {
   code: BlockCode
   reason: string
   action_hint: string
-  action_target: ActionTarget
-  action_payload: string | null
+  action_target?: ActionTarget
+  action_payload?: string | null
   submitted_version: number | null
   current_version: number
-  resolve_status: ResolveStatus
-  resolve_remark: string | null
-  resolved_at: string | null
+  resolve_status?: ResolveStatus
+  resolve_remark?: string | null
+  resolved_at?: string | null
   created_at: string
+}
+
+const BLOCK_DEFAULT_ACTION_TARGET: Record<BlockCode, ActionTarget> = {
+  wrong_role: 'switch_role',
+  wrong_status: 'goto_detail',
+  missing_evidence: 'add_evidence',
+  version_conflict: 'refresh_version',
+  duplicate_supplement: 'continue_verify',
+  archived: 'no_action',
+  not_found: 'no_action',
+  unknown: 'no_action',
+}
+
+export function parseActionPayloadJSON(payload: string | null | undefined): ActionPayload {
+  if (!payload) return {}
+  try {
+    return JSON.parse(payload)
+  } catch {
+    return {}
+  }
+}
+
+export function normalizeBlockAttempt(b: BlockAttempt): BlockAttempt & {
+  action_target: ActionTarget
+  resolve_status: ResolveStatus
+  parsedActionPayload: ActionPayload
+} {
+  const code = b.code || 'unknown'
+  const actionTarget = b.action_target || BLOCK_DEFAULT_ACTION_TARGET[code] || 'goto_detail'
+  const parsedPayload = parseActionPayloadJSON(b.action_payload)
+  if (!parsedPayload.orderId && b.order_id) parsedPayload.orderId = b.order_id
+  if (actionTarget === 'switch_role' && !parsedPayload.targetRole) {
+    if (b.action_attempted === 'supplement') parsedPayload.targetRole = 'receptionist'
+    else if (b.action_attempted === 'verify') parsedPayload.targetRole = 'room_supervisor'
+    else if (b.action_attempted === 'review') parsedPayload.targetRole = 'duty_manager'
+  }
+  if (actionTarget === 'add_evidence' && !parsedPayload.scrollTo) parsedPayload.scrollTo = 'evidence'
+  if ((actionTarget === 'continue_supplement' || actionTarget === 'continue_verify' || actionTarget === 'continue_review') && !parsedPayload.scrollTo) {
+    parsedPayload.scrollTo = 'action'
+  }
+  return {
+    ...b,
+    action_target: actionTarget,
+    resolve_status: b.resolve_status || 'pending',
+    parsedActionPayload: parsedPayload,
+  }
+}
+
+export function normalizeOrderBlockAttempts(order: Order): Order {
+  if (!order.blockAttempts || order.blockAttempts.length === 0) return order
+  return { ...order, blockAttempts: order.blockAttempts.map(normalizeBlockAttempt) }
 }
 
 export interface User {
@@ -123,16 +174,47 @@ export interface BatchFailureItem {
   order_no?: string
   reason: string
   code: string
-  actionHint: string
-  actionTarget: ActionTarget
-  actionPayload: ActionPayload
-  submittedVersion: number | null
+  actionHint?: string
+  actionTarget?: ActionTarget
+  actionPayload?: ActionPayload
+  submittedVersion?: number | null
   currentVersion: number
 }
 
 export interface BatchActionResult {
   successes: BatchSuccessItem[]
   failures: BatchFailureItem[]
+}
+
+const BATCH_FAIL_DEFAULT_ACTION_TARGET: Record<string, ActionTarget> = {
+  wrong_role: 'switch_role',
+  wrong_status: 'goto_detail',
+  missing_evidence: 'add_evidence',
+  version_conflict: 'refresh_version',
+  duplicate_supplement: 'continue_verify',
+  archived: 'no_action',
+  not_found: 'no_action',
+  unknown: 'no_action',
+}
+
+export function normalizeBatchFailure(f: BatchFailureItem): BatchFailureItem & {
+  actionHint: string
+  actionTarget: ActionTarget
+  actionPayload: ActionPayload
+  submittedVersion: number | null
+} {
+  const code = f.code || 'unknown'
+  const actionTarget = f.actionTarget || BATCH_FAIL_DEFAULT_ACTION_TARGET[code] || 'goto_detail'
+  const existingPayload = f.actionPayload || {}
+  const payload: ActionPayload = { ...existingPayload }
+  if (!payload.orderId) payload.orderId = f.id
+  return {
+    ...f,
+    actionHint: f.actionHint || f.reason,
+    actionTarget,
+    actionPayload: payload,
+    submittedVersion: f.submittedVersion ?? null,
+  }
 }
 
 export interface ApiError {
@@ -176,43 +258,49 @@ export async function getOrders(token: string, filters?: { status?: string }): P
   const params = new URLSearchParams()
   if (filters?.status) params.set('status', filters.status)
   const query = params.toString() ? `?${params.toString()}` : ''
-  return request(`/api/orders${query}`, { headers: authHeader(token) })
+  const orders = await request<Order[]>(`/api/orders${query}`, { headers: authHeader(token) })
+  return orders.map(normalizeOrderBlockAttempts)
 }
 
 export async function getOrder(token: string, id: string): Promise<Order> {
-  return request(`/api/orders/${id}`, { headers: authHeader(token) })
+  const order = await request<Order>(`/api/orders/${id}`, { headers: authHeader(token) })
+  return normalizeOrderBlockAttempts(order)
 }
 
 export async function createOrder(token: string, data: CreateOrderData): Promise<Order> {
-  return request('/api/orders', {
+  const order = await request<Order>('/api/orders', {
     method: 'POST',
     headers: authHeader(token),
     body: JSON.stringify(data),
   })
+  return normalizeOrderBlockAttempts(order)
 }
 
 export async function supplementOrder(token: string, id: string, data: SupplementData): Promise<Order> {
-  return request(`/api/orders/${id}/supplement`, {
+  const order = await request<Order>(`/api/orders/${id}/supplement`, {
     method: 'PUT',
     headers: authHeader(token),
     body: JSON.stringify(data),
   })
+  return normalizeOrderBlockAttempts(order)
 }
 
 export async function verifyOrder(token: string, id: string, data: VerifyData): Promise<Order> {
-  return request(`/api/orders/${id}/verify`, {
+  const order = await request<Order>(`/api/orders/${id}/verify`, {
     method: 'PUT',
     headers: authHeader(token),
     body: JSON.stringify(data),
   })
+  return normalizeOrderBlockAttempts(order)
 }
 
 export async function reviewOrder(token: string, id: string, data: ReviewData): Promise<Order> {
-  return request(`/api/orders/${id}/review`, {
+  const order = await request<Order>(`/api/orders/${id}/review`, {
     method: 'PUT',
     headers: authHeader(token),
     body: JSON.stringify(data),
   })
+  return normalizeOrderBlockAttempts(order)
 }
 
 export async function batchAction(token: string, data: BatchActionData): Promise<BatchActionResult> {

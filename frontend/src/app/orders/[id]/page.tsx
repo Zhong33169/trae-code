@@ -1,7 +1,6 @@
 "use client";
-
-import { useEffect, useState, useCallback } from "react";
-import { useRouter, useParams } from "next/navigation";
+import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
   CheckCircle2,
@@ -33,7 +32,7 @@ import {
   type BlockCode,
   type ActionTarget,
   type ActionPayload,
-  type Role,
+  normalizeBlockAttempt,
 } from "@/lib/api";
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string }> = {
@@ -79,15 +78,6 @@ const ROLE_CONFIG = {
   room_supervisor: { label: "客房主管", username: "supervisor1", password: "123456" },
   duty_manager: { label: "值班经理", username: "manager1", password: "123456" },
 };
-
-function parseActionPayload(payload: string | null): ActionPayload {
-  if (!payload) return {};
-  try {
-    return JSON.parse(payload);
-  } catch {
-    return {};
-  }
-}
 
 const ROLE_LABELS: Record<string, string> = {
   receptionist: "前厅接待",
@@ -544,10 +534,11 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
               拦截记录 <span className="text-xs text-gray-400 font-normal">({order.blockAttempts.length})</span>
             </h2>
             <div className="space-y-3">
-              {order.blockAttempts.slice().reverse().map((b) => {
+              {order.blockAttempts.slice().reverse().map((raw) => {
+                const b = normalizeBlockAttempt(raw)
+                const payload = b.parsedActionPayload
                 const actionCfg = ACTION_BUTTON_CONFIG[b.action_target] || ACTION_BUTTON_CONFIG.no_action
                 const ActionIcon = actionCfg.icon
-                const payload = parseActionPayload(b.action_payload)
                 const statusBadge =
                   b.resolve_status === "resolved"
                     ? { label: "已处理", cls: "bg-green-100 text-green-700", icon: CheckCircle2 }
@@ -798,7 +789,8 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
                       </div>
                     );
                   } else {
-                    const b = item.data as BlockAttempt;
+                    const raw = item.data as BlockAttempt;
+                    const b = normalizeBlockAttempt(raw);
                     const statusBadge =
                       b.resolve_status === "resolved"
                         ? { label: "已处理", cls: "bg-green-100 text-green-700", icon: CheckCircle2 }

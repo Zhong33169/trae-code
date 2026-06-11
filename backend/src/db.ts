@@ -108,7 +108,33 @@ function saveDb(): void {
 }
 
 export function loadBlockAttempts(orderId: string): any[] {
-  return prepare('SELECT * FROM block_attempts WHERE order_id = ? ORDER BY created_at DESC').all(orderId);
+  const rows = prepare('SELECT * FROM block_attempts WHERE order_id = ? ORDER BY created_at DESC').all(orderId);
+  return rows.map(normalizeBlockAttempt);
+}
+
+export function normalizeBlockAttempt(row: any): any {
+  const code = (row.code || 'unknown') as BlockCode;
+  const actionTarget = row.action_target || getBlockActionTarget(code);
+  const existingPayload: any = row.action_payload
+    ? (() => { try { return JSON.parse(row.action_payload); } catch { return {}; } })()
+    : {};
+  if (!existingPayload.orderId && row.order_id) existingPayload.orderId = row.order_id;
+  if (actionTarget === 'switch_role' && !existingPayload.targetRole) {
+    if (row.action_attempted === 'supplement') existingPayload.targetRole = 'receptionist';
+    else if (row.action_attempted === 'verify') existingPayload.targetRole = 'room_supervisor';
+    else if (row.action_attempted === 'review') existingPayload.targetRole = 'duty_manager';
+  }
+  if (actionTarget === 'add_evidence' && !existingPayload.scrollTo) existingPayload.scrollTo = 'evidence';
+  if ((actionTarget === 'continue_supplement' || actionTarget === 'continue_verify' || actionTarget === 'continue_review') && !existingPayload.scrollTo) existingPayload.scrollTo = 'action';
+
+  return {
+    ...row,
+    action_target: actionTarget,
+    action_payload: JSON.stringify(existingPayload),
+    resolve_status: row.resolve_status || 'pending',
+    resolve_remark: row.resolve_remark || null,
+    resolved_at: row.resolved_at || null,
+  };
 }
 
 export function recordBlockAttempt(params: {
@@ -226,8 +252,79 @@ export async function initDb(): Promise<void> {
     );
   `);
 
+  migrateBlockAttempts();
   seedData();
   saveDb();
+}
+
+function migrateBlockAttempts(): void {
+  try {
+    const cols = prepare("PRAGMA table_info(block_attempts)").all();
+    const colNames = new Set(cols.map((c: any) => c.name));
+
+    const addCol = (sql: string) => {
+      try { db.run(sql); } catch {}
+    };
+
+    if (!colNames.has('action_target')) {
+      addCol(`ALTER TABLE block_attempts ADD COLUMN action_target TEXT NOT NULL DEFAULT 'goto_detail'`);
+      try { db.run(`UPDATE block_attempts SET action_target = 'goto_detail' WHERE action_target IS NULL OR action_target = ''`); } catch {}
+    }
+    if (!colNames.has('action_payload')) {
+      addCol(`ALTER TABLE block_attempts ADD COLUMN action_payload TEXT`);
+    }
+    if (!colNames.has('resolve_status')) {
+      addCol(`ALTER TABLE block_attempts ADD COLUMN resolve_status TEXT NOT NULL DEFAULT 'pending' CHECK(resolve_status IN ('pending','resolved','ignored'))`);
+      try { db.run(`UPDATE block_attempts SET resolve_status = 'pending' WHERE resolve_status IS NULL OR resolve_status = ''`); } catch {}
+    }
+    if (!colNames.has('resolve_remark')) {
+      addCol(`ALTER TABLE block_attempts ADD COLUMN resolve_remark TEXT`);
+    }
+    if (!colNames.has('resolved_at')) {
+      addCol(`ALTER TABLE block_attempts ADD COLUMN resolved_at TEXT`);
+    }
+
+    try {
+      db.run(`
+        UPDATE block_attempts
+        SET action_target = (
+          CASE code
+            WHEN 'wrong_role' THEN 'switch_role'
+            WHEN 'missing_evidence' THEN 'add_evidence'
+            WHEN 'duplicate_supplement' THEN 'continue_verify'
+            WHEN 'version_conflict' THEN 'refresh_version'
+            WHEN 'archived' THEN 'no_action'
+            WHEN 'not_found' THEN 'no_action'
+            WHEN 'unknown' THEN 'no_action'
+            ELSE 'goto_detail'
+          END
+        )
+        WHERE action_target IS NULL OR action_target = '' OR action_target = 'goto_detail'
+      `);
+    } catch {}
+
+    try {
+      const rows = prepare(`
+        SELECT id, order_id, action_attempted, action_target
+        FROM block_attempts
+        WHERE action_payload IS NULL OR action_payload = '' OR action_payload = '{}'
+      `).all();
+      for (const row of rows) {
+        const payload: any = {};
+        if (row.action_target === 'switch_role') {
+          if (row.action_attempted === 'supplement') payload.targetRole = 'receptionist';
+          else if (row.action_attempted === 'verify') payload.targetRole = 'room_supervisor';
+          else if (row.action_attempted === 'review') payload.targetRole = 'duty_manager';
+        }
+        if (row.order_id) payload.orderId = row.order_id;
+        if (row.action_target === 'add_evidence') payload.scrollTo = 'evidence';
+        if (row.action_target === 'continue_supplement' || row.action_target === 'continue_verify' || row.action_target === 'continue_review') payload.scrollTo = 'action';
+        try {
+          prepare('UPDATE block_attempts SET action_payload = ? WHERE id = ?').run(JSON.stringify(payload), row.id);
+        } catch {}
+      }
+    } catch {}
+  } catch {}
 }
 
 function seedData(): void {
