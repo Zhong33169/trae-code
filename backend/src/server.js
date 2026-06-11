@@ -202,7 +202,7 @@ app.post('/api/orders/batch/preview', (req, res) => {
 });
 
 app.post('/api/orders/batch', (req, res) => {
-  const { action, orderIds, opinion, lockTokens, materials } = req.body || {};
+  const { action, orderIds, opinion, lockTokens, materials, versions } = req.body || {};
   if (!action || !Array.isArray(orderIds) || orderIds.length === 0) {
     return fail(res, '缺少操作类型或订货单列表');
   }
@@ -225,6 +225,7 @@ app.post('/api/orders/batch', (req, res) => {
     opinion,
     lockTokens,
     materials,
+    versions,
   });
   ok(res, result);
 });

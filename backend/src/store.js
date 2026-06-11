@@ -572,7 +572,7 @@ class DataStore {
     return { order: JSON.parse(JSON.stringify(order)) };
   }
 
-  batchProcess({ operator, action, orderIds, opinion, lockTokens, materials }) {
+  batchProcess({ operator, action, orderIds, opinion, lockTokens, materials, versions }) {
     this.checkOverdueOrders();
     const user = this.getUserInfo(operator);
     const results = {
@@ -584,6 +584,7 @@ class DataStore {
         attempted: 0,
         successCount: 0,
         failedCount: 0,
+        versionConflictCount: 0,
       },
     };
 
@@ -618,10 +619,11 @@ class DataStore {
       results.summary.attempted++;
       const id = orderIds[i];
       const token = lockTokens?.[i];
+      const expectedVersion = versions?.[i];
       const order = this.orders.find(o => o.id === id);
       const now = new Date().toISOString();
 
-      const logAudit = ({ ok, reason, oldStatus, newStatus, detail }) => {
+      const logAudit = ({ ok, reason, oldStatus, newStatus, detail, expectedVer, currentVer }) => {
         const payload = {
           orderId: id,
           orderNo: order?.orderNo || 'unknown',
@@ -636,6 +638,8 @@ class DataStore {
           failureReason: reason || null,
           oldStatus: oldStatus || (order ? order.status : null),
           newStatus: newStatus || (order ? order.status : null),
+          expectedVersion: expectedVer !== undefined ? expectedVer : (expectedVersion !== undefined ? expectedVersion : null),
+          currentVersion: order ? order.version : null,
           versionAfter: order ? order.version : null,
         };
         this._addAuditLog(payload);
@@ -649,13 +653,32 @@ class DataStore {
           reason,
           failureType: 'not_found',
         });
-        logAudit({ ok: false, reason });
+        logAudit({ ok: false, reason, expectedVer: expectedVersion, currentVer: null });
         results.summary.failedCount++;
         continue;
       }
 
       const orderNo = order.orderNo;
       const oldStatus = order.status;
+
+      if (expectedVersion !== undefined && expectedVersion !== null && order.version !== expectedVersion) {
+        const reason = `版本冲突：期望版本 v${expectedVersion}，当前版本 v${order.version}，单据已被他人修改`;
+        results.failed.push({
+          orderId: id,
+          orderNo,
+          reason,
+          failureType: 'version',
+          expectedVersion,
+          currentVersion: order.version,
+          status: order.status,
+          statusName: this.getStatusName(order.status),
+          versionError: true,
+        });
+        logAudit({ ok: false, reason, oldStatus, newStatus: oldStatus, expectedVer: expectedVersion, currentVer: order.version });
+        results.summary.failedCount++;
+        results.summary.versionConflictCount++;
+        continue;
+      }
 
       const allowed = this.getAllowedActions(order, user.role);
 
@@ -677,7 +700,7 @@ class DataStore {
           status: order.status,
           statusName: this.getStatusName(order.status),
         });
-        logAudit({ ok: false, reason, oldStatus, newStatus: oldStatus });
+        logAudit({ ok: false, reason, oldStatus, newStatus: oldStatus, expectedVer: expectedVersion, currentVer: order.version });
         results.summary.failedCount++;
         continue;
       }
@@ -692,7 +715,7 @@ class DataStore {
           overdue: true,
           overdueReason: order.overdueReason,
         });
-        logAudit({ ok: false, reason, oldStatus, newStatus: oldStatus });
+        logAudit({ ok: false, reason, oldStatus, newStatus: oldStatus, expectedVer: expectedVersion, currentVer: order.version });
         results.summary.failedCount++;
         continue;
       }
@@ -705,7 +728,7 @@ class DataStore {
           reason,
           failureType: 'lock',
         });
-        logAudit({ ok: false, reason, oldStatus, newStatus: oldStatus });
+        logAudit({ ok: false, reason, oldStatus, newStatus: oldStatus, expectedVer: expectedVersion, currentVer: order.version });
         results.summary.failedCount++;
         continue;
       }
@@ -726,7 +749,7 @@ class DataStore {
             requiredMaterials: check.required,
             stage: STAGE_NAMES.REGISTRATION,
           });
-          logAudit({ ok: false, reason, oldStatus, newStatus: oldStatus, detail: `材料缺失：${check.missing.join('、')}` });
+          logAudit({ ok: false, reason, oldStatus, newStatus: oldStatus, detail: `材料缺失：${check.missing.join('、')}`, expectedVer: expectedVersion, currentVer: order.version });
           results.summary.failedCount++;
           continue;
         }
@@ -746,7 +769,7 @@ class DataStore {
             requiredMaterials: check.required,
             stage: STAGE_NAMES.VERIFICATION,
           });
-          logAudit({ ok: false, reason, oldStatus, newStatus: oldStatus, detail: reason });
+          logAudit({ ok: false, reason, oldStatus, newStatus: oldStatus, detail: reason, expectedVer: expectedVersion, currentVer: order.version });
           results.summary.failedCount++;
           continue;
         }
@@ -766,7 +789,7 @@ class DataStore {
             requiredMaterials: check.required,
             stage: STAGE_NAMES.REVIEW,
           });
-          logAudit({ ok: false, reason, oldStatus, newStatus: oldStatus, detail: reason });
+          logAudit({ ok: false, reason, oldStatus, newStatus: oldStatus, detail: reason, expectedVer: expectedVersion, currentVer: order.version });
           results.summary.failedCount++;
           continue;
         }
@@ -781,7 +804,7 @@ class DataStore {
           reason,
           failureType: 'opinion',
         });
-        logAudit({ ok: false, reason, oldStatus, newStatus: oldStatus });
+        logAudit({ ok: false, reason, oldStatus, newStatus: oldStatus, expectedVer: expectedVersion, currentVer: order.version });
         results.summary.failedCount++;
         continue;
       }
@@ -851,6 +874,8 @@ class DataStore {
         oldStatus,
         newStatus: nextStatus,
         detail: `[${this.getStatusName(oldStatus)}] → [${this.getStatusName(nextStatus)}]：${opinion}（批量）`,
+        expectedVer: expectedVersion,
+        currentVer: order.version,
       });
 
       const stages = [STAGE_NAMES.REGISTRATION, STAGE_NAMES.VERIFICATION, STAGE_NAMES.REVIEW];
@@ -863,6 +888,7 @@ class DataStore {
         newStatus: nextStatus,
         newStatusName: this.getStatusName(nextStatus),
         newStage: nextStageName,
+        versionBefore: expectedVersion || order.version - 1,
         versionAfter: order.version,
         appliedAction: effectiveAction,
         appliedActionName: this.getActionName(effectiveAction),

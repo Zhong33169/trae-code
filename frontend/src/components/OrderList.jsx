@@ -129,7 +129,7 @@ export default function OrderList({ meta, user, navigate, showToast }) {
     setShowBatch(true);
   }
 
-  async function handleBatchDone({ action, opinion }) {
+  async function handleBatchDone({ action, opinion, versions }) {
     const ids = Array.from(selected);
     const tokens = await ensureLocks(ids);
     try {
@@ -138,13 +138,22 @@ export default function OrderList({ meta, user, navigate, showToast }) {
         orderIds: ids,
         opinion,
         lockTokens: ids.map(id => tokens[id]),
+        versions,
       });
       if (res.success.length > 0) {
         showToast(`批量${action.startsWith('approve') ? '通过' : action.startsWith('reject') ? '退回' : '提交'} ${res.success.length} 条成功`, 'success');
       }
       if (res.failed.length > 0) {
-        const reasons = res.failed.slice(0, 3).map(f => `${f.orderNo || f.orderId.slice(0,8)}：${f.reason}`).join('；');
-        showToast(`失败 ${res.failed.length} 条：${reasons}${res.failed.length > 3 ? '...' : ''}`, 'error');
+        const versionConflicts = res.failed.filter(f => f.failureType === 'version');
+        const otherFails = res.failed.filter(f => f.failureType !== 'version');
+        if (versionConflicts.length > 0) {
+          const vcNames = versionConflicts.map(f => `${f.orderNo}（v${f.expectedVersion}→v${f.currentVersion}）`).join('、');
+          showToast(`版本冲突 ${versionConflicts.length} 条：${vcNames}，请刷新后重试`, 'error');
+        }
+        if (otherFails.length > 0) {
+          const reasons = otherFails.slice(0, 3).map(f => `${f.orderNo || f.orderId?.slice(0,8)}：${f.reason}`).join('；');
+          showToast(`失败 ${otherFails.length} 条：${reasons}${otherFails.length > 3 ? '...' : ''}`, 'error');
+        }
       }
       setSelected(new Set());
       setShowBatch(false);

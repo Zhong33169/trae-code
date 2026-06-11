@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'preact/hooks';
+import { useState, useEffect, useMemo } from 'preact/hooks';
 import { api } from '../api.js';
 
 export default function BatchActionModal({ action, orderIds, role, meta, onClose, onConfirm, showToast }) {
@@ -44,6 +44,16 @@ export default function BatchActionModal({ action, orderIds, role, meta, onClose
     return () => { cancelled = true; };
   }, [action, orderIds.join(',')]);
 
+  const versionMap = useMemo(() => {
+    const m = {};
+    if (preview?.orders) {
+      for (const o of preview.orders) {
+        if (o.orderId && o.version != null) m[o.orderId] = o.version;
+      }
+    }
+    return m;
+  }, [preview]);
+
   const mixedSubmit = preview?.summary?.mixedSubmitStatuses;
   const canProcessCount = preview?.summary?.canProcess ?? 0;
   const blockedCount = preview?.summary?.blocked ?? 0;
@@ -63,7 +73,8 @@ export default function BatchActionModal({ action, orderIds, role, meta, onClose
     if (!canConfirm()) return;
     setSubmitting(true);
     try {
-      await onConfirm({ action, opinion: opinion.trim() });
+      const versions = orderIds.map(id => versionMap[id] ?? null);
+      await onConfirm({ action, opinion: opinion.trim(), versions });
     } finally {
       setSubmitting(false);
     }
@@ -79,7 +90,7 @@ export default function BatchActionModal({ action, orderIds, role, meta, onClose
 
   return (
     <div className="modal-mask" onClick={(e) => { if (e.target === e.currentTarget) onClose?.(); }}>
-      <div className="modal" style={{ width: 880, maxWidth: '95vw' }}>
+      <div className="modal" style={{ width: 920, maxWidth: '95vw' }}>
         <div className="modal-header">
           <h3>
             {isApprove && '✅ '}{isReject && '⚠ '}{isSubmitLike && '📋 '}
@@ -137,12 +148,13 @@ export default function BatchActionModal({ action, orderIds, role, meta, onClose
                 <table className="preview-table">
                   <thead>
                     <tr>
-                      <th style={{ width: 48 }}></th>
+                      <th style={{ width: 40 }}></th>
                       <th>单号 / 标题</th>
-                      <th style={{ width: 90 }}>当前状态</th>
-                      <th style={{ width: 130 }}>将执行动作 → 目标</th>
-                      <th style={{ width: 120 }}>材料</th>
-                      <th style={{ width: 120 }}>时限</th>
+                      <th style={{ width: 80 }}>当前状态</th>
+                      <th style={{ width: 60 }}>版本</th>
+                      <th style={{ width: 120 }}>将执行动作 → 目标</th>
+                      <th style={{ width: 110 }}>材料</th>
+                      <th style={{ width: 110 }}>时限</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -167,6 +179,11 @@ export default function BatchActionModal({ action, orderIds, role, meta, onClose
                           {o.status ? (
                             <span className={`tag ${statusColor(o.status)}`}>{o.statusName}</span>
                           ) : <span className="tag gray">-</span>}
+                        </td>
+                        <td>
+                          <span style={{ fontSize: 12, fontFamily: 'monospace', color: 'var(--gray-600)' }}>
+                            v{o.version ?? '-'}
+                          </span>
                         </td>
                         <td>
                           {o.canProcess ? (
@@ -233,8 +250,9 @@ export default function BatchActionModal({ action, orderIds, role, meta, onClose
               <div className="alert info" style={{ marginTop: 12, fontSize: 12 }}>
                 <strong>📌 执行说明：</strong>
                 <ul style={{ margin: '6px 0 0 18px', padding: 0, lineHeight: 1.6 }}>
-                  <li>每张单据独立校验：角色权限、状态顺序、材料完整性、时限逾期、版本乐观锁、操作锁token</li>
-                  <li>标记 ❌ 的单据会被跳过，不影响 ✅ 单据推进；每条单据会单独写入审计日志</li>
+                  <li>每张单据独立校验：角色权限、状态顺序、材料完整性、时限逾期、<strong>版本乐观锁</strong>、操作锁token</li>
+                  <li>提交时携带每张单的版本号（如上表 v 列），若版本不一致则该单被阻断，不影响其余单据</li>
+                  <li>版本冲突说明单据已被他人修改，请刷新列表获取最新版本后重试</li>
                   <li>草稿与核验退回单必须分开批量（动作语义不同：初次提交 vs 补正重提交）</li>
                 </ul>
               </div>
