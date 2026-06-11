@@ -4,6 +4,34 @@ export type OrderStatus = 'pending_supplement' | 'pending_verification' | 'pendi
 
 export type EvidenceStage = 'registration' | 'verification' | 'archive';
 
+export type BlockCode =
+  | 'wrong_role'
+  | 'wrong_status'
+  | 'missing_evidence'
+  | 'version_conflict'
+  | 'duplicate_supplement'
+  | 'archived'
+  | 'not_found'
+  | 'unknown';
+
+export type ActionTarget =
+  | 'goto_detail'
+  | 'switch_role'
+  | 'refresh_version'
+  | 'add_evidence'
+  | 'continue_verify'
+  | 'continue_review'
+  | 'continue_supplement'
+  | 'no_action';
+
+export type ResolveStatus = 'pending' | 'resolved' | 'ignored';
+
+export interface ActionPayload {
+  targetRole?: UserRole;
+  orderId?: string;
+  scrollTo?: 'evidence' | 'action';
+}
+
 export interface User {
   id: string;
   username: string;
@@ -48,16 +76,6 @@ export interface AuditLog {
   created_at: string;
 }
 
-export type BlockCode =
-  | 'wrong_role'
-  | 'wrong_status'
-  | 'missing_evidence'
-  | 'version_conflict'
-  | 'duplicate_supplement'
-  | 'archived'
-  | 'not_found'
-  | 'unknown';
-
 export interface JwtPayload {
   id: string;
   username: string;
@@ -73,8 +91,13 @@ export interface BlockAttempt {
   code: BlockCode;
   reason: string;
   action_hint: string;
+  action_target: ActionTarget;
+  action_payload: string | null;
   submitted_version: number | null;
   current_version: number;
+  resolve_status: ResolveStatus;
+  resolve_remark: string | null;
+  resolved_at: string | null;
   created_at: string;
 }
 
@@ -83,5 +106,29 @@ export interface ValidationError {
   reason: string;
   code: BlockCode;
   actionHint: string;
+  actionTarget: ActionTarget;
+  actionPayload: ActionPayload;
   currentVersion: number;
+}
+
+export interface BatchSuccessItem {
+  id: string;
+  order_no: string;
+}
+
+export interface BatchFailureItem {
+  id: string;
+  order_no?: string;
+  reason: string;
+  code: string;
+  actionHint: string;
+  actionTarget: ActionTarget;
+  actionPayload: ActionPayload;
+  submittedVersion: number | null;
+  currentVersion: number;
+}
+
+export interface BatchActionResult {
+  successes: BatchSuccessItem[];
+  failures: BatchFailureItem[];
 }

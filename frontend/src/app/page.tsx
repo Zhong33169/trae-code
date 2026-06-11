@@ -17,6 +17,11 @@ import {
   Loader2,
   ArrowRight,
   X,
+  ShieldCheck,
+  CheckCheck,
+  Ban,
+  RefreshCw,
+  LogIn,
 } from "lucide-react";
 import { useStore } from "@/store/useStore";
 import {
@@ -27,6 +32,9 @@ import {
   type BatchActionResult,
   type BlockAttempt,
   type BlockCode,
+  type ActionTarget,
+  type ActionPayload,
+  type Role,
 } from "@/lib/api";
 
 const ROLE_CONFIG = {
@@ -61,6 +69,26 @@ const BLOCK_CODE_LABELS: Record<BlockCode, { label: string; color: string; bg: s
   unknown: { label: "未知", color: "text-gray-700", bg: "bg-gray-100" },
 };
 
+const ACTION_BUTTON_CONFIG: Record<ActionTarget, { label: string; icon: any; variant: string }> = {
+  goto_detail: { label: "去详情", icon: ArrowRight, variant: "navy" },
+  switch_role: { label: "切换角色", icon: LogIn, variant: "purple" },
+  refresh_version: { label: "刷新版本", icon: RefreshCw, variant: "rose" },
+  add_evidence: { label: "补充证据", icon: FileText, variant: "amber" },
+  continue_verify: { label: "继续核验", icon: ShieldCheck, variant: "blue" },
+  continue_review: { label: "继续归档", icon: CheckCheck, variant: "green" },
+  continue_supplement: { label: "继续补录", icon: FileText, variant: "yellow" },
+  no_action: { label: "无法处理", icon: Ban, variant: "gray" },
+};
+
+function parseActionPayload(payload: string | null): ActionPayload {
+  if (!payload) return {};
+  try {
+    return JSON.parse(payload);
+  } catch {
+    return {};
+  }
+}
+
 const STAGE_LABELS: Record<string, string> = {
   registration: "登记证据",
   verification: "核验证据",
@@ -93,40 +121,99 @@ function BlockCodeBadge({ code }: { code: BlockCode | string }) {
   );
 }
 
-function BlockHintCard({ block, compact }: { block: BlockAttempt; compact?: boolean }) {
+function BlockHintCard({
+  block,
+  compact,
+  onAction,
+}: {
+  block: BlockAttempt
+  compact?: boolean
+  onAction?: (actionTarget: ActionTarget, payload: ActionPayload) => void
+}) {
+  const actionCfg = ACTION_BUTTON_CONFIG[block.action_target] || ACTION_BUTTON_CONFIG.no_action
+  const ActionIcon = actionCfg.icon
+  const payload = parseActionPayload(block.action_payload)
+
+  const variantClasses: Record<string, string> = {
+    navy: "bg-navy-700 hover:bg-navy-800 text-white",
+    purple: "bg-purple-600 hover:bg-purple-700 text-white",
+    rose: "bg-rose-600 hover:bg-rose-700 text-white",
+    amber: "bg-amber-600 hover:bg-amber-700 text-white",
+    blue: "bg-blue-600 hover:bg-blue-700 text-white",
+    green: "bg-green-600 hover:bg-green-700 text-white",
+    yellow: "bg-yellow-600 hover:bg-yellow-700 text-white",
+    gray: "bg-gray-400 text-white cursor-not-allowed",
+  }
+
+  const statusBadge =
+    block.resolve_status === "resolved"
+      ? { label: "已处理", cls: "bg-green-100 text-green-700" }
+      : block.resolve_status === "ignored"
+      ? { label: "已忽略", cls: "bg-gray-100 text-gray-600" }
+      : { label: "待处理", cls: "bg-amber-100 text-amber-700" }
+
   if (compact) {
     return (
-      <div className="mt-2.5 border border-amber-200 bg-amber-50 rounded-md px-2.5 py-1.5 flex items-start gap-1.5">
-        <AlertCircle className="w-3.5 h-3.5 text-amber-600 mt-0.5 shrink-0" />
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-1.5">
-            <BlockCodeBadge code={block.code} />
-            <span className="text-[10px] text-gray-400">v{block.current_version}</span>
+      <div className="mt-2.5 border border-amber-200 bg-amber-50 rounded-md px-2.5 py-1.5">
+        <div className="flex items-start gap-1.5">
+          <AlertCircle className="w-3.5 h-3.5 text-amber-600 mt-0.5 shrink-0" />
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <BlockCodeBadge code={block.code} />
+              <span className="text-[10px] text-gray-400">v{block.current_version}</span>
+              <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${statusBadge.cls}`}>
+                {statusBadge.label}
+              </span>
+            </div>
+            <p className="text-[11px] text-amber-900 mt-0.5 truncate">{block.reason}</p>
           </div>
-          <p className="text-[11px] text-amber-900 mt-0.5 truncate">{block.reason}</p>
         </div>
+        {block.action_target !== "no_action" && block.resolve_status === "pending" && onAction && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              onAction(block.action_target, payload)
+            }}
+            className={`mt-1.5 w-full flex items-center justify-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-colors ${variantClasses[actionCfg.variant]}`}
+          >
+            <ActionIcon className="w-3 h-3" />
+            {actionCfg.label}
+          </button>
+        )}
       </div>
-    );
+    )
   }
   return (
     <div className="border border-amber-200 bg-amber-50 rounded-lg px-3 py-2.5 flex items-start gap-2.5">
       <AlertCircle className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 mb-1">
+        <div className="flex items-center gap-2 mb-1 flex-wrap">
           <BlockCodeBadge code={block.code} />
           <span className="text-xs text-gray-500">当前版本 v{block.current_version}</span>
           {block.submitted_version !== null && block.submitted_version !== block.current_version && (
             <span className="text-[10px] text-rose-600">(提交 v{block.submitted_version})</span>
           )}
+          <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${statusBadge.cls}`}>
+            {statusBadge.label}
+          </span>
         </div>
         <p className="text-sm text-amber-900 font-medium">{block.reason}</p>
         <p className="text-xs text-amber-700 mt-1 flex items-center gap-1">
           <ArrowRight className="w-3 h-3" />
           {block.action_hint}
         </p>
+        {block.action_target !== "no_action" && block.resolve_status === "pending" && onAction && (
+          <button
+            onClick={() => onAction(block.action_target, payload)}
+            className={`mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${variantClasses[actionCfg.variant]}`}
+          >
+            <ActionIcon className="w-3.5 h-3.5" />
+            {actionCfg.label}
+          </button>
+        )}
       </div>
     </div>
-  );
+  )
 }
 
 function EvidencePanel({ order }: { order: Order }) {
@@ -243,6 +330,8 @@ function BatchActionBar({ onShowDetail }: { onShowDetail: (result: BatchActionRe
           reason: apiErr.reason || apiErr.error || "操作失败",
           code: apiErr.code || "unknown",
           actionHint: apiErr.actionHint || "请联系管理员或稍后重试",
+          actionTarget: apiErr.actionTarget || "no_action",
+          actionPayload: apiErr.actionPayload || {},
           submittedVersion: o.version,
           currentVersion: apiErr.currentVersion ?? o.version,
         })),
@@ -311,6 +400,7 @@ function Toast({ message, type, onClose }: { message: string; type: "success" | 
 }
 
 export default function HomePage() {
+  const router = useRouter();
   const {
     currentUser,
     token,
@@ -363,6 +453,39 @@ export default function HomePage() {
   );
 
   const selectedOrder = orders.find((o) => o.id === selectedOrderId) || null;
+
+  const handleBlockAction = useCallback(
+    async (actionTarget: ActionTarget, payload: ActionPayload) => {
+      if (actionTarget === "switch_role" && payload.targetRole) {
+        const roleKey = payload.targetRole as keyof typeof ROLE_CONFIG;
+        const cfg = ROLE_CONFIG[roleKey];
+        if (cfg && currentUser?.role !== roleKey) {
+          try {
+            await login(cfg.username, cfg.password);
+            setToast({ message: `已切换为${cfg.label}`, type: "success" });
+          } catch {
+            setToast({ message: "角色切换失败", type: "error" });
+          }
+        } else if (currentUser?.role === roleKey) {
+          setToast({ message: "当前已是该角色", type: "success" });
+        }
+      } else if (actionTarget === "goto_detail" || actionTarget === "add_evidence" || actionTarget === "continue_verify" || actionTarget === "continue_review" || actionTarget === "continue_supplement") {
+        const orderId = payload.orderId || selectedOrderId;
+        if (orderId) {
+          setSelectedOrderId(orderId);
+          if (!selectedOrderIds.includes(orderId)) {
+            toggleOrderSelection(orderId);
+          }
+          const hash = payload.scrollTo ? `#${payload.scrollTo}` : "";
+          router.push(`/orders/${orderId}${hash}`);
+        }
+      } else if (actionTarget === "refresh_version") {
+        await fetchOrders();
+        setToast({ message: "已刷新订单列表与版本", type: "success" });
+      }
+    },
+    [login, selectedOrderId, selectedOrderIds, toggleOrderSelection, setSelectedOrderId, fetchOrders, currentUser, router]
+  );
 
   return (
     <div className="h-screen flex flex-col">
@@ -488,7 +611,7 @@ export default function HomePage() {
                         </div>
                         <span className="text-xs text-gray-400">{progress.current}/{progress.total}</span>
                       </div>
-                      {lastBlock && <BlockHintCard block={lastBlock} compact />}
+                      {lastBlock && <BlockHintCard block={lastBlock} compact onAction={handleBlockAction} />}
                     </div>
                   </div>
                 </div>
@@ -530,25 +653,51 @@ export default function HomePage() {
                 成功 <span className="font-semibold text-green-600">{batchFailDetail.successes.length}</span> 条，
                 失败 <span className="font-semibold text-red-600">{batchFailDetail.failures.length}</span> 条
               </div>
-              {batchFailDetail.failures.map((f) => (
-                <div key={f.id} className="border border-red-200 bg-red-50 rounded-lg p-3">
-                  <div className="flex items-center justify-between mb-1.5">
-                    <span className="font-medium text-sm text-navy-900">{f.order_no || f.id}</span>
-                    <BlockCodeBadge code={f.code} />
-                  </div>
-                  <div className="flex items-center gap-3 mb-1 text-xs text-gray-500">
-                    <span>当前版本 v{f.currentVersion}</span>
-                    {f.submittedVersion !== null && f.submittedVersion !== f.currentVersion && (
-                      <span className="text-rose-600">(提交 v{f.submittedVersion})</span>
+              {batchFailDetail.failures.map((f) => {
+                const actionCfg = ACTION_BUTTON_CONFIG[f.actionTarget] || ACTION_BUTTON_CONFIG.no_action
+                const ActionIcon = actionCfg.icon
+                const variantClasses: Record<string, string> = {
+                  navy: "bg-navy-700 hover:bg-navy-800 text-white",
+                  purple: "bg-purple-600 hover:bg-purple-700 text-white",
+                  rose: "bg-rose-600 hover:bg-rose-700 text-white",
+                  amber: "bg-amber-600 hover:bg-amber-700 text-white",
+                  blue: "bg-blue-600 hover:bg-blue-700 text-white",
+                  green: "bg-green-600 hover:bg-green-700 text-white",
+                  yellow: "bg-yellow-600 hover:bg-yellow-700 text-white",
+                  gray: "bg-gray-400 text-white cursor-not-allowed",
+                }
+                return (
+                  <div key={f.id} className="border border-red-200 bg-red-50 rounded-lg p-3">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="font-medium text-sm text-navy-900">{f.order_no || f.id}</span>
+                      <BlockCodeBadge code={f.code} />
+                    </div>
+                    <div className="flex items-center gap-3 mb-1 text-xs text-gray-500">
+                      <span>当前版本 v{f.currentVersion}</span>
+                      {f.submittedVersion !== null && f.submittedVersion !== f.currentVersion && (
+                        <span className="text-rose-600">(提交 v{f.submittedVersion})</span>
+                      )}
+                    </div>
+                    <p className="text-sm text-red-700 mb-1.5">{f.reason}</p>
+                    <p className="text-xs text-red-600 bg-white/60 rounded px-2 py-1 flex items-start gap-1">
+                      <ArrowRight className="w-3 h-3 mt-0.5 shrink-0" />
+                      <span>{f.actionHint}</span>
+                    </p>
+                    {f.actionTarget !== "no_action" && (
+                      <button
+                        onClick={() => {
+                          setBatchFailDetail(null)
+                          handleBlockAction(f.actionTarget, f.actionPayload)
+                        }}
+                        className={`mt-2 w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${variantClasses[actionCfg.variant]}`}
+                      >
+                        <ActionIcon className="w-3.5 h-3.5" />
+                        {actionCfg.label}
+                      </button>
                     )}
                   </div>
-                  <p className="text-sm text-red-700 mb-1.5">{f.reason}</p>
-                  <p className="text-xs text-red-600 bg-white/60 rounded px-2 py-1 flex items-start gap-1">
-                    <ArrowRight className="w-3 h-3 mt-0.5 shrink-0" />
-                    <span>{f.actionHint}</span>
-                  </p>
-                </div>
-              ))}
+                )
+              })}
             </div>
             <div className="px-6 py-3 bg-gray-50 border-t border-gray-200 flex justify-end">
               <button

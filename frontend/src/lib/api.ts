@@ -4,6 +4,14 @@ export type Role = 'receptionist' | 'room_supervisor' | 'duty_manager'
 export type OrderStatus = 'pending_supplement' | 'pending_verification' | 'pending_review' | 'archived'
 export type EvidenceStage = 'registration' | 'verification' | 'archive'
 export type BlockCode = 'wrong_role' | 'wrong_status' | 'missing_evidence' | 'version_conflict' | 'duplicate_supplement' | 'archived' | 'not_found' | 'unknown'
+export type ActionTarget = 'goto_detail' | 'switch_role' | 'refresh_version' | 'add_evidence' | 'continue_verify' | 'continue_review' | 'continue_supplement' | 'no_action'
+export type ResolveStatus = 'pending' | 'resolved' | 'ignored'
+
+export interface ActionPayload {
+  targetRole?: Role
+  orderId?: string
+  scrollTo?: 'evidence' | 'action'
+}
 
 export interface BlockAttempt {
   id: string
@@ -14,8 +22,13 @@ export interface BlockAttempt {
   code: BlockCode
   reason: string
   action_hint: string
+  action_target: ActionTarget
+  action_payload: string | null
   submitted_version: number | null
   current_version: number
+  resolve_status: ResolveStatus
+  resolve_remark: string | null
+  resolved_at: string | null
   created_at: string
 }
 
@@ -111,6 +124,8 @@ export interface BatchFailureItem {
   reason: string
   code: string
   actionHint: string
+  actionTarget: ActionTarget
+  actionPayload: ActionPayload
   submittedVersion: number | null
   currentVersion: number
 }
@@ -125,6 +140,8 @@ export interface ApiError {
   reason: string
   code?: string
   actionHint?: string
+  actionTarget?: ActionTarget
+  actionPayload?: ActionPayload
   currentVersion?: number
 }
 

@@ -1,8 +1,8 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { randomUUID } from 'crypto';
-import { prepare, loadBlockAttempts, recordBlockAttempt, getBlockHint } from './db.js';
+import { prepare, loadBlockAttempts, recordBlockAttempt, getBlockHint, getBlockActionTarget, getBlockActionPayload } from './db.js';
 import { authMiddleware } from './auth.js';
-import { JwtPayload, Order, EvidenceItem, AuditLog, BlockCode } from './types.js';
+import { JwtPayload, Order, EvidenceItem, AuditLog, BlockCode, BatchFailureItem, BatchSuccessItem } from './types.js';
 
 function formatOrder(row: any): Order {
   return {
@@ -70,11 +70,15 @@ function sendBlock(
     submittedVersion,
     currentVersion,
   });
+  const actionTarget = getBlockActionTarget(code);
+  const actionPayload = getBlockActionPayload(code, orderId, actionAttempted);
   reply.code(httpCode).send({
     error: '操作被拦截',
     reason,
     code,
     actionHint: getBlockHint(code),
+    actionTarget,
+    actionPayload,
     currentVersion,
   });
 }
@@ -392,16 +396,8 @@ export async function registerOrderRoutes(app: FastifyInstance): Promise<void> {
       };
 
       const orderList = body.orders || [];
-      const successes: { id: string; order_no: string }[] = [];
-      const failures: {
-        id: string;
-        order_no?: string;
-        reason: string;
-        code: string;
-        actionHint: string;
-        submittedVersion: number | null;
-        currentVersion: number;
-      }[] = [];
+      const successes: BatchSuccessItem[] = [];
+      const failures: BatchFailureItem[] = [];
 
       for (const orderItem of orderList) {
         const orderId = orderItem.id;
@@ -409,11 +405,15 @@ export async function registerOrderRoutes(app: FastifyInstance): Promise<void> {
 
         const orderRow = prepare('SELECT * FROM orders WHERE id = ?').get(orderId) as any;
         if (!orderRow) {
+          const actionTarget = getBlockActionTarget('not_found');
+          const actionPayload = getBlockActionPayload('not_found', orderId, body.action);
           failures.push({
             id: orderId,
             reason: '订单不存在',
             code: 'not_found',
             actionHint: getBlockHint('not_found'),
+            actionTarget,
+            actionPayload,
             submittedVersion: submitVersion ?? null,
             currentVersion: 0,
           });
@@ -436,12 +436,16 @@ export async function registerOrderRoutes(app: FastifyInstance): Promise<void> {
             submittedVersion,
             currentVersion,
           });
+          const actionTarget = getBlockActionTarget(code);
+          const actionPayload = getBlockActionPayload(code, orderId, body.action);
           failures.push({
             id: orderId,
             order_no: orderNo,
             reason,
             code,
             actionHint: getBlockHint(code),
+            actionTarget,
+            actionPayload,
             submittedVersion,
             currentVersion,
           });

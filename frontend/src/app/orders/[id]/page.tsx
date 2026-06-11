@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useState, useCallback } from "react";
+import { useRouter, useParams } from "next/navigation";
 import {
   ArrowLeft,
   CheckCircle2,
@@ -18,6 +18,8 @@ import {
   Send,
   Ban,
   ArrowRight,
+  RefreshCw,
+  LogIn,
 } from "lucide-react";
 import { useStore } from "@/store/useStore";
 import {
@@ -29,6 +31,9 @@ import {
   type ApiError,
   type BlockAttempt,
   type BlockCode,
+  type ActionTarget,
+  type ActionPayload,
+  type Role,
 } from "@/lib/api";
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string }> = {
@@ -56,6 +61,32 @@ function BlockCodeBadge({ code }: { code: BlockCode | string }) {
       {cfg.label}
     </span>
   );
+}
+
+const ACTION_BUTTON_CONFIG: Record<ActionTarget, { label: string; icon: any; variant: string }> = {
+  goto_detail: { label: "查看详情", icon: ArrowRight, variant: "navy" },
+  switch_role: { label: "切换角色", icon: LogIn, variant: "purple" },
+  refresh_version: { label: "刷新版本", icon: RefreshCw, variant: "rose" },
+  add_evidence: { label: "补充证据", icon: FileText, variant: "amber" },
+  continue_verify: { label: "继续核验", icon: ShieldCheck, variant: "blue" },
+  continue_review: { label: "继续归档", icon: CheckCheck, variant: "green" },
+  continue_supplement: { label: "继续补录", icon: FileText, variant: "yellow" },
+  no_action: { label: "无法处理", icon: Ban, variant: "gray" },
+};
+
+const ROLE_CONFIG = {
+  receptionist: { label: "前厅接待", username: "receptionist1", password: "123456" },
+  room_supervisor: { label: "客房主管", username: "supervisor1", password: "123456" },
+  duty_manager: { label: "值班经理", username: "manager1", password: "123456" },
+};
+
+function parseActionPayload(payload: string | null): ActionPayload {
+  if (!payload) return {};
+  try {
+    return JSON.parse(payload);
+  } catch {
+    return {};
+  }
 }
 
 const ROLE_LABELS: Record<string, string> = {
@@ -110,7 +141,7 @@ function EvidenceFormItems({
   };
 
   return (
-    <div className="space-y-3">
+    <div id="evidence" className="space-y-3 scroll-mt-4">
       <div className="flex items-center justify-between">
         <label className="block text-sm font-medium text-navy-700">
           证据项 <span className="text-red-500">*</span>
@@ -166,7 +197,7 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [errorDetail, setErrorDetail] = useState<{ code?: string; actionHint?: string; currentVersion?: number } | null>(null);
+  const [errorDetail, setErrorDetail] = useState<{ code?: string; actionHint?: string; currentVersion?: number; actionTarget?: ActionTarget; actionPayload?: ActionPayload } | null>(null);
   const [success, setSuccess] = useState(false);
 
   const [guestName, setGuestName] = useState("");
@@ -197,11 +228,40 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
         code: apiErr.code,
         actionHint: apiErr.actionHint,
         currentVersion: apiErr.currentVersion,
+        actionTarget: apiErr.actionTarget,
+        actionPayload: apiErr.actionPayload,
       });
     } finally {
       setLoading(false);
     }
   };
+
+  const handleBlockAction = useCallback(
+    async (actionTarget: ActionTarget, payload: ActionPayload) => {
+      if (actionTarget === "switch_role" && payload.targetRole) {
+        const roleKey = payload.targetRole as keyof typeof ROLE_CONFIG;
+        const cfg = ROLE_CONFIG[roleKey];
+        if (cfg && currentUser?.role !== roleKey) {
+          try {
+            await login(cfg.username, cfg.password);
+          } catch {
+            setError("角色切换失败");
+          }
+        }
+      } else if (actionTarget === "refresh_version") {
+        await fetchOrders();
+        loadOrder();
+      } else if (actionTarget === "add_evidence" || actionTarget === "continue_verify" || actionTarget === "continue_review" || actionTarget === "continue_supplement") {
+        if (payload.scrollTo) {
+          const el = document.getElementById(payload.scrollTo);
+          if (el) {
+            el.scrollIntoView({ behavior: "smooth", block: "center" });
+          }
+        }
+      }
+    },
+    [login, currentUser, fetchOrders]
+  );
 
   useEffect(() => {
     if (!token) {
@@ -249,6 +309,8 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
           code: apiErr.code,
           actionHint: apiErr.actionHint,
           currentVersion: apiErr.currentVersion,
+          actionTarget: apiErr.actionTarget,
+          actionPayload: apiErr.actionPayload,
         });
         loadOrder();
       } finally {
@@ -282,6 +344,8 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
           code: apiErr.code,
           actionHint: apiErr.actionHint,
           currentVersion: apiErr.currentVersion,
+          actionTarget: apiErr.actionTarget,
+          actionPayload: apiErr.actionPayload,
         });
         loadOrder();
       } finally {
@@ -315,6 +379,8 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
           code: apiErr.code,
           actionHint: apiErr.actionHint,
           currentVersion: apiErr.currentVersion,
+          actionTarget: apiErr.actionTarget,
+          actionPayload: apiErr.actionPayload,
         });
         loadOrder();
       } finally {
@@ -444,7 +510,7 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
           <div className="bg-red-50 border border-red-200 rounded-xl px-5 py-4 flex items-start gap-3">
             <AlertTriangle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
             <div className="flex-1">
-              <div className="flex items-center gap-2 mb-1">
+              <div className="flex items-center gap-2 mb-1 flex-wrap">
                 <p className="text-sm font-medium text-red-800">操作被拦截</p>
                 {errorDetail?.code && <BlockCodeBadge code={errorDetail.code} />}
                 {typeof errorDetail?.currentVersion === "number" && (
@@ -458,6 +524,15 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
                   <span>{errorDetail.actionHint}</span>
                 </p>
               )}
+              {errorDetail?.actionTarget && errorDetail.actionTarget !== "no_action" && errorDetail.actionPayload && (
+                <button
+                  onClick={() => handleBlockAction(errorDetail.actionTarget!, errorDetail.actionPayload!)}
+                  className={`mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors bg-navy-700 hover:bg-navy-800 text-white`}
+                >
+                  <ArrowRight className="w-3.5 h-3.5" />
+                  {ACTION_BUTTON_CONFIG[errorDetail.actionTarget]?.label || "处理"}
+                </button>
+              )}
             </div>
           </div>
         )}
@@ -469,31 +544,73 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
               拦截记录 <span className="text-xs text-gray-400 font-normal">({order.blockAttempts.length})</span>
             </h2>
             <div className="space-y-3">
-              {order.blockAttempts.slice().reverse().map((b) => (
-                <div key={b.id} className="border border-amber-200 bg-amber-50 rounded-lg px-4 py-3">
-                  <div className="flex items-center gap-2 mb-1">
-                    <BlockCodeBadge code={b.code} />
-                    <span className="text-xs text-gray-500">{ROLE_LABELS[b.operator_role] || b.operator_role}</span>
-                    <span className="text-xs text-gray-400">{new Date(b.created_at).toLocaleString("zh-CN")}</span>
-                  </div>
-                  <div className="flex items-center gap-3 text-xs text-gray-500 mb-1">
-                    <span>当前版本 v{b.current_version}</span>
-                    {b.submitted_version !== null && b.submitted_version !== b.current_version && (
-                      <span className="text-rose-600">(提交 v{b.submitted_version})</span>
+              {order.blockAttempts.slice().reverse().map((b) => {
+                const actionCfg = ACTION_BUTTON_CONFIG[b.action_target] || ACTION_BUTTON_CONFIG.no_action
+                const ActionIcon = actionCfg.icon
+                const payload = parseActionPayload(b.action_payload)
+                const statusBadge =
+                  b.resolve_status === "resolved"
+                    ? { label: "已处理", cls: "bg-green-100 text-green-700", icon: CheckCircle2 }
+                    : b.resolve_status === "ignored"
+                    ? { label: "已忽略", cls: "bg-gray-100 text-gray-600", icon: Ban }
+                    : { label: "待处理", cls: "bg-amber-100 text-amber-700", icon: Clock }
+                const StatusIcon = statusBadge.icon
+                const variantClasses: Record<string, string> = {
+                  navy: "bg-navy-700 hover:bg-navy-800 text-white",
+                  purple: "bg-purple-600 hover:bg-purple-700 text-white",
+                  rose: "bg-rose-600 hover:bg-rose-700 text-white",
+                  amber: "bg-amber-600 hover:bg-amber-700 text-white",
+                  blue: "bg-blue-600 hover:bg-blue-700 text-white",
+                  green: "bg-green-600 hover:bg-green-700 text-white",
+                  yellow: "bg-yellow-600 hover:bg-yellow-700 text-white",
+                  gray: "bg-gray-400 text-white cursor-not-allowed",
+                }
+                return (
+                  <div key={b.id} className={`border rounded-lg px-4 py-3 ${
+                    b.resolve_status === "pending" ? "border-amber-200 bg-amber-50" : "border-gray-200 bg-gray-50"
+                  }`}>
+                    <div className="flex items-center gap-2 mb-1 flex-wrap">
+                      <BlockCodeBadge code={b.code} />
+                      <span className="text-xs text-gray-500">{ROLE_LABELS[b.operator_role] || b.operator_role}</span>
+                      <span className="text-xs text-gray-400">{new Date(b.created_at).toLocaleString("zh-CN")}</span>
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium inline-flex items-center gap-1 ${statusBadge.cls}`}>
+                        <StatusIcon className="w-3 h-3" />
+                        {statusBadge.label}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-3 text-xs text-gray-500 mb-1">
+                      <span>当前版本 v{b.current_version}</span>
+                      {b.submitted_version !== null && b.submitted_version !== b.current_version && (
+                        <span className="text-rose-600">(提交 v{b.submitted_version})</span>
+                      )}
+                    </div>
+                    <p className="text-sm text-amber-900">{b.reason}</p>
+                    <p className="text-xs text-amber-700 mt-1 flex items-start gap-1">
+                      <ArrowRight className="w-3 h-3 mt-0.5 shrink-0" />
+                      <span>{b.action_hint}</span>
+                    </p>
+                    {b.resolve_remark && (
+                      <p className="text-xs text-gray-500 mt-2 bg-white/60 rounded px-2 py-1">
+                        处理备注: {b.resolve_remark}
+                      </p>
+                    )}
+                    {b.action_target !== "no_action" && b.resolve_status === "pending" && (
+                      <button
+                        onClick={() => handleBlockAction(b.action_target, payload)}
+                        className={`mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${variantClasses[actionCfg.variant]}`}
+                      >
+                        <ActionIcon className="w-3.5 h-3.5" />
+                        {actionCfg.label}
+                      </button>
                     )}
                   </div>
-                  <p className="text-sm text-amber-900">{b.reason}</p>
-                  <p className="text-xs text-amber-700 mt-1 flex items-start gap-1">
-                    <ArrowRight className="w-3 h-3 mt-0.5 shrink-0" />
-                    <span>{b.action_hint}</span>
-                  </p>
-                </div>
-              ))}
+                )
+              })}
             </div>
           </div>
         )}
 
-        <div className="bg-white rounded-xl border border-gray-200 p-6">
+        <div id="action" className="bg-white rounded-xl border border-gray-200 p-6 scroll-mt-4">
           <h2 className="text-sm font-semibold text-navy-800 mb-4">操作面板</h2>
 
           {!canOperate && noActionReason && (
@@ -682,29 +799,45 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
                     );
                   } else {
                     const b = item.data as BlockAttempt;
+                    const statusBadge =
+                      b.resolve_status === "resolved"
+                        ? { label: "已处理", cls: "bg-green-100 text-green-700", icon: CheckCircle2 }
+                        : b.resolve_status === "ignored"
+                        ? { label: "已忽略", cls: "bg-gray-100 text-gray-600", icon: Ban }
+                        : { label: "待处理", cls: "bg-amber-100 text-amber-700", icon: Clock };
+                    const StatusIcon = statusBadge.icon;
                     return (
                       <div key={item.id} className="flex gap-4 pb-4 last:pb-0">
                         <div className="flex flex-col items-center">
-                          <div className="w-8 h-8 rounded-full bg-amber-100 flex items-center justify-center shrink-0">
-                            <Ban className="w-4 h-4 text-amber-600" />
+                          <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${
+                            b.resolve_status === "pending" ? "bg-amber-100" : "bg-gray-100"
+                          }`}>
+                            <Ban className={`w-4 h-4 ${
+                              b.resolve_status === "pending" ? "text-amber-600" : "text-gray-400"
+                            }`} />
                           </div>
                           {idx < logs.length - 1 && <div className="w-px flex-1 bg-gray-200 mt-1" />}
                         </div>
                         <div className="flex-1 min-w-0 pb-2">
-                          <div className="flex items-center gap-2 mb-1">
-                            <span className="text-xs font-medium text-amber-700">
+                          <div className="flex items-center gap-2 mb-1 flex-wrap">
+                            <span className={`text-xs font-medium ${
+                              b.resolve_status === "pending" ? "text-amber-700" : "text-gray-600"
+                            }`}>
                               {ROLE_LABELS[b.operator_role] || b.operator_role}
                             </span>
                             <BlockCodeBadge code={b.code} />
                             <span className="text-xs text-gray-400">{new Date(b.created_at).toLocaleString("zh-CN")}</span>
+                            <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium inline-flex items-center gap-1 ${statusBadge.cls}`}>
+                              <StatusIcon className="w-3 h-3" />
+                              {statusBadge.label}
+                            </span>
                           </div>
-                          <p className="text-sm text-amber-800">
+                          <p className={`text-sm ${b.resolve_status === "pending" ? "text-amber-800" : "text-gray-600" }`}>
                             尝试{b.action_attempted === "supplement" ? "补录" : b.action_attempted === "verify" ? "核验" : "归档"}被拦截：{b.reason}
                           </p>
-                          <p className="text-xs text-amber-600 mt-1 flex items-start gap-1">
-                            <ArrowRight className="w-3 h-3 mt-0.5 shrink-0" />
-                            <span>{b.action_hint}</span>
-                          </p>
+                          {b.resolve_remark && (
+                            <p className="text-xs text-gray-500 mt-1">处理备注: {b.resolve_remark}</p>
+                          )}
                         </div>
                       </div>
                     );

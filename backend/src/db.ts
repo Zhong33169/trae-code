@@ -2,7 +2,7 @@ import initSqlJs, { Database as SqlJsDatabase } from 'sql.js';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { readFileSync, writeFileSync, existsSync } from 'fs';
-import type { BlockCode, UserRole } from './types.js';
+import type { BlockCode, UserRole, ActionTarget, ActionPayload } from './types.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -21,8 +21,43 @@ export const BLOCK_HINTS: Record<BlockCode, string> = {
   unknown: '操作异常，请稍后重试或联系技术支持',
 };
 
+export const BLOCK_ACTION_TARGETS: Record<BlockCode, ActionTarget> = {
+  wrong_role: 'switch_role',
+  wrong_status: 'goto_detail',
+  missing_evidence: 'add_evidence',
+  version_conflict: 'refresh_version',
+  duplicate_supplement: 'continue_verify',
+  archived: 'no_action',
+  not_found: 'no_action',
+  unknown: 'no_action',
+};
+
+export function getBlockActionPayload(code: BlockCode, orderId?: string, actionAttempted?: 'supplement' | 'verify' | 'review'): ActionPayload {
+  const payload: ActionPayload = {};
+  const actionTarget = getBlockActionTarget(code);
+  if (actionTarget === 'switch_role') {
+    if (actionAttempted === 'supplement') payload.targetRole = 'receptionist';
+    else if (actionAttempted === 'verify') payload.targetRole = 'room_supervisor';
+    else if (actionAttempted === 'review') payload.targetRole = 'duty_manager';
+  }
+  if (orderId) {
+    payload.orderId = orderId;
+  }
+  if (actionTarget === 'add_evidence') {
+    payload.scrollTo = 'evidence';
+  }
+  if (actionTarget === 'continue_supplement' || actionTarget === 'continue_verify' || actionTarget === 'continue_review') {
+    payload.scrollTo = 'action';
+  }
+  return payload;
+}
+
 export function getBlockHint(code: BlockCode): string {
   return BLOCK_HINTS[code] || BLOCK_HINTS.unknown;
+}
+
+export function getBlockActionTarget(code: BlockCode): ActionTarget {
+  return BLOCK_ACTION_TARGETS[code] || 'no_action';
 }
 
 export interface PreparedResult {
@@ -87,9 +122,14 @@ export function recordBlockAttempt(params: {
   submittedVersion: number | null;
   currentVersion: number;
 }): void {
+  const actionTarget = getBlockActionTarget(params.code);
+  const actionPayload = getBlockActionPayload(params.code, params.orderId, params.actionAttempted);
   prepare(`
-    INSERT INTO block_attempts (id, order_id, operator_id, operator_role, action_attempted, code, reason, action_hint, submitted_version, current_version)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO block_attempts (
+      id, order_id, operator_id, operator_role, action_attempted, code, reason, action_hint,
+      action_target, action_payload, submitted_version, current_version, resolve_status
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
   `).run(
     params.id,
     params.orderId,
@@ -99,6 +139,8 @@ export function recordBlockAttempt(params: {
     params.code,
     params.reason,
     getBlockHint(params.code),
+    actionTarget,
+    JSON.stringify(actionPayload),
     params.submittedVersion,
     params.currentVersion
   );
@@ -173,8 +215,13 @@ export async function initDb(): Promise<void> {
       code TEXT NOT NULL,
       reason TEXT NOT NULL,
       action_hint TEXT NOT NULL,
+      action_target TEXT NOT NULL,
+      action_payload TEXT,
       submitted_version INTEGER,
       current_version INTEGER NOT NULL,
+      resolve_status TEXT NOT NULL DEFAULT 'pending' CHECK(resolve_status IN ('pending','resolved','ignored')),
+      resolve_remark TEXT,
+      resolved_at TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
   `);
@@ -226,10 +273,10 @@ function seedData(): void {
   db.run("INSERT INTO audit_logs (id, order_id, action, operator_id, operator_role, detail) VALUES ('a12', 'o9', 'verify', 'u2', 'room_supervisor', '核验通过')");
   db.run("INSERT INTO audit_logs (id, order_id, action, operator_id, operator_role, detail) VALUES ('a13', 'o9', 'review', 'u3', 'duty_manager', '复核退回：信息有误')");
 
-  db.run("INSERT INTO block_attempts (id, order_id, operator_id, operator_role, action_attempted, code, reason, action_hint, submitted_version, current_version) VALUES ('b1', 'o2', 'u1', 'receptionist', 'supplement', 'wrong_status', '订单状态不是待补录，无法补录', '请确认订单当前状态是否与操作匹配，或先完成前置步骤', 2, 2)");
-  db.run("INSERT INTO block_attempts (id, order_id, operator_id, operator_role, action_attempted, code, reason, action_hint, submitted_version, current_version) VALUES ('b2', 'o4', 'u3', 'duty_manager', 'review', 'archived', '已归档订单不可修改', '已归档订单不可修改，如需变更请联系管理员', 4, 4)");
-  db.run("INSERT INTO block_attempts (id, order_id, operator_id, operator_role, action_attempted, code, reason, action_hint, submitted_version, current_version) VALUES ('b3', 'o7', 'u1', 'receptionist', 'supplement', 'duplicate_supplement', '该订单已有补录记录，不可重复补录', '该订单已有补录记录，可前往核验流程继续推进', 3, 3)");
-  db.run("INSERT INTO block_attempts (id, order_id, operator_id, operator_role, action_attempted, code, reason, action_hint, submitted_version, current_version) VALUES ('b4', 'o9', 'u2', 'room_supervisor', 'verify', 'version_conflict', '订单已被他人修改，请刷新后重试（版本冲突）', '请刷新页面获取最新版本后重试', 3, 4)");
-  db.run("INSERT INTO block_attempts (id, order_id, operator_id, operator_role, action_attempted, code, reason, action_hint, submitted_version, current_version) VALUES ('b5', 'o3', 'u1', 'receptionist', 'supplement', 'wrong_role', '仅前厅接待可以补录登记', '请切换到正确的角色后重试', 3, 3)");
-  db.run("INSERT INTO block_attempts (id, order_id, operator_id, operator_role, action_attempted, code, reason, action_hint, submitted_version, current_version) VALUES ('b6', 'o6', 'u1', 'receptionist', 'supplement', 'missing_evidence', '补录登记必须至少提供1项登记证据', '请补充至少1项必需证据后再提交', 1, 1)");
+  db.run("INSERT INTO block_attempts (id, order_id, operator_id, operator_role, action_attempted, code, reason, action_hint, action_target, action_payload, submitted_version, current_version, resolve_status) VALUES ('b1', 'o2', 'u1', 'receptionist', 'supplement', 'wrong_status', '订单状态不是待补录，无法补录', '请确认订单当前状态是否与操作匹配，或先完成前置步骤', 'goto_detail', '{\"orderId\":\"o2\"}', 2, 2, 'pending')");
+  db.run("INSERT INTO block_attempts (id, order_id, operator_id, operator_role, action_attempted, code, reason, action_hint, action_target, action_payload, submitted_version, current_version, resolve_status) VALUES ('b2', 'o4', 'u3', 'duty_manager', 'review', 'archived', '已归档订单不可修改', '已归档订单不可修改，如需变更请联系管理员', 'no_action', '{}', 4, 4, 'pending')");
+  db.run("INSERT INTO block_attempts (id, order_id, operator_id, operator_role, action_attempted, code, reason, action_hint, action_target, action_payload, submitted_version, current_version, resolve_status, resolve_remark, resolved_at) VALUES ('b3', 'o7', 'u1', 'receptionist', 'supplement', 'duplicate_supplement', '该订单已有补录记录，不可重复补录', '该订单已有补录记录，可前往核验流程继续推进', 'continue_verify', '{\"orderId\":\"o7\",\"scrollTo\":\"action\"}', 3, 3, 'resolved', '已切换到客房主管角色继续推进', datetime('now'))");
+  db.run("INSERT INTO block_attempts (id, order_id, operator_id, operator_role, action_attempted, code, reason, action_hint, action_target, action_payload, submitted_version, current_version, resolve_status, resolve_remark, resolved_at) VALUES ('b4', 'o9', 'u2', 'room_supervisor', 'verify', 'version_conflict', '订单已被他人修改，请刷新后重试（版本冲突）', '请刷新页面获取最新版本后重试', 'refresh_version', '{\"orderId\":\"o9\"}', 3, 4, 'resolved', '已刷新版本重新提交', datetime('now'))");
+  db.run("INSERT INTO block_attempts (id, order_id, operator_id, operator_role, action_attempted, code, reason, action_hint, action_target, action_payload, submitted_version, current_version, resolve_status) VALUES ('b5', 'o3', 'u1', 'receptionist', 'supplement', 'wrong_role', '仅前厅接待可以补录登记', '请切换到正确的角色后重试', 'switch_role', '{\"targetRole\":\"receptionist\"}', 3, 3, 'pending')");
+  db.run("INSERT INTO block_attempts (id, order_id, operator_id, operator_role, action_attempted, code, reason, action_hint, action_target, action_payload, submitted_version, current_version, resolve_status) VALUES ('b6', 'o6', 'u1', 'receptionist', 'supplement', 'missing_evidence', '补录登记必须至少提供1项登记证据', '请补充至少1项必需证据后再提交', 'add_evidence', '{\"orderId\":\"o6\",\"scrollTo\":\"evidence\"}', 1, 1, 'pending')");
 }
