@@ -217,41 +217,62 @@ pub async fn seed_initial_data(pool: &SqlitePool) -> Result<()> {
 }
 
 async fn migrate_scan_records_table(pool: &SqlitePool) -> Result<()> {
-    let columns: Vec<String> = sqlx::query_scalar(
+    let old_columns: Vec<String> = sqlx::query_scalar(
         "SELECT name FROM pragma_table_info('scan_records') ORDER BY cid"
     )
     .fetch_all(pool)
     .await
     .unwrap_or_default();
 
-    if columns.is_empty() {
+    if old_columns.is_empty() {
         return Ok(());
     }
 
-    let has_user_name = columns.contains(&"user_name".to_string());
-    let has_error_code = columns.contains(&"error_code".to_string());
+    let has_user_name = old_columns.iter().any(|c| c == "user_name");
+    let has_user_role = old_columns.iter().any(|c| c == "user_role");
+    let has_error_code = old_columns.iter().any(|c| c == "error_code");
     
     let mut has_nullable_demand_id = false;
-    if let Some(idx) = columns.iter().position(|c| c == "creative_demand_id") {
-        let notnull: Option<i64> = sqlx::query_scalar(
+    if let Some(idx) = old_columns.iter().position(|c| c == "creative_demand_id") {
+        let notnull: i64 = sqlx::query_scalar::<_, i64>(
             "SELECT notnull FROM pragma_table_info('scan_records') WHERE cid = ?"
         )
         .bind(idx as i64)
         .fetch_one(pool)
         .await
-        .unwrap_or(Some(1));
-        has_nullable_demand_id = notnull.unwrap_or(1) == 0;
+        .unwrap_or(1);
+        has_nullable_demand_id = notnull == 0;
     }
 
-    if has_user_name && has_error_code && has_nullable_demand_id {
+    if has_user_name && has_user_role && has_error_code && has_nullable_demand_id {
         return Ok(());
     }
 
-    sqlx::query("PRAGMA foreign_keys = OFF").execute(pool).await?;
+    let mut conn = pool.acquire().await?;
 
-    sqlx::query("DROP TABLE IF EXISTS scan_records_new").execute(pool).await?;
-    sqlx::query("DROP INDEX IF EXISTS idx_scan_records_creative_demand").execute(pool).await?;
-    sqlx::query("DROP INDEX IF EXISTS idx_scan_records_user").execute(pool).await?;
+    sqlx::query("PRAGMA busy_timeout = 5000").execute(&mut *conn).await.ok();
+    sqlx::query("PRAGMA foreign_keys = OFF").execute(&mut *conn).await.ok();
+
+    let migrate_result = migrate_scan_records_with_conn(&mut conn, &old_columns, has_error_code).await;
+
+    let _ = sqlx::query("PRAGMA foreign_keys = ON").execute(&mut *conn).await;
+
+    match migrate_result {
+        Ok(_) => Ok(()),
+        Err(e) => {
+            Err(anyhow::anyhow!("MIGRATION_SCAN_RECORDS_FAILED: {}", e))
+        }
+    }
+}
+
+async fn migrate_scan_records_with_conn(
+    conn: &mut sqlx::SqliteConnection,
+    old_columns: &[String],
+    has_error_code: bool,
+) -> Result<(), anyhow::Error> {
+    sqlx::query("DROP TABLE IF EXISTS scan_records_new").execute(&mut *conn).await?;
+    sqlx::query("DROP INDEX IF EXISTS idx_scan_records_creative_demand").execute(&mut *conn).await?;
+    sqlx::query("DROP INDEX IF EXISTS idx_scan_records_user").execute(&mut *conn).await?;
 
     sqlx::query(
         r#"
@@ -259,39 +280,64 @@ async fn migrate_scan_records_table(pool: &SqlitePool) -> Result<()> {
             id TEXT PRIMARY KEY,
             creative_demand_id TEXT,
             user_id TEXT NOT NULL,
-            user_name TEXT NOT NULL,
-            user_role TEXT NOT NULL,
-            scan_result TEXT NOT NULL,
+            user_name TEXT NOT NULL DEFAULT '未知用户',
+            user_role TEXT NOT NULL DEFAULT 'unknown',
+            scan_result TEXT NOT NULL DEFAULT 'failed',
             error_code TEXT,
             error_message TEXT,
-            scanned_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users(id)
+            scanned_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
         "#
-    ).execute(pool).await?;
+    ).execute(&mut *conn).await?;
 
-    let old_columns: Vec<String> = columns.iter()
-        .filter(|c| {
-            matches!(c.as_str(), 
-                "id" | "creative_demand_id" | "user_id" | "user_name" | 
-                "user_role" | "scan_result" | "error_code" | "error_message" | "scanned_at"
-            )
-        })
-        .cloned()
-        .collect();
+    let col_id      = old_columns.iter().any(|c| c == "id");
+    let col_did     = old_columns.iter().any(|c| c == "creative_demand_id");
+    let col_uid     = old_columns.iter().any(|c| c == "user_id");
+    let col_uname   = old_columns.iter().any(|c| c == "user_name");
+    let col_urole   = old_columns.iter().any(|c| c == "user_role");
+    let col_result  = old_columns.iter().any(|c| c == "scan_result");
+    let col_ecode   = old_columns.iter().any(|c| c == "error_code");
+    let col_emsg    = old_columns.iter().any(|c| c == "error_message");
+    let col_time    = old_columns.iter().any(|c| c == "scanned_at");
 
-    let col_str = old_columns.join(", ");
+    let mut dst_cols: Vec<&str> = Vec::new();
+    let mut src_exprs: Vec<String> = Vec::new();
+
+    if col_id { dst_cols.push("id"); src_exprs.push("id".to_string()); }
+    if col_did { dst_cols.push("creative_demand_id"); src_exprs.push("creative_demand_id".to_string()); }
+    if col_uid { dst_cols.push("user_id"); src_exprs.push("user_id".to_string()); }
+
+    dst_cols.push("user_name");
+    if col_uname {
+        src_exprs.push("COALESCE(NULLIF(user_name, ''), '未知用户')".to_string());
+    } else {
+        src_exprs.push("COALESCE((SELECT name FROM users WHERE users.id = scan_records.user_id), '未知用户')".to_string());
+    }
+
+    dst_cols.push("user_role");
+    if col_urole {
+        src_exprs.push("COALESCE(NULLIF(user_role, ''), 'unknown')".to_string());
+    } else {
+        src_exprs.push("COALESCE((SELECT role FROM users WHERE users.id = scan_records.user_id), 'unknown')".to_string());
+    }
+
+    dst_cols.push("scan_result");
+    if col_result {
+        src_exprs.push("COALESCE(scan_result, 'failed')".to_string());
+    } else {
+        src_exprs.push("'failed'".to_string());
+    }
+
+    if col_ecode { dst_cols.push("error_code"); src_exprs.push("error_code".to_string()); }
+    if col_emsg  { dst_cols.push("error_message"); src_exprs.push("error_message".to_string()); }
+    if col_time  { dst_cols.push("scanned_at"); src_exprs.push("scanned_at".to_string()); }
+
     let copy_sql = format!(
         "INSERT INTO scan_records_new ({}) SELECT {} FROM scan_records",
-        col_str, col_str
+        dst_cols.join(", "),
+        src_exprs.join(", ")
     );
-    sqlx::query(&copy_sql).execute(pool).await?;
-
-    if !has_user_name {
-        sqlx::query(
-            "UPDATE scan_records_new SET user_name = (SELECT name FROM users WHERE users.id = scan_records_new.user_id) WHERE user_name IS NULL OR user_name = ''"
-        ).execute(pool).await?;
-    }
+    sqlx::query(&copy_sql).execute(&mut *conn).await?;
 
     if !has_error_code {
         sqlx::query(
@@ -299,22 +345,20 @@ async fn migrate_scan_records_table(pool: &SqlitePool) -> Result<()> {
                 WHEN scan_result = 'failed' AND error_message LIKE '%无效%' THEN 'INVALID_CODE'
                 WHEN scan_result = 'failed' AND error_message LIKE '%重复%' THEN 'DUPLICATE_SCAN'
                 WHEN scan_result = 'failed' AND error_message LIKE '%处理人%' THEN 'WRONG_HANDLER'
-                ELSE error_code 
-            END"
-        ).execute(pool).await?;
+                ELSE NULL
+            END WHERE error_code IS NULL"
+        ).execute(&mut *conn).await?;
     }
 
-    sqlx::query("DROP TABLE IF EXISTS scan_records").execute(pool).await?;
-    sqlx::query("ALTER TABLE scan_records_new RENAME TO scan_records").execute(pool).await?;
+    sqlx::query("DROP TABLE IF EXISTS scan_records").execute(&mut *conn).await?;
+    sqlx::query("ALTER TABLE scan_records_new RENAME TO scan_records").execute(&mut *conn).await?;
 
     sqlx::query(
         "CREATE INDEX IF NOT EXISTS idx_scan_records_creative_demand ON scan_records(creative_demand_id)"
-    ).execute(pool).await?;
+    ).execute(&mut *conn).await?;
     sqlx::query(
         "CREATE INDEX IF NOT EXISTS idx_scan_records_user ON scan_records(user_id)"
-    ).execute(pool).await?;
-
-    sqlx::query("PRAGMA foreign_keys = ON").execute(pool).await?;
+    ).execute(&mut *conn).await?;
 
     Ok(())
 }

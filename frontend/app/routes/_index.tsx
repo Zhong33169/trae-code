@@ -131,7 +131,7 @@ export default function Index() {
       let message = `批量处理完成：成功 ${result.success_count} 个，失败 ${result.fail_count} 个`;
       if (result.results) {
         const conflicts = result.results.filter(
-          (r: any) => r.error_code === "VERSION_CONFLICT"
+          (r: any) => r.error_code === "VERSION_CONFLICT" || r.code === "VERSION_CONFLICT"
         );
         if (conflicts.length > 0) {
           message += `\n\n版本冲突 ${conflicts.length} 个，页面将自动刷新。`;

@@ -39,7 +39,17 @@ async fn main() -> anyhow::Result<()> {
     let config = Arc::new(AppConfig::from_env());
 
     let pool = SqlitePool::connect(&config.database_url).await?;
-    db::init_db(&pool).await?;
+    
+    if let Err(e) = db::init_db(&pool).await {
+        let err_msg = e.to_string();
+        if err_msg.starts_with("MIGRATION_SCAN_RECORDS_FAILED") {
+            tracing::error!(error = %err_msg, "扫码记录表迁移失败，请检查数据库兼容性");
+        } else {
+            tracing::error!(error = %err_msg, "数据库初始化失败");
+        }
+        return Err(e);
+    }
+    
     db::seed_initial_data(&pool).await?;
 
     let cors = CorsLayer::new()

@@ -42,7 +42,7 @@ export async function apiFetch<T>(
   if (!response.ok) {
     throw new ApiError(
       data.error || `HTTP ${response.status}`,
-      data.code || "UNKNOWN_ERROR",
+      data.code || data.error_code || "UNKNOWN_ERROR",
       response.status,
       data
     );
@@ -65,7 +65,8 @@ export class ApiError extends Error {
   }
 
   isVersionConflict(): boolean {
-    return this.code === "VERSION_CONFLICT" || this.status === 409;
+    const code = this.code || (this.details as any)?.error_code;
+    return code === "VERSION_CONFLICT" || this.status === 409;
   }
 }
 
