@@ -1,0 +1,328 @@
+import os
+import sys
+import django
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'app.settings')
+django.setup()
+
+from django.db import connection
+from app.models import User, Ticket, TicketLog, Evidence
+from django.utils import timezone
+from datetime import timedelta
+
+
+def init_database():
+    with connection.schema_editor() as schema_editor:
+        from app.models import User, Ticket, TicketLog, Evidence
+        for model in [User, Ticket, TicketLog, Evidence]:
+            try:
+                schema_editor.create_model(model)
+                print(f'创建表: {model._meta.db_table}')
+            except Exception as e:
+                print(f'表已存在或创建失败 {model._meta.db_table}: {e}')
+
+
+def create_users():
+    users = [
+        {
+            'username': 'registrar1',
+            'password': '123456',
+            'name': '张登记',
+            'role': 'registrar',
+        },
+        {
+            'username': 'registrar2',
+            'password': '123456',
+            'name': '李登记',
+            'role': 'registrar',
+        },
+        {
+            'username': 'auditor1',
+            'password': '123456',
+            'name': '王审核',
+            'role': 'auditor',
+        },
+        {
+            'username': 'auditor2',
+            'password': '123456',
+            'name': '赵审核',
+            'role': 'auditor',
+        },
+        {
+            'username': 'reviewer1',
+            'password': '123456',
+            'name': '陈复核',
+            'role': 'reviewer',
+        },
+    ]
+
+    created = []
+    for u in users:
+        user, is_new = User.objects.get_or_create(
+            username=u['username'],
+            defaults={
+                'name': u['name'],
+                'role': u['role'],
+            }
+        )
+        if is_new:
+            user.set_password(u['password'])
+            user.save()
+            print(f'创建用户: {user.username} ({user.name}, {user.get_role_display()})')
+        else:
+            print(f'用户已存在: {user.username}')
+        created.append(user)
+
+    return created
+
+
+def create_sample_tickets():
+    registrar1 = User.objects.get(username='registrar1')
+    registrar2 = User.objects.get(username='registrar2')
+    auditor1 = User.objects.get(username='auditor1')
+    reviewer1 = User.objects.get(username='reviewer1')
+
+    now = timezone.now()
+
+    samples = [
+        {
+            'title': '高风险-核心支付模块外包需求',
+            'description': '涉及用户支付核心流程，金额大，安全要求高，需高风险等级处理。包含支付网关对接、订单系统改造、对账模块开发。',
+            'risk_level': 'high',
+            'stage': 'confirm',
+            'status': 'pending',
+            'creator': registrar1,
+            'handler': auditor1,
+            'deadline': now + timedelta(hours=12),
+            'logs': [
+                ('create', '', 'confirm', '', 'pending', registrar1, '创建高风险需求交付单'),
+            ],
+            'evidences_per_log': [
+                [('需求规格说明书', 'doc', 'https://example.com/spec.docx'),
+                 ('外包合同草案', 'doc', 'https://example.com/contract.pdf'),
+                 ('安全评估报告', 'link', 'https://example.com/security')],
+            ],
+        },
+        {
+            'title': '中风险-会员管理系统开发',
+            'description': '会员管理后台系统开发，包含会员信息管理、等级体系、积分系统等功能。属于中等复杂度业务系统。',
+            'risk_level': 'medium',
+            'stage': 'schedule',
+            'status': 'pending',
+            'creator': registrar2,
+            'handler': auditor1,
+            'deadline': now + timedelta(days=2),
+            'logs': [
+                ('create', '', 'confirm', '', 'pending', registrar2, '创建需求交付单'),
+                ('approve', 'confirm', 'schedule', 'pending', 'pending', auditor1, '需求确认通过，已完成需求分析，进入排期评估阶段'),
+            ],
+            'evidences_per_log': [
+                [('需求文档V1.0', 'doc', 'https://example.com/req-v1.docx')],
+                [('需求评审会议纪要', 'doc', 'https://example.com/meeting-minutes.docx'),
+                 ('原型设计稿', 'link', 'https://example.com/prototype')],
+            ],
+        },
+        {
+            'title': '低风险-官网页面改版',
+            'description': '公司官网首页视觉改版，不涉及核心业务逻辑，主要为前端展示层调整。',
+            'risk_level': 'low',
+            'stage': 'acceptance',
+            'status': 'pending',
+            'creator': registrar1,
+            'handler': reviewer1,
+            'deadline': now + timedelta(days=3),
+            'logs': [
+                ('create', '', 'confirm', '', 'pending', registrar1, '创建官网改版需求'),
+                ('approve', 'confirm', 'schedule', 'pending', 'pending', auditor1, '需求确认通过'),
+                ('approve', 'schedule', 'acceptance', 'pending', 'pending', auditor1, '排期评估通过，开发已完成，进入交付验收阶段'),
+            ],
+            'evidences_per_log': [
+                [('设计需求说明', 'doc', 'https://example.com/design-req.pdf')],
+                [('排期表', 'doc', 'https://example.com/schedule.xlsx')],
+                [('测试报告', 'doc', 'https://example.com/test-report.pdf'),
+                 ('验收标准', 'doc', 'https://example.com/acceptance.pdf')],
+            ],
+        },
+        {
+            'title': '高风险-数据迁移项目（退回补正中）',
+            'description': '历史业务系统数据迁移至新平台，涉及大量用户敏感数据，数据一致性要求极高。',
+            'risk_level': 'high',
+            'stage': 'confirm',
+            'status': 'returned',
+            'creator': registrar2,
+            'handler': registrar2,
+            'deadline': now + timedelta(days=1),
+            'logs': [
+                ('create', '', 'confirm', '', 'pending', registrar2, '创建数据迁移项目需求'),
+                ('reject', 'confirm', 'confirm', 'pending', 'returned', auditor1, '退回补正：缺少数据安全评估报告和迁移回滚方案，请补充后重新提交。证据材料数量不足，高风险项目需至少3份证据。'),
+            ],
+            'evidences_per_log': [
+                [('迁移需求说明', 'doc', 'https://example.com/migration-req.docx')],
+                [('退回意见说明', 'doc', 'https://example.com/reject-note.pdf')],
+            ],
+        },
+        {
+            'title': '中风险-客服工单系统优化（已逾期）',
+            'description': '客服工单系统功能优化，增加自动派单、智能分类等功能。当前已逾期。',
+            'risk_level': 'medium',
+            'stage': 'schedule',
+            'status': 'overdue',
+            'creator': registrar1,
+            'handler': auditor1,
+            'deadline': now - timedelta(days=1),
+            'logs': [
+                ('create', '', 'confirm', '', 'pending', registrar1, '创建客服系统优化需求'),
+                ('approve', 'confirm', 'schedule', 'pending', 'pending', auditor1, '需求确认通过，进入排期评估'),
+                ('validate_fail', 'schedule', 'schedule', 'pending', 'overdue', None, '系统自动标记逾期'),
+            ],
+            'evidences_per_log': [
+                [('需求文档', 'doc', 'https://example.com/cs-req.docx')],
+                [('确认意见', 'doc', 'https://example.com/confirm-opinion.pdf')],
+                [],
+            ],
+        },
+        {
+            'title': '中风险-营销活动平台（已完成归档）',
+            'description': '营销活动管理平台，支持活动创建、发布、数据统计等功能。已完成全部流程。',
+            'risk_level': 'medium',
+            'stage': 'acceptance',
+            'status': 'completed',
+            'creator': registrar2,
+            'handler': None,
+            'deadline': now - timedelta(days=5),
+            'logs': [
+                ('create', '', 'confirm', '', 'pending', registrar2, '创建营销活动平台需求'),
+                ('approve', 'confirm', 'schedule', 'pending', 'pending', auditor1, '需求确认通过，评审通过'),
+                ('approve', 'schedule', 'acceptance', 'pending', 'pending', auditor1, '排期评估通过，开发团队交付完成'),
+                ('archive', 'acceptance', 'acceptance', 'pending', 'completed', reviewer1, '复核归档：验收通过，功能完整，性能达标，文档齐全'),
+            ],
+            'evidences_per_log': [
+                [('活动平台需求V1', 'doc', 'https://example.com/marketing-req.docx')],
+                [('需求评审记录', 'doc', 'https://example.com/review.docx')],
+                [('开发排期表', 'doc', 'https://example.com/dev-schedule.xlsx'),
+                 ('交付清单', 'doc', 'https://example.com/delivery-list.docx')],
+                [('验收报告', 'doc', 'https://example.com/acceptance-report.pdf'),
+                 ('项目总结', 'doc', 'https://example.com/project-summary.pdf'),
+                 ('源码仓库链接', 'link', 'https://github.com/example/marketing')],
+            ],
+        },
+        {
+            'title': '低风险-内部工具小需求（待补正）',
+            'description': '内部使用的小工具开发，用于提升日常办公效率。',
+            'risk_level': 'low',
+            'stage': 'schedule',
+            'status': 'returned',
+            'creator': registrar1,
+            'handler': registrar1,
+            'deadline': now + timedelta(days=4),
+            'logs': [
+                ('create', '', 'confirm', '', 'pending', registrar1, '创建内部工具需求'),
+                ('approve', 'confirm', 'schedule', 'pending', 'pending', auditor1, '需求简单，确认通过'),
+                ('reject', 'schedule', 'schedule', 'pending', 'returned', auditor1, '退回补正：排期不够明确，缺少人力资源分配信息，请补充详细排期表和人力配置。'),
+            ],
+            'evidences_per_log': [
+                [('工具需求描述', 'doc', 'https://example.com/tool-req.txt')],
+                [],
+                [('退回说明', 'doc', 'https://example.com/schedule-reject.pdf')],
+            ],
+        },
+        {
+            'title': '高风险-风控模型升级项目',
+            'description': '风控模型升级，涉及核心风控算法调整，影响面广，需严格评审。',
+            'risk_level': 'high',
+            'stage': 'confirm',
+            'status': 'pending',
+            'creator': registrar1,
+            'handler': auditor1,
+            'deadline': now + timedelta(hours=8),
+            'logs': [
+                ('create', '', 'confirm', '', 'pending', registrar1, '创建风控模型升级需求'),
+            ],
+            'evidences_per_log': [
+                [('模型升级方案', 'doc', 'https://example.com/risk-model.docx'),
+                 ('影响评估报告', 'doc', 'https://example.com/impact-assessment.pdf'),
+                 ('技术方案评审链接', 'link', 'https://example.com/tech-review')],
+            ],
+        },
+    ]
+
+    for sample in samples:
+        existing = Ticket.objects.filter(title=sample['title']).first()
+        if existing:
+            print(f'需求单已存在: {sample["title"][:30]}...')
+            continue
+
+        ticket = Ticket.objects.create(
+            title=sample['title'],
+            description=sample['description'],
+            risk_level=sample['risk_level'],
+            stage=sample['stage'],
+            status=sample['status'],
+            version=len(sample['logs']),
+            creator=sample['creator'],
+            current_handler=sample['handler'],
+            deadline=sample['deadline'],
+        )
+
+        for i, log_info in enumerate(sample['logs']):
+            action, from_stage, to_stage, from_status, to_status, operator, comment = log_info
+            log = TicketLog.objects.create(
+                ticket=ticket,
+                action=action,
+                from_stage=from_stage,
+                to_stage=to_stage,
+                from_status=from_status,
+                to_status=to_status,
+                operator=operator,
+                comment=comment,
+            )
+
+            if i < len(sample['evidences_per_log']):
+                for ev_name, ev_type, ev_url in sample['evidences_per_log'][i]:
+                    Evidence.objects.create(
+                        ticket=ticket,
+                        log=log,
+                        name=ev_name,
+                        type=ev_type,
+                        url=ev_url,
+                    )
+
+        print(f'创建需求单: {sample["title"][:30]}... ({sample["risk_level"]}, {sample["stage"]}, {sample["status"]})')
+
+
+def main():
+    print('=' * 60)
+    print('软件外包项目组-风险分级处置需求交付单系统')
+    print('数据库初始化脚本')
+    print('=' * 60)
+
+    print('\n[1/3] 初始化数据库表...')
+    init_database()
+
+    print('\n[2/3] 创建用户账号...')
+    create_users()
+
+    print('\n[3/3] 创建样例需求交付单...')
+    create_sample_tickets()
+
+    print('\n' + '=' * 60)
+    print('初始化完成！')
+    print('=' * 60)
+    print('\n测试账号：')
+    print('  需求交付登记员: registrar1 / 123456 (张登记)')
+    print('  需求交付登记员: registrar2 / 123456 (李登记)')
+    print('  需求交付审核主管: auditor1 / 123456 (王审核)')
+    print('  需求交付审核主管: auditor2 / 123456 (赵审核)')
+    print('  软件外包项目组复核负责人: reviewer1 / 123456 (陈复核)')
+    print('\n样例数据包含:')
+    print('  - 正常流转中的需求（各阶段）')
+    print('  - 高/中/低风险等级')
+    print('  - 退回补正状态')
+    print('  - 逾期状态')
+    print('  - 已完成归档')
+    print('  - 缺证据场景')
+
+
+if __name__ == '__main__':
+    main()
