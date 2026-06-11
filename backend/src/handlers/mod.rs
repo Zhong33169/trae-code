@@ -449,6 +449,19 @@ pub async fn accept_handover(
     .execute(pool)
     .await?;
 
+    let now = Utc::now();
+
+    if current_user.role == "cs_manager" {
+        sqlx::query(
+            "UPDATE tickets SET status = ?, updated_at = ? WHERE id = ?"
+        )
+        .bind("closed")
+        .bind(now)
+        .bind(&record.ticket_id)
+        .execute(pool)
+        .await?;
+    }
+
     let shift_display = match record.shift.as_str() {
         "morning" => "早班",
         "afternoon" => "中班",
@@ -468,6 +481,21 @@ pub async fn accept_handover(
         "handover_accept",
         Some(&log_detail),
     ).await?;
+
+    if current_user.role == "cs_manager" {
+        let status_log = if remark_str.is_empty() {
+            format!("客服经理最终签收，工单已关闭（{}：{}）", role_display(&current_user.role), current_user.name)
+        } else {
+            format!("客服经理最终签收，工单已关闭（{}：{}）：{}", role_display(&current_user.role), current_user.name, remark_str)
+        };
+        add_operation_log(
+            pool,
+            &record.ticket_id,
+            &current_user.id,
+            "status_change:->closed",
+            Some(&status_log),
+        ).await?;
+    }
 
     let record: HandoverRecord = sqlx::query_as::<_, HandoverRecord>(
         "SELECT * FROM handover_records WHERE id = ?"
@@ -563,12 +591,9 @@ pub async fn list_my_handovers(
     let mut sql = "SELECT * FROM handover_records WHERE to_user = ?".to_string();
     let mut params: Vec<String> = vec![current_user.id.clone()];
 
-    if let Some(s) = &status {
-        if !s.is_empty() {
-            sql.push_str(" AND status = ?");
-            params.push(s.clone());
-        }
-    }
+    let filter_status = status.clone().and_then(|s| if s.is_empty() { None } else { Some(s) }).unwrap_or_else(|| "pending".to_string());
+    sql.push_str(" AND status = ?");
+    params.push(filter_status);
 
     sql.push_str(" ORDER BY created_at DESC");
 

@@ -6,25 +6,33 @@
       </el-button>
       <h2 class="page-title">工单详情</h2>
       <div class="header-actions">
-        <template v-if="canAssign">
-          <el-button type="warning" @click="openAssign">
-            问题派单
-          </el-button>
+        <template v-if="ticket?.status === 'closed'">
+          <el-tag type="success" size="large">
+            <el-icon style="margin-right:4px"><CircleCheck /></el-icon>
+            工单已完成
+          </el-tag>
         </template>
-        <template v-if="canStartReturnVisit">
-          <el-button type="primary" @click="openStartReturnVisit">
-            开始回访
-          </el-button>
-        </template>
-        <template v-if="canCloseReturnVisit">
-          <el-button type="success" @click="openCloseReturnVisit">
-            回访关闭
-          </el-button>
-        </template>
-        <template v-if="canHandover">
-          <el-button :icon="Switch" @click="openHandover">
-            交接
-          </el-button>
+        <template v-else>
+          <template v-if="canAssign">
+            <el-button type="warning" @click="openAssign">
+              问题派单
+            </el-button>
+          </template>
+          <template v-if="canStartReturnVisit">
+            <el-button type="primary" @click="openStartReturnVisit">
+              开始回访
+            </el-button>
+          </template>
+          <template v-if="canCloseReturnVisit">
+            <el-button type="success" @click="openCloseReturnVisit">
+              回访关闭
+            </el-button>
+          </template>
+          <template v-if="canHandover">
+            <el-button :icon="Switch" @click="openHandover">
+              交接
+            </el-button>
+          </template>
         </template>
       </div>
     </div>
@@ -461,7 +469,11 @@ function getTimelineIcon(type) {
 
 function getLogType(action) {
   if (action === 'create_ticket') return 'create'
-  if (action.startsWith('status_change')) return 'assign'
+  if (action.startsWith('status_change')) {
+    if (action.endsWith('->closed')) return 'sign'
+    if (action.endsWith('->exception')) return 'abnormal'
+    return 'assign'
+  }
   if (action === 'handover_submit') return 'assign'
   if (action === 'handover_accept') return 'sign'
   if (action === 'handover_reject') return 'abnormal'
@@ -479,7 +491,13 @@ function getLogTitle(action) {
   if (action.startsWith('status_change:')) {
     const parts = action.replace('status_change:', '').split('->')
     if (parts.length === 2) {
-      return `状态变更：${getStatusLabel(parts[0])} → ${getStatusLabel(parts[1])}`
+      const from = parts[0] ? getStatusLabel(parts[0]) : ''
+      const to = getStatusLabel(parts[1])
+      if (from) {
+        return `状态变更：${from} → ${to}`
+      } else {
+        return `工单${to}`
+      }
     }
     return '状态变更'
   }
