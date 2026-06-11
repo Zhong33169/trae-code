@@ -2,6 +2,26 @@ from typing import Tuple, Optional, Dict, Any, List
 from datetime import datetime
 
 
+def build_reconcile_detail(
+    reconcile: Dict[str, Any],
+    reservation_no: Optional[str] = None,
+    batch_no: Optional[str] = None,
+    operator_role: Optional[str] = None,
+) -> Dict[str, Any]:
+    return {
+        "diffs": reconcile.get("diffs", []),
+        "block_reasons": reconcile.get("block_reasons", []),
+        "item_results": reconcile.get("item_results", []),
+        "reservation_no": reservation_no,
+        "batch_no": batch_no,
+        "operator_role": operator_role,
+        "total_online": reconcile.get("total_online"),
+        "total_offline": reconcile.get("total_offline"),
+        "is_consistent": reconcile.get("is_consistent"),
+        "is_blocked": reconcile.get("is_blocked"),
+    }
+
+
 def build_offline_statuses_for_batch(
     batch_items: List[Any],
     offline_count: int = None,
@@ -34,6 +54,54 @@ def run_batch_reconcile(
     if not statuses:
         count, statuses = build_offline_statuses_for_batch(batch_items, offline_count)
     return reconcile_offline_online(batch_items, count, statuses, atts)
+
+
+def apply_reconcile_result(db, batch_items, reconcile, offline_count, current,
+                          reservation=None, action="submit", force_submit=False):
+    """统一写入批次核对结果：离线字段、BatchRecord、AuditLog、BlockLog"""
+    from ..models import BatchRecord, AuditLog, BlockLog
+
+    batch_no = batch_items[0].batch_no if batch_items else (reservation.batch_no if reservation else None)
+    reservation_no = reservation.reservation_no if reservation else None
+    reservation_id = reservation.id if reservation else None
+
+    for r in batch_items:
+        if offline_count:
+            r.offline_count = offline_count
+        r.offline_check_diff = reconcile
+        r.offline_checked = True
+        r.offline_checked_at = datetime.now()
+        r.offline_checked_by = current["name"]
+
+    batch = db.query(BatchRecord).filter(BatchRecord.batch_no == batch_no).first()
+    if batch:
+        batch.offline_count = offline_count or batch.offline_count or len(batch_items)
+        batch.check_status = "checked" if reconcile["is_consistent"] else ("blocked" if reconcile["is_blocked"] else "has_diff")
+        batch.check_diff = reconcile
+        batch.checked_at = datetime.now()
+        batch.checked_by = current["name"]
+
+    if reconcile["is_blocked"] and not force_submit:
+        detail = build_reconcile_detail(
+            reconcile,
+            reservation_no=reservation_no,
+            batch_no=batch_no,
+            operator_role=current["role"],
+        )
+        log = BlockLog(
+            reservation_id=reservation_id,
+            batch_no=batch_no,
+            block_type="batch_mismatch",
+            reason=reconcile["message"],
+            detail=detail,
+            operator=current["name"],
+            operator_role=current["role"],
+            item_results=reconcile["item_results"],
+        )
+        db.add(log)
+        return {"blocked": True}
+
+    return {"blocked": False}
 
 STATUS_FLOW = {
     "draft": {

@@ -86,6 +86,7 @@ class AuditLog(Base):
     operator = Column(String(100))
     operator_role = Column(String(50))
     remark = Column(Text)
+    detail = Column(JSON)
     item_results = Column(JSON)
     created_at = Column(DateTime, default=datetime.now)
 

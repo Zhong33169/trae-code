@@ -244,16 +244,47 @@ export class AuditLogList extends LitElement {
               </td>
               <td>
                 ${log.remark ? html`<div class="remark-box">${log.remark}</div>` : '-'}
-                ${log.item_results?.length ? html`
+                ${log.detail?.block_reasons?.length ? html`
+                  <div class="detail-box" style="margin-top:6px;">
+                    <div style="font-weight:600; margin-bottom: 4px; color:#7f1d1d;">阻断原因：</div>
+                    ${log.detail.block_reasons.map(br => html`
+                      <div class="d-item">• ${br}</div>
+                    `)}
+                  </div>
+                ` : ''}
+                ${log.detail?.diffs?.length ? html`
+                  <div class="detail-box" style="margin-top:6px;">
+                    <div style="font-weight:600; margin-bottom: 4px;">差异明细：</div>
+                    ${log.detail.diffs.map(d => html`
+                      <div class="d-item">
+                        <span class="d-label">${d.field}：</span>${d.message || ''}
+                        ${d.online_value !== undefined ? html`
+                          <div style="padding-left: 12px; font-size: 11px; color:#6b7280;">
+                            线上：${Array.isArray(d.online_value) ? d.online_value.join('、') : d.online_value}
+                            ${d.offline_value !== undefined && d.offline_value !== null ? html` / 线下：${d.offline_value}` : ''}
+                          </div>
+                        ` : ''}
+                      </div>
+                    `)}
+                  </div>
+                ` : ''}
+                ${(log.detail?.item_results?.length || log.item_results?.length) ? html`
                   <div class="item-result-list" style="margin-top:6px;">
                     <div style="font-size: 11px; color:#9ca3af; margin-bottom: 4px;">逐单结果：</div>
-                    ${log.item_results.map(item => html`
+                    ${(log.detail?.item_results || log.item_results || []).map(item => html`
                       <div class="item-result-row ${item.is_consistent ? 'ok' : 'diff'}">
                         ${item.reservation_no}: ${item.is_consistent ? '✓ 一致' : '✗ 差异'}
                         ${item.status_diffs?.length ? html`<span style="margin-left:8px;">状态不匹配</span>` : ''}
                         ${item.attachment_diffs?.length ? html`<span style="margin-left:8px;">附件不匹配</span>` : ''}
                       </div>
                     `)}
+                  </div>
+                ` : ''}
+                ${log.detail?.batch_no || log.detail?.reservation_no || log.detail?.operator_role ? html`
+                  <div style="margin-top:6px; padding:6px 8px; background:#f9fafb; border-radius:4px; font-size:11px; color:#6b7280;">
+                    ${log.detail.batch_no ? html`批次：${log.detail.batch_no}` : ''}
+                    ${log.detail.reservation_no ? html` 预约单：${log.detail.reservation_no}` : ''}
+                    ${log.detail.operator_role ? html` 操作角色：${roleMap[log.detail.operator_role] || log.detail.operator_role}` : ''}
                   </div>
                 ` : ''}
               </td>
@@ -317,16 +348,23 @@ export class AuditLogList extends LitElement {
                     `)}
                   </div>
                 ` : ''}
-                ${log.item_results?.length ? html`
+                ${(log.detail?.item_results?.length || log.item_results?.length) ? html`
                   <div class="item-result-list">
                     <div style="font-size: 11px; color:#9ca3af; margin: 6px 0 4px;">逐单核对：</div>
-                    ${log.item_results.map(item => html`
+                    ${(log.detail?.item_results || log.item_results || []).map(item => html`
                       <div class="item-result-row ${item.is_consistent ? 'ok' : 'diff'}">
                         ${item.reservation_no}: ${item.is_consistent ? '✓ 一致' : '✗ 差异'}
                         ${item.status_diffs?.length ? html`<span style="margin-left:8px;">状态</span>` : ''}
                         ${item.attachment_diffs?.length ? html`<span style="margin-left:8px;">附件</span>` : ''}
                       </div>
                     `)}
+                  </div>
+                ` : ''}
+                ${log.detail?.batch_no || log.detail?.reservation_no || log.detail?.operator_role ? html`
+                  <div style="margin-top:6px; padding:6px 8px; background:#fff1f2; border-radius:4px; font-size:11px; color:#991b1b;">
+                    ${log.detail.batch_no ? html`批次：${log.detail.batch_no}` : ''}
+                    ${log.detail.reservation_no ? html` 预约单：${log.detail.reservation_no}` : ''}
+                    ${log.detail.operator_role ? html` 操作角色：${roleMap[log.detail.operator_role] || log.detail.operator_role}` : ''}
                   </div>
                 ` : ''}
               </td>

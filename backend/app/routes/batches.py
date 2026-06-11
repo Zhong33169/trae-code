@@ -6,7 +6,15 @@ from urllib.parse import unquote
 
 from ..database import get_db
 from ..models import BatchRecord, MeetingReservation, AuditLog, BlockLog
-from ..permissions import reconcile_offline_online, run_batch_reconcile, build_offline_statuses_for_batch, STATUS_LABELS, check_permission
+from ..permissions import (
+    reconcile_offline_online,
+    run_batch_reconcile,
+    build_offline_statuses_for_batch,
+    build_reconcile_detail,
+    apply_reconcile_result,
+    STATUS_LABELS,
+    check_permission,
+)
 
 
 def get_current_user(request: Request):
@@ -126,21 +134,16 @@ async def reconcile_batch(request: Request):
 
     reconcile = run_batch_reconcile(reservations, offline_count, offline_statuses, offline_attachments)
 
-    batch = db.query(BatchRecord).filter(BatchRecord.batch_no == batch_no).first()
-    if batch:
-        batch.offline_count = offline_count or len(reservations)
-        batch.check_status = "checked" if reconcile["is_consistent"] else ("has_diff" if not reconcile["is_blocked"] else "blocked")
-        batch.check_diff = reconcile
-        batch.checked_at = datetime.now()
-        batch.checked_by = current["name"]
+    apply_result = apply_reconcile_result(
+        db, reservations, reconcile, offline_count, current,
+        action="batch_reconcile",
+    )
 
-    for r in reservations:
-        r.offline_check_diff = reconcile
-        r.offline_checked = True
-        r.offline_checked_at = datetime.now()
-        r.offline_checked_by = current["name"]
-        if offline_count:
-            r.offline_count = offline_count
+    detail = build_reconcile_detail(
+        reconcile,
+        batch_no=batch_no,
+        operator_role=current["role"],
+    )
 
     audit = AuditLog(
         batch_no=batch_no,
@@ -148,24 +151,10 @@ async def reconcile_batch(request: Request):
         operator=current["name"],
         operator_role=current["role"],
         remark="批次离线台账核对，" + reconcile["message"],
+        detail=detail,
         item_results=reconcile["item_results"],
     )
     db.add(audit)
-
-    if reconcile["is_blocked"]:
-        block = BlockLog(
-            batch_no=batch_no,
-            block_type="batch_mismatch",
-            reason=reconcile["message"],
-            detail={
-                "diffs": reconcile["diffs"],
-                "block_reasons": reconcile["block_reasons"],
-            },
-            operator=current["name"],
-            operator_role=current["role"],
-            item_results=reconcile["item_results"],
-        )
-        db.add(block)
 
     db.commit()
     return JSONResponse(reconcile)

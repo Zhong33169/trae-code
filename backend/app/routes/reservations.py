@@ -20,6 +20,8 @@ from ..permissions import (
     reconcile_offline_online,
     run_batch_reconcile,
     build_offline_statuses_for_batch,
+    build_reconcile_detail,
+    apply_reconcile_result,
     STATUS_LABELS,
 )
 
@@ -33,7 +35,16 @@ def get_current_user(request: Request):
 
 
 def add_audit_log(db, reservation_id, batch_no, action, status_from, status_to,
-                 operator, operator_role, remark=None, item_results=None):
+                 operator, operator_role, remark=None, item_results=None,
+                 reconcile=None, reservation_no=None):
+    detail = None
+    if reconcile is not None:
+        detail = build_reconcile_detail(
+            reconcile,
+            reservation_no=reservation_no,
+            batch_no=batch_no,
+            operator_role=operator_role,
+        )
     log = AuditLog(
         reservation_id=reservation_id,
         batch_no=batch_no,
@@ -46,10 +57,19 @@ def add_audit_log(db, reservation_id, batch_no, action, status_from, status_to,
         item_results=item_results,
     )
     db.add(log)
+    return log
 
 
 def add_block_log(db, reservation_id, batch_no, block_type, reason, operator,
-                  operator_role, detail=None, item_results=None):
+                  operator_role, detail=None, item_results=None,
+                  reconcile=None, reservation_no=None):
+    if reconcile is not None and detail is None:
+        detail = build_reconcile_detail(
+            reconcile,
+            reservation_no=reservation_no,
+            batch_no=batch_no,
+            operator_role=operator_role,
+        )
     log = BlockLog(
         reservation_id=reservation_id,
         batch_no=batch_no,
@@ -61,6 +81,7 @@ def add_block_log(db, reservation_id, batch_no, block_type, reason, operator,
         item_results=item_results,
     )
     db.add(log)
+    return log
 
 
 async def list_reservations(request: Request):
@@ -134,44 +155,6 @@ async def create_reservation(request: Request):
     except Exception as e:
         return JSONResponse({"detail": f"参数校验失败: {str(e)}"}, status_code=400)
 
-    existing_batch = db.query(BatchRecord).filter(BatchRecord.batch_no == data.batch_no).first()
-    batch_items = db.query(MeetingReservation).filter(
-        MeetingReservation.batch_no == data.batch_no
-    ).all()
-    is_duplicate = existing_batch is not None
-
-    reconcile = None
-    if is_duplicate and batch_items:
-        new_entry = {
-            "reservation_no": "NEW",
-            "status": data.offline_status or "draft",
-            "attachments": data.offline_attachment_list or [a.strip() for a in (data.attachment_names or "").split(",") if a.strip()],
-        }
-        count, statuses = build_offline_statuses_for_batch(batch_items, data.offline_count, [new_entry])
-        reconcile = reconcile_offline_online(batch_items, count, statuses)
-
-        if reconcile["is_blocked"] and not data.force_submit:
-            add_block_log(
-                db, None, data.batch_no, "batch_mismatch",
-                reconcile["message"], current["name"], current["role"],
-                detail={
-                    "diffs": reconcile["diffs"],
-                    "block_reasons": reconcile["block_reasons"],
-                },
-                item_results=reconcile["item_results"],
-            )
-            db.commit()
-            return JSONResponse({
-                "detail": reconcile["message"],
-                "blocked": True,
-                "block_type": "batch_mismatch",
-                "batch_warning": True,
-                "batch_warning_msg": reconcile["message"],
-                "existing_count": len(batch_items),
-                "can_force_submit": True,
-                "reconcile": reconcile,
-            }, status_code=409)
-
     is_valid, errors = validate_required_fields(data.model_dump())
     if not is_valid:
         return JSONResponse({
@@ -207,12 +190,7 @@ async def create_reservation(request: Request):
     db.add(reservation)
     db.flush()
 
-    add_audit_log(
-        db, reservation.id, data.batch_no, "create",
-        None, "draft", current["name"], current["role"],
-        remark="创建预约单" + ("（强制录入重复批次）" if is_duplicate and data.force_submit else ""),
-    )
-
+    existing_batch = db.query(BatchRecord).filter(BatchRecord.batch_no == data.batch_no).first()
     if not existing_batch:
         batch = BatchRecord(
             batch_no=data.batch_no,
@@ -228,13 +206,71 @@ async def create_reservation(request: Request):
         existing_batch.total_count += 1
         existing_batch.offline_count += (data.offline_count or 1)
 
+    db.flush()
+    db.refresh(reservation)
+
+    add_audit_log(
+        db, reservation.id, data.batch_no, "create",
+        None, "draft", current["name"], current["role"],
+        remark="创建预约单草稿",
+    )
+
+    existing_batch = db.query(BatchRecord).filter(BatchRecord.batch_no == data.batch_no).first()
+    batch_items = db.query(MeetingReservation).filter(
+        MeetingReservation.batch_no == data.batch_no
+    ).all()
+    is_duplicate = existing_batch is not None and existing_batch.total_count > 1
+
+    reconcile = None
+    if is_duplicate:
+        new_entry = {
+            "reservation_no": reservation_no,
+            "status": data.offline_status or "draft",
+            "attachments": data.offline_attachment_list or [a.strip() for a in (data.attachment_names or "").split(",") if a.strip()],
+        }
+        count, statuses = build_offline_statuses_for_batch(batch_items, data.offline_count, [new_entry])
+        reconcile = reconcile_offline_online(batch_items, count, statuses)
+
+        apply_result = apply_reconcile_result(
+            db, batch_items, reconcile, count, current,
+            reservation=reservation, action="create", force_submit=data.force_submit,
+        )
+
+        if apply_result["blocked"]:
+            add_audit_log(
+                db, reservation.id, data.batch_no, "create_blocked",
+                "draft", "draft", current["name"], current["role"],
+                remark="批次差异阻断，草稿已保存",
+                reconcile=reconcile,
+                reservation_no=reservation_no,
+            )
+            db.commit()
+            result = MeetingReservationOut.model_validate(reservation).model_dump(mode='json')
+            result["batch_warning"] = True
+            result["batch_warning_msg"] = reconcile["message"]
+            result["blocked"] = True
+            result["block_type"] = "batch_mismatch"
+            result["can_force_submit"] = True
+            result["reconcile"] = reconcile
+            return JSONResponse(result, status_code=409)
+
+    add_audit_log(
+        db, reservation.id, data.batch_no, "create",
+        "draft", "draft", current["name"], current["role"],
+        remark="创建预约单" + ("（强制录入重复批次）" if is_duplicate and data.force_submit else ""),
+        reconcile=reconcile,
+        reservation_no=reservation_no,
+    )
+
     db.commit()
     db.refresh(reservation)
 
     result = MeetingReservationOut.model_validate(reservation).model_dump(mode='json')
     result["batch_warning"] = is_duplicate
     if is_duplicate:
-        result["batch_warning_msg"] = f"批次号已存在，当前有 {len(batch_items) + 1} 条预约单。线下台账批次号与线上数据重复。"
+        result["batch_warning_msg"] = f"批次号已存在，当前有 {len(batch_items)} 条预约单。线下台账批次号与线上数据重复。"
+    if reconcile and not reconcile["is_consistent"]:
+        result["reconcile"] = reconcile
 
     return JSONResponse(result, status_code=201)
 
@@ -314,22 +350,12 @@ async def submit_reservation(request: Request):
 
     reconcile = run_batch_reconcile(batch_items, offline_count, offline_statuses, offline_attachments)
 
-    reservation.offline_count = offline_count
-    reservation.offline_check_diff = reconcile
-    reservation.offline_checked = True
-    reservation.offline_checked_at = datetime.now()
-    reservation.offline_checked_by = current["name"]
+    apply_result = apply_reconcile_result(
+        db, batch_items, reconcile, offline_count, current,
+        reservation=reservation, action="submit", force_submit=force_submit,
+    )
 
-    if reconcile["is_blocked"] and not force_submit:
-        add_block_log(
-            db, rid, reservation.batch_no, "batch_mismatch",
-            reconcile["message"], current["name"], current["role"],
-            detail={
-                "diffs": reconcile["diffs"],
-                "block_reasons": reconcile["block_reasons"],
-            },
-            item_results=reconcile["item_results"],
-        )
+    if apply_result["blocked"]:
         db.commit()
         return JSONResponse({
             "detail": reconcile["message"],
@@ -369,18 +395,12 @@ async def submit_reservation(request: Request):
     reservation.updated_by = current["name"]
     reservation.updated_at = datetime.now()
 
-    batch = db.query(BatchRecord).filter(BatchRecord.batch_no == reservation.batch_no).first()
-    if batch:
-        batch.check_status = "checked" if reconcile["is_consistent"] else "has_diff"
-        batch.check_diff = reconcile
-        batch.checked_at = datetime.now()
-        batch.checked_by = current["name"]
-
     add_audit_log(
         db, reservation.id, reservation.batch_no, "submit",
         old_status, "pending_audit", current["name"], current["role"],
         remark="提交审核" + ("（强制提交，存在批次差异）" if not reconcile["is_consistent"] else ""),
-        item_results=reconcile["item_results"],
+        reconcile=reconcile,
+        reservation_no=reservation.reservation_no,
     )
 
     db.commit()
@@ -542,16 +562,12 @@ async def review_reservation(request: Request):
         offline_attachments = body.get("offline_attachments", [])
         reconcile = run_batch_reconcile(batch_items, offline_count, offline_statuses, offline_attachments)
 
-        if reconcile["is_blocked"]:
-            add_block_log(
-                db, rid, reservation.batch_no, "batch_mismatch",
-                reconcile["message"], current["name"], current["role"],
-                detail={
-                    "diffs": reconcile["diffs"],
-                    "block_reasons": reconcile["block_reasons"],
-                },
-                item_results=reconcile["item_results"],
-            )
+        apply_result = apply_reconcile_result(
+            db, batch_items, reconcile, offline_count, current,
+            reservation=reservation, action="review_pass",
+        )
+
+        if apply_result["blocked"]:
             db.commit()
             return JSONResponse({
                 "detail": reconcile["message"],
@@ -570,10 +586,6 @@ async def review_reservation(request: Request):
         if batch:
             batch.processed_count += 1
             batch.status = "completed" if batch.processed_count >= batch.total_count else batch.status
-            batch.check_status = "checked" if reconcile["is_consistent"] else "has_diff"
-            batch.check_diff = reconcile
-            batch.checked_at = datetime.now()
-            batch.checked_by = current["name"]
 
     elif action == "return":
         return_reason = body.get("return_reason", "")
@@ -605,6 +617,8 @@ async def review_reservation(request: Request):
         old_status, reservation.status,
         current["name"], current["role"],
         remark=log_remark,
+        reconcile=reconcile if action == "pass" else None,
+        reservation_no=reservation.reservation_no,
     )
 
     db.commit()
@@ -693,17 +707,18 @@ async def reconcile_reservation(request: Request):
     if body.get("offline_count"):
         reservation.offline_count = offline_count
 
-    reservation.offline_check_diff = reconcile
-    reservation.offline_checked = True
-    reservation.offline_checked_at = datetime.now()
-    reservation.offline_checked_by = current["name"]
+    apply_reconcile_result(
+        db, batch_items, reconcile, offline_count, current,
+        reservation=reservation, action="reconcile",
+    )
 
     add_audit_log(
         db, reservation.id, reservation.batch_no, "reconcile",
         reservation.status, reservation.status,
         current["name"], current["role"],
         remark="离线台账核对，" + reconcile["message"],
-        item_results=reconcile["item_results"],
+        reconcile=reconcile,
+        reservation_no=reservation.reservation_no,
     )
 
     db.commit()
