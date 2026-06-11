@@ -1,0 +1,2 @@
+litestar[standard]>=2.0
+pydantic>=2.0
