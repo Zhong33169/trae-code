@@ -1,0 +1,482 @@
+import { expenses, users, expenseStatuses, statusLabels, expenseTypeLabels } from '../data/database.js';
+import { v4 as uuidv4 } from 'uuid';
+
+const WARN_THRESHOLD = 24 * 60 * 60 * 1000;
+
+const getUserById = (id) => users.find(u => u.id === id);
+
+const calcDeadlineInfo = (deadline) => {
+  const now = Date.now();
+  const diff = deadline - now;
+  const isOverdue = diff < 0;
+  const isWarning = !isOverdue && diff <= WARN_THRESHOLD;
+  const absHours = Math.abs(Math.floor(diff / (60 * 60 * 1000)));
+  const absDays = Math.floor(absHours / 24);
+  const remainHours = absHours % 24;
+
+  let text;
+  if (isOverdue) {
+    if (absDays > 0) {
+      text = `已逾期 ${absDays}天${remainHours}小时`;
+    } else {
+      text = `已逾期 ${absHours}小时`;
+    }
+  } else {
+    if (absDays > 0) {
+      text = `剩余 ${absDays}天${remainHours}小时`;
+    } else if (remainHours > 0) {
+      text = `剩余 ${remainHours}小时`;
+    } else {
+      const mins = Math.abs(Math.floor(diff / (60 * 1000)));
+      text = `剩余 ${mins}分钟`;
+    }
+  }
+
+  return {
+    isOverdue,
+    isWarning,
+    text,
+    diff,
+    deadline,
+  };
+};
+
+const enrichExpense = (exp) => {
+  const handler = exp.currentHandler ? getUserById(exp.currentHandler) : null;
+  const lastHandler = exp.lastHandler ? getUserById(exp.lastHandler) : null;
+  const creator = exp.creator ? getUserById(exp.creator) : null;
+  const deadlineInfo = calcDeadlineInfo(exp.deadline);
+  return {
+    ...exp,
+    currentHandlerName: handler ? handler.name : null,
+    currentHandlerRole: handler ? handler.role : null,
+    currentHandlerDept: handler ? handler.dept : null,
+    lastHandlerName: lastHandler ? lastHandler.name : null,
+    creatorName: creator ? creator.name : null,
+    creatorDept: creator ? creator.dept : null,
+    lastResult: exp.lastResult || null,
+    statusLabel: statusLabels[exp.status] || exp.status,
+    expenseTypeLabel: expenseTypeLabels[exp.expenseType] || exp.expenseType,
+    deadlineInfo,
+  };
+};
+
+export const getExpenseList = ({ userId, role, status, warningLevel, keyword } = {}) => {
+  let list = [...expenses];
+
+  if (status) {
+    list = list.filter(e => e.status === status);
+  }
+
+  if (warningLevel === 'overdue') {
+    list = list.filter(e => e.deadline < Date.now());
+  } else if (warningLevel === 'warning') {
+    const now = Date.now();
+    list = list.filter(e => e.deadline >= now && e.deadline <= now + WARN_THRESHOLD);
+  } else if (warningLevel === 'normal') {
+    list = list.filter(e => e.deadline > Date.now() + WARN_THRESHOLD);
+  }
+
+  if (role && role !== 'manager') {
+    list = list.filter(e => {
+      if (e.currentHandler === userId) return true;
+      if (role === 'clerk' && e.creator === userId) return true;
+      if (e.lastHandler === userId && e.status === expenseStatuses.DRAFT) return true;
+      return false;
+    });
+  }
+
+  if (keyword) {
+    const kw = keyword.toLowerCase();
+    list = list.filter(e =>
+      e.title.toLowerCase().includes(kw) ||
+      e.applicant.toLowerCase().includes(kw) ||
+      e.id.toLowerCase().includes(kw)
+    );
+  }
+
+  list.sort((a, b) => {
+    const aOverdue = a.deadline < Date.now();
+    const bOverdue = b.deadline < Date.now();
+    if (aOverdue && !bOverdue) return -1;
+    if (!aOverdue && bOverdue) return 1;
+    return a.deadline - b.deadline;
+  });
+
+  return list.map(enrichExpense);
+};
+
+export const getExpenseDetail = (id) => {
+  const exp = expenses.find(e => e.id === id);
+  if (!exp) return null;
+  return enrichExpense(exp);
+};
+
+const addAuditLog = (exp, action, userId, remark) => {
+  const user = getUserById(userId);
+  exp.auditLogs.push({
+    id: uuidv4(),
+    action,
+    userId,
+    userName: user ? user.name : '未知',
+    time: Date.now(),
+    remark,
+  });
+};
+
+const updateLastInfo = (exp, result, userId) => {
+  exp.lastResult = result;
+  exp.lastHandler = userId;
+  exp.lastHandleTime = Date.now();
+};
+
+const checkVersion = (exp, version) => {
+  if (version !== undefined && exp.version !== version) {
+    throw new Error('数据已被他人修改，请刷新后重试');
+  }
+  exp.version += 1;
+  exp.updatedAt = Date.now();
+};
+
+const checkPermission = (role, allowedRoles) => {
+  if (!allowedRoles.includes(role)) {
+    throw new Error('权限不足，无法执行此操作');
+  }
+};
+
+export const createExpense = (data, userId) => {
+  const user = getUserById(userId);
+  if (!user) throw new Error('用户不存在');
+  if (user.role !== 'clerk') throw new Error('只有报销专员可以创建报销申请');
+
+  const day = 24 * 60 * 60 * 1000;
+  const exp = {
+    id: uuidv4(),
+    title: data.title || '报销申请',
+    applicant: data.applicant || '',
+    applicantDept: data.applicantDept || '',
+    amount: data.amount || 0,
+    expenseType: data.expenseType || 'other',
+    creator: userId,
+    currentHandler: userId,
+    status: expenseStatuses.DRAFT,
+    materials: data.materials || [],
+    deadline: data.deadline ? new Date(data.deadline).getTime() : Date.now() + 3 * day,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    version: 1,
+    lastResult: '已创建草稿',
+    lastHandler: userId,
+    lastHandleTime: Date.now(),
+    exceptionReason: null,
+    auditLogs: [],
+    verifyOpinion: null,
+    reviewOpinion: null,
+  };
+
+  addAuditLog(exp, 'create', userId, '创建报销单');
+  expenses.unshift(exp);
+  return enrichExpense(exp);
+};
+
+export const submitExpense = (id, userId, version) => {
+  const exp = expenses.find(e => e.id === id);
+  if (!exp) throw new Error('报销申请不存在');
+  const user = getUserById(userId);
+  if (!user) throw new Error('用户不存在');
+
+  checkPermission(user.role, ['clerk']);
+
+  if (exp.status !== expenseStatuses.DRAFT) {
+    throw new Error('只有草稿状态可以提交');
+  }
+  if (exp.creator !== userId) {
+    throw new Error('只能提交自己创建的报销单');
+  }
+
+  if (!exp.applicant || !exp.amount || exp.amount <= 0) {
+    throw new Error('请完善申请人和金额信息');
+  }
+
+  checkVersion(exp, version);
+  exp.status = expenseStatuses.SUBMITTED;
+  exp.currentHandler = null;
+  exp.exceptionReason = null;
+
+  addAuditLog(exp, 'submit', userId, '提交报销申请');
+  updateLastInfo(exp, '已提交待核验', userId);
+
+  return enrichExpense(exp);
+};
+
+export const startVerify = (id, userId, version) => {
+  const exp = expenses.find(e => e.id === id);
+  if (!exp) throw new Error('报销申请不存在');
+  const user = getUserById(userId);
+  if (!user) throw new Error('用户不存在');
+
+  checkPermission(user.role, ['accountant']);
+
+  if (exp.status !== expenseStatuses.SUBMITTED) {
+    throw new Error('只有已提交状态可以开始核验');
+  }
+
+  checkVersion(exp, version);
+  exp.status = expenseStatuses.VERIFYING;
+  exp.currentHandler = userId;
+
+  addAuditLog(exp, 'start_verify', userId, '开始核验');
+  updateLastInfo(exp, '核验中', userId);
+
+  return enrichExpense(exp);
+};
+
+export const passVerify = (id, userId, data = {}, version) => {
+  const exp = expenses.find(e => e.id === id);
+  if (!exp) throw new Error('报销申请不存在');
+  const user = getUserById(userId);
+  if (!user) throw new Error('用户不存在');
+
+  checkPermission(user.role, ['accountant']);
+
+  if (exp.status !== expenseStatuses.VERIFYING) {
+    throw new Error('只有核验中状态可以通过核验');
+  }
+  if (exp.currentHandler !== userId) {
+    throw new Error('只能处理分配给自己的报销单');
+  }
+
+  if (!data.opinion || data.opinion.trim().length < 5) {
+    throw new Error('请填写核验意见（至少5个字）');
+  }
+
+  checkVersion(exp, version);
+  exp.status = expenseStatuses.PENDING_REVIEW;
+  exp.currentHandler = null;
+  exp.verifyOpinion = data.opinion;
+  exp.exceptionReason = null;
+
+  addAuditLog(exp, 'verify_pass', userId, `核验通过：${data.opinion}`);
+  updateLastInfo(exp, '核验通过，待复核', userId);
+
+  return enrichExpense(exp);
+};
+
+export const rejectVerify = (id, userId, data = {}, version) => {
+  const exp = expenses.find(e => e.id === id);
+  if (!exp) throw new Error('报销申请不存在');
+  const user = getUserById(userId);
+  if (!user) throw new Error('用户不存在');
+
+  checkPermission(user.role, ['accountant']);
+
+  if (exp.status !== expenseStatuses.VERIFYING) {
+    throw new Error('只有核验中状态可以驳回');
+  }
+  if (exp.currentHandler !== userId) {
+    throw new Error('只能处理分配给自己的报销单');
+  }
+
+  if (!data.reason || data.reason.trim().length < 5) {
+    throw new Error('请填写驳回原因（至少5个字）');
+  }
+
+  checkVersion(exp, version);
+  exp.status = expenseStatuses.REJECTED;
+  exp.currentHandler = null;
+  exp.verifyOpinion = data.reason;
+  exp.exceptionReason = data.reason;
+
+  addAuditLog(exp, 'verify_reject', userId, `核验驳回：${data.reason}`);
+  updateLastInfo(exp, '核验驳回', userId);
+
+  return enrichExpense(exp);
+};
+
+export const requestSupplement = (id, userId, data = {}, version) => {
+  const exp = expenses.find(e => e.id === id);
+  if (!exp) throw new Error('报销申请不存在');
+  const user = getUserById(userId);
+  if (!user) throw new Error('用户不存在');
+
+  checkPermission(user.role, ['accountant']);
+
+  if (exp.status !== expenseStatuses.VERIFYING) {
+    throw new Error('只有核验中状态可以要求补材料');
+  }
+  if (exp.currentHandler !== userId) {
+    throw new Error('只能处理分配给自己的报销单');
+  }
+
+  if (!data.reason || data.reason.trim().length < 5) {
+    throw new Error('请填写补材料说明（至少5个字）');
+  }
+
+  checkVersion(exp, version);
+  exp.status = expenseStatuses.DRAFT;
+  exp.currentHandler = exp.creator;
+  exp.exceptionReason = `需补材料：${data.reason}`;
+
+  addAuditLog(exp, 'request_supplement', userId, `要求补材料：${data.reason}`);
+  updateLastInfo(exp, '需补充材料，退回创建者', userId);
+
+  return enrichExpense(exp);
+};
+
+export const passReview = (id, userId, data = {}, version) => {
+  const exp = expenses.find(e => e.id === id);
+  if (!exp) throw new Error('报销申请不存在');
+  const user = getUserById(userId);
+  if (!user) throw new Error('用户不存在');
+
+  checkPermission(user.role, ['manager']);
+
+  if (exp.status !== expenseStatuses.PENDING_REVIEW) {
+    throw new Error('只有待复核状态可以复核通过');
+  }
+
+  if (!data.opinion || data.opinion.trim().length < 3) {
+    throw new Error('请填写复核意见');
+  }
+
+  checkVersion(exp, version);
+  exp.status = expenseStatuses.APPROVED;
+  exp.currentHandler = null;
+  exp.reviewOpinion = data.opinion;
+  exp.exceptionReason = null;
+
+  addAuditLog(exp, 'review_pass', userId, `复核通过：${data.opinion}`);
+  updateLastInfo(exp, '复核通过', userId);
+
+  return enrichExpense(exp);
+};
+
+export const rejectReview = (id, userId, data = {}, version) => {
+  const exp = expenses.find(e => e.id === id);
+  if (!exp) throw new Error('报销申请不存在');
+  const user = getUserById(userId);
+  if (!user) throw new Error('用户不存在');
+
+  checkPermission(user.role, ['manager']);
+
+  if (exp.status !== expenseStatuses.PENDING_REVIEW) {
+    throw new Error('只有待复核状态可以复核驳回');
+  }
+
+  if (!data.reason || data.reason.trim().length < 5) {
+    throw new Error('请填写驳回原因（至少5个字）');
+  }
+
+  checkVersion(exp, version);
+  exp.status = expenseStatuses.REJECTED;
+  exp.currentHandler = null;
+  exp.reviewOpinion = data.reason;
+  exp.exceptionReason = data.reason;
+
+  addAuditLog(exp, 'review_reject', userId, `复核驳回：${data.reason}`);
+  updateLastInfo(exp, '复核驳回', userId);
+
+  return enrichExpense(exp);
+};
+
+export const batchPassReview = (ids, userId, data = {}) => {
+  const results = [];
+  const errors = [];
+
+  for (const id of ids) {
+    try {
+      const result = passReview(id, userId, { opinion: data.opinion || '批量复核通过' });
+      results.push(result);
+    } catch (err) {
+      errors.push({ id, message: err.message });
+    }
+  }
+
+  return { success: results.length, failed: errors.length, results, errors };
+};
+
+export const batchRejectReview = (ids, userId, data = {}) => {
+  const results = [];
+  const errors = [];
+
+  for (const id of ids) {
+    try {
+      const result = rejectReview(id, userId, { reason: data.reason || '批量驳回' });
+      results.push(result);
+    } catch (err) {
+      errors.push({ id, message: err.message });
+    }
+  }
+
+  return { success: results.length, failed: errors.length, results, errors };
+};
+
+export const batchStartVerify = (ids, userId) => {
+  const results = [];
+  const errors = [];
+
+  for (const id of ids) {
+    try {
+      const result = startVerify(id, userId);
+      results.push(result);
+    } catch (err) {
+      errors.push({ id, message: err.message });
+    }
+  }
+
+  return { success: results.length, failed: errors.length, results, errors };
+};
+
+export const getStats = ({ userId, role } = {}) => {
+  const list = getExpenseList({ userId, role });
+  const now = Date.now();
+
+  const total = list.length;
+  const overdue = list.filter(e => e.deadline < now).length;
+  const warning = list.filter(e => e.deadline >= now && e.deadline <= now + WARN_THRESHOLD).length;
+  const normal = list.filter(e => e.deadline > now + WARN_THRESHOLD).length;
+
+  const byStatus = {};
+  for (const key of Object.keys(statusLabels)) {
+    byStatus[key] = list.filter(e => e.status === key).length;
+  }
+
+  const myPending = list.filter(e => e.currentHandler === userId).length;
+
+  return {
+    total,
+    overdue,
+    warning,
+    normal,
+    byStatus,
+    myPending,
+  };
+};
+
+export const getAuditLogs = (id) => {
+  const exp = expenses.find(e => e.id === id);
+  if (!exp) return null;
+  return exp.auditLogs.sort((a, b) => b.time - a.time);
+};
+
+export const getUsers = () => {
+  return users.map(u => ({ id: u.id, name: u.name, role: u.role, dept: u.dept }));
+};
+
+export const updateExpenseDeadline = (id, deadline, userId) => {
+  const exp = expenses.find(e => e.id === id);
+  if (!exp) throw new Error('报销申请不存在');
+  const user = getUserById(userId);
+  if (!user) throw new Error('用户不存在');
+
+  checkPermission(user.role, ['manager', 'clerk']);
+
+  const oldDeadline = exp.deadline;
+  exp.deadline = new Date(deadline).getTime();
+  exp.updatedAt = Date.now();
+  exp.version += 1;
+
+  addAuditLog(exp, 'update_deadline', userId, `调整截止时间：从${new Date(oldDeadline).toLocaleString()}到${new Date(exp.deadline).toLocaleString()}`);
+
+  return enrichExpense(exp);
+};
