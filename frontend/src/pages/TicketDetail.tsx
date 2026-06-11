@@ -29,7 +29,7 @@ const stages = [
 export default function TicketDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { currentTicket, fetchTicketDetail, executeAction, user, loading, error, setError } = useAppStore();
+  const { currentTicket, fetchTicketDetail, fetchTickets, executeAction, user, loading, error, setError } = useAppStore();
 
   const [comment, setComment] = useState('');
   const [evidences, setEvidences] = useState<EvidenceCreate[]>([]);
@@ -125,6 +125,7 @@ export default function TicketDetail() {
       });
       setComment('');
       setEvidences([]);
+      fetchTickets();
     } catch (err: any) {
       setActionError(err.message);
     }
@@ -132,12 +133,16 @@ export default function TicketDetail() {
 
   const handleTransfer = async () => {
     if (!ticket || !selectedTargetUserId) return;
+    if (!comment.trim()) {
+      setActionError('请填写转交原因');
+      return;
+    }
     setActionError('');
 
     try {
       await executeAction(ticket.id, {
         action: 'transfer',
-        comment,
+        comment: comment.trim(),
         version: ticket.version,
         target_user_id: selectedTargetUserId,
         evidences,
@@ -146,6 +151,7 @@ export default function TicketDetail() {
       setSelectedTargetUserId(null);
       setComment('');
       setEvidences([]);
+      fetchTickets();
     } catch (err: any) {
       setActionError(err.message);
     }
@@ -673,6 +679,7 @@ export default function TicketDetail() {
               <div>
                 <label className="block text-xs font-medium text-slate-600 mb-2">
                   转交原因
+                  <span className="text-red-500 ml-1">*</span>
                 </label>
                 <textarea
                   value={comment}
@@ -784,7 +791,7 @@ export default function TicketDetail() {
               </button>
               <button
                 onClick={handleTransfer}
-                disabled={!selectedTargetUserId || loading.action}
+                disabled={!selectedTargetUserId || !comment.trim() || loading.action}
                 className="flex-1 py-2 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 确认转交

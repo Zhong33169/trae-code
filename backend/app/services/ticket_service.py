@@ -62,16 +62,16 @@ def create_ticket(user: User, data: dict) -> Ticket:
 
 
 def submit_ticket(ticket: Ticket, user: User, data: dict) -> Ticket:
+    version = data.get('version', ticket.version)
+    evidences = data.get('evidences', [])
+
+    try:
+        validate_ticket_action(ticket, user, 'submit', version, evidences)
+    except ValidationError as e:
+        write_validate_fail_log(ticket, user, 'submit', e.message)
+        raise
+
     with transaction.atomic():
-        version = data.get('version', ticket.version)
-        evidences = data.get('evidences', [])
-
-        try:
-            validate_ticket_action(ticket, user, 'submit', version, evidences)
-        except ValidationError as e:
-            write_validate_fail_log(ticket, user, 'submit', e.message)
-            raise
-
         old_stage = ticket.stage
         old_status = ticket.status
 
@@ -104,16 +104,16 @@ def submit_ticket(ticket: Ticket, user: User, data: dict) -> Ticket:
 
 
 def approve_ticket(ticket: Ticket, user: User, data: dict) -> Ticket:
+    version = data.get('version', ticket.version)
+    evidences = data.get('evidences', [])
+
+    try:
+        validate_ticket_action(ticket, user, 'approve', version, evidences)
+    except ValidationError as e:
+        write_validate_fail_log(ticket, user, 'approve', e.message)
+        raise
+
     with transaction.atomic():
-        version = data.get('version', ticket.version)
-        evidences = data.get('evidences', [])
-
-        try:
-            validate_ticket_action(ticket, user, 'approve', version, evidences)
-        except ValidationError as e:
-            write_validate_fail_log(ticket, user, 'approve', e.message)
-            raise
-
         old_stage = ticket.stage
         old_status = ticket.status
 
@@ -156,16 +156,16 @@ def approve_ticket(ticket: Ticket, user: User, data: dict) -> Ticket:
 
 
 def reject_ticket(ticket: Ticket, user: User, data: dict) -> Ticket:
+    version = data.get('version', ticket.version)
+    evidences = data.get('evidences', [])
+
+    try:
+        validate_ticket_action(ticket, user, 'reject', version, evidences)
+    except ValidationError as e:
+        write_validate_fail_log(ticket, user, 'reject', e.message)
+        raise
+
     with transaction.atomic():
-        version = data.get('version', ticket.version)
-        evidences = data.get('evidences', [])
-
-        try:
-            validate_ticket_action(ticket, user, 'reject', version, evidences)
-        except ValidationError as e:
-            write_validate_fail_log(ticket, user, 'reject', e.message)
-            raise
-
         old_stage = ticket.stage
         old_status = ticket.status
 
@@ -198,20 +198,58 @@ def reject_ticket(ticket: Ticket, user: User, data: dict) -> Ticket:
 
 
 def revise_ticket(ticket: Ticket, user: User, data: dict) -> Ticket:
-    return submit_ticket(ticket, user, data)
+    version = data.get('version', ticket.version)
+    evidences = data.get('evidences', [])
+
+    try:
+        validate_ticket_action(ticket, user, 'revise', version, evidences)
+    except ValidationError as e:
+        write_validate_fail_log(ticket, user, 'revise', e.message)
+        raise
+
+    with transaction.atomic():
+        old_stage = ticket.stage
+        old_status = ticket.status
+
+        ticket.status = 'pending'
+        _assign_handler(ticket)
+        ticket.version += 1
+        ticket.save()
+
+        log = TicketLog.objects.create(
+            ticket=ticket,
+            action='revise',
+            from_stage=old_stage,
+            to_stage=ticket.stage,
+            from_status=old_status,
+            to_status=ticket.status,
+            operator=user,
+            comment=data.get('comment', '补正后重新提交'),
+        )
+
+        for ev in evidences:
+            Evidence.objects.create(
+                ticket=ticket,
+                log=log,
+                name=ev.get('name', ''),
+                type=ev.get('type', 'doc'),
+                url=ev.get('url', ''),
+            )
+
+        return ticket
 
 
 def archive_ticket(ticket: Ticket, user: User, data: dict) -> Ticket:
+    version = data.get('version', ticket.version)
+    evidences = data.get('evidences', [])
+
+    try:
+        validate_ticket_action(ticket, user, 'archive', version, evidences)
+    except ValidationError as e:
+        write_validate_fail_log(ticket, user, 'archive', e.message)
+        raise
+
     with transaction.atomic():
-        version = data.get('version', ticket.version)
-        evidences = data.get('evidences', [])
-
-        try:
-            validate_ticket_action(ticket, user, 'archive', version, evidences)
-        except ValidationError as e:
-            write_validate_fail_log(ticket, user, 'archive', e.message)
-            raise
-
         old_stage = ticket.stage
         old_status = ticket.status
 
@@ -244,21 +282,27 @@ def archive_ticket(ticket: Ticket, user: User, data: dict) -> Ticket:
 
 
 def transfer_ticket(ticket: Ticket, user: User, data: dict) -> Ticket:
-    with transaction.atomic():
-        version = data.get('version', ticket.version)
-        evidences = data.get('evidences', [])
-        target_user_id = data.get('target_user_id')
+    version = data.get('version', ticket.version)
+    evidences = data.get('evidences', [])
+    target_user_id = data.get('target_user_id')
+    comment = data.get('comment', '').strip()
 
+    try:
+        validate_ticket_action(ticket, user, 'transfer', version, evidences)
+        if not comment:
+            raise ValidationError('请填写转交原因', 'comment_missing')
+        if not target_user_id:
+            raise ValidationError('请指定转交目标用户', 'target_user_missing')
         try:
-            validate_ticket_action(ticket, user, 'transfer', version, evidences)
-            if not target_user_id:
-                raise ValidationError('请指定转交目标用户', 'target_user_missing')
             target_user = User.objects.get(id=target_user_id)
-            validate_transfer(ticket, user, target_user)
-        except ValidationError as e:
-            write_validate_fail_log(ticket, user, 'transfer', e.message)
-            raise
+        except User.DoesNotExist:
+            raise ValidationError('目标用户不存在', 'target_user_not_found')
+        validate_transfer(ticket, user, target_user)
+    except ValidationError as e:
+        write_validate_fail_log(ticket, user, 'transfer', e.message)
+        raise
 
+    with transaction.atomic():
         old_handler_name = ticket.current_handler.name if ticket.current_handler else '无'
         old_handler = ticket.current_handler
 
@@ -275,7 +319,7 @@ def transfer_ticket(ticket: Ticket, user: User, data: dict) -> Ticket:
             to_status=ticket.status,
             operator=user,
             target_handler=target_user,
-            comment=data.get('comment', f'转交给 {target_user.name}'),
+            comment=comment,
         )
 
         for ev in evidences:
@@ -291,27 +335,20 @@ def transfer_ticket(ticket: Ticket, user: User, data: dict) -> Ticket:
 
 
 def takeover_ticket(ticket: Ticket, user: User, data: dict) -> Ticket:
+    version = data.get('version', ticket.version)
+    evidences = data.get('evidences', [])
+    comment = data.get('comment', '').strip()
+
+    try:
+        validate_ticket_action(ticket, user, 'takeover', version, evidences)
+        if not comment:
+            raise ValidationError('请填写接手说明', 'comment_missing')
+        validate_takeover(ticket, user)
+    except ValidationError as e:
+        write_validate_fail_log(ticket, user, 'takeover', e.message)
+        raise
+
     with transaction.atomic():
-        version = data.get('version', ticket.version)
-        evidences = data.get('evidences', [])
-
-        try:
-            if ticket.current_handler_id != user.id:
-                handler_name = ticket.current_handler.name if ticket.current_handler else '未知'
-                raise ValidationError(
-                    f'当前处理人为「{handler_name}」，您无权接手此需求交付单',
-                    'handler_mismatch'
-                )
-            if version != ticket.version:
-                raise ValidationError(
-                    f'版本号不匹配（提交v{version}，当前v{ticket.version}），请刷新页面后重试',
-                    'version_conflict'
-                )
-            validate_takeover(ticket, user)
-        except ValidationError as e:
-            write_validate_fail_log(ticket, user, 'takeover', e.message)
-            raise
-
         ticket.version += 1
         ticket.save()
 
@@ -323,7 +360,7 @@ def takeover_ticket(ticket: Ticket, user: User, data: dict) -> Ticket:
             from_status=ticket.status,
             to_status=ticket.status,
             operator=user,
-            comment=data.get('comment', '确认接手'),
+            comment=comment,
         )
 
         for ev in evidences:

@@ -325,6 +325,33 @@ def create_sample_tickets():
                 [('退回意见说明', 'doc', 'https://example.com/reject-note.docx')],
             ],
         },
+        {
+            'title': '中风险-项目管理平台（转交失败留痕：无原因、角色不符、目标不存在）',
+            'description': '项目管理平台开发，包含进度跟踪、任务分配、甘特图等模块。样例演示转交时的各种校验失败场景。',
+            'risk_level': 'medium',
+            'stage': 'schedule',
+            'status': 'pending',
+            'creator': registrar2,
+            'handler': auditor1,
+            'deadline': now + timedelta(days=4),
+            'logs': [
+                ('create', '', 'confirm', '', 'pending', registrar2, None, '创建项目管理平台需求'),
+                ('submit', 'confirm', 'confirm', 'pending', 'pending', registrar2, None, '提交审核'),
+                ('approve', 'confirm', 'schedule', 'pending', 'pending', auditor1, None, '需求确认通过，进入排期评估阶段'),
+                ('validate_fail', 'schedule', 'schedule', 'pending', 'pending', auditor1, None, '校验失败（尝试transfer）：请填写转交原因'),
+                ('validate_fail', 'schedule', 'schedule', 'pending', 'pending', auditor1, None, '校验失败（尝试transfer）：当前阶段只能转交给审核主管角色的用户'),
+                ('validate_fail', 'schedule', 'schedule', 'pending', 'pending', auditor1, None, '校验失败（尝试transfer）：目标用户不存在'),
+                ('validate_fail', 'schedule', 'schedule', 'pending', 'pending', auditor1, None, '校验失败（尝试transfer）：版本号不匹配（提交v4，当前v5），请刷新页面后重试'),
+            ],
+            'evidences_per_log': [
+                [('需求文档V1.0', 'doc', 'https://example.com/pm-platform.docx')],
+                [('需求文档V1.0', 'doc', 'https://example.com/pm-platform.docx'),
+                 ('业务流程图', 'link', 'https://example.com/pm-flow')],
+                [('需求评审纪要', 'doc', 'https://example.com/pm-review.docx'),
+                 ('技术方案初稿', 'link', 'https://example.com/pm-tech')],
+                [], [], [], [],
+            ],
+        },
     ]
 
     for sample in samples:
@@ -408,6 +435,8 @@ def main():
     print('  - 已完成归档')
     print('  - 证据不足校验失败留痕（validate_fail）')
     print('  - 非当前处理人越权操作校验失败留痕（handler_mismatch）')
+    print('  - 转交→接手→回收退回完整处理人链路')
+    print('  - 转交失败留痕（无原因、角色不符、目标不存在、版本冲突）')
 
 
 if __name__ == '__main__':

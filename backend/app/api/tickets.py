@@ -58,7 +58,7 @@ def create_ticket(request, data: TicketCreateSchema):
         raise ValidationError('只有需求交付登记员可以发起需求交付单', 'permission_denied')
 
     ticket = ticket_service.create_ticket(user, data.dict())
-    return ticket_service.get_ticket_detail(ticket.id)
+    return ticket_service.get_ticket_detail(ticket.id, user)
 
 
 @router.put('/{ticket_id}/action', response=TicketDetailSchema)
@@ -66,4 +66,4 @@ def action_ticket(request, ticket_id: int, data: TicketActionSchema):
     user = require_auth(request)
     ticket = Ticket.objects.get(id=ticket_id)
     result = ticket_service.execute_action(ticket, user, data.action, data.dict())
-    return ticket_service.get_ticket_detail(result.id)
+    return ticket_service.get_ticket_detail(result.id, user)

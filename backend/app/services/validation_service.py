@@ -29,11 +29,11 @@ ROLE_STAGE_ACTIONS = {
         'acceptance': {'returned': ['revise']},
     },
     'auditor': {
-        'confirm': {'pending': ['approve', 'reject', 'transfer']},
-        'schedule': {'pending': ['approve', 'reject', 'transfer']},
+        'confirm': {'pending': ['approve', 'reject', 'transfer', 'takeover'], 'overdue': ['approve', 'reject', 'transfer', 'takeover']},
+        'schedule': {'pending': ['approve', 'reject', 'transfer', 'takeover'], 'overdue': ['approve', 'reject', 'transfer', 'takeover']},
     },
     'reviewer': {
-        'acceptance': {'pending': ['archive', 'reject', 'transfer']},
+        'acceptance': {'pending': ['archive', 'reject', 'transfer', 'takeover'], 'overdue': ['archive', 'reject', 'transfer', 'takeover']},
     },
 }
 
