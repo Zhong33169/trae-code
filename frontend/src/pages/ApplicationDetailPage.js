@@ -3,6 +3,8 @@ import {
   request, showToast, statusClass, formatDate, handoverStatusClass,
   canEditApplication, canSubmitApplication, canAuditApplication,
   canReviewApplication, canHandoverApplication, roleDisplayName,
+  processingRecordTypeClass, processingRecordStatusClass,
+  canAddProcessingRecord, canUpdateProcessingRecord,
 } from '../utils.js';
 
 class ApplicationDetailPage extends LitElement {
@@ -12,16 +14,22 @@ class ApplicationDetailPage extends LitElement {
     app: { type: Object },
     logs: { type: Array },
     handovers: { type: Array },
+    processingRecords: { type: Array },
     users: { type: Array },
     loading: { type: Boolean },
     showEditModal: { type: Boolean },
     showHandoverModal: { type: Boolean },
     showAuditModal: { type: Boolean },
     showReviewModal: { type: Boolean },
+    showRecordModal: { type: Boolean },
+    showUpdateRecordModal: { type: Boolean },
     editForm: { type: Object },
     handoverForm: { type: Object },
     auditForm: { type: Object },
     reviewForm: { type: Object },
+    recordForm: { type: Object },
+    updateRecordForm: { type: Object },
+    currentRecord: { type: Object },
     auditApproved: { type: Boolean },
     reviewApproved: { type: Boolean },
   };
@@ -31,16 +39,22 @@ class ApplicationDetailPage extends LitElement {
     this.app = null;
     this.logs = [];
     this.handovers = [];
+    this.processingRecords = [];
     this.users = [];
     this.loading = false;
     this.showEditModal = false;
     this.showHandoverModal = false;
     this.showAuditModal = false;
     this.showReviewModal = false;
+    this.showRecordModal = false;
+    this.showUpdateRecordModal = false;
     this.editForm = {};
     this.handoverForm = { toUserId: null, toShift: '白班', remark: '' };
     this.auditForm = { reason: '', remark: '' };
     this.reviewForm = { reason: '', remark: '' };
+    this.recordForm = { recordType: 'TODO', content: '', rejectReason: '' };
+    this.updateRecordForm = { status: 'PROCESSING', content: '', rejectReason: '' };
+    this.currentRecord = null;
     this.auditApproved = true;
     this.reviewApproved = true;
   }
@@ -55,11 +69,12 @@ class ApplicationDetailPage extends LitElement {
   async loadAll() {
     this.loading = true;
     try {
-      const [appData, logsData, usersData, handoversData] = await Promise.all([
+      const [appData, logsData, usersData, handoversData, recordsData] = await Promise.all([
         request('/applications/' + this.appId),
         request('/logs/' + this.appId),
         request('/users'),
         request('/handovers'),
+        request('/processing-records/application/' + this.appId),
       ]);
       if (appData.code === 0) {
         this.app = appData.data;
@@ -69,6 +84,7 @@ class ApplicationDetailPage extends LitElement {
       if (logsData.code === 0) this.logs = logsData.data || [];
       if (usersData.code === 0) this.users = usersData.data || [];
       if (handoversData.code === 0) this.handovers = (handoversData.data || []).filter(h => h.applicationId === this.appId);
+      if (recordsData.code === 0) this.processingRecords = recordsData.data || [];
     } catch (e) {
       showToast(e.message, 'error');
     } finally {
@@ -262,6 +278,82 @@ class ApplicationDetailPage extends LitElement {
     } catch (e) { showToast(e.message, 'error'); }
   }
 
+  getPendingTodos() {
+    return this.processingRecords.filter(r =>
+      r.status === 'PENDING' || r.status === 'PROCESSING'
+    );
+  }
+
+  getRejectRecords() {
+    return this.processingRecords.filter(r => r.rejectReason);
+  }
+
+  openAddRecord(type = 'TODO') {
+    const defaultContent = this.app.status === 'NEED_CORRECTION' && type === 'CORRECTION'
+      ? '已补正资料，准备重新提交审核'
+      : '';
+    this.recordForm = {
+      recordType: type,
+      content: defaultContent,
+      rejectReason: this.app.rejectReason || '',
+    };
+    this.showRecordModal = true;
+  }
+
+  async saveRecord() {
+    if (!this.recordForm.content) {
+      showToast('请填写处理内容', 'warning'); return;
+    }
+    if (this.recordForm.recordType === 'CORRECTION' && this.app.status !== 'NEED_CORRECTION') {
+      showToast('当前申请状态不允许添加补正记录', 'warning'); return;
+    }
+    try {
+      const data = await request('/processing-records', {
+        method: 'POST',
+        body: {
+          applicationId: this.appId,
+          recordType: this.recordForm.recordType,
+          content: this.recordForm.content,
+          rejectReason: this.recordForm.rejectReason,
+        },
+      });
+      if (data.code === 0) {
+        showToast(data.message, 'success');
+        this.showRecordModal = false;
+        this.loadAll();
+      } else {
+        showToast(data.message, 'error');
+      }
+    } catch (e) { showToast(e.message, 'error'); }
+  }
+
+  openUpdateRecord(record) {
+    this.currentRecord = record;
+    this.updateRecordForm = {
+      status: record.status === 'PENDING' ? 'PROCESSING' : 'COMPLETED',
+      content: record.content,
+      rejectReason: record.rejectReason || '',
+    };
+    this.showUpdateRecordModal = true;
+  }
+
+  async saveUpdateRecord() {
+    if (!this.currentRecord) return;
+    try {
+      const data = await request('/processing-records/' + this.currentRecord.id, {
+        method: 'PUT',
+        body: this.updateRecordForm,
+      });
+      if (data.code === 0) {
+        showToast(data.message, 'success');
+        this.showUpdateRecordModal = false;
+        this.loadAll();
+      } else {
+        showToast(data.message, 'error');
+      }
+    } catch (e) { showToast(e.message, 'error'); }
+  }
+
   renderDetailItem(label, value, highlight = false) {
     return html`
       <div class="detail-item">
@@ -323,6 +415,49 @@ class ApplicationDetailPage extends LitElement {
             <div class="reject-box">
               <strong>⚠ 退回原因：</strong>${a.rejectReason}
               ${a.status === 'NEED_CORRECTION' ? html`（请根据此原因补正资料后重新提交审核）` : ''}
+            </div>
+          ` : ''}
+
+          ${this.getPendingTodos().length > 0 ? html`
+            <div class="todo-alert">
+              <div class="todo-title">
+                <span>📋 待办提醒（${this.getPendingTodos().length} 项）</span>
+                ${canAddProcessingRecord(this.app, this.user) ? html`
+                  <div style="display:flex;gap:8px;">
+                    ${this.app.status === 'NEED_CORRECTION' ? html`
+                      <button class="btn btn-sm btn-warning" @click="${() => this.openAddRecord('CORRECTION')}">➕ 补正处理</button>
+                    ` : ''}
+                    <button class="btn btn-sm" @click="${() => this.openAddRecord('TODO')}">➕ 添加待办</button>
+                    <button class="btn btn-sm" @click="${() => this.openAddRecord('REMARK')}">📝 添加备注</button>
+                  </div>
+                ` : ''}
+              </div>
+              <div class="todo-list">
+                ${this.getPendingTodos().map(t => html`
+                  <div class="todo-item ${t.status === 'PENDING' ? 'pending' : 'processing'}">
+                    <div class="todo-status">
+                      <span class="tag ${processingRecordTypeClass(t.recordType)}" style="margin-right:8px;">${t.recordTypeDisplay}</span>
+                      <span class="tag ${processingRecordStatusClass(t.status)}">${t.statusDisplay}</span>
+                    </div>
+                    <div class="todo-content">
+                      <div class="todo-text">${t.content}</div>
+                      ${t.rejectReason ? html`
+                        <div class="todo-reason"><strong>补正原因：</strong>${t.rejectReason}</div>
+                      ` : ''}
+                      <div class="todo-meta">
+                        责任人：${t.handlerName}（${t.handlerRole} · ${t.handlerShift}）
+                        · 创建：${formatDate(t.createdAt)}
+                        ${t.updatedAt && t.updatedAt !== t.createdAt ? html`· 更新：${formatDate(t.updatedAt)}` : ''}
+                      </div>
+                    </div>
+                    ${canUpdateProcessingRecord(t, this.user) ? html`
+                      <div class="todo-actions">
+                        <button class="btn btn-sm btn-primary" @click="${() => this.openUpdateRecord(t)}">更新</button>
+                      </div>
+                    ` : ''}
+                  </div>
+                `)}
+              </div>
             </div>
           ` : ''}
 
@@ -462,6 +597,64 @@ class ApplicationDetailPage extends LitElement {
             ` : ''}
           </div>
         </div>
+
+        ${this.processingRecords.length > 0 ? html`
+          <div class="card">
+            <div class="card-title">
+              <span>处理记录与补正追踪</span>
+              <span style="font-size:12px;color:#999;">共 ${this.processingRecords.length} 条记录</span>
+              ${canAddProcessingRecord(this.app, this.user) ? html`
+                <div style="display:flex;gap:8px;">
+                  ${this.app.status === 'NEED_CORRECTION' ? html`
+                    <button class="btn btn-sm btn-warning" @click="${() => this.openAddRecord('CORRECTION')}">➕ 补正处理</button>
+                  ` : ''}
+                  <button class="btn btn-sm" @click="${() => this.openAddRecord('TODO')}">➕ 添加待办</button>
+                  <button class="btn btn-sm" @click="${() => this.openAddRecord('REMARK')}">📝 添加备注</button>
+                </div>
+              ` : ''}
+            </div>
+            <div class="record-list">
+              ${this.processingRecords.map(r => html`
+                <div class="record-item ${r.status}">
+                  <div class="record-header">
+                    <div style="display:flex;align-items:center;gap:8px;">
+                      <span class="tag ${processingRecordTypeClass(r.recordType)}">${r.recordTypeDisplay}</span>
+                      <span class="tag ${processingRecordStatusClass(r.status)}">${r.statusDisplay}</span>
+                    </div>
+                    <div style="color:#999;font-size:12px;">
+                      ${formatDate(r.createdAt)}
+                      ${r.completedAt ? html` · 完成：${formatDate(r.completedAt)}` : ''}
+                    </div>
+                  </div>
+                  <div class="record-content">${r.content}</div>
+                  ${r.rejectReason ? html`
+                    <div class="record-reason"><strong>补正/拒绝原因：</strong>${r.rejectReason}</div>
+                  ` : ''}
+                  <div class="record-footer">
+                    <span>责任人：${r.handlerName}（${r.handlerRole} · ${r.handlerShift}）</span>
+                    ${canUpdateProcessingRecord(r, this.user) ? html`
+                      <button class="btn btn-sm btn-primary" @click="${() => this.openUpdateRecord(r)}">更新状态</button>
+                    ` : ''}
+                  </div>
+                </div>
+              `)}
+            </div>
+          </div>
+        ` : canAddProcessingRecord(this.app, this.user) ? html`
+          <div class="card">
+            <div class="card-title">
+              <span>处理记录与补正追踪</span>
+              <div style="display:flex;gap:8px;">
+                ${this.app.status === 'NEED_CORRECTION' ? html`
+                  <button class="btn btn-sm btn-warning" @click="${() => this.openAddRecord('CORRECTION')}">➕ 补正处理</button>
+                ` : ''}
+                <button class="btn btn-sm" @click="${() => this.openAddRecord('TODO')}">➕ 添加待办</button>
+                <button class="btn btn-sm" @click="${() => this.openAddRecord('REMARK')}">📝 添加备注</button>
+              </div>
+            </div>
+            <div class="empty">暂无处理记录，点击上方按钮添加</div>
+          </div>
+        ` : ''}
 
         <div class="card">
           <div class="card-title"><span>操作记录与流转日志</span><span style="font-size:12px;color:#999;">共 ${this.logs.length} 条记录</span></div>
@@ -705,6 +898,102 @@ class ApplicationDetailPage extends LitElement {
               <button class="btn ${this.reviewApproved ? 'btn-warning' : 'btn-danger'}" @click="${this.confirmReview}">
                 确认${this.reviewApproved ? '归档' : '退回'}
               </button>
+            </div>
+          </div>
+        </div>
+      ` : ''}
+
+      ${this.showRecordModal ? html`
+        <div class="modal-mask" @click="${(e) => e.target === e.currentTarget && (this.showRecordModal = false)}">
+          <div class="modal-box">
+            <div class="modal-header">
+              <span>添加${this.recordForm.recordType === 'CORRECTION' ? '补正' : this.recordForm.recordType === 'REMARK' ? '备注' : '待办'}记录</span>
+              <button class="modal-close" @click="${() => (this.showRecordModal = false)}">×</button>
+            </div>
+            <div class="modal-body">
+              <div class="remark-box">
+                <strong>关联申请：</strong>${this.app.applicationNo} - ${this.app.applicantName}<br/>
+                <strong>当前状态：</strong>${this.app.statusDisplay}<br/>
+                <strong>您的岗位：</strong>${roleDisplayName(this.user.role)}（${this.user.shift}）
+              </div>
+              <div class="form-row">
+                <div class="form-item">
+                  <label class="required">记录类型</label>
+                  <select .value="${this.recordForm.recordType}"
+                    @change="${(e) => (this.recordForm = { ...this.recordForm, recordType: e.target.value })}">
+                    <option value="TODO">待办</option>
+                    ${this.app.status === 'NEED_CORRECTION' ? html`
+                      <option value="CORRECTION">补正</option>
+                    ` : ''}
+                    <option value="REMARK">备注</option>
+                  </select>
+                </div>
+                <div class="form-item" style="grid-column:span 2;">
+                  <label class="required">处理内容</label>
+                  <textarea placeholder="请详细描述处理内容..."
+                    .value="${this.recordForm.content}"
+                    @input="${(e) => (this.recordForm = { ...this.recordForm, content: e.target.value })}"></textarea>
+                </div>
+                ${(this.recordForm.recordType === 'CORRECTION' || this.app.status === 'NEED_CORRECTION') ? html`
+                  <div class="form-item" style="grid-column:span 2;">
+                    <label>补正/拒绝原因</label>
+                    <textarea placeholder="可填写补正原因或参考的拒绝原因..."
+                      .value="${this.recordForm.rejectReason}"
+                      @input="${(e) => (this.recordForm = { ...this.recordForm, rejectReason: e.target.value })}"></textarea>
+                  </div>
+                ` : ''}
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button class="btn" @click="${() => (this.showRecordModal = false)}">取消</button>
+              <button class="btn btn-primary" @click="${this.saveRecord}">保存记录</button>
+            </div>
+          </div>
+        </div>
+      ` : ''}
+
+      ${this.showUpdateRecordModal && this.currentRecord ? html`
+        <div class="modal-mask" @click="${(e) => e.target === e.currentTarget && (this.showUpdateRecordModal = false)}">
+          <div class="modal-box">
+            <div class="modal-header">
+              <span>更新${this.currentRecord.recordTypeDisplay}记录</span>
+              <button class="modal-close" @click="${() => (this.showUpdateRecordModal = false)}">×</button>
+            </div>
+            <div class="modal-body">
+              <div class="remark-box">
+                <strong>当前状态：</strong>${this.currentRecord.statusDisplay}<br/>
+                <strong>记录内容：</strong>${this.currentRecord.content}
+                ${this.currentRecord.rejectReason ? html`<br/><strong>补正原因：</strong>${this.currentRecord.rejectReason}` : ''}
+              </div>
+              <div class="form-row">
+                <div class="form-item">
+                  <label class="required">更新状态</label>
+                  <select .value="${this.updateRecordForm.status}"
+                    @change="${(e) => (this.updateRecordForm = { ...this.updateRecordForm, status: e.target.value })}">
+                    <option value="PENDING">待处理</option>
+                    <option value="PROCESSING">处理中</option>
+                    <option value="COMPLETED">已完成</option>
+                  </select>
+                </div>
+                <div class="form-item" style="grid-column:span 2;">
+                  <label>更新内容（可选）</label>
+                  <textarea placeholder="可更新处理内容..."
+                    .value="${this.updateRecordForm.content}"
+                    @input="${(e) => (this.updateRecordForm = { ...this.updateRecordForm, content: e.target.value })}"></textarea>
+                </div>
+                ${this.currentRecord.recordType === 'CORRECTION' ? html`
+                  <div class="form-item" style="grid-column:span 2;">
+                    <label>补正/拒绝原因（可选）</label>
+                    <textarea placeholder="可更新补正原因..."
+                      .value="${this.updateRecordForm.rejectReason}"
+                      @input="${(e) => (this.updateRecordForm = { ...this.updateRecordForm, rejectReason: e.target.value })}"></textarea>
+                  </div>
+                ` : ''}
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button class="btn" @click="${() => (this.showUpdateRecordModal = false)}">取消</button>
+              <button class="btn btn-primary" @click="${this.saveUpdateRecord}">确认更新</button>
             </div>
           </div>
         </div>

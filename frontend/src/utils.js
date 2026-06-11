@@ -171,3 +171,33 @@ export function roleDisplayName(role) {
   };
   return map[role] || role;
 }
+
+export function processingRecordTypeClass(type) {
+  const map = {
+    TODO: 'tag-handover-pending',
+    CORRECTION: 'tag-need-correction',
+    REMARK: 'tag-draft',
+  };
+  return map[type] || 'tag-draft';
+}
+
+export function processingRecordStatusClass(status) {
+  const map = {
+    PENDING: 'tag-handover-pending',
+    PROCESSING: 'tag-pending-audit',
+    COMPLETED: 'tag-archived',
+  };
+  return map[status] || 'tag-draft';
+}
+
+export function canAddProcessingRecord(app, user) {
+  if (!user || !app) return false;
+  if (app.status === 'ARCHIVED') return false;
+  return app.currentHandlerId === user.id;
+}
+
+export function canUpdateProcessingRecord(record, user) {
+  if (!user || !record) return false;
+  if (record.status === 'COMPLETED') return false;
+  return record.handlerId === user.id;
+}

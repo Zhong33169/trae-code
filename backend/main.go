@@ -106,6 +106,14 @@ func main() {
 		r.Route("/api/statistics", func(r chi.Router) {
 			r.Get("/", hdl.GetStatistics)
 		})
+
+		r.Route("/api/processing-records", func(r chi.Router) {
+			r.Get("/summary", hdl.GetTodoSummary)
+			r.Get("/", hdl.ListProcessingRecords)
+			r.Get("/application/{appId}", hdl.ListProcessingRecords)
+			r.Post("/", hdl.CreateProcessingRecord)
+			r.Put("/{id}", hdl.UpdateProcessingRecord)
+		})
 	})
 
 	r.NotFound(func(w http.ResponseWriter, r *http.Request) {

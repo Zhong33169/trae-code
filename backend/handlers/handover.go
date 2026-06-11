@@ -262,6 +262,45 @@ func ConfirmHandover(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		var todoContent string
+		var rejectReason string
+		var recordType models.ProcessingRecordType
+
+		if appStatus == string(models.StatusNeedCorrection) {
+			recordType = models.RecordTypeCorrection
+			var reason string
+			_ = tx.QueryRow("SELECT reject_reason FROM applications WHERE id=?", appID).Scan(&reason)
+			if reason != "" {
+				rejectReason = reason
+				todoContent = "根据交接接收，需处理资料补正：" + reason
+			} else {
+				todoContent = "根据交接接收，需处理该申请的资料补正"
+			}
+		} else {
+			recordType = models.RecordTypeTodo
+			todoContent = "根据交接接收，需处理该申请，当前状态：【" + models.ApplicationStatus(appStatus).DisplayName() + "】"
+			if handoverRemark != "" {
+				todoContent += "。交接说明：" + handoverRemark
+			}
+		}
+
+		_, err = tx.Exec(`
+			INSERT INTO processing_records(
+				application_id, handover_id, handler_id, handler_name,
+				handler_role, handler_shift, record_type, status,
+				content, reject_reason, created_at, updated_at
+			) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
+			appID, id, user.ID, user.RealName,
+			string(user.Role), user.Shift, recordType, models.RecordStatusPending,
+			todoContent, rejectReason, now, now,
+		)
+		if err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(utils.Fail(500, "创建待办记录失败"))
+			return
+		}
+
 		opDetail := "【交接确认-接收】交出人：" + fromUserName + "（" + fromShift + "）→ 接收人：" + toUserName + "（" + toShift + "）"
 		opDetail += "，交接说明：" + handoverRemark
 		if req.Remark != "" {
@@ -269,6 +308,7 @@ func ConfirmHandover(w http.ResponseWriter, r *http.Request) {
 		}
 		opDetail += "，申请当前状态：【" + models.ApplicationStatus(appStatus).DisplayName() + "】"
 		opDetail += "，处理人已变更为：" + user.RealName + "（" + user.Shift + "）"
+		opDetail += "，已自动创建" + recordType.DisplayName() + "待办"
 		writeOpLog(tx, appID, appNo, user,
 			"接收交接", opDetail, appStatus, appStatus, r.RemoteAddr)
 	} else {

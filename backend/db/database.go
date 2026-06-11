@@ -115,6 +115,29 @@ func createTables() error {
 	CREATE INDEX IF NOT EXISTS idx_logs_app ON operation_logs(application_id);
 	CREATE INDEX IF NOT EXISTS idx_logs_user ON operation_logs(user_id);
 	CREATE INDEX IF NOT EXISTS idx_logs_created ON operation_logs(created_at);
+
+	CREATE TABLE IF NOT EXISTS processing_records (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		application_id INTEGER NOT NULL REFERENCES applications(id),
+		handover_id INTEGER REFERENCES handovers(id),
+		handler_id INTEGER NOT NULL REFERENCES users(id),
+		handler_name TEXT NOT NULL,
+		handler_role TEXT NOT NULL,
+		handler_shift TEXT NOT NULL,
+		record_type TEXT NOT NULL CHECK(record_type IN ('TODO','CORRECTION','REMARK')),
+		status TEXT NOT NULL CHECK(status IN ('PENDING','PROCESSING','COMPLETED')),
+		content TEXT NOT NULL,
+		reject_reason TEXT,
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		completed_at DATETIME
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_records_app ON processing_records(application_id);
+	CREATE INDEX IF NOT EXISTS idx_records_handler ON processing_records(handler_id);
+	CREATE INDEX IF NOT EXISTS idx_records_status ON processing_records(status);
+	CREATE INDEX IF NOT EXISTS idx_records_type ON processing_records(record_type);
+	CREATE INDEX IF NOT EXISTS idx_records_created ON processing_records(created_at);
 	`
 
 	_, err := DB.Exec(schema)

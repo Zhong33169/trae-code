@@ -19,6 +19,10 @@ const (
 	CodeHandoverStatusError   = 3001
 	CodeHandoverSelfForbidden = 3002
 	CodeHandoverRoleMismatch  = 3003
+
+	CodeRecordNotFound       = 4001
+	CodeRecordStatusError    = 4002
+	CodeRecordPermissionDeny = 4003
 )
 
 func Success(data interface{}) Response {

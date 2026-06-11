@@ -174,3 +174,73 @@ type HandoverStats struct {
 	Rejected int64 `json:"rejected"`
 	Total    int64 `json:"total"`
 }
+
+type ProcessingRecordType string
+
+const (
+	RecordTypeTodo       ProcessingRecordType = "TODO"
+	RecordTypeCorrection ProcessingRecordType = "CORRECTION"
+	RecordTypeRemark     ProcessingRecordType = "REMARK"
+)
+
+func (t ProcessingRecordType) DisplayName() string {
+	switch t {
+	case RecordTypeTodo:
+		return "待办"
+	case RecordTypeCorrection:
+		return "补正"
+	case RecordTypeRemark:
+		return "备注"
+	default:
+		return string(t)
+	}
+}
+
+type ProcessingRecordStatus string
+
+const (
+	RecordStatusPending    ProcessingRecordStatus = "PENDING"
+	RecordStatusProcessing ProcessingRecordStatus = "PROCESSING"
+	RecordStatusCompleted  ProcessingRecordStatus = "COMPLETED"
+)
+
+func (s ProcessingRecordStatus) DisplayName() string {
+	switch s {
+	case RecordStatusPending:
+		return "待处理"
+	case RecordStatusProcessing:
+		return "处理中"
+	case RecordStatusCompleted:
+		return "已完成"
+	default:
+		return string(s)
+	}
+}
+
+type ProcessingRecord struct {
+	ID             int64                  `json:"id"`
+	ApplicationID  int64                  `json:"applicationId"`
+	ApplicationNo  string                 `json:"applicationNo,omitempty"`
+	ApplicantName  string                 `json:"applicantName,omitempty"`
+	HandoverID     *int64                 `json:"handoverId,omitempty"`
+	HandlerID      int64                  `json:"handlerId"`
+	HandlerName    string                 `json:"handlerName"`
+	HandlerRole    string                 `json:"handlerRole"`
+	HandlerShift   string                 `json:"handlerShift"`
+	RecordType     ProcessingRecordType   `json:"recordType"`
+	RecordTypeDisplay string              `json:"recordTypeDisplay"`
+	Status         ProcessingRecordStatus `json:"status"`
+	StatusDisplay  string                 `json:"statusDisplay"`
+	Content        string                 `json:"content"`
+	RejectReason   string                 `json:"rejectReason,omitempty"`
+	CreatedAt      time.Time              `json:"createdAt"`
+	UpdatedAt      time.Time              `json:"updatedAt"`
+	CompletedAt    *time.Time             `json:"completedAt,omitempty"`
+}
+
+type TodoSummary struct {
+	PendingCount    int64 `json:"pendingCount"`
+	ProcessingCount int64 `json:"processingCount"`
+	CompletedCount  int64 `json:"completedCount"`
+	TotalCount      int64 `json:"totalCount"`
+}

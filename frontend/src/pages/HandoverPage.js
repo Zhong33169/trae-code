@@ -1,6 +1,7 @@
 import { LitElement, html } from 'lit';
 import {
   request, showToast, handoverStatusClass, formatDate, statusClass,
+  processingRecordTypeClass, processingRecordStatusClass,
 } from '../utils.js';
 
 class HandoverPage extends LitElement {
@@ -14,6 +15,9 @@ class HandoverPage extends LitElement {
     currentHandover: { type: Object },
     confirmForm: { type: Object },
     accepted: { type: Boolean },
+    todoSummary: { type: Object },
+    myTodos: { type: Array },
+    showTodoPanel: { type: Boolean },
   };
 
   constructor() {
@@ -26,6 +30,9 @@ class HandoverPage extends LitElement {
     this.currentHandover = null;
     this.confirmForm = { remark: '' };
     this.accepted = true;
+    this.todoSummary = { pendingCount: 0, processingCount: 0, completedCount: 0, totalCount: 0 };
+    this.myTodos = [];
+    this.showTodoPanel = true;
   }
 
   createRenderRoot() { return this; }
@@ -41,11 +48,21 @@ class HandoverPage extends LitElement {
       const params = new URLSearchParams();
       if (this.filterScope !== 'all') params.append('scope', this.filterScope);
       if (this.filterStatus) params.append('status', this.filterStatus);
-      const data = await request('/handovers?' + params.toString());
+      const [data, todoSummaryData, myTodosData] = await Promise.all([
+        request('/handovers?' + params.toString()),
+        request('/processing-records/summary'),
+        request('/processing-records?handler=me'),
+      ]);
       if (data.code === 0) {
         this.list = data.data || [];
       } else {
         showToast(data.message || '加载失败', 'error');
+      }
+      if (todoSummaryData.code === 0) {
+        this.todoSummary = todoSummaryData.data || { pendingCount: 0, processingCount: 0, completedCount: 0, totalCount: 0 };
+      }
+      if (myTodosData.code === 0) {
+        this.myTodos = (myTodosData.data || []).filter(t => t.status !== 'COMPLETED');
       }
     } catch (e) {
       showToast(e.message, 'error');
@@ -107,15 +124,18 @@ class HandoverPage extends LitElement {
     return btns;
   }
 
+  goApp(id) { location.hash = '#/applications/' + id; }
+
   getPendingIncoming() {
     return this.list.filter(h => h.toUserId === this.user.id && h.status === 'PENDING').length;
   }
 
   render() {
     const pendingIncoming = this.getPendingIncoming();
+    const totalTodoCount = this.todoSummary.totalCount || 0;
     return html`
       <div class="page-wrap">
-        <div class="stats-grid" style="grid-template-columns:repeat(4,1fr);">
+        <div class="stats-grid" style="grid-template-columns:repeat(6,1fr);">
           <div class="stat-card total">
             <div class="stat-label">交接总数</div>
             <div class="stat-value">${this.list.length}</div>
@@ -132,7 +152,55 @@ class HandoverPage extends LitElement {
             <div class="stat-label">已拒绝</div>
             <div class="stat-value">${this.list.filter(h => h.status === 'REJECTED').length}</div>
           </div>
+          <div class="stat-card pending-review">
+            <div class="stat-label">待处理（我）</div>
+            <div class="stat-value">${this.todoSummary.pendingCount || 0}</div>
+          </div>
+          <div class="stat-card today">
+            <div class="stat-label">处理中（我）</div>
+            <div class="stat-value">${this.todoSummary.processingCount || 0}</div>
+          </div>
         </div>
+
+        ${totalTodoCount > 0 ? html`
+          <div class="card">
+            <div class="card-title">
+              <span>📋 我的待办与补正追踪（${totalTodoCount} 项待处理）</span>
+              <button class="btn btn-sm" @click="${() => this.showTodoPanel = !this.showTodoPanel}">
+                ${this.showTodoPanel ? '收起' : '展开'}
+              </button>
+            </div>
+            ${this.showTodoPanel ? html`
+              <div class="todo-list">
+                ${this.myTodos.map(t => html`
+                  <div class="todo-item ${t.status === 'PENDING' ? 'pending' : 'processing'}">
+                    <div class="todo-status">
+                      <span class="tag ${processingRecordTypeClass(t.recordType)}" style="margin-right:8px;">${t.recordTypeDisplay}</span>
+                      <span class="tag ${processingRecordStatusClass(t.status)}">${t.statusDisplay}</span>
+                    </div>
+                    <div class="todo-content">
+                      <div class="todo-text">
+                        <strong style="color:#1890ff;">${t.applicationNo}</strong> - ${t.applicantName}
+                        <br/>${t.content}
+                      </div>
+                      ${t.rejectReason ? html`
+                        <div class="todo-reason"><strong>补正/拒绝原因：</strong>${t.rejectReason}</div>
+                      ` : ''}
+                      <div class="todo-meta">
+                        责任人：${t.handlerName}（${t.handlerRole} · ${t.handlerShift}）
+                        · 创建：${formatDate(t.createdAt)}
+                        ${t.updatedAt && t.updatedAt !== t.createdAt ? html`· 更新：${formatDate(t.updatedAt)}` : ''}
+                      </div>
+                    </div>
+                    <div class="todo-actions">
+                      <button class="btn btn-sm btn-primary" @click="${() => this.goApp(t.applicationId)}">处理</button>
+                    </div>
+                  </div>
+                `)}
+              </div>
+            ` : ''}
+          </div>
+        ` : ''}
 
         <div class="card">
           <div class="card-title">
