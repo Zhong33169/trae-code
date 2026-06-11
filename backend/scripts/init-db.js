@@ -1,4 +1,4 @@
-const { initializeDatabase, getDb } = require('../src/db');
+const { initializeDatabase, getDb, saveDatabase } = require('../src/db');
 
 async function init() {
   await initializeDatabase();
@@ -95,7 +95,7 @@ async function init() {
   `);
 
   console.log('数据库初始化完成！');
-  
+  saveDatabase();
   process.exit(0);
 }
 

@@ -1,5 +1,5 @@
 const bcrypt = require('bcryptjs');
-const { initializeDatabase, getDb } = require('../src/db');
+const { initializeDatabase, getDb, saveDatabase } = require('../src/db');
 const { ROLES, RECORD_STATUSES, OPERATION_TYPES, EVIDENCE_TYPES } = require('../src/constants');
 
 const hashPassword = (password) => bcrypt.hashSync(password, 10);
@@ -355,6 +355,7 @@ async function seed() {
 
     db.exec('COMMIT');
     console.log('样例数据插入完成！');
+    saveDatabase();
     process.exit(0);
   } catch (e) {
     db.exec('ROLLBACK');

@@ -112,8 +112,10 @@ class SqlJsDb {
 async function initializeDatabase() {
   if (_db) return _db;
 
+  const sqlJsMain = require.resolve('sql.js');
+  const sqlJsRoot = path.resolve(path.dirname(sqlJsMain), '..');
   const SQL = await initSqlJs({
-    locateFile: file => path.join(require.resolve('sql.js'), '..', 'dist', file)
+    locateFile: file => path.join(sqlJsRoot, 'dist', file)
   });
 
   let dbInstance;
@@ -158,20 +160,40 @@ function getDb() {
   return _db;
 }
 
-module.exports.initializeDatabase = initializeDatabase;
-module.exports.getDb = getDb;
+function saveDatabase() {
+  if (!_db) return;
+  try {
+    const data = _db.export();
+    const buffer = Buffer.from(data);
+    const tmpPath = dbPath + '.tmp';
+    fs.writeFileSync(tmpPath, buffer);
+    fs.renameSync(tmpPath, dbPath);
+    return true;
+  } catch (e) {
+    console.error('保存数据库失败:', e.message);
+    return false;
+  }
+}
 
 const lazyDb = new Proxy({}, {
   get(target, prop) {
+    if (prop in target) {
+      return target[prop];
+    }
     const db = getDb();
     if (typeof db[prop] === 'function') {
       return db[prop].bind(db);
     }
     return db[prop];
+  },
+  set(target, prop, value) {
+    target[prop] = value;
+    return true;
   }
 });
 
 module.exports = lazyDb;
 module.exports.initializeDatabase = initializeDatabase;
 module.exports.getDb = getDb;
+module.exports.saveDatabase = saveDatabase;
 module.exports.default = lazyDb;

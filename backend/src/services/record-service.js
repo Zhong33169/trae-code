@@ -70,15 +70,16 @@ const addReviewRecord = (recordId, handlerId, operationType, opinion, result, pr
 };
 
 const updateRecordStatus = (recordId, newStatus, version, currentHandlerId = null) => {
-  const params = [newStatus, version, recordId];
-  let handlerSql = '';
+  const params = [newStatus];
+  let setSql = 'status = ?, updated_at = CURRENT_TIMESTAMP';
   if (currentHandlerId !== null) {
-    handlerSql = ', current_handler_id = ?';
-    params.splice(2, 0, currentHandlerId);
+    setSql += ', current_handler_id = ?';
+    params.push(currentHandlerId);
   }
+  params.push(recordId, version);
   return db.prepare(`
     UPDATE supervision_records
-    SET status = ?, updated_at = CURRENT_TIMESTAMP ${handlerSql}
+    SET ${setSql}
     WHERE id = ? AND version = ?
   `).run(...params);
 };
@@ -320,14 +321,6 @@ const validateStatusTransition = (record, operation, userId, role) => {
 
   if (transition.requireCreator && record.created_by !== userId) {
     throw new ValidationError('只有记录创建人才能执行此操作');
-  }
-
-  if (transition.requireEvidence) {
-    const evidenceCheck = validateRequiredEvidences(record.id);
-    if (!evidenceCheck.valid) {
-      const missingNames = evidenceCheck.missingTypes.join('、');
-      throw new ValidationError(`缺少必要证据：${missingNames}`, { missingTypes: evidenceCheck.missingTypes });
-    }
   }
 
   return transition;

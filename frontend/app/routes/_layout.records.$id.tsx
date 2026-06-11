@@ -1,5 +1,5 @@
 import { json, LoaderFunctionArgs, ActionFunctionArgs, redirect } from "@remix-run/node";
-import { useLoaderData, useActionData, useRevalidator, Link, useFetcher } from "@remix-run/react";
+import { useLoaderData, useActionData, useRevalidator, Link } from "@remix-run/react";
 import {
   Card,
   Descriptions,
@@ -17,7 +17,6 @@ import {
   Col,
   Divider,
   App,
-  message,
   Popconfirm,
   List,
 } from "antd";
@@ -464,7 +463,6 @@ export default function RecordDetail() {
 
       {lastReview && (
         <Card
-          style={{ marginBottom: 16 }}
           title={
             <Space>
               <ExclamationCircleOutlined style={{ color: "#fa8c16" }} />
@@ -472,7 +470,7 @@ export default function RecordDetail() {
             </Space>
           }
           size="small"
-          style={{ marginBottom: 16, border: "1px solid #ffd591", background: "#fffbe6" } as any}
+          style={{ marginBottom: 16, border: "1px solid #ffd591", background: "#fffbe6" }}
         >
           <Row gutter={16}>
             <Col xs={24} sm={12} md={6}>

@@ -295,10 +295,12 @@ router.post('/:id/operate', authMiddleware(), allRoles, async (ctx) => {
     return error(ctx, '请填写驳回原因', 400);
   }
 
-  if (transition.requireEvidence && operation === OPERATION_TYPES.CORRECT) {
+  if (transition.requireEvidence) {
     const existingEvidences = getEvidencesByRecordId(id);
-    const newEvidences = evidences || [];
-    const allEvidences = [...existingEvidences, ...newEvidences];
+    let allEvidences = [...existingEvidences];
+    if (evidences && evidences.length > 0 && [OPERATION_TYPES.CORRECT, OPERATION_TYPES.RESUBMIT, OPERATION_TYPES.SUBMIT].includes(operation)) {
+      allEvidences = [...allEvidences, ...evidences];
+    }
     const hasPhoto = allEvidences.some(e => e.type === 'photo');
     if (!hasPhoto) {
       logOperation(id, user.id, operation, '操作失败: 缺少必要证据-照片证据', ctx.request.ip);

@@ -7,10 +7,6 @@ const { initializeDatabase } = require('./db');
 
 dotenv.config({ path: path.join(__dirname, '../.env') });
 
-const authRoutes = require('./routes/auth');
-const recordRoutes = require('./routes/records');
-const logRoutes = require('./routes/logs');
-
 const app = new Koa();
 
 app.use(cors({
@@ -50,15 +46,18 @@ app.use(async (ctx, next) => {
   console.log(`${ctx.method} ${ctx.url} - ${ctx.status} - ${duration}ms`);
 });
 
-app.use(authRoutes.routes()).use(authRoutes.allowedMethods());
-app.use(recordRoutes.routes()).use(recordRoutes.allowedMethods());
-app.use(logRoutes.routes()).use(logRoutes.allowedMethods());
-
 const PORT = process.env.PORT || 8004;
 
 async function start() {
   try {
     await initializeDatabase();
+    const authRoutes = require('./routes/auth');
+    const recordRoutes = require('./routes/records');
+    const logRoutes = require('./routes/logs');
+    app.use(authRoutes.routes()).use(authRoutes.allowedMethods());
+    app.use(recordRoutes.routes()).use(recordRoutes.allowedMethods());
+    app.use(logRoutes.routes()).use(logRoutes.allowedMethods());
+
     app.listen(PORT, () => {
       console.log(`\n========================================`);
       console.log(`工程监理旁站记录系统 - 后端服务`);
