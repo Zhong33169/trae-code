@@ -170,15 +170,15 @@ def seed_data():
     now = "2026-06-12T09:00:00"
 
     tickets = [
-        ("XJ-20260610-001", "A1", "生猪", 120, "张三", "2026-06-10", "archived", 1, 1, now, now),
-        ("XJ-20260611-001", "B2", "肉牛", 45, "张三", "2026-06-11", "reviewed", 1, 1, now, now),
-        ("XJ-20260612-001", "C3", "山羊", 80, "张三", "2026-06-12", "under_review", 1, 1, now, now),
-        ("XJ-20260612-002", "A1", "生猪", 118, "张三", "2026-06-12", "submitted", 1, 1, now, now),
-        ("XJ-20260612-003", "D4", "绵羊", 200, "张三", "2026-06-12", "draft", 1, 1, now, now),
-        ("XJ-20260612-004", "B2", "肉牛", 43, "张三", "2026-06-12", "returned", 2, 1, now, now),
-        ("XJ-20260612-005", "E5", "蛋鸡", 500, "张三", "2026-06-12", "rejected", 1, 1, now, now),
-        ("XJ-20260612-006", "F6", "生猪", 60, "张三", "2026-06-12", "returned", 2, 1, now, now),
-        ("XJ-20260612-007", "G7", "肉牛", 30, "张三", "2026-06-12", "returned", 3, 1, now, now),
+        ("XJ-20260610-001", "A1", "生猪", 120, "张三", "2026-06-10", "archived", 5, 1, now, now),
+        ("XJ-20260611-001", "B2", "肉牛", 45, "张三", "2026-06-11", "reviewed", 4, 1, now, now),
+        ("XJ-20260612-001", "C3", "山羊", 80, "张三", "2026-06-12", "under_review", 3, 1, now, now),
+        ("XJ-20260612-002", "A1", "生猪", 118, "张三", "2026-06-12", "submitted", 5, 1, now, now),
+        ("XJ-20260612-003", "D4", "绵羊", 200, "张三", "2026-06-12", "submitted", 2, 1, now, now),
+        ("XJ-20260612-004", "B2", "肉牛", 43, "张三", "2026-06-12", "submitted", 7, 1, now, now),
+        ("XJ-20260612-005", "E5", "蛋鸡", 500, "张三", "2026-06-12", "rejected", 4, 1, now, now),
+        ("XJ-20260612-006", "F6", "生猪", 60, "张三", "2026-06-12", "returned", 4, 1, now, now),
+        ("XJ-20260612-007", "G7", "肉牛", 30, "张三", "2026-06-12", "returned", 7, 1, now, now),
         ("XJ-20260612-008", "H8", "蛋鸡", 800, "张三", "2026-06-12", "draft", 1, 1, now, now),
     ]
     for t in tickets:
@@ -195,7 +195,7 @@ def seed_data():
         (ticket_ids[1], "B2-1号栏", "clean", "good", 18.0, 55.0, "正常"),
         (ticket_ids[2], "C3-1号栏", "dirty", "poor", 26.0, 80.0, "需清洁整改"),
         (ticket_ids[3], "A1-1号栏", "clean", "good", 22.0, 63.0, "日常巡检"),
-        (ticket_ids[4], "D4-1号栏", "acceptable", "good", 20.0, 60.0, ""),
+        (ticket_ids[4], "D4-1号栏", "acceptable", "good", 20.0, 60.0, "日常巡检"),
         (ticket_ids[5], "B2-1号栏", "acceptable", "fair", 19.0, 58.0, "补录后复检"),
         (ticket_ids[6], "E5-1号栏", "dirty", "poor", 30.0, 85.0, "高温高湿预警"),
         (ticket_ids[7], "F6-1号栏", "clean", "good", 22.5, 62.0, "正常巡检"),
@@ -214,6 +214,7 @@ def seed_data():
         (ticket_ids[2], "C3-G001", "羊-001", "sick", "咳嗽、流涕", "呼吸道感染", "张三"),
         (ticket_ids[2], "C3-G002", "羊-002", "mild", "跛行", "蹄部轻微炎症", "张三"),
         (ticket_ids[3], "A1-P003", "猪-003", "healthy", "", "", "张三"),
+        (ticket_ids[4], "D4-M001", "羊-001", "healthy", "", "", "张三"),
         (ticket_ids[5], "B2-C002", "牛-002", "mild", "体温偏高", "疑似感冒", "张三"),
         (ticket_ids[6], "E5-H001", "鸡-001", "critical", "大量死亡", "疑似禽流感", "张三"),
         (ticket_ids[7], "F6-P001", "猪-004", "healthy", "", "", "张三"),
@@ -240,29 +241,33 @@ def seed_data():
             t2,
         )
 
+    treatment_ids = [row[0] for row in cur.execute("SELECT id FROM treatment_trackings ORDER BY id").fetchall()]
+
     evidence_data = [
         (ticket_ids[0], "pen_inspection", 1, "A1栏舍日常巡检记录", 1),
         (ticket_ids[0], "health_report", 2, "猪-002健康异常报告", 1),
-        (ticket_ids[0], "treatment_tracking", 1, "猪-002治疗跟踪", 1),
+        (ticket_ids[0], "treatment_tracking", treatment_ids[0], "猪-002治疗跟踪", 1),
         (ticket_ids[1], "pen_inspection", 3, "B2栏舍巡检记录", 1),
         (ticket_ids[1], "health_report", 3, "牛-001健康报告", 1),
         (ticket_ids[2], "pen_inspection", 4, "C3栏舍异常巡检", 1),
         (ticket_ids[2], "health_report", 4, "羊-001呼吸道感染报告", 1),
         (ticket_ids[2], "health_report", 5, "羊-002跛行报告", 1),
-        (ticket_ids[2], "treatment_tracking", 2, "羊-001治疗记录", 1),
-        (ticket_ids[2], "treatment_tracking", 3, "羊-002治疗记录", 1),
+        (ticket_ids[2], "treatment_tracking", treatment_ids[1], "羊-001治疗记录", 1),
+        (ticket_ids[2], "treatment_tracking", treatment_ids[2], "羊-002治疗记录", 1),
         (ticket_ids[3], "pen_inspection", 5, "A1日常巡检", 1),
         (ticket_ids[3], "health_report", 6, "猪-003健康报告", 1),
+        (ticket_ids[4], "pen_inspection", 6, "D4日常巡检", 1),
+        (ticket_ids[4], "health_report", 7, "羊-001健康报告", 1),
         (ticket_ids[5], "pen_inspection", 7, "B2补录后复检", 1),
-        (ticket_ids[5], "health_report", 7, "牛-002体温偏高报告", 1),
-        (ticket_ids[5], "treatment_tracking", 4, "牛-002治疗跟踪", 1),
+        (ticket_ids[5], "health_report", 8, "牛-002体温偏高报告", 1),
+        (ticket_ids[5], "treatment_tracking", treatment_ids[3], "牛-002治疗跟踪", 1),
         (ticket_ids[6], "pen_inspection", 8, "E5高温高湿环境记录", 1),
-        (ticket_ids[6], "health_report", 8, "鸡-001疑似禽流感报告", 1),
-        (ticket_ids[6], "treatment_tracking", 5, "鸡-001隔离措施", 1),
+        (ticket_ids[6], "health_report", 9, "鸡-001疑似禽流感报告", 1),
+        (ticket_ids[6], "treatment_tracking", treatment_ids[4], "鸡-001隔离措施", 1),
         (ticket_ids[7], "pen_inspection", 9, "F6栏舍巡检记录", 1),
-        (ticket_ids[7], "health_report", 9, "猪-004健康报告", 1),
+        (ticket_ids[7], "health_report", 10, "猪-004健康报告", 1),
         (ticket_ids[8], "pen_inspection", 10, "G7栏舍常规检查", 1),
-        (ticket_ids[8], "health_report", 10, "牛-003健康报告", 1),
+        (ticket_ids[8], "health_report", 11, "牛-003健康报告", 1),
     ]
     for e in evidence_data:
         cur.execute(
@@ -271,8 +276,8 @@ def seed_data():
         )
 
     supplement_data = [
-        (ticket_ids[5], "correction", "pen_area", "B2-1号栏", "B2-1号栏（补录后复检）", "原记录遗漏复检标记", 1, "2026-06-12T13:00:00", 2),
-        (ticket_ids[5], "correction", "temperature", "18.0", "19.0", "温度计校准后修正", 1, "2026-06-12T13:05:00", 2),
+        (ticket_ids[5], "correction", "pen_area", "B2-1号栏", "B2-1号栏（补录后复检）", "原记录遗漏复检标记", 1, "2026-06-12T13:00:00", 5),
+        (ticket_ids[5], "correction", "temperature", "18.0", "19.0", "温度计校准后修正", 1, "2026-06-12T13:05:00", 6),
     ]
     for s in supplement_data:
         cur.execute(
@@ -288,24 +293,29 @@ def seed_data():
         (ticket_ids[1], "submit", "draft", "submitted", 1, "2026-06-11T09:15:00", ""),
         (ticket_ids[1], "review", "submitted", "under_review", 2, "2026-06-11T10:00:00", ""),
         (ticket_ids[1], "approve_review", "under_review", "reviewed", 2, "2026-06-11T15:00:00", "审核通过待复核"),
-        (ticket_ids[2], "submit", "draft", "submitted", 1, "2026-06-12T08:30:00", ""),
-        (ticket_ids[2], "review", "submitted", "under_review", 2, "2026-06-12T09:00:00", ""),
-        (ticket_ids[3], "submit", "draft", "submitted", 1, "2026-06-12T09:30:00", ""),
         (ticket_ids[5], "submit", "draft", "submitted", 1, "2026-06-12T08:00:00", "首次提交"),
-        (ticket_ids[5], "review", "submitted", "under_review", 2, "2026-06-12T09:30:00", ""),
-        (ticket_ids[5], "return", "under_review", "returned", 2, "2026-06-12T10:00:00", "温度数据存疑，请补录修正"),
-        (ticket_ids[5], "resubmit", "returned", "submitted", 1, "2026-06-12T13:10:00", "已补录修正后重新提交"),
         (ticket_ids[6], "submit", "draft", "submitted", 1, "2026-06-12T08:00:00", ""),
+        (ticket_ids[3], "submit", "draft", "submitted", 1, "2026-06-12T08:15:00", ""),
+        (ticket_ids[2], "submit", "draft", "submitted", 1, "2026-06-12T08:30:00", ""),
         (ticket_ids[6], "review", "submitted", "under_review", 2, "2026-06-12T08:30:00", ""),
+        (ticket_ids[3], "review", "submitted", "under_review", 2, "2026-06-12T08:45:00", ""),
         (ticket_ids[6], "reject", "under_review", "rejected", 2, "2026-06-12T09:00:00", "疑似禽流感需上报，巡检单流程终止"),
-        (ticket_ids[7], "submit", "draft", "submitted", 1, "2026-06-12T09:15:00", ""),
+        (ticket_ids[7], "submit", "draft", "submitted", 1, "2026-06-12T09:00:00", ""),
+        (ticket_ids[3], "return", "under_review", "returned", 2, "2026-06-12T09:15:00", "数据存疑，退回补正"),
+        (ticket_ids[5], "review", "submitted", "under_review", 2, "2026-06-12T09:30:00", ""),
         (ticket_ids[7], "review", "submitted", "under_review", 2, "2026-06-12T09:45:00", ""),
-        (ticket_ids[7], "return", "under_review", "returned", 2, "2026-06-12T10:15:00", "审核退回补充，版本已更新为2"),
-        (ticket_ids[8], "submit", "draft", "submitted", 1, "2026-06-12T08:45:00", ""),
-        (ticket_ids[8], "review", "submitted", "under_review", 2, "2026-06-12T09:15:00", ""),
-        (ticket_ids[8], "return", "under_review", "returned", 2, "2026-06-12T09:30:00", "第一次退回"),
-        (ticket_ids[8], "resubmit", "returned", "under_review", 1, "2026-06-12T09:45:00", "重新提交"),
-        (ticket_ids[8], "return", "under_review", "returned", 2, "2026-06-12T10:00:00", "第二次退回，版本已更新为3"),
+        (ticket_ids[8], "submit", "draft", "submitted", 1, "2026-06-12T09:45:00", ""),
+        (ticket_ids[3], "resubmit", "returned", "submitted", 1, "2026-06-12T10:00:00", "补正后重新提交"),
+        (ticket_ids[5], "return", "under_review", "returned", 2, "2026-06-12T10:00:00", "温度数据存疑，请补录修正"),
+        (ticket_ids[7], "return", "under_review", "returned", 2, "2026-06-12T10:15:00", "审核退回补充"),
+        (ticket_ids[8], "review", "submitted", "under_review", 2, "2026-06-12T10:15:00", ""),
+        (ticket_ids[8], "return", "under_review", "returned", 2, "2026-06-12T10:25:00", "第一次退回"),
+        (ticket_ids[2], "review", "submitted", "under_review", 2, "2026-06-12T10:30:00", "[批次PL-20260612-001] 批量开始审核"),
+        (ticket_ids[8], "resubmit", "returned", "submitted", 1, "2026-06-12T10:45:00", "第一次重新提交"),
+        (ticket_ids[8], "review", "submitted", "under_review", 2, "2026-06-12T10:50:00", ""),
+        (ticket_ids[8], "return", "under_review", "returned", 2, "2026-06-12T10:55:00", "第二次退回"),
+        (ticket_ids[4], "submit", "draft", "submitted", 1, "2026-06-12T11:00:00", "[批次PL-20260612-002] 批量提交"),
+        (ticket_ids[5], "resubmit", "returned", "submitted", 1, "2026-06-12T13:10:00", "已补录修正后重新提交"),
     ]
     for w in workflow_data:
         cur.execute(
@@ -314,8 +324,8 @@ def seed_data():
         )
 
     batch_data = [
-        ("PL-20260612-001", "review", 2, "2026-06-12T10:30:00", 4, 2, 2, "日常批量审核"),
-        ("PL-20260612-002", "submit", 1, "2026-06-12T11:00:00", 3, 1, 2, "登记员批量提交演示"),
+        ("PL-20260612-001", "review", 2, "2026-06-12T10:30:00", 6, 1, 5, "日常批量审核"),
+        ("PL-20260612-002", "submit", 1, "2026-06-12T11:00:00", 4, 1, 3, "登记员批量提交演示"),
     ]
     for b in batch_data:
         cur.execute(
@@ -327,12 +337,15 @@ def seed_data():
 
     batch_items = [
         (batch_ids[0], ticket_ids[2], "XJ-20260612-001", 1, None, "submitted", "under_review"),
-        (batch_ids[0], ticket_ids[3], "XJ-20260612-002", 1, None, "submitted", "under_review"),
-        (batch_ids[0], ticket_ids[7], "XJ-20260612-006", 0, "版本冲突: 前端版本=1，后端最新版本=2", "submitted", None),
+        (batch_ids[0], ticket_ids[3], "XJ-20260612-002", 0, "版本冲突: 当前版本为5，提交版本为1，数据可能已被他人修改，请刷新后重试", "submitted", None),
         (batch_ids[0], ticket_ids[0], "XJ-20260610-001", 0, "角色[审核主管]不能对状态为[已归档]的巡检单执行操作", "archived", None),
+        (batch_ids[0], ticket_ids[5], "XJ-20260612-004", 0, "角色[审核主管]不能对状态为[已退回]的巡检单执行操作", "returned", None),
+        (batch_ids[0], ticket_ids[6], "XJ-20260612-005", 0, "角色[审核主管]不能对状态为[已驳回]的巡检单执行操作", "rejected", None),
+        (batch_ids[0], ticket_ids[4], "XJ-20260612-003", 0, "角色[审核主管]不能对状态为[草稿]的巡检单执行操作", "draft", None),
         (batch_ids[1], ticket_ids[4], "XJ-20260612-003", 1, None, "draft", "submitted"),
         (batch_ids[1], ticket_ids[9], "XJ-20260612-008", 0, "证据不足: 执行[submit]操作至少需要2条证据，当前仅有0条", "draft", None),
         (batch_ids[1], ticket_ids[2], "XJ-20260612-001", 0, "角色[登记员]无权执行[submit]操作", "under_review", None),
+        (batch_ids[1], ticket_ids[7], "XJ-20260612-006", 0, "版本号缺失: 批量操作需携带每条巡检单的版本号", "returned", None),
     ]
     for bi in batch_items:
         cur.execute(

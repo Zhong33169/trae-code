@@ -14,6 +14,7 @@ export class AppRoot extends LitElement {
     showCreate: { type: Boolean },
     selectedIds: { type: Array },
     sideEvidence: { type: Object },
+    batchResult: { type: Object },
   };
 
   static styles = css`
@@ -94,6 +95,44 @@ export class AppRoot extends LitElement {
       border: 1px solid #d9ecff;
     }
     .batch-bar .count { font-size: 13px; color: #409eff; font-weight: 500; }
+    
+    .batch-result {
+      background: #fff; border: 1px solid #e4e7ed; border-radius: 8px;
+      margin-bottom: 12px; overflow: hidden;
+    }
+    .batch-result-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 16px; background: #f5f7fa; border-bottom: 1px solid #e4e7ed;
+      gap: 16px;
+    }
+    .batch-result-header .batch-title { font-size: 13px; color: #303133; font-weight: 500; }
+    .batch-result-header .batch-no { color: #1a5c2a; font-weight: 600; margin: 0 6px; }
+    .batch-result-header .batch-action { color: #909399; font-weight: 400; }
+    .batch-result-header .batch-stats { display: flex; gap: 14px; font-size: 12px; }
+    .batch-result-header .stat-total { color: #606266; }
+    .batch-result-header .stat-success { color: #67c23a; font-weight: 500; }
+    .batch-result-header .stat-error { color: #f56c6c; font-weight: 500; }
+    .batch-result-header .batch-time { color: #909399; }
+    .batch-result-header .btn-close {
+      background: none; border: none; cursor: pointer; color: #909399;
+      font-size: 16px; padding: 0 4px;
+    }
+    .batch-result-header .btn-close:hover { color: #f56c6c; }
+    .batch-section { padding: 8px 16px; }
+    .batch-section-title { font-size: 12px; font-weight: 500; margin-bottom: 6px; color: #606266; }
+    .batch-items { display: flex; flex-direction: column; gap: 4px; }
+    .batch-item {
+      display: flex; align-items: center; gap: 10px; padding: 6px 10px;
+      border-radius: 4px; font-size: 12px; cursor: pointer;
+      transition: background 0.2s;
+    }
+    .batch-item:hover { background: #f5f7fa; }
+    .batch-item-success { background: #f0f9f3; border: 1px solid #c7e9d0; }
+    .batch-item-error { background: #fef0f0; border: 1px solid #fbc4c4; }
+    .batch-item .ticket-no { font-weight: 600; color: #303133; min-width: 130px; }
+    .batch-item .arrow { color: #909399; }
+    .batch-item .version { color: #909399; font-size: 11px; }
+    .batch-item .error-reason { color: #f56c6c; flex: 1; min-width: 0; }
     
     .ticket-list { display: flex; flex-direction: column; gap: 8px; }
     
@@ -182,6 +221,7 @@ export class AppRoot extends LitElement {
     this.showCreate = false;
     this.selectedIds = [];
     this.sideEvidence = null;
+    this.batchResult = null;
     this._toastTimer = null;
   }
 
@@ -266,25 +306,29 @@ export class AppRoot extends LitElement {
         comment: '',
         versions,
       });
-      const successCount = res.data.success?.length || 0;
-      const errorCount = res.data.errors?.length || 0;
-      if (errorCount > 0) {
-        const msgs = res.data.errors.map(e => `${e.ticket_no || e.ticket_id}: ${e.reason}`).join('\n');
-        this._showToast(`批量操作: 成功${successCount}条, 失败${errorCount}条\n${msgs}`, 'warning');
-      } else if (successCount > 0) {
-        this._showToast(`批量操作成功: 处理 ${successCount} 条 (批次: ${res.data.batch_no})`, 'success');
-      }
+      const success = res.data.success || [];
+      const errors = res.data.errors || [];
+      this.batchResult = {
+        batch_no: res.data.batch_no,
+        batch_id: res.data.batch_id,
+        action,
+        total: this.selectedIds.length,
+        success,
+        errors,
+        timestamp: new Date().toLocaleString('zh-CN'),
+      };
       const wasSelected = this.selectedTicket ? [...this.selectedIds] : [];
       this.selectedIds = [];
       await this._loadTickets();
       if (this.selectedTicket) {
-        const stillSelected = wasSelected.filter(id => res.data.success?.some(s => s.ticket_id === id));
-        if (stillSelected.length > 0) {
-          await this._selectTicket({ id: stillSelected[0] });
-        } else if (wasSelected.length > 0 && this.selectedTicket) {
+        const successIds = success.map(s => s.ticket_id);
+        const errorIds = errors.map(e => e.ticket_id);
+        const affectedIds = [...successIds, ...errorIds];
+        if (this.selectedTicket && affectedIds.includes(this.selectedTicket.id)) {
           await this._selectTicket(this.selectedTicket);
         }
       }
+      this.requestUpdate();
     } catch (e) {
       this._showToast(e.message, 'error');
     }
@@ -442,6 +486,68 @@ export class AppRoot extends LitElement {
     return [];
   }
 
+  _renderBatchResult() {
+    if (!this.batchResult) return '';
+    const r = this.batchResult;
+    const successCount = r.success?.length || 0;
+    const errorCount = r.errors?.length || 0;
+    const total = r.total || 0;
+    return html`
+      <div class="batch-result">
+        <div class="batch-result-header">
+          <div class="batch-title">
+            📦 批次 <span class="batch-no">${r.batch_no}</span>
+            <span class="batch-action">${this._actionLabel(r.action)}</span>
+          </div>
+          <div class="batch-stats">
+            <span class="stat-total">共 ${total} 条</span>
+            <span class="stat-success">✅ 成功 ${successCount}</span>
+            <span class="stat-error">❌ 失败 ${errorCount}</span>
+            <span class="batch-time">${r.timestamp}</span>
+          </div>
+          <button class="btn-close" @click=${() => { this.batchResult = null; this.requestUpdate(); }}>✕</button>
+        </div>
+        ${successCount > 0 ? html`
+          <div class="batch-section">
+            <div class="batch-section-title">✅ 成功 (${successCount})</div>
+            <div class="batch-items">
+              ${r.success.map(s => html`
+                <div class="batch-item batch-item-success" @click=${() => this._selectTicket({ id: s.ticket_id })}>
+                  <span class="ticket-no">${s.ticket_no}</span>
+                  <span class="arrow">→</span>
+                  <span class="status-badge" style="background:${STATUS_COLORS[s.new_status]}">${STATUS_LABELS[s.new_status]}</span>
+                  <span class="version">v${s.new_version}</span>
+                </div>
+              `)}
+            </div>
+          </div>
+        ` : ''}
+        ${errorCount > 0 ? html`
+          <div class="batch-section">
+            <div class="batch-section-title">❌ 失败 (${errorCount})</div>
+            <div class="batch-items">
+              ${r.errors.map(e => html`
+                <div class="batch-item batch-item-error" @click=${() => this._selectTicket({ id: e.ticket_id })}>
+                  <span class="ticket-no">${e.ticket_no || e.ticket_id}</span>
+                  <span class="error-reason">${e.reason}</span>
+                </div>
+              `)}
+            </div>
+          </div>
+        ` : ''}
+      </div>
+    `;
+  }
+
+  _actionLabel(action) {
+    const map = {
+      submit: '提交', resubmit: '补正提交', review: '开始审核',
+      approve_review: '审核通过', reject: '驳回', return: '退回',
+      archive: '归档'
+    };
+    return map[action] || action;
+  }
+
   _renderTicketList() {
     if (this.tickets.length === 0) {
       return html`<div style="text-align:center;padding:60px 0;color:#909399;font-size:14px;">暂无巡检单数据</div>`;
@@ -589,6 +695,7 @@ export class AppRoot extends LitElement {
         <div class="main-content">
           <div class="ticket-panel">
             ${this._renderToolbar()}
+            ${this._renderBatchResult()}
             ${this._renderTicketList()}
           </div>
           ${this._renderEvidencePanel()}
