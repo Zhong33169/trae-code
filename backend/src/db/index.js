@@ -30,7 +30,6 @@ class SqlJsStatement {
     this._stmt.step();
     const changes = this._db.getRowsModified();
     this._stmt.reset();
-    this._stmt.free();
     return { changes, lastInsertRowid: this._db.exec('SELECT last_insert_rowid() AS id')[0]?.values[0]?.[0] };
   }
 
@@ -51,7 +50,6 @@ class SqlJsStatement {
       }
     }
     this._stmt.reset();
-    this._stmt.free();
     return result;
   }
 
@@ -73,7 +71,6 @@ class SqlJsStatement {
       }
     }
     this._stmt.reset();
-    this._stmt.free();
     return results;
   }
 }

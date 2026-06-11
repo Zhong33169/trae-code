@@ -10,11 +10,10 @@ import {
   Row,
   Col,
   Space,
-  Upload,
   Select,
   App,
-  message,
   Modal,
+  Tag,
 } from "antd";
 import { ArrowLeftOutlined, PlusOutlined, UploadOutlined } from "@ant-design/icons";
 import { requireAuth } from "~/utils/auth.server";
@@ -23,7 +22,6 @@ import dayjs from "dayjs";
 import type { UploadProps } from "antd";
 
 const { TextArea } = Input;
-const { Option } = Select;
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { user } = await requireAuth(request);
@@ -72,6 +70,7 @@ export default function NewRecord() {
   const navigate = useNavigate();
   const { message: messageApi } = App.useApp();
   const [form] = Form.useForm();
+  const [evidenceForm] = Form.useForm();
 
   if (actionData && "code" in actionData && actionData.code !== 200) {
     messageApi.error(actionData.message || "创建失败");
@@ -104,34 +103,33 @@ export default function NewRecord() {
       { value: "signature", label: "签字" },
       { value: "other", label: "其他" },
     ];
+    evidenceForm.resetFields();
     Modal.confirm({
       title: "添加证据",
       content: (
-        <Form layout="vertical">
-          <Form.Item label="类型" name="type" rules={[{ required: true }]}>
-            <Select placeholder="请选择证据类型">
-              {typeOptions.map(opt => (
-                <Option key={opt.value} value={opt.value}>{opt.label}</Option>
-              ))}
-            </Select>
+        <Form form={evidenceForm} layout="vertical" preserve={false}>
+          <Form.Item label="类型" name="type" rules={[{ required: true, message: "请选择证据类型" }]}>
+            <Select placeholder="请选择证据类型" options={typeOptions} />
           </Form.Item>
-          <Form.Item label="名称" name="name" rules={[{ required: true }]}>
+          <Form.Item label="名称" name="name" rules={[{ required: true, message: "请输入证据名称" }]}>
             <Input placeholder="请输入证据名称" />
           </Form.Item>
           <Form.Item label="描述" name="description">
             <TextArea rows={2} placeholder="请输入证据描述（可选）" />
           </Form.Item>
-          <Form.Item label="文件标识" name="fileUrl" rules={[{ required: true }]}>
+          <Form.Item label="文件标识" name="fileUrl" rules={[{ required: true, message: "请输入文件标识" }]}>
             <Input placeholder="请输入文件标识或URL（演示用）" />
           </Form.Item>
         </Form>
       ),
       onOk: async () => {
         try {
-          const values = await form.validateFields();
+          const values = await evidenceForm.validateFields();
           setEvidences([...evidences, values]);
           messageApi.success("证据已添加");
-        } catch {}
+        } catch {
+          return Promise.reject();
+        }
       },
     });
   };
@@ -256,15 +254,18 @@ export default function NewRecord() {
             </Col>
             <Col span={8}>
               <Form.Item label="天气" name="weather">
-                <Select placeholder="请选择天气">
-                  <Option value="晴">晴</Option>
-                  <Option value="多云">多云</Option>
-                  <Option value="阴">阴</Option>
-                  <Option value="小雨">小雨</Option>
-                  <Option value="中雨">中雨</Option>
-                  <Option value="大雨">大雨</Option>
-                  <Option value="雪">雪</Option>
-                </Select>
+                <Select 
+                  placeholder="请选择天气" 
+                  options={[
+                    { value: "晴", label: "晴" },
+                    { value: "多云", label: "多云" },
+                    { value: "阴", label: "阴" },
+                    { value: "小雨", label: "小雨" },
+                    { value: "中雨", label: "中雨" },
+                    { value: "大雨", label: "大雨" },
+                    { value: "雪", label: "雪" },
+                  ]}
+                />
               </Form.Item>
             </Col>
             <Col span={8}>

@@ -92,9 +92,9 @@ async function seed() {
           { type: EVIDENCE_TYPES.DOCUMENT, name: '整改报告', desc: '施工单位提交的整改完成报告扫描件', url: '/docs/pz001-rectification.pdf' },
         ],
         reviews: [
-          { handler: 3, op: OPERATION_TYPES.START_REVIEW, opinion: '收到记录，开始审核', result: 'process', prev: RECORD_STATUSES.SUBMITTED, next: RECORD_STATUSES.IN_REVIEW, reason: null, version: 1 },
+          { handler: 3, op: OPERATION_TYPES.REVIEW, opinion: '收到记录，开始审核', result: 'process', prev: RECORD_STATUSES.SUBMITTED, next: RECORD_STATUSES.IN_REVIEW, reason: null, version: 1 },
           { handler: 3, op: OPERATION_TYPES.REVIEW_PASS, opinion: '记录内容完整，问题描述清晰，整改要求明确，审核通过。', result: 'pass', prev: RECORD_STATUSES.IN_REVIEW, next: RECORD_STATUSES.REVIEW_PASSED, reason: null, version: 1 },
-          { handler: 5, op: OPERATION_TYPES.START_FINAL_REVIEW, opinion: '开始复核', result: 'process', prev: RECORD_STATUSES.REVIEW_PASSED, next: RECORD_STATUSES.IN_FINAL_REVIEW, reason: null, version: 1 },
+          { handler: 5, op: OPERATION_TYPES.FINAL_REVIEW, opinion: '开始复核', result: 'process', prev: RECORD_STATUSES.REVIEW_PASSED, next: RECORD_STATUSES.IN_FINAL_REVIEW, reason: null, version: 1 },
           { handler: 5, op: OPERATION_TYPES.FINAL_PASS, opinion: '符合旁站记录规范，复核通过。', result: 'pass', prev: RECORD_STATUSES.IN_FINAL_REVIEW, next: RECORD_STATUSES.FINAL_PASSED, reason: null, version: 1 },
         ],
       },
@@ -121,9 +121,9 @@ async function seed() {
           { type: EVIDENCE_TYPES.VIDEO, name: '现场实测过程', desc: '钢筋间距实测视频记录', url: '/videos/pz002-1.mp4' },
         ],
         reviews: [
-          { handler: 4, op: OPERATION_TYPES.START_REVIEW, opinion: '开始审核', result: 'process', prev: RECORD_STATUSES.SUBMITTED, next: RECORD_STATUSES.IN_REVIEW, reason: null, version: 1 },
+          { handler: 4, op: OPERATION_TYPES.REVIEW, opinion: '开始审核', result: 'process', prev: RECORD_STATUSES.SUBMITTED, next: RECORD_STATUSES.IN_REVIEW, reason: null, version: 1 },
           { handler: 4, op: OPERATION_TYPES.REVIEW_PASS, opinion: '问题描述清楚，要求合理，审核通过。', result: 'pass', prev: RECORD_STATUSES.IN_REVIEW, next: RECORD_STATUSES.REVIEW_PASSED, reason: null, version: 1 },
-          { handler: 6, op: OPERATION_TYPES.START_FINAL_REVIEW, opinion: '已接收，复核中', result: 'process', prev: RECORD_STATUSES.REVIEW_PASSED, next: RECORD_STATUSES.IN_FINAL_REVIEW, reason: null, version: 1 },
+          { handler: 6, op: OPERATION_TYPES.FINAL_REVIEW, opinion: '已接收，复核中', result: 'process', prev: RECORD_STATUSES.REVIEW_PASSED, next: RECORD_STATUSES.IN_FINAL_REVIEW, reason: null, version: 1 },
         ],
       },
       {
@@ -147,7 +147,7 @@ async function seed() {
           { type: EVIDENCE_TYPES.PHOTO, name: '预埋件安装', desc: '幕墙预埋件安装现场', url: '/images/pz003-1.jpg' },
         ],
         reviews: [
-          { handler: 3, op: OPERATION_TYPES.START_REVIEW, opinion: '开始审核', result: 'process', prev: RECORD_STATUSES.SUBMITTED, next: RECORD_STATUSES.IN_REVIEW, reason: null, version: 1 },
+          { handler: 3, op: OPERATION_TYPES.REVIEW, opinion: '开始审核', result: 'process', prev: RECORD_STATUSES.SUBMITTED, next: RECORD_STATUSES.IN_REVIEW, reason: null, version: 1 },
           { handler: 3, op: OPERATION_TYPES.REQUEST_CORRECTION, opinion: '记录不完整，需要补正', result: 'correction', prev: RECORD_STATUSES.IN_REVIEW, next: RECORD_STATUSES.NEEDS_CORRECTION, reason: '缺少预埋件标高偏差的具体数值测量照片及焊缝质量检测报告；问题整改要求描述不够具体，需补充整改完成时限和复查要求。', version: 1 },
         ],
       },
@@ -197,7 +197,7 @@ async function seed() {
           { type: EVIDENCE_TYPES.PHOTO, name: '温度测量', desc: '红外测温仪实测入模温度', url: '/images/pz005-2.jpg' },
         ],
         reviews: [
-          { handler: 4, op: OPERATION_TYPES.START_REVIEW, opinion: '开始审核该记录', result: 'process', prev: RECORD_STATUSES.SUBMITTED, next: RECORD_STATUSES.IN_REVIEW, reason: null, version: 1 },
+          { handler: 4, op: OPERATION_TYPES.REVIEW, opinion: '开始审核该记录', result: 'process', prev: RECORD_STATUSES.SUBMITTED, next: RECORD_STATUSES.IN_REVIEW, reason: null, version: 1 },
         ],
       },
       {
@@ -223,7 +223,7 @@ async function seed() {
           { type: EVIDENCE_TYPES.DOCUMENT, name: '焊工证书清单', desc: '现场作业人员焊工证复印件汇总', url: '/docs/pz006-welders.pdf' },
         ],
         reviews: [
-          { handler: 3, op: OPERATION_TYPES.START_REVIEW, opinion: '已接收，正在审核证据材料', result: 'process', prev: RECORD_STATUSES.SUBMITTED, next: RECORD_STATUSES.IN_REVIEW, reason: null, version: 1 },
+          { handler: 3, op: OPERATION_TYPES.REVIEW, opinion: '已接收，正在审核证据材料', result: 'process', prev: RECORD_STATUSES.SUBMITTED, next: RECORD_STATUSES.IN_REVIEW, reason: null, version: 1 },
         ],
       },
       {
@@ -293,9 +293,9 @@ async function seed() {
           { type: EVIDENCE_TYPES.PHOTO, name: '接地焊接', desc: '接地端子焊接质量', url: '/images/pz009-2.jpg' },
         ],
         reviews: [
-          { handler: 3, op: OPERATION_TYPES.START_REVIEW, opinion: '开始审核', result: 'process', prev: RECORD_STATUSES.SUBMITTED, next: RECORD_STATUSES.IN_REVIEW, reason: null, version: 1 },
+          { handler: 3, op: OPERATION_TYPES.REVIEW, opinion: '开始审核', result: 'process', prev: RECORD_STATUSES.SUBMITTED, next: RECORD_STATUSES.IN_REVIEW, reason: null, version: 1 },
           { handler: 3, op: OPERATION_TYPES.REVIEW_PASS, opinion: '记录完整审核通过', result: 'pass', prev: RECORD_STATUSES.IN_REVIEW, next: RECORD_STATUSES.REVIEW_PASSED, reason: null, version: 1 },
-          { handler: 5, op: OPERATION_TYPES.START_FINAL_REVIEW, opinion: '开始复核', result: 'process', prev: RECORD_STATUSES.REVIEW_PASSED, next: RECORD_STATUSES.IN_FINAL_REVIEW, reason: null, version: 1 },
+          { handler: 5, op: OPERATION_TYPES.FINAL_REVIEW, opinion: '开始复核', result: 'process', prev: RECORD_STATUSES.REVIEW_PASSED, next: RECORD_STATUSES.IN_FINAL_REVIEW, reason: null, version: 1 },
           { handler: 5, op: OPERATION_TYPES.MARK_STATUS_CONFLICT, opinion: '发现状态异常需核实', result: 'process', prev: RECORD_STATUSES.IN_FINAL_REVIEW, next: RECORD_STATUSES.STATUS_CONFLICT, reason: '发现该记录中工程名称为"城市高架桥工程"，但旁站部位描述为"3#厂房机电管线预埋施工"，存在明显不一致。请记录创建人重新核对工程名称与施工部位是否匹配，并补充该部位设计变更相关证明材料（如有）。', version: 1 },
         ],
       },
@@ -322,7 +322,7 @@ async function seed() {
           { type: EVIDENCE_TYPES.DOCUMENT, name: '涂料检测报告', desc: '防水材料进场复检报告', url: '/docs/pz010-test-report.pdf' },
         ],
         reviews: [
-          { handler: 4, op: OPERATION_TYPES.START_REVIEW, opinion: '开始审核', result: 'process', prev: RECORD_STATUSES.SUBMITTED, next: RECORD_STATUSES.IN_REVIEW, reason: null, version: 1 },
+          { handler: 4, op: OPERATION_TYPES.REVIEW, opinion: '开始审核', result: 'process', prev: RECORD_STATUSES.SUBMITTED, next: RECORD_STATUSES.IN_REVIEW, reason: null, version: 1 },
           { handler: 4, op: OPERATION_TYPES.REVIEW_PASS, opinion: '审核通过，材料齐全', result: 'pass', prev: RECORD_STATUSES.IN_REVIEW, next: RECORD_STATUSES.REVIEW_PASSED, reason: null, version: 1 },
         ],
       },
