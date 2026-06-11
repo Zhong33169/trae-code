@@ -263,6 +263,187 @@ func seedData() error {
 	}
 
 	log.Println("开户申请样例数据已插入")
+
+	sampleHandovers := []struct {
+		appID, fromUserID, toUserID int64
+		fromShift, toShift          string
+		status                      string
+		remark                      string
+		acceptRemark                string
+	}{
+		{
+			3, 2, 1, "夜班", "白班", "ACCEPTED",
+			"该申请资料有问题已被退回，麻烦你补正资料后重新提交",
+			"已收到，会尽快处理补正",
+		},
+		{
+			2, 3, 4, "白班", "夜班", "PENDING",
+			"该申请资料完整，请夜班同事继续审核办理",
+			"",
+		},
+		{
+			4, 5, 5, "白班", "白班", "ACCEPTED",
+			"该申请已审核通过，请复核归档",
+			"好的，我来复核",
+		},
+	}
+
+	for i, h := range sampleHandovers {
+		var confirmedAt interface{}
+		if h.status != "PENDING" {
+			confirmedAt = now.Add(time.Duration(i+1) * -5 * time.Minute)
+		}
+		_, err = DB.Exec(`
+			INSERT INTO handovers(
+				application_id, from_user_id, from_shift, to_user_id, to_shift,
+				status, handover_remark, accept_remark, created_at, confirmed_at
+			) VALUES(?,?,?,?,?,?,?,?,?,?)`,
+			h.appID, h.fromUserID, h.fromShift, h.toUserID, h.toShift,
+			h.status, h.remark, h.acceptRemark,
+			now.Add(time.Duration(i+2)*-10*time.Minute), confirmedAt,
+		)
+		if err != nil {
+			return fmt.Errorf("插入样例交接记录失败: %w", err)
+		}
+	}
+	log.Println("交接样例数据已插入")
+
+	sampleRecords := []struct {
+		appID, handoverID, handlerID int64
+		handlerName, handlerRole, handlerShift string
+		recordType, status, content, rejectReason string
+		completed bool
+	}{
+		{
+			3, 1, 1, "张登记", "register", "白班",
+			"CORRECTION", "PENDING",
+			"根据交接接收，需处理资料补正：房产证明文件不清晰，请重新上传清晰版的产权证照片",
+			"房产证明文件不清晰，请重新上传清晰版的产权证照片",
+			false,
+		},
+		{
+			3, 1, 1, "张登记", "register", "白班",
+			"CORRECTION", "PROCESSING",
+			"身份证正反面照片需要更清晰，已联系申请人重新拍摄",
+			"身份证照片模糊",
+			false,
+		},
+		{
+			3, 1, 1, "张登记", "register", "白班",
+			"CORRECTION", "COMPLETED",
+			"已联系申请人重新拍摄身份证照片并上传，资料已补正",
+			"身份证照片模糊",
+			true,
+		},
+		{
+			2, 2, 4, "赵审核", "auditor", "夜班",
+			"TODO", "PENDING",
+			"根据交接接收，需处理该申请，当前状态：【待审核】，请审核申请人资料是否齐全",
+			"",
+			false,
+		},
+		{
+			4, 3, 5, "陈复核", "reviewer", "白班",
+			"TODO", "PROCESSING",
+			"根据交接接收，需处理该申请，当前状态：【待复核】，请复核申请资料并归档",
+			"",
+			false,
+		},
+	}
+
+	for _, r := range sampleRecords {
+		createdAt := now.Add(-2 * time.Hour)
+		updatedAt := createdAt
+		var completedAt interface{}
+		if r.completed {
+			completedAt = now.Add(-1 * time.Hour)
+			updatedAt = now.Add(-1 * time.Hour)
+		}
+		var handoverID interface{}
+		if r.handoverID > 0 {
+			handoverID = r.handoverID
+		}
+		_, err = DB.Exec(`
+			INSERT INTO processing_records(
+				application_id, handover_id, handler_id, handler_name,
+				handler_role, handler_shift, record_type, status,
+				content, reject_reason, created_at, updated_at, completed_at
+			) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			r.appID, handoverID, r.handlerID, r.handlerName,
+			r.handlerRole, r.handlerShift, r.recordType, r.status,
+			r.content, r.rejectReason, createdAt, updatedAt, completedAt,
+		)
+		if err != nil {
+			return fmt.Errorf("插入样例处理记录失败: %w", err)
+		}
+	}
+	log.Println("处理记录样例数据已插入")
+
+	sampleLogs := []struct {
+		appID   int64
+		userID  int64
+		appNo   string
+		userName string
+		userRole string
+		operation string
+		opDetail  string
+		fromStatus string
+		toStatus   string
+	}{
+		{
+			3, 2, "", "李登记", "开户登记员",
+			"创建申请", "创建开户申请草稿",
+			"", "DRAFT",
+		},
+		{
+			3, 2, "", "李登记", "开户登记员",
+			"提交审核", "补正资料后提交审核",
+			"DRAFT", "PENDING_AUDIT",
+		},
+		{
+			3, 3, "", "王审核", "开户审核主管",
+			"审核退回", "房产证明文件不清晰，身份证照片模糊，退回补正",
+			"PENDING_AUDIT", "NEED_CORRECTION",
+		},
+		{
+			3, 2, "", "李登记", "开户登记员",
+			"发起交接", "发起交接：夜班李登记 → 白班张登记，说明：该申请资料有问题已被退回",
+			"NEED_CORRECTION", "NEED_CORRECTION",
+		},
+		{
+			3, 1, "", "张登记", "开户登记员",
+			"接收交接", "接收交接，已自动创建补正待办",
+			"NEED_CORRECTION", "NEED_CORRECTION",
+		},
+		{
+			2, 1, "", "张登记", "开户登记员",
+			"创建申请", "创建并提交开户申请进入审核流程",
+			"", "PENDING_AUDIT",
+		},
+		{
+			2, 3, "", "王审核", "开户审核主管",
+			"发起交接", "发起交接：白班王审核 → 夜班赵审核，请夜班同事继续审核",
+			"PENDING_AUDIT", "PENDING_AUDIT",
+		},
+	}
+
+	for _, l := range sampleLogs {
+		var appNo string
+		DB.QueryRow("SELECT application_no FROM applications WHERE id=?", l.appID).Scan(&appNo)
+		_, err = DB.Exec(`
+			INSERT INTO operation_logs(
+				application_id, application_no, user_id, user_name, user_role,
+				operation, operation_detail, from_status, to_status, ip_address
+			) VALUES(?,?,?,?,?,?,?,?,?,?)`,
+			l.appID, appNo, l.userID, l.userName, l.userRole,
+			l.operation, l.opDetail, l.fromStatus, l.toStatus, "127.0.0.1",
+		)
+		if err != nil {
+			return fmt.Errorf("插入样例操作日志失败: %w", err)
+		}
+	}
+	log.Println("操作日志样例数据已插入")
+
 	return nil
 }
 

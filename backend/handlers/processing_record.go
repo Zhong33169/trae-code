@@ -3,6 +3,7 @@ package handlers
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -140,9 +141,21 @@ func CreateProcessingRecord(w http.ResponseWriter, r *http.Request) {
 
 	tx.Commit()
 
+	var extraMsg string
+	if recordType == models.RecordTypeCorrection {
+		extraMsg = "，请及时补正资料并更新处理状态"
+	} else if recordType == models.RecordTypeTodo {
+		extraMsg = "，请及时处理并更新状态"
+	} else {
+		extraMsg = "，该记录已自动标记为完成"
+	}
+	if appStatus == string(models.StatusNeedCorrection) && recordType != models.RecordTypeRemark {
+		extraMsg += "。补正完成后可提交审核重新进入审核流程"
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(utils.SuccessMsg(
-		recordType.DisplayName()+"记录添加成功",
+		recordType.DisplayName()+"记录添加成功【状态："+status.DisplayName()+"】"+extraMsg,
 		map[string]interface{}{"recordId": recordID}))
 }
 
@@ -246,9 +259,37 @@ func UpdateProcessingRecord(w http.ResponseWriter, r *http.Request) {
 
 	tx.Commit()
 
+	var extraMsg string
+	if newStatus == models.RecordStatusCompleted {
+		var remainingPending int64
+		var remainingProcessing int64
+		db.DB.QueryRow(`
+			SELECT 
+				COUNT(CASE WHEN status='PENDING' THEN 1 END),
+				COUNT(CASE WHEN status='PROCESSING' THEN 1 END)
+			FROM processing_records WHERE application_id=?`, appID).
+			Scan(&remainingPending, &remainingProcessing)
+
+		if rt == models.RecordTypeCorrection && appStatus == string(models.StatusNeedCorrection) {
+			if remainingPending == 0 && remainingProcessing == 0 {
+				extraMsg = "。所有补正任务已完成，您可以点击【提交审核】将申请流转至待审核状态"
+			} else {
+				extraMsg = fmt.Sprintf("。该申请还剩 %d 项待处理、%d 项处理中的补正任务", remainingPending, remainingProcessing)
+			}
+		} else {
+			if remainingPending == 0 && remainingProcessing == 0 {
+				extraMsg = "。该申请关联的所有处理任务均已完成"
+			} else {
+				extraMsg = fmt.Sprintf("。该申请还剩 %d 项待处理、%d 项处理中的任务", remainingPending, remainingProcessing)
+			}
+		}
+	} else if newStatus == models.RecordStatusProcessing {
+		extraMsg = "，请及时跟进处理"
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(utils.SuccessMsg(
-		rt.DisplayName()+"记录更新成功", nil))
+		rt.DisplayName()+"记录已更新为【"+newStatus.DisplayName()+"】"+extraMsg, nil))
 }
 
 func ListProcessingRecords(w http.ResponseWriter, r *http.Request) {

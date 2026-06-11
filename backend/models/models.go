@@ -112,6 +112,14 @@ type Application struct {
 	ReviewedAt          *time.Time        `json:"reviewedAt,omitempty"`
 	CreatedAt           time.Time         `json:"createdAt"`
 	UpdatedAt           time.Time         `json:"updatedAt"`
+
+	PendingTodoCount    int64             `json:"pendingTodoCount"`
+	ProcessingTodoCount int64             `json:"processingTodoCount"`
+	CompletedTodoCount  int64             `json:"completedTodoCount"`
+	TotalTodoCount      int64             `json:"totalTodoCount"`
+	CorrectionProgress  int               `json:"correctionProgress"`
+	LatestRejectReason  string            `json:"latestRejectReason,omitempty"`
+	TodoSummaryText     string            `json:"todoSummaryText,omitempty"`
 }
 
 type Handover struct {
@@ -138,6 +146,14 @@ type Handover struct {
 	AcceptRemark     string         `json:"acceptRemark,omitempty"`
 	CreatedAt        time.Time      `json:"createdAt"`
 	ConfirmedAt      *time.Time     `json:"confirmedAt,omitempty"`
+
+	PendingTodoCount    int64  `json:"pendingTodoCount"`
+	ProcessingTodoCount int64  `json:"processingTodoCount"`
+	CompletedTodoCount  int64  `json:"completedTodoCount"`
+	TotalTodoCount      int64  `json:"totalTodoCount"`
+	CorrectionProgress  int    `json:"correctionProgress"`
+	LatestRejectReason  string `json:"latestRejectReason,omitempty"`
+	TodoSummaryText     string `json:"todoSummaryText,omitempty"`
 }
 
 type OperationLog struct {

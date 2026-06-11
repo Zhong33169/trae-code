@@ -124,8 +124,6 @@ class HandoverPage extends LitElement {
     return btns;
   }
 
-  goApp(id) { location.hash = '#/applications/' + id; }
-
   getPendingIncoming() {
     return this.list.filter(h => h.toUserId === this.user.id && h.status === 'PENDING').length;
   }
@@ -226,7 +224,7 @@ class HandoverPage extends LitElement {
             </div>
           </div>
 
-          <table>
+          <table class="data-table">
             <thead>
               <tr>
                 <th>交接ID</th>
@@ -234,19 +232,21 @@ class HandoverPage extends LitElement {
                 <th>交出方</th>
                 <th>交接方向</th>
                 <th>接收方</th>
-                <th style="width:100px;">交接状态</th>
-                <th style="width:100px;">申请状态</th>
-                <th>当前处理人</th>
+                <th style="width:90px;">交接状态</th>
+                <th style="width:90px;">申请状态</th>
+                <th style="width:120px;">当前处理人</th>
+                <th style="width:150px;">待办/补正进度</th>
+                <th style="width:160px;">最新拒绝/补正原因</th>
                 <th>交接说明</th>
-                <th style="width:150px;">发起/确认时间</th>
-                <th style="width:160px;">操作</th>
+                <th style="width:140px;">发起/确认时间</th>
+                <th style="width:140px;">操作</th>
               </tr>
             </thead>
             <tbody>
               ${this.loading
-                ? html`<tr><td colspan="11" class="empty">加载中...</td></tr>`
+                ? html`<tr><td colspan="13" class="empty">加载中...</td></tr>`
                 : this.list.length === 0
-                  ? html`<tr><td colspan="11" class="empty">暂无交接记录，可在申请详情页发起交接</td></tr>`
+                  ? html`<tr><td colspan="13" class="empty">暂无交接记录，可在申请详情页发起交接</td></tr>`
                   : this.list.map((h) => html`
                     <tr>
                       <td style="font-family:monospace;color:#1890ff;">#${h.id}</td>
@@ -273,7 +273,31 @@ class HandoverPage extends LitElement {
                         <div><strong>${h.currentHandlerName}</strong></div>
                         <div style="color:#999;font-size:11px;">${h.currentHandlerRole}</div>
                       </td>
-                      <td style="max-width:260px;vertical-align:top;">
+                      <td>
+                        ${h.totalTodoCount > 0 ? html`
+                          <div class="todo-progress-cell">
+                            <div class="progress-bar-wrap">
+                              <div class="progress-bar" style="width:${h.correctionProgress}%;"></div>
+                            </div>
+                            <div class="progress-text">${h.todoSummaryText}</div>
+                            ${h.appStatus === 'NEED_CORRECTION' ? html`
+                              <div style="color:#d46b08;font-size:11px;">完成度 ${h.correctionProgress}%</div>
+                            ` : ''}
+                          </div>
+                        ` : html`
+                          <span style="color:#999;font-size:12px;">暂无待办</span>
+                        `}
+                      </td>
+                      <td>
+                        ${h.latestRejectReason ? html`
+                          <div class="reason-cell" title="${h.latestRejectReason}">
+                            ⚠ ${h.latestRejectReason}
+                          </div>
+                        ` : html`
+                          <span style="color:#bbb;font-size:12px;">—</span>
+                        `}
+                      </td>
+                      <td style="max-width:220px;vertical-align:top;">
                         <div style="color:#555;line-height:1.5;">${h.handoverRemark}</div>
                         ${h.acceptRemark ? html`
                           <div style="margin-top:4px;color:#888;font-size:11px;padding-top:4px;border-top:1px dashed #eee;">

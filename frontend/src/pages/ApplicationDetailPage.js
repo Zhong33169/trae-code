@@ -418,6 +418,32 @@ class ApplicationDetailPage extends LitElement {
             </div>
           ` : ''}
 
+          ${a.totalTodoCount > 0 ? html`
+            <div class="progress-section">
+              <div class="progress-header">
+                <span>📊 处理进度概览</span>
+                <span class="progress-percent">完成度 ${a.correctionProgress}%</span>
+              </div>
+              <div class="progress-bar-wrap" style="height:10px;">
+                <div class="progress-bar" style="width:${a.correctionProgress}%;height:100%;"></div>
+              </div>
+              <div class="progress-stats">
+                <span class="stat-item pending">
+                  <span class="dot"></span>待处理 ${a.pendingTodoCount}
+                </span>
+                <span class="stat-item processing">
+                  <span class="dot"></span>处理中 ${a.processingTodoCount}
+                </span>
+                <span class="stat-item completed">
+                  <span class="dot"></span>已完成 ${a.completedTodoCount}
+                </span>
+                <span class="stat-item total">
+                  <span class="dot"></span>总计 ${a.totalTodoCount}
+                </span>
+              </div>
+            </div>
+          ` : ''}
+
           ${this.getPendingTodos().length > 0 ? html`
             <div class="todo-alert">
               <div class="todo-title">

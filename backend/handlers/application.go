@@ -71,6 +71,8 @@ func scanApplication(row *sql.Row) (models.Application, error) {
 	app.CurrentHandlerName = handler.RealName
 	app.CurrentHandlerRole = handler.Role.DisplayName()
 
+	loadTodoSummary(&app)
+
 	return app, nil
 }
 
@@ -126,6 +128,8 @@ func scanApplicationRows(rows *sql.Rows) ([]models.Application, error) {
 		app.CurrentHandlerName = handler.RealName
 		app.CurrentHandlerRole = handler.Role.DisplayName()
 
+		loadTodoSummary(&app)
+
 		apps = append(apps, app)
 	}
 	return apps, nil
@@ -147,6 +151,53 @@ func getUserInfo(userID int64) userInfo {
 	var info userInfo
 	db.DB.QueryRow("SELECT real_name, role, shift FROM users WHERE id=?", userID).Scan(&info.RealName, &info.Role, &info.Shift)
 	return info
+}
+
+func loadTodoSummary(app *models.Application) {
+	row := db.DB.QueryRow(`
+		SELECT
+			COUNT(CASE WHEN status='PENDING' THEN 1 END),
+			COUNT(CASE WHEN status='PROCESSING' THEN 1 END),
+			COUNT(CASE WHEN status='COMPLETED' THEN 1 END),
+			COUNT(*)
+		FROM processing_records WHERE application_id=?`, app.ID)
+	var pending, processing, completed, total int64
+	row.Scan(&pending, &processing, &completed, &total)
+	app.PendingTodoCount = pending
+	app.ProcessingTodoCount = processing
+	app.CompletedTodoCount = completed
+	app.TotalTodoCount = total
+
+	if app.Status == models.StatusNeedCorrection && total > 0 {
+		app.CorrectionProgress = int(completed * 100 / total)
+	} else if total > 0 {
+		app.CorrectionProgress = int(completed * 100 / total)
+	}
+
+	if app.RejectReason != "" {
+		app.LatestRejectReason = app.RejectReason
+	} else {
+		db.DB.QueryRow(`
+			SELECT COALESCE(reject_reason, '') FROM processing_records
+			WHERE application_id=? AND (reject_reason IS NOT NULL AND reject_reason != '')
+			ORDER BY id DESC LIMIT 1`, app.ID).Scan(&app.LatestRejectReason)
+	}
+
+	parts := []string{}
+	if pending > 0 {
+		parts = append(parts, fmt.Sprintf("待处理%d项", pending))
+	}
+	if processing > 0 {
+		parts = append(parts, fmt.Sprintf("处理中%d项", processing))
+	}
+	if completed > 0 {
+		parts = append(parts, fmt.Sprintf("已完成%d项", completed))
+	}
+	if total == 0 {
+		app.TodoSummaryText = "暂无待办"
+	} else {
+		app.TodoSummaryText = strings.Join(parts, "，")
+	}
 }
 
 func baseSelectSQL() string {

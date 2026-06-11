@@ -3,8 +3,10 @@ package handlers
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -413,11 +415,53 @@ func ListHandovers(w http.ResponseWriter, r *http.Request) {
 		if confirmedAt != nil {
 			h.ConfirmedAt = confirmedAt
 		}
+		loadHandoverTodoSummary(&h, appStatus)
 		list = append(list, h)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(utils.Success(list))
+}
+
+func loadHandoverTodoSummary(h *models.Handover, appStatus string) {
+	row := db.DB.QueryRow(`
+		SELECT
+			COUNT(CASE WHEN status='PENDING' THEN 1 END),
+			COUNT(CASE WHEN status='PROCESSING' THEN 1 END),
+			COUNT(CASE WHEN status='COMPLETED' THEN 1 END),
+			COUNT(*),
+			COALESCE((SELECT reject_reason FROM processing_records
+				WHERE application_id=? AND (reject_reason IS NOT NULL AND reject_reason != '')
+				ORDER BY id DESC LIMIT 1), '')
+		FROM processing_records WHERE application_id=?`, h.ApplicationID, h.ApplicationID)
+	var pending, processing, completed, total int64
+	var rejectReason string
+	row.Scan(&pending, &processing, &completed, &total, &rejectReason)
+	h.PendingTodoCount = pending
+	h.ProcessingTodoCount = processing
+	h.CompletedTodoCount = completed
+	h.TotalTodoCount = total
+
+	if total > 0 {
+		h.CorrectionProgress = int(completed * 100 / total)
+	}
+	h.LatestRejectReason = rejectReason
+
+	parts := []string{}
+	if pending > 0 {
+		parts = append(parts, fmt.Sprintf("待处理%d项", pending))
+	}
+	if processing > 0 {
+		parts = append(parts, fmt.Sprintf("处理中%d项", processing))
+	}
+	if completed > 0 {
+		parts = append(parts, fmt.Sprintf("已完成%d项", completed))
+	}
+	if total == 0 {
+		h.TodoSummaryText = "暂无待办"
+	} else {
+		h.TodoSummaryText = strings.Join(parts, "，")
+	}
 }
 
 func joinStrings(arr []string, sep string) string {

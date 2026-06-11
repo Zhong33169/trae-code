@@ -199,19 +199,19 @@ class ApplicationListPage extends LitElement {
             </div>
           </div>
 
-          <table>
+          <table class="data-table">
             <thead>
               <tr>
                 <th style="width:160px;">申请编号</th>
                 <th>申请人</th>
                 <th>联系电话</th>
                 <th>用水类型</th>
-                <th>申请地址</th>
                 <th style="width:110px;">当前状态</th>
-                <th style="width:130px;">当前处理人</th>
-                <th style="width:110px;">登记人</th>
+                <th style="width:180px;">当前处理人 / 责任人</th>
+                <th style="width:160px;">待办与补正进度</th>
+                <th style="width:200px;">最新拒绝/补正原因</th>
                 <th style="width:150px;">创建时间</th>
-                <th style="width:180px;">操作</th>
+                <th style="width:160px;">操作</th>
               </tr>
             </thead>
             <tbody>
@@ -225,17 +225,39 @@ class ApplicationListPage extends LitElement {
                       <td>${app.applicantName}</td>
                       <td>${app.applicantPhone}</td>
                       <td>${app.waterUsageType}</td>
-                      <td style="max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${app.applicantAddress}">
-                        ${app.applicantAddress}
-                      </td>
                       <td>
                         <span class="tag ${statusClass(app.status)}">${app.statusDisplay}</span>
                       </td>
                       <td>
-                        ${app.currentHandlerName}
+                        <div style="font-weight:500;">${app.currentHandlerName}</div>
                         <div style="color:#999;font-size:11px;">${app.currentHandlerRole}</div>
                       </td>
-                      <td>${app.registerName}</td>
+                      <td>
+                        ${app.totalTodoCount > 0 ? html`
+                          <div class="todo-progress-cell">
+                            <div class="progress-bar-wrap">
+                              <div class="progress-bar" style="width:${app.correctionProgress}%;"></div>
+                            </div>
+                            <div class="progress-text">
+                              ${app.todoSummaryText}
+                            </div>
+                            ${app.status === 'NEED_CORRECTION' ? html`
+                              <div style="color:#d46b08;font-size:11px;">补正完成度 ${app.correctionProgress}%</div>
+                            ` : ''}
+                          </div>
+                        ` : html`
+                          <span style="color:#999;font-size:12px;">暂无待办</span>
+                        `}
+                      </td>
+                      <td>
+                        ${app.latestRejectReason ? html`
+                          <div class="reason-cell" title="${app.latestRejectReason}">
+                            ⚠ ${app.latestRejectReason}
+                          </div>
+                        ` : html`
+                          <span style="color:#bbb;font-size:12px;">—</span>
+                        `}
+                      </td>
                       <td>${formatDate(app.createdAt)}</td>
                       <td @click="${(e) => e.stopPropagation()}">
                         ${this.renderQuickActions(app)}
