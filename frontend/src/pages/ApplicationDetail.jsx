@@ -93,12 +93,30 @@ export default function ApplicationDetail({ user }) {
   }
 
   const handleProcess = async (values) => {
-    if (handlerMismatch.mismatch && ['approve', 'submit_revise'].includes(values.action)) {
-      Modal.warning({
-        title: '处理人不匹配',
-        content: handlerMismatch.reason + '，请让登记责任人处理，或在详情页认领后再操作。',
+    if (handlerMismatch.mismatch) {
+      const proceed = await new Promise((resolve) => {
+        Modal.confirm({
+          title: '处理人与登记责任人不匹配',
+          content: (
+            <div>
+              <p>您不是当前登记责任人，确认要继续提交吗？</p>
+              <Divider style={{ margin: '8px 0' }} />
+              <p>登记责任人：<Tag color="blue">{handlerMismatch.expected}</Tag>（ID: {handlerMismatch.expectedId}）</p>
+              <p>您的账号：<Tag color="orange">{user?.name}</Tag>（ID: {user?.id}）</p>
+              <Divider style={{ margin: '8px 0' }} />
+              <p style={{ color: '#faad14' }}>
+                <WarningOutlined /> 后端将拦截此操作，申请不会推进。
+              </p>
+            </div>
+          ),
+          okText: '继续提交',
+          okButtonProps: { danger: true },
+          cancelText: '取消',
+          onOk: () => resolve(true),
+          onCancel: () => resolve(false),
+        })
       })
-      return
+      if (!proceed) return
     }
     setProcessing(true)
     try {
@@ -126,9 +144,22 @@ export default function ApplicationDetail({ user }) {
           onOk: () => loadData(),
         })
       } else if (error.response?.status === 403) {
+        const data = error.response.data || {}
         Modal.error({
-          title: '越权操作',
-          content: error.response.data?.error || '无权执行此操作',
+          title: data.expected_handler_id ? '责任人不匹配，操作被拦截' : '越权操作',
+          content: (
+            <div>
+              <p>{data.error || '无权执行此操作'}</p>
+              {data.expected_handler_id && (
+                <>
+                  <Divider style={{ margin: '8px 0' }} />
+                  <p>登记责任人：<Tag color="blue">{data.expected_handler_name}</Tag>（ID: {data.expected_handler_id}）</p>
+                  <p>当前操作人：<Tag color="orange">{data.current_user_name}</Tag>（ID: {data.current_user_id}）</p>
+                  <p style={{ color: '#999', marginTop: 8 }}>请由登记责任人操作，或联系管理员变更责任人。</p>
+                </>
+              )}
+            </div>
+          ),
         })
       } else {
         message.error(error.response?.data?.error || '处理失败')

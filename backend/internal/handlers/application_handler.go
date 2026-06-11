@@ -440,6 +440,20 @@ func (h *ApplicationHandler) Process(c *gin.Context) {
 		return
 	}
 
+	if app.CurrentHandlerID != nil && *app.CurrentHandlerID != userID {
+		reason := "非当前登记责任人无法推进申请：该申请登记责任人为 " + app.CurrentHandlerName +
+			"（ID: " + strconv.FormatUint(uint64(*app.CurrentHandlerID), 10) +
+			"），当前操作人 " + userName + "（ID: " + strconv.FormatUint(uint64(userID), 10) + "）"
+		c.JSON(http.StatusForbidden, gin.H{
+			"error":                reason,
+			"expected_handler_id":  *app.CurrentHandlerID,
+			"expected_handler_name": app.CurrentHandlerName,
+			"current_user_id":      userID,
+			"current_user_name":    userName,
+		})
+		return
+	}
+
 	if action == services.ActionApprove || action == services.ActionSubmitRevise {
 		materials := app.Materials
 		if req.MaterialsChecked != "" {
@@ -503,7 +517,12 @@ func (h *ApplicationHandler) Process(c *gin.Context) {
 		app.ID,
 		c.ClientIP(),
 		c.Request.UserAgent(),
-		"处理投保申请: "+app.ApplicationNo+", 动作: "+req.Action+", 结果: "+req.Opinion,
+		"处理投保申请: "+app.ApplicationNo+
+			", 动作: "+req.Action+
+			", 结果: "+req.Opinion+
+			", 版本: v"+strconv.Itoa(processRecord.OldVersion)+" → v"+strconv.Itoa(processRecord.NewVersion)+
+			", 状态: "+string(processRecord.FromStatus)+" → "+string(processRecord.ToStatus)+
+			", 处理人: "+userName+"("+string(userRole)+")",
 	)
 
 	c.JSON(http.StatusOK, gin.H{
@@ -571,6 +590,17 @@ func (h *ApplicationHandler) BatchProcess(c *gin.Context) {
 		if _, err := h.workflow.ValidateTransition(&app, action, userRole); err != nil {
 			c.JSON(http.StatusForbidden, gin.H{
 				"error": "越权操作：申请 " + app.ApplicationNo + " 无法执行该动作 - " + err.Error(),
+			})
+			return
+		}
+		if app.CurrentHandlerID != nil && *app.CurrentHandlerID != userID {
+			c.JSON(http.StatusForbidden, gin.H{
+				"error": "非当前登记责任人无法推进：申请 " + app.ApplicationNo +
+					" 的责任人为 " + app.CurrentHandlerName +
+					"（ID: " + strconv.FormatUint(uint64(*app.CurrentHandlerID), 10) +
+					"），当前操作人 " + userName + "（ID: " + strconv.FormatUint(uint64(userID), 10) + "）",
+				"expected_handler_id":  *app.CurrentHandlerID,
+				"expected_handler_name": app.CurrentHandlerName,
 			})
 			return
 		}
@@ -749,7 +779,12 @@ func (h *ApplicationHandler) BatchProcess(c *gin.Context) {
 			app.ID,
 			c.ClientIP(),
 			c.Request.UserAgent(),
-			"批量处理投保申请(批次"+strconv.Itoa(len(req.IDs))+"条): "+app.ApplicationNo+", 动作: "+req.Action+", 意见: "+req.Opinion,
+			"批量处理投保申请(批次"+strconv.Itoa(len(req.IDs))+"条): "+app.ApplicationNo+
+				", 动作: "+req.Action+
+				", 意见: "+req.Opinion+
+				", 版本: v"+strconv.Itoa(app.Version-1)+" → v"+strconv.Itoa(app.Version)+
+				", 状态: "+string(processRecord.FromStatus)+" → "+string(processRecord.ToStatus)+
+				", 处理人: "+userName+"("+string(userRole)+")",
 		)
 	}
 

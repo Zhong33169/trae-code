@@ -101,9 +101,22 @@ export default function BatchProcessModal({
           content: `处理失败：${error.response.data?.error || '数据版本不匹配，请刷新页面后重试'}`,
         })
       } else if (error.response?.status === 403) {
+        const data = error.response.data || {}
         Modal.error({
-          title: '越权操作',
-          content: `无权执行此操作：${error.response.data?.error || '请联系管理员'}`,
+          title: data.expected_handler_id ? '责任人不匹配，操作被拦截' : '越权操作',
+          content: (
+            <div>
+              <p>{data.error || '无权执行此操作'}</p>
+              {data.expected_handler_id && (
+                <>
+                  <Divider style={{ margin: '8px 0' }} />
+                  <p>登记责任人：<Tag color="blue">{data.expected_handler_name}</Tag>（ID: {data.expected_handler_id}）</p>
+                  <p>当前操作人：<Tag color="orange">{user?.name}</Tag>（ID: {user?.id}）</p>
+                  <p style={{ color: '#999', marginTop: 8 }}>批量处理要求操作人为所有选中申请的登记责任人。</p>
+                </>
+              )}
+            </div>
+          ),
         })
       } else if (error.response?.status === 400) {
         message.error(error.response.data?.error || '请求参数错误')

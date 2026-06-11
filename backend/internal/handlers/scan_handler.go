@@ -108,6 +108,10 @@ func (h *ScanHandler) ScanQRCode(c *gin.Context) {
 	stayInPlace := false
 	nextAction := ""
 
+	originalHandlerID := app.CurrentHandlerID
+	originalHandlerName := app.CurrentHandlerName
+	originalHandlerRole := app.CurrentHandlerRole
+
 	if req.QRCode != app.QRCode {
 		result = "invalid_qr"
 		qrMatched = false
@@ -208,15 +212,11 @@ func (h *ScanHandler) ScanQRCode(c *gin.Context) {
 		DeviceInfo:          req.DeviceInfo,
 		LocationInfo:        req.LocationInfo,
 		StayInPlace:         stayInPlace,
-		ExpectedHandlerID:   app.CurrentHandlerID,
-		ExpectedHandlerName: app.CurrentHandlerName,
+		ExpectedHandlerID:   originalHandlerID,
+		ExpectedHandlerName: originalHandlerName,
 		StatusBefore:        statusBefore,
 		StatusAfter:         statusAfter,
 		CreatedAt:           scanTime,
-	}
-	if stayInPlace && result != "materials_missing" {
-		scanRecord.ExpectedHandlerID = app.CurrentHandlerID
-		scanRecord.ExpectedHandlerName = app.CurrentHandlerName
 	}
 
 	if err := tx.Create(scanRecord).Error; err != nil {
@@ -256,7 +256,7 @@ func (h *ScanHandler) ScanQRCode(c *gin.Context) {
 	}
 
 	auditAction := "scan_" + result
-	auditDetail := h.buildAuditDetail(result, app.ApplicationNo, evidence, failureReason)
+	auditDetail := h.buildAuditDetail(result, app.ApplicationNo, evidence, failureReason, userName, originalHandlerName, string(originalHandlerRole))
 	auditLog, auditErr := h.workflow.CreateAuditLogReturn(
 		tx,
 		userID,
@@ -290,8 +290,8 @@ func (h *ScanHandler) ScanQRCode(c *gin.Context) {
 		StayInPlace:       stayInPlace,
 		StatusBefore:      string(statusBefore),
 		StatusAfter:       string(statusAfter),
-		ExpectedHandler:   app.CurrentHandlerName,
-		ExpectedHandlerID: app.CurrentHandlerID,
+		ExpectedHandler:   originalHandlerName,
+		ExpectedHandlerID: originalHandlerID,
 	}
 
 	c.JSON(http.StatusOK, response)
@@ -314,24 +314,34 @@ func (h *ScanHandler) buildOpinion(result, failureReason, materialsMsg string) s
 	}
 }
 
-func (h *ScanHandler) buildAuditDetail(result, appNo, evidence, failureReason string) string {
+func (h *ScanHandler) buildAuditDetail(result, appNo, evidence, failureReason string, scannerName string, expectedHandlerName string, expectedHandlerRole string) string {
 	shortEvidence := evidence
 	if len(shortEvidence) > 16 {
 		shortEvidence = shortEvidence[:16] + "..."
 	}
+	handlerInfo := ""
+	if expectedHandlerName != "" {
+		handlerInfo = ", 登记责任人: " + expectedHandlerName
+		if expectedHandlerRole != "" {
+			handlerInfo += "(" + expectedHandlerRole + ")"
+		}
+		if scannerName != expectedHandlerName {
+			handlerInfo += ", 扫码人: " + scannerName
+		}
+	}
 	switch result {
 	case "success":
-		return "扫码核验通过: " + appNo + ", 凭证: " + shortEvidence
+		return "扫码核验通过: " + appNo + ", 凭证: " + shortEvidence + handlerInfo
 	case "invalid_qr":
-		return "扫码无效二维码: " + appNo + ", 凭证: " + shortEvidence + ", 原因: " + failureReason
+		return "扫码无效二维码: " + appNo + ", 凭证: " + shortEvidence + ", 原因: " + failureReason + handlerInfo
 	case "duplicate":
-		return "重复扫码: " + appNo + ", 凭证: " + shortEvidence + ", 原因: " + failureReason
+		return "重复扫码: " + appNo + ", 凭证: " + shortEvidence + ", 原因: " + failureReason + handlerInfo
 	case "handler_mismatch":
-		return "扫码人不匹配: " + appNo + ", 凭证: " + shortEvidence + ", 原因: " + failureReason
+		return "扫码人不匹配: " + appNo + ", 凭证: " + shortEvidence + ", 扫码人: " + scannerName + ", 登记责任人: " + expectedHandlerName + "(" + expectedHandlerRole + ")" + ", 原因: " + failureReason
 	case "materials_missing":
-		return "扫码通过但材料缺失: " + appNo + ", 凭证: " + shortEvidence + ", 原因: " + failureReason
+		return "扫码通过但材料缺失: " + appNo + ", 凭证: " + shortEvidence + ", 原因: " + failureReason + handlerInfo
 	default:
-		return "扫码异常: " + appNo + ", 凭证: " + shortEvidence
+		return "扫码异常: " + appNo + ", 凭证: " + shortEvidence + handlerInfo
 	}
 }
 
