@@ -154,6 +154,8 @@ export interface BatchAdvanceRequest {
   action: 'submit' | 'approve' | 'reject';
   remark?: string;
   abnormal_reason?: string;
+  expected_node?: TaskNode;
+  target_node?: TaskNode;
 }
 
 export interface BatchItemResult {

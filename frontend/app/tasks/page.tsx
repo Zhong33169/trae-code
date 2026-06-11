@@ -73,6 +73,7 @@ interface BatchActionOption {
   action: 'submit' | 'approve' | 'reject';
   label: string;
   node: TaskNode;
+  target_node: TaskNode;
   role: string;
 }
 
@@ -212,6 +213,7 @@ function TasksPage() {
           action: 'submit',
           label: '提交审核',
           node: 'order_sampling',
+          target_node: 'sample_confirmation',
           role: 'registrar',
         });
       }
@@ -221,6 +223,7 @@ function TasksPage() {
           action: 'submit',
           label: '补正提交',
           node: 'order_sampling',
+          target_node: 'sample_confirmation',
           role: 'registrar',
         });
       }
@@ -232,12 +235,14 @@ function TasksPage() {
           action: 'approve',
           label: '审核通过',
           node: 'order_sampling',
+          target_node: 'sample_confirmation',
           role: 'auditor',
         });
         actions.push({
           action: 'reject',
           label: '打回补正',
           node: 'order_sampling',
+          target_node: 'order_sampling',
           role: 'auditor',
         });
       }
@@ -246,12 +251,14 @@ function TasksPage() {
           action: 'approve',
           label: '确认通过',
           node: 'sample_confirmation',
+          target_node: 'production_scheduling',
           role: 'auditor',
         });
         actions.push({
           action: 'reject',
           label: '打回补正',
           node: 'sample_confirmation',
+          target_node: 'order_sampling',
           role: 'auditor',
         });
       }
@@ -260,6 +267,7 @@ function TasksPage() {
           action: 'submit',
           label: '提交复核',
           node: 'production_scheduling',
+          target_node: 'production_scheduling',
           role: 'auditor',
         });
       }
@@ -270,12 +278,14 @@ function TasksPage() {
         action: 'approve',
         label: '复核归档',
         node: 'production_scheduling',
+        target_node: 'archived',
         role: 'reviewer',
       });
       actions.push({
         action: 'reject',
         label: '打回',
         node: 'production_scheduling',
+        target_node: 'sample_confirmation',
         role: 'reviewer',
       });
     }
@@ -283,7 +293,7 @@ function TasksPage() {
     const uniqueActions: BatchActionOption[] = [];
     const seen = new Set<string>();
     for (const a of actions) {
-      const key = `${a.action}-${a.label}`;
+      const key = `${a.action}-${a.label}-${a.node}`;
       if (!seen.has(key)) {
         seen.add(key);
         uniqueActions.push(a);
@@ -292,9 +302,11 @@ function TasksPage() {
     return uniqueActions;
   }, [selectedRows]);
 
-  const handleBatchActionClick = (action: 'submit' | 'approve' | 'reject', label: string) => {
-    setBatchSelectedAction(action);
-    batchForm.setFieldsValue({ action, remark: '', abnormal_reason: '' });
+  const [pendingBatchOption, setPendingBatchOption] = useState<BatchActionOption | null>(null);
+
+  const handleBatchActionClick = (option: BatchActionOption) => {
+    setPendingBatchOption(option);
+    batchForm.setFieldsValue({ action: option.action, remark: '', abnormal_reason: '' });
     setBatchResult(null);
     setBatchModalVisible(true);
   };
@@ -306,11 +318,17 @@ function TasksPage() {
   }) => {
     try {
       setBatchLoading(true);
+      const option = pendingBatchOption;
+      const filteredRows = option
+        ? selectedRows.filter((r) => r.current_node === option.node)
+        : selectedRows;
       const request: BatchAdvanceRequest = {
-        task_ids: selectedRowKeys.map((k) => k.toString()),
+        task_ids: filteredRows.map((r) => r.id),
         action: values.action,
         remark: values.remark,
         abnormal_reason: values.abnormal_reason,
+        expected_node: option?.node,
+        target_node: option?.target_node,
       };
       const response = await api.post<ApiResponse<BatchAdvanceResult>>('/tasks/batch-advance', request);
       const result = response.data.data;
@@ -341,6 +359,7 @@ function TasksPage() {
     setBatchModalVisible(false);
     setBatchResult(null);
     setBatchSelectedAction(null);
+    setPendingBatchOption(null);
     batchForm.resetFields();
   };
 
@@ -732,7 +751,7 @@ function TasksPage() {
                       opt.action === 'approve' ? <CheckOutlined /> :
                       opt.action === 'reject' ? <CloseOutlined /> : <SendOutlined />
                     }
-                    onClick={() => handleBatchActionClick(opt.action, opt.label)}
+                    onClick={() => handleBatchActionClick(opt)}
                   >
                     {opt.label}
                     <Tag color={getNodeColor(opt.node)} className="ml-1">{NODE_LABELS[opt.node]}</Tag>

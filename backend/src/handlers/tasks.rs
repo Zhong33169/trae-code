@@ -1141,6 +1141,22 @@ async fn batch_advance_task(
 
         let from_node = task.current_node.clone();
 
+        if let Some(expected) = form.expected_node.as_deref() {
+            if expected != task.current_node.as_str() {
+                fail_count += 1;
+                results.push(BatchItemResult {
+                    task_id: task.id.clone(),
+                    task_no: task.task_no.clone(),
+                    success: false,
+                    error: Some(format!("当前节点{}与期望节点{}不匹配", task.current_node, expected)),
+                    action: None,
+                    from_node: Some(from_node),
+                    to_node: None,
+                });
+                continue;
+            }
+        }
+
         let mut tx = match pool.get_ref().begin().await {
             Ok(t) => t,
             Err(_) => {

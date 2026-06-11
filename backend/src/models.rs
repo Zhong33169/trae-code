@@ -408,6 +408,8 @@ pub struct BatchAdvanceRequest {
     pub action: String,
     pub remark: Option<String>,
     pub abnormal_reason: Option<String>,
+    pub expected_node: Option<String>,
+    pub target_node: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
