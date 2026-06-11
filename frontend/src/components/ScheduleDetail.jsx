@@ -12,8 +12,9 @@ function validateHandover(h) {
   return null;
 }
 
-export default function ScheduleDetail() {
-  const user = authStore.getUser();
+export default function ScheduleDetail({ scheduleId }) {
+  const [user, setUser] = useState(null);
+  const [id, setId] = useState('');
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
@@ -23,20 +24,32 @@ export default function ScheduleDetail() {
   const [auditResult, setAuditResult] = useState('pass');
   const [auditOpinion, setAuditOpinion] = useState('');
 
-  const id = window.location.pathname.split('/').pop();
+  useEffect(() => {
+    const u = authStore.getUser();
+    setUser(u);
+    if (scheduleId) {
+      setId(String(scheduleId));
+    } else if (typeof window !== 'undefined') {
+      const parts = window.location.pathname.split('/');
+      setId(parts[parts.length - 1]);
+    }
+  }, [scheduleId]);
 
   const loadDetail = useCallback(async () => {
+    if (!id) return;
     setLoading(true);
     const r = await api.getSchedule(id);
     setLoading(false);
     if (r.ok && r.data.code === 0) {
       setData(r.data.data);
     } else {
-      toast(r.data.message || '加载失败', 'error');
+      toast(r.data?.message || '加载失败', 'error');
     }
   }, [id]);
 
-  useEffect(() => { loadDetail(); }, [loadDetail]);
+  useEffect(() => {
+    if (id && user) loadDetail();
+  }, [id, user, loadDetail]);
 
   const canEdit = user?.role === 'registrar' && data &&
     ['draft', 'audit_rejected', 'review_rejected'].includes(data.status) &&
@@ -132,8 +145,9 @@ export default function ScheduleDetail() {
     }
   };
 
-  if (loading) return <div className="card"><div className="empty">加载中...</div></div>;
-  if (!data) return <div className="card"><div className="empty">加载失败</div></div>;
+  if (!user || !id) return null;
+  if (loading && !data) return <div className="card"><div className="empty">加载中...</div></div>;
+  if (!loading && !data) return <div className="card"><div className="empty">加载失败</div></div>;
 
   return (
     <div>

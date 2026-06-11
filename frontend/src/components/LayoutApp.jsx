@@ -5,7 +5,7 @@ import { getRoleText } from '../utils/format';
 
 export default function LayoutApp({ children, activeTab = 'list' }) {
   const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [ready, setReady] = useState(false);
 
   useEffect(() => {
     const u = authStore.getUser();
@@ -15,7 +15,7 @@ export default function LayoutApp({ children, activeTab = 'list' }) {
       return;
     }
     setUser(u);
-    setLoading(false);
+    setReady(true);
   }, []);
 
   const logout = async () => {
@@ -27,8 +27,7 @@ export default function LayoutApp({ children, activeTab = 'list' }) {
     setTimeout(() => { window.location.href = '/login'; }, 300);
   };
 
-  if (loading) return null;
-  if (!user) return null;
+  if (!ready) return null;
 
   const navs = [
     { key: 'list', label: '发车计划', href: '/' },

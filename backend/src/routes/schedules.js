@@ -130,7 +130,7 @@ router.post('/', authMiddleware, roleMiddleware(config.roles.REGISTRAR), async (
 
   const scheduleNo = 'FC' + dayjs().format('YYYYMMDDHHmmss') + Math.floor(Math.random() * 1000);
 
-  db.run(`
+  const result = db.run(`
     INSERT INTO bus_schedules
     (schedule_no, route_name, bus_no, driver_name, departure_time, start_station, end_station, shift_type, status, remark, created_by)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?)
@@ -147,7 +147,7 @@ router.post('/', authMiddleware, roleMiddleware(config.roles.REGISTRAR), async (
     user.id
   ]);
 
-  const newId = db.lastInsertRowid();
+  const newId = result.lastInsertRowid;
 
   if (body.handover) {
     db.run(`

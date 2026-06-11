@@ -33,18 +33,24 @@ async function initDB() {
 }
 
 function run(sql, params = []) {
-  const stmt = db.prepare(sql);
-  stmt.bind(params);
-  let result;
+  let lastId = null;
   try {
-    result = stmt.step();
-    stmt.free();
+    if (params.length > 0) {
+      const stmt = db.prepare(sql);
+      stmt.run(params);
+      stmt.free();
+    } else {
+      db.run(sql);
+    }
+    const rid = db.exec('SELECT last_insert_rowid() as id');
+    if (rid.length > 0 && rid[0].values.length > 0) {
+      lastId = rid[0].values[0][0];
+    }
   } catch (e) {
-    stmt.free();
     throw e;
   }
   save();
-  return { changes: db.getRowsModified() };
+  return { changes: db.getRowsModified(), lastInsertRowid: lastId };
 }
 
 function execScript(sql) {
@@ -54,10 +60,11 @@ function execScript(sql) {
 
 function get(sql, params = []) {
   const stmt = db.prepare(sql);
-  stmt.bind(params);
+  if (params.length > 0) stmt.bind(params);
   let row = null;
   if (stmt.step()) {
-    row = stmt.getAsObject();
+    const obj = stmt.getAsObject();
+    row = obj;
   }
   stmt.free();
   return row || null;
@@ -65,7 +72,7 @@ function get(sql, params = []) {
 
 function all(sql, params = []) {
   const stmt = db.prepare(sql);
-  stmt.bind(params);
+  if (params.length > 0) stmt.bind(params);
   const rows = [];
   while (stmt.step()) {
     rows.push(stmt.getAsObject());
@@ -75,8 +82,11 @@ function all(sql, params = []) {
 }
 
 function lastInsertRowid() {
-  const row = get('SELECT last_insert_rowid() as id');
-  return row?.id;
+  const rid = db.exec('SELECT last_insert_rowid() as id');
+  if (rid.length > 0 && rid[0].values.length > 0) {
+    return rid[0].values[0][0];
+  }
+  return null;
 }
 
 module.exports = {

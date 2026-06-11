@@ -1,10 +1,12 @@
 ---
-import BaseLayout from '../layouts/BaseLayout.astro';
-import LayoutApp from '../components/LayoutApp.jsx';
-import ScheduleDetail from '../components/ScheduleDetail.jsx';
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import LayoutApp from '../../components/LayoutApp.jsx';
+import ScheduleDetail from '../../components/ScheduleDetail.jsx';
+
+const { id } = Astro.params;
 ---
 <BaseLayout>
   <LayoutApp client:load activeTab="list">
-    <ScheduleDetail client:load />
+    <ScheduleDetail client:load scheduleId={id} />
   </LayoutApp>
 </BaseLayout>

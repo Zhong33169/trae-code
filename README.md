@@ -10,7 +10,7 @@
 |---|---|---|
 | 前端 | Astro 4 + React Islands (React 18) | **3002** |
 | 后端 | Node.js + Koa 2 | **8002** |
-| 数据库 | 本地 SQLite (better-sqlite3) | - |
+| 数据库 | 本地 SQLite (sql.js / WASM) | - |
 
 ---
 

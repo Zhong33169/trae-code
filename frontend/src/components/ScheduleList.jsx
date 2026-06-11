@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { api, authStore } from '../utils/api';
 import { toast } from './Toast.jsx';
-import { getStatusText, getStatusColor, getRoleText } from '../utils/format';
+import { getStatusText, getStatusColor } from '../utils/format';
 
 export default function ScheduleList() {
-  const user = authStore.getUser();
+  const [user, setUser] = useState(null);
   const [list, setList] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -15,6 +15,11 @@ export default function ScheduleList() {
   const [showCreate, setShowCreate] = useState(false);
   const [stats, setStats] = useState({ statusList: [] });
 
+  useEffect(() => {
+    const u = authStore.getUser();
+    setUser(u);
+  }, []);
+
   const loadData = useCallback(async () => {
     setLoading(true);
     const r = await api.listSchedules({ status, keyword, page, pageSize });
@@ -23,7 +28,7 @@ export default function ScheduleList() {
       setList(r.data.data.list);
       setTotal(r.data.data.total);
     } else {
-      toast(r.data.message || '加载失败', 'error');
+      toast(r.data?.message || '加载失败', 'error');
     }
   }, [status, keyword, page, pageSize]);
 
@@ -33,9 +38,11 @@ export default function ScheduleList() {
   }, []);
 
   useEffect(() => {
-    loadData();
-    loadStats();
-  }, [loadData, loadStats]);
+    if (user) {
+      loadData();
+      loadStats();
+    }
+  }, [user, loadData, loadStats]);
 
   const onDelete = async (id) => {
     if (!confirm('确定删除该发车计划吗？删除后不可恢复。')) return;
@@ -50,16 +57,18 @@ export default function ScheduleList() {
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
+  if (!user) return null;
+
   return (
     <div>
-      {user?.role === 'registrar' && (
+      {user.role === 'registrar' && (
         <div className="card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div style={{ fontSize: '15px', fontWeight: 600 }}>我的发车计划</div>
           <button className="btn btn-primary" onClick={() => setShowCreate(true)}>+ 新建发车计划</button>
         </div>
       )}
 
-      {user?.role !== 'registrar' && (
+      {user.role !== 'registrar' && (
         <div className="stat-cards">
           {stats.statusList.map(s => (
             <div key={s.status} className="stat-card" onClick={() => { setStatus(s.status); setPage(1); }}
@@ -97,7 +106,7 @@ export default function ScheduleList() {
               <th>驾驶员</th>
               <th>发车时间</th>
               <th>起终点站</th>
-              {user?.role !== 'registrar' && <th>创建人</th>}
+              {user.role !== 'registrar' && <th>创建人</th>}
               <th>状态</th>
               <th>创建时间</th>
               <th style={{ width: '200px' }}>操作</th>
@@ -118,7 +127,7 @@ export default function ScheduleList() {
                 <td>{item.driverName || '-'}</td>
                 <td>{item.departureTime}</td>
                 <td>{item.startStation} → {item.endStation}</td>
-                {user?.role !== 'registrar' && <td>{item.creatorName}</td>}
+                {user.role !== 'registrar' && <td>{item.creatorName}</td>}
                 <td>
                   <span className="tag" style={{ background: getStatusColor(item.status) + '22', color: getStatusColor(item.status) }}>
                     {getStatusText(item.status)}
@@ -127,7 +136,7 @@ export default function ScheduleList() {
                 <td>{item.createdAt}</td>
                 <td>
                   <a href={`/detail/${item.id}`} className="btn btn-default" style={{ padding: '4px 10px', fontSize: '12px' }}>详情</a>
-                  {user?.role === 'registrar' && item.createdBy === user.id && item.status === 'draft' && (
+                  {user.role === 'registrar' && item.createdBy === user.id && item.status === 'draft' && (
                     <button className="btn btn-danger" style={{ padding: '4px 10px', fontSize: '12px' }}
                       onClick={() => onDelete(item.id)}>删除</button>
                   )}
@@ -145,14 +154,13 @@ export default function ScheduleList() {
       </div>
 
       {showCreate && (
-        <ScheduleFormModal onClose={() => setShowCreate(false)} onSuccess={() => { setShowCreate(false); loadData(); loadStats(); }} />
+        <ScheduleFormModal user={user} onClose={() => setShowCreate(false)} onSuccess={() => { setShowCreate(false); loadData(); loadStats(); }} />
       )}
     </div>
   );
 }
 
-function ScheduleFormModal({ onClose, onSuccess }) {
-  const user = authStore.getUser();
+function ScheduleFormModal({ user, onClose, onSuccess }) {
   const [loading, setLoading] = useState(false);
   const [form, setForm] = useState({
     routeName: '', busNo: '', driverName: '', departureTime: '',

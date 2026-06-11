@@ -1,20 +1,24 @@
 const BASE = '';
 
 function getToken() {
+  if (typeof window === 'undefined') return '';
   return localStorage.getItem('bus_token') || '';
 }
 
 function setToken(t) {
+  if (typeof window === 'undefined') return;
   if (t) localStorage.setItem('bus_token', t);
   else localStorage.removeItem('bus_token');
 }
 
 function getUser() {
+  if (typeof window === 'undefined') return null;
   const raw = localStorage.getItem('bus_user');
   return raw ? JSON.parse(raw) : null;
 }
 
 function setUser(u) {
+  if (typeof window === 'undefined') return;
   if (u) localStorage.setItem('bus_user', JSON.stringify(u));
   else localStorage.removeItem('bus_user');
 }
