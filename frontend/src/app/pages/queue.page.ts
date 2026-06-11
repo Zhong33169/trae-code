@@ -176,33 +176,51 @@ import { ApiService } from '../api.service';
             <div>
               <div class="text-xs font-semibold text-slate-600 mb-2">登记证据 (CSM提交)</div>
               <div *ngIf="evList('REGISTRATION').length === 0" class="text-xs text-slate-400 p-3 bg-slate-50 rounded">暂无登记证据</div>
-              <div *ngFor="let e of evList('REGISTRATION')" class="p-3 mb-1 bg-blue-50/50 rounded border border-blue-100 flex items-center justify-between">
-                <div>
+              <div *ngFor="let e of evList('REGISTRATION')" class="p-3 mb-1 bg-blue-50/50 rounded border border-blue-100">
+                <div class="flex items-center justify-between">
                   <div class="text-sm text-slate-700">📄 {{ e.name }}</div>
-                  <div class="text-xs text-slate-400">{{ e.uploader_name }} · {{ e.uploaded_at }}</div>
+                  <div class="flex gap-1 flex-wrap justify-end">
+                    <span *ngIf="e.source_label" class="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">{{ e.source_label }}</span>
+                    <span *ngIf="e.batch_no" class="text-[10px] px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700">� {{ e.batch_no }}</span>
+                  </div>
                 </div>
+                <div class="text-xs text-slate-400 mt-0.5">👤 {{ e.uploader_name }} · {{ e.uploaded_at }}</div>
+                <div *ngIf="e.note" class="text-xs text-slate-500 mt-1 pt-1 border-t border-blue-100/60">💬 {{ e.note }}</div>
+                <div *ngIf="e.batch_item_status" class="text-[10px] text-slate-500 mt-0.5">关联批次项: {{ e.batch_item_status }} · 重试 {{ e.batch_item_retry_count || 0 }} 次</div>
               </div>
             </div>
 
             <div>
               <div class="text-xs font-semibold text-slate-600 mb-2">核验证据 (交付顾问)</div>
               <div *ngIf="evList('VERIFICATION').length === 0" class="text-xs text-slate-400 p-3 bg-slate-50 rounded">暂无核验证据</div>
-              <div *ngFor="let e of evList('VERIFICATION')" class="p-3 mb-1 bg-purple-50/50 rounded border border-purple-100 flex items-center justify-between">
-                <div>
+              <div *ngFor="let e of evList('VERIFICATION')" class="p-3 mb-1 bg-purple-50/50 rounded border border-purple-100">
+                <div class="flex items-center justify-between">
                   <div class="text-sm text-slate-700">🔍 {{ e.name }}</div>
-                  <div class="text-xs text-slate-400">{{ e.uploader_name }} · {{ e.uploaded_at }}</div>
+                  <div class="flex gap-1 flex-wrap justify-end">
+                    <span *ngIf="e.source_label" class="text-[10px] px-1.5 py-0.5 rounded bg-purple-100 text-purple-700">{{ e.source_label }}</span>
+                    <span *ngIf="e.batch_no" class="text-[10px] px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700">� {{ e.batch_no }}</span>
+                  </div>
                 </div>
+                <div class="text-xs text-slate-400 mt-0.5">👤 {{ e.uploader_name }} · {{ e.uploaded_at }}</div>
+                <div *ngIf="e.note" class="text-xs text-slate-500 mt-1 pt-1 border-t border-purple-100/60">💬 {{ e.note }}</div>
+                <div *ngIf="e.batch_item_status" class="text-[10px] text-slate-500 mt-0.5">关联批次项: {{ e.batch_item_status }} · 重试 {{ e.batch_item_retry_count || 0 }} 次</div>
               </div>
             </div>
 
             <div>
               <div class="text-xs font-semibold text-slate-600 mb-2">归档证据 (负责人)</div>
               <div *ngIf="evList('ARCHIVAL').length === 0" class="text-xs text-slate-400 p-3 bg-slate-50 rounded">暂无归档证据</div>
-              <div *ngFor="let e of evList('ARCHIVAL')" class="p-3 mb-1 bg-orange-50/50 rounded border border-orange-100 flex items-center justify-between">
-                <div>
+              <div *ngFor="let e of evList('ARCHIVAL')" class="p-3 mb-1 bg-orange-50/50 rounded border border-orange-100">
+                <div class="flex items-center justify-between">
                   <div class="text-sm text-slate-700">📦 {{ e.name }}</div>
-                  <div class="text-xs text-slate-400">{{ e.uploader_name }} · {{ e.uploaded_at }}</div>
+                  <div class="flex gap-1 flex-wrap justify-end">
+                    <span *ngIf="e.source_label" class="text-[10px] px-1.5 py-0.5 rounded bg-orange-100 text-orange-700">{{ e.source_label }}</span>
+                    <span *ngIf="e.batch_no" class="text-[10px] px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700">� {{ e.batch_no }}</span>
+                  </div>
                 </div>
+                <div class="text-xs text-slate-400 mt-0.5">👤 {{ e.uploader_name }} · {{ e.uploaded_at }}</div>
+                <div *ngIf="e.note" class="text-xs text-slate-500 mt-1 pt-1 border-t border-orange-100/60">💬 {{ e.note }}</div>
+                <div *ngIf="e.batch_item_status" class="text-[10px] text-slate-500 mt-0.5">关联批次项: {{ e.batch_item_status }} · 重试 {{ e.batch_item_retry_count || 0 }} 次</div>
               </div>
             </div>
 

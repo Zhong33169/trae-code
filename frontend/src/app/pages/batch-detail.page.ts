@@ -113,7 +113,20 @@ import { ApiService } from '../api.service';
                       最后 {{ it.latest_upload_at }}
                     </div>
                     <div *ngIf="it.can_retry" class="mt-1">
-                      <span class="text-[10px] px-1.5 py-0.5 rounded bg-green-100 text-green-700">可重试</span>
+                      <span class="text-[10px] px-1.5 py-0.5 rounded bg-green-100 text-green-700">✅ 可重试</span>
+                    </div>
+                    <div *ngIf="it.upload_count > 0 && !it.can_retry" class="mt-1">
+                      <span class="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">⚠️ {{ it.can_retry_reason }}</span>
+                    </div>
+                    <div *ngIf="it.uploads?.length" class="mt-2 space-y-1.5 max-h-36 overflow-auto">
+                      <div *ngFor="let u of it.uploads" class="p-2 bg-slate-50 rounded text-[10px] border border-slate-100">
+                        <div class="flex items-center justify-between">
+                          <span class="font-medium text-slate-700">{{ u.evidence_label }}: {{ u.name }}</span>
+                          <span class="text-slate-400">{{ u.source_label }}</span>
+                        </div>
+                        <div class="text-slate-500 mt-0.5">👤 {{ u.uploader_name }} · {{ u.uploaded_at }}</div>
+                        <div *ngIf="u.note" class="text-slate-500 mt-0.5 pt-0.5 border-t border-slate-200">💬 {{ u.note }}</div>
+                      </div>
                     </div>
                   </div>
                   <div *ngIf="it.status !== 'FAILED'" class="text-xs text-slate-400">-</div>

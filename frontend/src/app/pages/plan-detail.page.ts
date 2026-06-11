@@ -118,12 +118,22 @@ import { ApiService } from '../api.service';
                 </div>
                 <div class="p-3">
                   <div *ngIf="evidenceList(eg.type).length === 0" class="text-xs text-slate-400 py-3 text-center">暂无证据</div>
-                  <div *ngFor="let e of evidenceList(eg.type)" class="p-3 bg-slate-50 rounded mb-1.5 last:mb-0 flex items-center justify-between">
-                    <div>
+                  <div *ngFor="let e of evidenceList(eg.type)" class="p-3 bg-slate-50 rounded mb-1.5 last:mb-0">
+                    <div class="flex items-center justify-between">
                       <div class="text-sm text-slate-700">{{ eg.icon }} {{ e.name }}</div>
-                      <div class="text-xs text-slate-400">{{ e.uploader_name }} · {{ e.uploaded_at }}</div>
+                      <div class="flex gap-1 flex-wrap justify-end items-center">
+                        <span *ngIf="e.source_label" class="text-[10px] px-1.5 py-0.5 rounded bg-white text-slate-600 border border-slate-200">{{ e.source_label }}</span>
+                        <span *ngIf="e.batch_no" class="text-[10px] px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-600 border border-indigo-200">🔗 {{ e.batch_no }}</span>
+                        <span class="text-xs text-success font-medium">✅</span>
+                      </div>
                     </div>
-                    <span class="text-xs text-success font-medium">✅</span>
+                    <div class="text-xs text-slate-400 mt-0.5">👤 {{ e.uploader_name }} · {{ e.uploaded_at }}</div>
+                    <div *ngIf="e.note" class="text-xs text-slate-500 mt-1 pt-1 border-t border-slate-200">💬 {{ e.note }}</div>
+                    <div *ngIf="e.batch_item_status" class="text-[10px] text-slate-500 mt-0.5">
+                      关联批次项: <span [ngClass]="e.batch_item_status==='SUCCESS' ? 'text-green-600 font-medium' : 'text-red-500 font-medium'">{{ e.batch_item_status }}</span>
+                      <span *ngIf="e.batch_item_error"> · 错误: {{ e.batch_item_error }}</span>
+                      <span *ngIf="e.batch_item_retry_count"> · 重试 {{ e.batch_item_retry_count }} 次</span>
+                    </div>
                   </div>
                 </div>
               </div>

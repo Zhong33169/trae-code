@@ -166,14 +166,25 @@ export default async function batchRoutes(fastify) {
           plan_id: plan.id, plan_no: plan.plan_no,
           result: 'SUCCESS', prev_status: plan.status, next_status: result.nextStatus
         });
+        const upEv = d.prepare(`
+          SELECT e.id, e.evidence_type, e.name, e.source, e.note, e.uploaded_at,
+                 u.name AS uploader_name FROM plan_evidences e
+          JOIN users u ON e.uploaded_by = u.id
+          WHERE e.batch_item_id=? ORDER BY e.id
+        `).all(item.item_id);
         audit(request.user.id, `BATCH_RETRY_${batch.action.toUpperCase()}`, 'PLAN', plan.id,
           {
             batch_no: batch.batch_no,
             batch_id: batchId,
+            batch_item_id: item.item_id,
             plan_no: plan.plan_no,
             retry_no: newRetry,
             prev: plan.status,
-            next: result.nextStatus
+            next: result.nextStatus,
+            retried_evidences: upEv.map(e => ({
+              id: e.id, type: e.evidence_type, name: e.name,
+              source: e.source, note: e.note, uploader: e.uploader_name
+            }))
           }, request.ip);
       } else {
         retryFailed++;
@@ -185,14 +196,25 @@ export default async function batchRoutes(fastify) {
           plan_id: plan.id, plan_no: plan.plan_no,
           result: 'FAILED', error_code: result.code, error_message: result.message
         });
+        const upEv = d.prepare(`
+          SELECT e.id, e.evidence_type, e.name, e.source, e.note, e.uploaded_at,
+                 u.name AS uploader_name FROM plan_evidences e
+          JOIN users u ON e.uploaded_by = u.id
+          WHERE e.batch_item_id=? ORDER BY e.id
+        `).all(item.item_id);
         audit(request.user.id, `BATCH_RETRY_FAIL`, 'PLAN', plan.id,
           {
             batch_no: batch.batch_no,
             batch_id: batchId,
+            batch_item_id: item.item_id,
             plan_no: plan.plan_no,
             retry_no: newRetry,
             error_code: result.code,
-            error_message: result.message
+            error_message: result.message,
+            retried_evidences: upEv.map(e => ({
+              id: e.id, type: e.evidence_type, name: e.name,
+              source: e.source, note: e.note, uploader: e.uploader_name
+            }))
           }, request.ip);
       }
     }
@@ -309,16 +331,29 @@ export default async function batchRoutes(fastify) {
 
       const uploads = d.prepare(`
         SELECT pe.id, pe.evidence_type, pe.name, pe.url, pe.source, pe.note, pe.uploaded_at,
-               u.username AS uploader_name, u.role AS uploader_role
+               u.name AS uploader_name, u.role AS uploader_role,
+               b.batch_no
         FROM plan_evidences pe
         JOIN users u ON pe.uploaded_by = u.id
+        LEFT JOIN batch_items bi ON pe.batch_item_id = bi.id
+        LEFT JOIN batches b ON bi.batch_id = b.id
         WHERE pe.batch_item_id=? ORDER BY pe.id DESC
       `).all(item.item_id);
+      for (const u of uploads) {
+        u.source_label = { queue: '队列快速补传', batch_detail: '批次详情补传', plan_detail: '详情页上传' }[u.source || 'plan_detail'] || '详情页上传';
+        u.evidence_label = EVIDENCE_LABEL[u.evidence_type] || u.evidence_type;
+      }
       item.uploads = uploads;
       item.upload_count = uploads.length;
       item.latest_upload_at = uploads[0]?.uploaded_at || null;
-      item.can_retry = item.status === 'FAILED' && item.upload_count > 0 &&
-        item.next_allowed_actions.some(a => a.allowed);
+      const nextAllowed = item.next_allowed_actions.find(a => a.allowed);
+      const nextBlocked = item.next_allowed_actions.find(a => !a.allowed);
+      item.can_retry = item.status === 'FAILED' && item.upload_count > 0 && !!nextAllowed;
+      item.can_retry_reason = nextAllowed ? `证据齐全，可执行「${nextAllowed.label}」` :
+        (nextBlocked && nextBlocked.missing_labels?.length
+          ? `仍缺：${nextBlocked.missing_labels.join('、')}`
+          : '无可执行操作');
+      item.batch_no = batch.batch_no;
     }
 
     batch.items = items;

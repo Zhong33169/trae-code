@@ -114,10 +114,21 @@ export function getPlanWithDetail(planId) {
   if (!plan) return null;
 
   plan.evidences = d.prepare(`
-    SELECT e.*, u.name AS uploader_name FROM plan_evidences e
+    SELECT e.*, u.name AS uploader_name, u.role AS uploader_role,
+           bi.status AS batch_item_status, bi.error_code AS batch_item_error,
+           bi.retry_count AS batch_item_retry_count,
+           b.batch_no, b.action AS batch_action
+    FROM plan_evidences e
     LEFT JOIN users u ON e.uploaded_by = u.id
-    WHERE e.plan_id = ? ORDER BY e.uploaded_at
+    LEFT JOIN batch_items bi ON e.batch_item_id = bi.id
+    LEFT JOIN batches b ON bi.batch_id = b.id
+    WHERE e.plan_id = ? ORDER BY e.uploaded_at DESC
   `).all(planId);
+
+  for (const ev of plan.evidences) {
+    ev.source_label = { queue: '队列快速补传', batch_detail: '批次详情补传', plan_detail: '详情页上传' }[ev.source || 'plan_detail'] || '详情页上传';
+  }
+  plan.evidence_trace = plan.evidences;
 
   plan.transitions = d.prepare(`
     SELECT t.*, u.name AS operator_name, u.role AS operator_role
