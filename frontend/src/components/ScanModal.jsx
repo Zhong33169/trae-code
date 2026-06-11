@@ -25,27 +25,35 @@ export default function ScanModal({ visible, app, onCancel, onSuccess, user }) {
   const handleScan = async (values) => {
     if (!app) return
 
-    if (handlerMismatch.mismatch) {
-      Modal.warning({
-        title: '扫码人不匹配',
-        content: (
-          <div>
-            <p><strong>⚠ 该申请的当前责任人不是您</strong></p>
-            <Divider style={{ margin: '8px 0' }} />
-            <p>登记责任人：<Tag color="blue">{handlerMismatch.expected}</Tag>（ID: {handlerMismatch.expectedId}）</p>
-            <p>您的账号：<Tag color="orange">{user?.name}</Tag>（ID: {user?.id}）</p>
-            <Divider style={{ margin: '8px 0' }} />
-            <p style={{ color: '#666' }}>请由指定责任人执行扫码核验，避免交叉处理导致的流程混乱。</p>
-            <p style={{ color: '#666' }}>如确需操作，请联系管理员变更责任人，或在详情页认领任务。</p>
-          </div>
-        ),
-      })
-      return
-    }
-
     if (!values.qr_code || values.qr_code.trim() === '') {
       message.warning('请输入扫码内容')
       return
+    }
+
+    if (handlerMismatch.mismatch) {
+      const proceed = await new Promise((resolve) => {
+        Modal.confirm({
+          title: '扫码人与登记责任人不匹配',
+          content: (
+            <div>
+              <p>确认要继续提交扫码核验吗？</p>
+              <Divider style={{ margin: '8px 0' }} />
+              <p>登记责任人：<Tag color="blue">{handlerMismatch.expected}</Tag>（ID: {handlerMismatch.expectedId}）</p>
+              <p>您的账号：<Tag color="orange">{user?.name}</Tag>（ID: {user?.id}）</p>
+              <Divider style={{ margin: '8px 0' }} />
+              <p style={{ color: '#faad14' }}>
+                <WarningOutlined /> 继续扫码将记录您的操作，但会标记"扫码人不匹配"并停在原队列，不会推进申请流转。
+              </p>
+            </div>
+          ),
+          okText: '继续扫码（记录并停留）',
+          okButtonProps: { danger: true },
+          cancelText: '取消',
+          onOk: () => resolve(true),
+          onCancel: () => resolve(false),
+        })
+      })
+      if (!proceed) return
     }
 
     setLoading(true)
@@ -346,6 +354,28 @@ export default function ScanModal({ visible, app, onCancel, onSuccess, user }) {
                     <Tag color="green">已推进</Tag>
                   )}
                 </Descriptions.Item>
+                {scanResult.status_before && scanResult.status_after && (
+                  <>
+                    <Descriptions.Item label="扫码前状态">
+                      <Tag color={STATUS_COLORS[scanResult.status_before]}>
+                        {STATUS_LABELS[scanResult.status_before]}
+                      </Tag>
+                    </Descriptions.Item>
+                    <Descriptions.Item label="扫码后状态">
+                      <Tag color={STATUS_COLORS[scanResult.status_after]}>
+                        {STATUS_LABELS[scanResult.status_after]}
+                        {scanResult.stay_in_place && (
+                          <LockOutlined style={{ marginLeft: 4, fontSize: 10 }} />
+                        )}
+                      </Tag>
+                      {scanResult.stay_in_place && scanResult.status_before === scanResult.status_after && (
+                        <span style={{ color: '#faad14', fontSize: 12, marginLeft: 8 }}>
+                          状态未变化
+                        </span>
+                      )}
+                    </Descriptions.Item>
+                  </>
+                )}
                 {scanResult.evidence && (
                   <Descriptions.Item label="核验凭证（SHA256）" span={2}>
                     <Space direction="vertical" size={4}>
@@ -416,9 +446,9 @@ export default function ScanModal({ visible, app, onCancel, onSuccess, user }) {
               loading={loading}
               icon={<SafetyOutlined />}
               size="large"
-              disabled={handlerMismatch.mismatch}
+              danger={handlerMismatch.mismatch}
             >
-              确认扫码核验（将记录凭证和审计）
+              {handlerMismatch.mismatch ? '继续扫码核验（将记录并停留原状态）' : '确认扫码核验（将记录凭证和审计）'}
             </Button>
           </Space>
         </Form.Item>

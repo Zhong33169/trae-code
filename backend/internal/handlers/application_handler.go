@@ -114,11 +114,15 @@ func (h *ApplicationHandler) List(c *gin.Context) {
 	for _, app := range applications {
 		timeLimitMet, hoursLeft := h.workflow.CheckDeadline(app.Deadline)
 		isLocked := h.appState.IsApplicationLocked(app.ID)
-		lockedBy := ""
+		var lockedBy gin.H
 		if lockerID, found := h.appState.GetApplicationLocker(app.ID); found {
 			var locker models.User
 			if h.db.First(&locker, lockerID).Error == nil {
-				lockedBy = locker.Name
+				lockedBy = gin.H{
+					"id":   locker.ID,
+					"name": locker.Name,
+					"role": locker.Role,
+				}
 			}
 		}
 
@@ -190,11 +194,15 @@ func (h *ApplicationHandler) Get(c *gin.Context) {
 	availableActions := h.workflow.GetAvailableActions(&app, userRole)
 	timeLimitMet, hoursLeft := h.workflow.CheckDeadline(app.Deadline)
 	isLocked := h.appState.IsApplicationLocked(app.ID)
-	lockedBy := ""
+	var lockedBy gin.H
 	if lockerID, found := h.appState.GetApplicationLocker(app.ID); found {
 		var locker models.User
 		if h.db.First(&locker, lockerID).Error == nil {
-			lockedBy = locker.Name
+			lockedBy = gin.H{
+				"id":   locker.ID,
+				"name": locker.Name,
+				"role": locker.Role,
+			}
 		}
 	}
 
@@ -458,6 +466,7 @@ func (h *ApplicationHandler) Process(c *gin.Context) {
 		userName,
 		userRole,
 		req.Opinion,
+		"",
 		req.MaterialsChecked,
 		startTime,
 	)
@@ -664,6 +673,7 @@ func (h *ApplicationHandler) BatchProcess(c *gin.Context) {
 			userName,
 			userRole,
 			req.Opinion,
+			"",
 			req.MaterialsChecked,
 			startTime,
 		)

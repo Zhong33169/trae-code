@@ -173,24 +173,44 @@ export default function ApplicationDetail({ user }) {
   const allEvents = [
     ...history.scan_records.map(r => ({
       time: dayjs(r.scan_time).format('YYYY-MM-DD HH:mm:ss'),
-      color: r.result === 'success' ? 'green' : (r.result === 'duplicate' ? 'orange' : 'red'),
+      color: r.result === 'success' ? 'green' :
+             (r.result === 'duplicate' || r.result === 'handler_mismatch' || r.result === 'materials_missing')
+             ? 'orange' : 'red',
       content: (
         <div className="timeline-content">
           <div style={{ marginBottom: 4 }}>
             <strong>扫码核验 - {
               r.result === 'success' ? '通过' :
+              r.result === 'invalid_qr' ? '无效二维码' :
               r.result === 'duplicate' ? '重复扫码' :
-              r.result === 'handler_mismatch' ? '处理人不匹配' : '失败'
+              r.result === 'handler_mismatch' ? '处理人不匹配' :
+              r.result === 'materials_missing' ? '材料缺失' : r.result
             }</strong>
-            {r.result !== 'success' && r.stay_in_place && (
+            {r.stay_in_place && (
               <Tag color="orange" style={{ marginLeft: 8 }}>
                 <LockOutlined /> 停留原状态
               </Tag>
             )}
+            {r.status_before && r.status_after && r.status_before !== r.status_after && (
+              <Tag color="green" style={{ marginLeft: 4 }}>
+                状态推进：{STATUS_LABELS[r.status_before]} → {STATUS_LABELS[r.status_after]}
+              </Tag>
+            )}
+            {r.status_before && r.status_after && r.status_before === r.status_after && r.stay_in_place && (
+              <Tag style={{ marginLeft: 4, color: '#999', borderColor: '#d9d9d9' }}>
+                状态不变：{STATUS_LABELS[r.status_before]}
+              </Tag>
+            )}
           </div>
           <div>操作人：{r.scanner_name}（{ROLE_LABELS[r.scanner_role]}）</div>
-          {r.expected_handler && (
-            <div>登记责任人：<Tag color="blue">{r.expected_handler}</Tag>（扫码人：{r.scanner_name}）</div>
+          {(r.expected_handler_name || r.expected_handler_id) && (
+            <div>
+              登记责任人：
+              <Tag color="blue">{r.expected_handler_name || '待认领'}</Tag>
+              {r.expected_handler_name !== r.scanner_name && (
+                <Tag color="red" style={{ marginLeft: 4 }}>与扫码人不匹配</Tag>
+              )}
+            </div>
           )}
           <div>扫码内容：<code>{r.qr_code}</code></div>
           {r.failure_reason && <div style={{ color: '#ff4d4f' }}>失败原因：{r.failure_reason}</div>}
@@ -245,6 +265,9 @@ export default function ApplicationDetail({ user }) {
           <div>操作人：{r.handler_name}（{ROLE_LABELS[r.handler_role]}）</div>
           <div>状态流转：{STATUS_LABELS[r.from_status]} → {STATUS_LABELS[r.to_status]}</div>
           <div>处理意见：{r.opinion}</div>
+          {r.failure_reason && (
+            <div style={{ color: '#ff4d4f' }}>失败/异常原因：{r.failure_reason}</div>
+          )}
           {r.processing_time_seconds > 0 && (
             <div>处理耗时：{r.processing_time_seconds}秒</div>
           )}
@@ -699,11 +722,11 @@ export default function ApplicationDetail({ user }) {
                 <div key={idx} style={{
                   padding: 12,
                   background: record.result === 'success' ? '#f6ffed' :
-                    (record.result === 'duplicate' ? '#fffbe6' : '#fff2f0'),
+                    (record.result === 'duplicate' || record.result === 'handler_mismatch' || record.result === 'materials_missing' ? '#fffbe6' : '#fff2f0'),
                   borderRadius: 6,
                   marginBottom: 8,
                   border: `1px solid ${record.result === 'success' ? '#b7eb8f' :
-                    (record.result === 'duplicate' ? '#ffe58f' : '#ffa39e')}`,
+                    (record.result === 'duplicate' || record.result === 'handler_mismatch' || record.result === 'materials_missing' ? '#ffe58f' : '#ffa39e')}`,
                 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, flexWrap: 'wrap', gap: 4 }}>
                     <Space wrap>
@@ -713,12 +736,21 @@ export default function ApplicationDetail({ user }) {
                       }
                       <strong style={{ fontSize: 13 }}>
                         {record.result === 'success' ? '核验通过' :
+                         record.result === 'invalid_qr' ? '无效二维码' :
                          record.result === 'duplicate' ? '重复扫码' :
-                         record.result === 'handler_mismatch' ? '处理人不匹配' : '核验失败'}
+                         record.result === 'handler_mismatch' ? '处理人不匹配' :
+                         record.result === 'materials_missing' ? '材料缺失' : '核验失败'}
                       </strong>
                       {record.stay_in_place && (
                         <Tag color="orange">
                           <LockOutlined /> 停留原状态
+                        </Tag>
+                      )}
+                      {record.status_before && record.status_after && (
+                        <Tag color={record.status_before === record.status_after ? 'default' : 'green'}>
+                          {STATUS_LABELS[record.status_before]}
+                          {' → '}
+                          {STATUS_LABELS[record.status_after]}
                         </Tag>
                       )}
                     </Space>
@@ -730,10 +762,18 @@ export default function ApplicationDetail({ user }) {
                     <div>
                       <UserOutlined /> 扫码人：<strong>{record.scanner_name}</strong>
                       <span style={{ color: '#666' }}>（{ROLE_LABELS[record.scanner_role]}）</span>
-                      {record.expected_handler && record.expected_handler !== record.scanner_name && (
-                        <span style={{ color: '#ff4d4f', marginLeft: 8 }}>
-                          （登记人应为：{record.expected_handler}）
-                        </span>
+                      {(record.expected_handler_name || record.expected_handler_id) && (
+                        <>
+                          {record.expected_handler_name !== record.scanner_name ? (
+                            <span style={{ color: '#ff4d4f', marginLeft: 8 }}>
+                              （登记责任人应为：{record.expected_handler_name || '待认领'}，ID: {record.expected_handler_id || '-'}）
+                            </span>
+                          ) : (
+                            <span style={{ color: '#52c41a', marginLeft: 8 }}>
+                              （与登记责任人一致）
+                            </span>
+                          )}
+                        </>
                       )}
                     </div>
                     <div><QrcodeOutlined /> 扫码内容：<code>{record.qr_code}</code></div>
@@ -958,6 +998,47 @@ export default function ApplicationDetail({ user }) {
                   <Tag color="green">已推进到下一状态</Tag>
                 )}
               </Descriptions.Item>
+              {currentEvidence.status_before && currentEvidence.status_after && (
+                <>
+                  <Descriptions.Item label="扫码前状态">
+                    <Tag color={STATUS_COLORS[currentEvidence.status_before]}>
+                      {STATUS_LABELS[currentEvidence.status_before]}
+                    </Tag>
+                  </Descriptions.Item>
+                  <Descriptions.Item label="扫码后状态">
+                    <Tag color={STATUS_COLORS[currentEvidence.status_after]}>
+                      {STATUS_LABELS[currentEvidence.status_after]}
+                      {currentEvidence.stay_in_place && currentEvidence.status_before === currentEvidence.status_after && (
+                        <LockOutlined style={{ marginLeft: 4, fontSize: 10 }} />
+                      )}
+                    </Tag>
+                    {currentEvidence.stay_in_place && (
+                      <span style={{ color: '#faad14', fontSize: 12, marginLeft: 8 }}>
+                        未变化
+                      </span>
+                    )}
+                  </Descriptions.Item>
+                </>
+              )}
+              {(currentEvidence.expected_handler_name || currentEvidence.expected_handler_id) && (
+                <Descriptions.Item label="登记责任人（预期）" span={2}>
+                  <Space wrap>
+                    <Tag color="blue">
+                      {currentEvidence.expected_handler_name || '待认领'}
+                    </Tag>
+                    {currentEvidence.expected_handler_id && (
+                      <span style={{ color: '#666', fontSize: 12 }}>
+                        ID: {currentEvidence.expected_handler_id}
+                      </span>
+                    )}
+                    {currentEvidence.expected_handler_name &&
+                      currentEvidence.scanner_name &&
+                      currentEvidence.expected_handler_name !== currentEvidence.scanner_name && (
+                      <Tag color="red">扫码人不匹配</Tag>
+                    )}
+                  </Space>
+                </Descriptions.Item>
+              )}
               {currentEvidence.failure_reason && (
                 <Descriptions.Item label="失败/异常原因" span={2}>
                   <span style={{ color: '#ff4d4f' }}>

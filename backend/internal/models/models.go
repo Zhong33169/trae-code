@@ -84,21 +84,26 @@ type Application struct {
 }
 
 type ScanRecord struct {
-	ID              uint      `gorm:"primaryKey" json:"id"`
-	ApplicationID   uint      `gorm:"not null;index" json:"application_id"`
-	QRCode          string    `gorm:"size:100;not null;index" json:"qr_code"`
-	ScanTime        time.Time `gorm:"not null;index" json:"scan_time"`
-	ScannerID       uint      `gorm:"not null" json:"scanner_id"`
-	ScannerName     string    `gorm:"size:100;not null" json:"scanner_name"`
-	ScannerRole     Role      `gorm:"size:20;not null" json:"scanner_role"`
-	Result          string    `gorm:"size:20;not null" json:"result"`
-	FailureReason   string    `gorm:"size:500" json:"failure_reason"`
-	Evidence        string    `gorm:"type:text" json:"evidence"`
-	DeviceInfo      string    `gorm:"size:500" json:"device_info"`
-	LocationInfo    string    `gorm:"size:500" json:"location_info"`
-	CreatedAt       time.Time `json:"created_at"`
-	Application     Application `gorm:"foreignKey:ApplicationID" json:"-"`
-	Scanner         User        `gorm:"foreignKey:ScannerID" json:"-"`
+	ID                   uint              `gorm:"primaryKey" json:"id"`
+	ApplicationID        uint              `gorm:"not null;index" json:"application_id"`
+	QRCode               string            `gorm:"size:100;not null;index" json:"qr_code"`
+	ScanTime             time.Time         `gorm:"not null;index" json:"scan_time"`
+	ScannerID            uint              `gorm:"not null" json:"scanner_id"`
+	ScannerName          string            `gorm:"size:100;not null" json:"scanner_name"`
+	ScannerRole          Role              `gorm:"size:20;not null" json:"scanner_role"`
+	Result               string            `gorm:"size:20;not null" json:"result"`
+	FailureReason        string            `gorm:"size:500" json:"failure_reason"`
+	Evidence             string            `gorm:"type:text" json:"evidence"`
+	DeviceInfo           string            `gorm:"size:500" json:"device_info"`
+	LocationInfo         string            `gorm:"size:500" json:"location_info"`
+	StayInPlace          bool              `gorm:"default:false;not null" json:"stay_in_place"`
+	ExpectedHandlerID    *uint             `gorm:"index" json:"expected_handler_id,omitempty"`
+	ExpectedHandlerName  string            `gorm:"size:100" json:"expected_handler_name,omitempty"`
+	StatusBefore         ApplicationStatus `gorm:"size:30;not null" json:"status_before"`
+	StatusAfter          ApplicationStatus `gorm:"size:30;not null" json:"status_after"`
+	CreatedAt            time.Time         `json:"created_at"`
+	Application          Application       `gorm:"foreignKey:ApplicationID" json:"-"`
+	Scanner              User              `gorm:"foreignKey:ScannerID" json:"-"`
 }
 
 type ProcessRecord struct {
@@ -111,9 +116,13 @@ type ProcessRecord struct {
 	HandlerID       uint              `gorm:"not null" json:"handler_id"`
 	HandlerName     string            `gorm:"size:100;not null" json:"handler_name"`
 	Opinion         string            `gorm:"type:text;not null" json:"opinion"`
+	FailureReason   string            `gorm:"size:500" json:"failure_reason"`
+	OldVersion      int               `gorm:"default:0" json:"old_version"`
+	NewVersion      int               `gorm:"default:0" json:"new_version"`
 	MaterialsChecked string           `gorm:"type:text" json:"materials_checked"`
 	TimeLimitMet    bool              `gorm:"default:true" json:"time_limit_met"`
 	ProcessingTime  int               `json:"processing_time_seconds"`
+	AuditID         *uint             `gorm:"index" json:"audit_id,omitempty"`
 	CreatedAt       time.Time         `json:"created_at"`
 	Application     Application       `gorm:"foreignKey:ApplicationID" json:"-"`
 	Handler         User              `gorm:"foreignKey:HandlerID" json:"-"`

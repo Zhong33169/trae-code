@@ -214,7 +214,7 @@ export default function ApplicationList({ user }) {
           <Space>
             <a onClick={() => navigate(`/applications/${record.id}`)}><strong>{text}</strong></a>
             {record.is_locked && (
-              <Tooltip title={record.locked_by ? `正在被 ${record.locked_by} 处理中` : '正在被处理中'}>
+              <Tooltip title={record.locked_by ? `正在被 ${record.locked_by.name}（${ROLE_LABELS[record.locked_by.role]}）处理中` : '正在被处理中'}>
                 <Badge status="processing" text={<span><LockOutlined /> 处理中</span>} />
               </Tooltip>
             )}
@@ -301,7 +301,7 @@ export default function ApplicationList({ user }) {
           </Tag>
           {record.locked_by && (
             <span style={{ color: '#faad14', fontSize: 12 }}>
-              <LockOutlined /> {record.locked_by} 正在处理
+              <LockOutlined /> {record.locked_by.name}（{ROLE_LABELS[record.locked_by.role]}）正在处理
             </span>
           )}
         </Space>

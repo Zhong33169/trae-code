@@ -146,11 +146,13 @@ func (s *WorkflowService) TransitionApplication(
 	handlerName string,
 	handlerRole models.Role,
 	opinion string,
+	failureReason string,
 	materialsChecked string,
 	startTime time.Time,
 ) (*models.ProcessRecord, error) {
 	fromStatus := app.Status
 	toStatus := rule.ToStatus
+	oldVersion := app.Version
 
 	processingTime := int(time.Since(startTime).Seconds())
 	timeLimitMet, _ := s.CheckDeadline(app.Deadline)
@@ -164,6 +166,9 @@ func (s *WorkflowService) TransitionApplication(
 		HandlerID:        handlerID,
 		HandlerName:      handlerName,
 		Opinion:          opinion,
+		FailureReason:    failureReason,
+		OldVersion:       oldVersion,
+		NewVersion:       oldVersion + 1,
 		MaterialsChecked: materialsChecked,
 		TimeLimitMet:     timeLimitMet,
 		ProcessingTime:   processingTime,
@@ -236,6 +241,36 @@ func (s *WorkflowService) CreateAuditLog(
 		CreatedAt:    time.Now(),
 	}
 	return db.Create(auditLog).Error
+}
+
+func (s *WorkflowService) CreateAuditLogReturn(
+	db *gorm.DB,
+	userID uint,
+	username string,
+	userRole models.Role,
+	action string,
+	resourceType string,
+	resourceID uint,
+	ipAddress string,
+	userAgent string,
+	details string,
+) (*models.AuditLog, error) {
+	auditLog := &models.AuditLog{
+		UserID:       userID,
+		Username:     username,
+		UserRole:     userRole,
+		Action:       action,
+		ResourceType: resourceType,
+		ResourceID:   resourceID,
+		IPAddress:    ipAddress,
+		UserAgent:    userAgent,
+		Details:      details,
+		CreatedAt:    time.Now(),
+	}
+	if err := db.Create(auditLog).Error; err != nil {
+		return nil, err
+	}
+	return auditLog, nil
 }
 
 func (s *WorkflowService) GetStatistics(db *gorm.DB, userRole models.Role, userID uint) (map[string]interface{}, error) {
