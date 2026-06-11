@@ -17,6 +17,7 @@ use crate::{AppState, models::{
 }};
 use crate::middleware::auth::AuthUser;
 use crate::services::{scan, transition, audit};
+use crate::db;
 
 #[derive(Debug, Deserialize)]
 pub struct ListQuery {
@@ -600,4 +601,31 @@ pub async fn statistics(
     };
 
     Json(response).into_response()
+}
+
+pub async fn get_migration_status(
+    State(state): State<AppState>,
+    Extension(_auth_user): Extension<Arc<AuthUser>>,
+) -> Response {
+    match db::get_migration_status(&state.pool, "scan_records").await {
+        Ok(status) => {
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({
+                    "success": true,
+                    "data": status
+                }))
+            ).into_response()
+        }
+        Err(e) => {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "success": false,
+                    "error": format!("查询迁移状态失败: {}", e),
+                    "code": "MIGRATION_STATUS_QUERY_FAILED"
+                }))
+            ).into_response()
+        }
+    }
 }

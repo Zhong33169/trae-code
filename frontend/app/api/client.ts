@@ -68,6 +68,21 @@ export class ApiError extends Error {
     const code = this.code || (this.details as any)?.error_code;
     return code === "VERSION_CONFLICT" || this.status === 409;
   }
+
+  isMigrationError(): boolean {
+    const code = this.code || (this.details as any)?.error_code;
+    const msg = this.message || "";
+    return code?.startsWith("MIGRATION_") || msg.startsWith("MIGRATION_");
+  }
+
+  getMigrationErrorMessage(): string {
+    const msg = this.message || "";
+    if (msg.startsWith("MIGRATION_SCAN_RECORDS_FAILED:")) {
+      const details = msg.replace("MIGRATION_SCAN_RECORDS_FAILED:", "").trim();
+      return `扫码记录表迁移失败：${details}\n\n建议操作：\n1. 备份数据库文件\n2. 联系技术支持\n3. 尝试重启服务`;
+    }
+    return this.message;
+  }
 }
 
 export interface User {

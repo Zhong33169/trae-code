@@ -1,8 +1,28 @@
 use sqlx::SqlitePool;
 use anyhow::Result;
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct MigrationStatus {
+    pub name: String,
+    pub status: String,
+    pub error_message: Option<String>,
+    pub started_at: Option<String>,
+    pub completed_at: Option<String>,
+}
+
 pub async fn init_db(pool: &SqlitePool) -> Result<()> {
-    migrate_scan_records_table(pool).await?;
+    init_migration_audit_table(pool).await?;
+    
+    match migrate_scan_records_table(pool).await {
+        Ok(_) => {
+            let _ = record_migration_success(pool, "scan_records").await;
+        }
+        Err(e) => {
+            let err_msg = e.to_string();
+            let _ = record_migration_failure(pool, "scan_records", &err_msg).await;
+            return Err(e);
+        }
+    }
     sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS users (
@@ -270,7 +290,11 @@ async fn migrate_scan_records_with_conn(
     old_columns: &[String],
     has_error_code: bool,
 ) -> Result<(), anyhow::Error> {
+    let backup_table = "scan_records_backup";
+
+    sqlx::query("PRAGMA journal_mode = WAL").execute(&mut *conn).await.ok();
     sqlx::query("DROP TABLE IF EXISTS scan_records_new").execute(&mut *conn).await?;
+    sqlx::query(&format!("DROP TABLE IF EXISTS {}", backup_table)).execute(&mut *conn).await?;
     sqlx::query("DROP INDEX IF EXISTS idx_scan_records_creative_demand").execute(&mut *conn).await?;
     sqlx::query("DROP INDEX IF EXISTS idx_scan_records_user").execute(&mut *conn).await?;
 
@@ -350,8 +374,23 @@ async fn migrate_scan_records_with_conn(
         ).execute(&mut *conn).await?;
     }
 
-    sqlx::query("DROP TABLE IF EXISTS scan_records").execute(&mut *conn).await?;
-    sqlx::query("ALTER TABLE scan_records_new RENAME TO scan_records").execute(&mut *conn).await?;
+    sqlx::query(&format!(
+        "ALTER TABLE scan_records RENAME TO {}", backup_table
+    )).execute(&mut *conn).await?;
+
+    let rename_result = sqlx::query("ALTER TABLE scan_records_new RENAME TO scan_records")
+        .execute(&mut *conn)
+        .await;
+
+    if rename_result.is_err() {
+        let _ = sqlx::query(&format!(
+            "ALTER TABLE {} RENAME TO scan_records", backup_table
+        )).execute(&mut *conn).await;
+        return Err(anyhow::anyhow!(
+            "重命名新表失败，已回滚旧表: {}",
+            rename_result.err().unwrap()
+        ));
+    }
 
     sqlx::query(
         "CREATE INDEX IF NOT EXISTS idx_scan_records_creative_demand ON scan_records(creative_demand_id)"
@@ -360,5 +399,104 @@ async fn migrate_scan_records_with_conn(
         "CREATE INDEX IF NOT EXISTS idx_scan_records_user ON scan_records(user_id)"
     ).execute(&mut *conn).await?;
 
+    sqlx::query(&format!("DROP TABLE IF EXISTS {}", backup_table))
+        .execute(&mut *conn)
+        .await
+        .ok();
+
     Ok(())
+}
+
+async fn init_migration_audit_table(pool: &SqlitePool) -> Result<()> {
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS migration_audit (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            migration_name TEXT NOT NULL,
+            status TEXT NOT NULL,
+            step_name TEXT,
+            error_message TEXT,
+            details TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+        "#
+    ).execute(pool).await?;
+
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_migration_audit_name ON migration_audit(migration_name)"
+    ).execute(pool).await?;
+
+    Ok(())
+}
+
+async fn record_migration_step(
+    pool: &SqlitePool,
+    name: &str,
+    status: &str,
+    step: Option<&str>,
+    error: Option<&str>,
+    details: Option<&str>,
+) -> Result<()> {
+    sqlx::query(
+        "INSERT INTO migration_audit (migration_name, status, step_name, error_message, details) 
+         VALUES (?, ?, ?, ?, ?)"
+    )
+    .bind(name)
+    .bind(status)
+    .bind(step)
+    .bind(error)
+    .bind(details)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+async fn record_migration_success(pool: &SqlitePool, name: &str) -> Result<()> {
+    record_migration_step(pool, name, "success", None, None, None).await
+}
+
+async fn record_migration_failure(pool: &SqlitePool, name: &str, error: &str) -> Result<()> {
+    record_migration_step(pool, name, "failed", None, Some(error), None).await
+}
+
+pub async fn get_migration_status(pool: &SqlitePool, name: &str) -> Result<Option<MigrationStatus>> {
+    let row: Option<(String, String, Option<String>, Option<String>, Option<String>)> = sqlx::query_as(
+        r#"
+        SELECT migration_name, status, error_message, 
+               MIN(created_at) as started_at, 
+               MAX(created_at) as completed_at
+        FROM migration_audit
+        WHERE migration_name = ?
+        GROUP BY migration_name, status
+        ORDER BY created_at DESC
+        LIMIT 1
+        "#
+    )
+    .bind(name)
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(row.map(|(name, status, error_msg, started, completed)| MigrationStatus {
+        name,
+        status,
+        error_message: error_msg,
+        started_at: started,
+        completed_at: completed,
+    }))
+}
+
+pub fn is_migration_error(error_msg: &str) -> bool {
+    error_msg.starts_with("MIGRATION_")
+}
+
+pub fn format_migration_error(error_msg: &str) -> String {
+    if error_msg.starts_with("MIGRATION_SCAN_RECORDS_FAILED:") {
+        let details = error_msg.strip_prefix("MIGRATION_SCAN_RECORDS_FAILED:").unwrap_or("").trim();
+        format!(
+            "扫码记录表迁移失败：{}\n\n请尝试：\n1. 备份数据库文件\n2. 删除旧的 scan_records 表\n3. 重启服务让系统自动重建",
+            details
+        )
+    } else {
+        error_msg.to_string()
+    }
 }

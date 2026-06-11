@@ -81,6 +81,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/creative-demands/:id/transition", post(handlers::creative_demand::transition))
         .route("/creative-demands/batch-transition", post(handlers::creative_demand::batch_transition))
         .route("/creative-demands/statistics", get(handlers::creative_demand::statistics))
+        .route("/migrations/scan-records/status", get(handlers::creative_demand::get_migration_status))
         .route("/audit-logs", get(handlers::audit_log::list))
         .route("/users/me", get(handlers::auth::me))
         .layer(axum::middleware::from_fn_with_state(

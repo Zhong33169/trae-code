@@ -62,7 +62,11 @@ export default function Index() {
       setDemands(demandsRes.items);
       setRecentScanRecords(scanRes.items);
     } catch (err: any) {
-      setError(err.message || "加载数据失败");
+      if (err instanceof ApiError && err.isMigrationError()) {
+        setError(err.getMigrationErrorMessage());
+      } else {
+        setError(err.message || "加载数据失败");
+      }
     } finally {
       setLoading(false);
     }
@@ -146,6 +150,8 @@ export default function Index() {
         const conflictMsg = err.details?.error || err.message;
         alert(`版本冲突：${conflictMsg}\n\n页面将自动刷新以获取最新数据。`);
         loadData();
+      } else if (err instanceof ApiError && err.isMigrationError()) {
+        alert(`数据迁移异常：\n${err.getMigrationErrorMessage()}`);
       } else {
         alert(`批量处理失败：${err.message}`);
       }
@@ -191,6 +197,8 @@ export default function Index() {
         const conflictMsg = err.details?.error || err.message;
         alert(`版本冲突：${conflictMsg}\n\n页面将自动刷新以获取最新数据。`);
         loadData();
+      } else if (err instanceof ApiError && err.isMigrationError()) {
+        alert(`数据迁移异常：\n${err.getMigrationErrorMessage()}`);
       } else {
         alert(`操作失败：${err.message}`);
       }

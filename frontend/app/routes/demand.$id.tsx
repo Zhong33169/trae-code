@@ -67,7 +67,11 @@ export default function DemandDetail() {
       setScanRecords(scanRes.items);
       initFormData(demandRes);
     } catch (err: any) {
-      setError(err.message || "加载数据失败");
+      if (err instanceof ApiError && err.isMigrationError()) {
+        setError(err.getMigrationErrorMessage());
+      } else {
+        setError(err.message || "加载数据失败");
+      }
     } finally {
       setLoading(false);
     }
@@ -115,6 +119,8 @@ export default function DemandDetail() {
         alert(`版本冲突：${conflictMsg}\n\n页面将自动刷新以获取最新数据。`);
         setEditMode(false);
         loadData();
+      } else if (err instanceof ApiError && err.isMigrationError()) {
+        alert(`数据迁移异常：\n${err.getMigrationErrorMessage()}`);
       } else {
         alert(`保存失败：${err.message}`);
       }
@@ -150,6 +156,8 @@ export default function DemandDetail() {
         setTransitionComments("");
         setSelectedAction(null);
         loadData();
+      } else if (err instanceof ApiError && err.isMigrationError()) {
+        alert(`数据迁移异常：\n${err.getMigrationErrorMessage()}`);
       } else {
         alert(`操作失败：${err.message}`);
       }
