@@ -459,7 +459,13 @@ func (h *CheckinHandler) HandleAction(c echo.Context) error {
 
 	if !roleCanAction(role, action) {
 		allowedStr := strings.Join(RoleAllowedActions[role], ",")
-		writeAuditLog(id, userID, action, "", "",
+		exists := 0
+		database.DB.QueryRow("SELECT 1 FROM checkin_records WHERE id = ?", id).Scan(&exists)
+		auditID := 0
+		if exists == 1 {
+			auditID = id
+		}
+		writeAuditLog(auditID, userID, action, "", "",
 			"", fmt.Sprintf("权限拒绝：角色 %s 不允许执行 %s 操作，允许操作为 [%s]", role, action, allowedStr))
 		return c.JSON(http.StatusForbidden, map[string]interface{}{
 			"error":          "角色无权执行该操作",
@@ -483,11 +489,11 @@ func (h *CheckinHandler) HandleAction(c echo.Context) error {
 		"SELECT status, batch_no, id_card_no, source FROM checkin_records WHERE id = ?", id,
 	).Scan(&oldStatus, &batchNo, &idCardNo, &source)
 	if err == sql.ErrNoRows {
-		writeAuditLog(id, userID, action, "", "", "", fmt.Sprintf("记录 #%d 不存在", id))
+		writeAuditLog(0, userID, action, "", "", "", fmt.Sprintf("记录 #%d 不存在", id))
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "record not found"})
 	}
 	if err != nil {
-		writeAuditLog(id, userID, action, "", "", "", "查询记录失败: "+err.Error())
+		writeAuditLog(0, userID, action, "", "", "", "查询记录失败: "+err.Error())
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
 
@@ -605,7 +611,13 @@ func (h *CheckinHandler) BatchHandle(c echo.Context) error {
 		allowedStr := strings.Join(RoleAllowedActions[role], ",")
 		reason := fmt.Sprintf("批量权限拒绝：角色 %s 不允许执行 %s 操作，允许操作为 [%s]", role, req.Action, allowedStr)
 		for _, id := range req.IDs {
-			writeAuditLog(id, userID, req.Action, "", "", req.Remark, reason)
+			exists := 0
+			database.DB.QueryRow("SELECT 1 FROM checkin_records WHERE id = ?", id).Scan(&exists)
+			auditID := 0
+			if exists == 1 {
+				auditID = id
+			}
+			writeAuditLog(auditID, userID, req.Action, "", "", req.Remark, reason)
 		}
 		return c.JSON(http.StatusForbidden, map[string]interface{}{
 			"error":          "角色无权执行该操作",
@@ -637,14 +649,17 @@ func (h *CheckinHandler) BatchHandle(c echo.Context) error {
 			item.Message = "记录不存在"
 			failCount++
 			results = append(results, item)
+			writeAuditLog(0, userID, req.Action, "", targetStatus, req.Remark,
+				fmt.Sprintf("批量处理失败：记录 #%d 不存在", id))
 			continue
 		}
 		if err != nil {
 			item.Success = false
 			item.Message = "数据库错误: " + err.Error()
 			failCount++
-			writeAuditLog(id, userID, req.Action, oldStatus, targetStatus, req.Remark, err.Error())
 			results = append(results, item)
+			writeAuditLog(0, userID, req.Action, "", targetStatus, req.Remark,
+				fmt.Sprintf("批量处理失败：查询记录 #%d 错误 - %s", id, err.Error()))
 			continue
 		}
 
