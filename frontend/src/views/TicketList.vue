@@ -9,7 +9,7 @@
           来电登记
         </el-button>
         <el-button v-if="authStore.role === 'qa_manager' || authStore.role === 'cs_manager'" :icon="Switch" @click="openHandover">
-          交接
+          我的待签收
         </el-button>
         <el-dropdown @command="handleCommand">
           <span class="user-info">
@@ -123,7 +123,7 @@
             </div>
           </el-card>
         </el-col>
-        <el-col :span="3">
+        <el-col :span="3" v-if="authStore.role === 'qa_manager' || authStore.role === 'cs_manager'">
           <el-card class="stat-card stat-handover" shadow="hover">
             <div class="stat-icon">
               <el-icon :size="28"><Switch /></el-icon>
@@ -134,7 +134,7 @@
             </div>
           </el-card>
         </el-col>
-        <el-col :span="3">
+        <el-col :span="3" v-if="authStore.role === 'qa_manager' || authStore.role === 'cs_manager'">
           <el-card class="stat-card stat-today" shadow="hover">
             <div class="stat-icon">
               <el-icon :size="28"><Clock /></el-icon>
@@ -147,6 +147,35 @@
         </el-col>
       </el-row>
 
+      <div class="batch-bar" v-if="selectedRows.length">
+        <span class="batch-count">已选择 {{ selectedRows.length }} 条</span>
+        <el-button
+          v-if="canBatchAssign"
+          type="warning"
+          size="small"
+          @click="batchAssign"
+        >批量派单</el-button>
+        <el-button
+          v-if="canBatchReturnVisit"
+          type="primary"
+          size="small"
+          @click="batchReturnVisit"
+        >批量回访</el-button>
+        <el-button
+          v-if="canBatchClose"
+          type="success"
+          size="small"
+          @click="batchClose"
+        >批量关闭</el-button>
+        <el-button
+          v-if="canBatchHandover"
+          type="info"
+          size="small"
+          @click="batchHandover"
+        >批量交接</el-button>
+        <el-button size="small" @click="clearSelection">清空选择</el-button>
+      </div>
+
       <el-card class="table-card" shadow="never">
         <el-table
           v-loading="ticketStore.loading"
@@ -154,7 +183,10 @@
           stripe
           border
           @row-click="handleRowClick"
+          ref="tableRef"
+          @selection-change="handleSelectionChange"
         >
+          <el-table-column type="selection" width="55" :selectable="isRowSelectable" />
           <el-table-column prop="id" label="工单号" width="100" />
           <el-table-column prop="title" label="标题" min-width="200" show-overflow-tooltip />
           <el-table-column prop="customer_name" label="客户姓名" width="120" />
@@ -247,7 +279,8 @@
       v-model="handoverVisible"
       :ticket-id="currentTicketId"
       :ticket-title="currentTicketTitle"
-      @success="handleRefresh"
+      :ticket-ids="batchTicketIds"
+      @success="handleHandoverSuccess"
     />
     <el-dialog
       v-model="pendingHandoverVisible"
@@ -335,6 +368,9 @@ const pendingHandoverList = ref([])
 const pendingHandoverLoading = ref(false)
 const currentTicketId = ref('')
 const currentTicketTitle = ref('')
+const selectedRows = ref([])
+const tableRef = ref(null)
+const batchTicketIds = ref([])
 
 const roleLabel = computed(() => {
   const roleMap = {
@@ -344,6 +380,134 @@ const roleLabel = computed(() => {
   }
   return roleMap[authStore.role] || authStore.role
 })
+
+function isRowSelectable(row) {
+  if (authStore.role === 'agent') {
+    return row.created_by === authStore.user?.id && row.status !== 'closed'
+  }
+  return row.status !== 'closed'
+}
+
+const canBatchAssign = computed(() => {
+  return (authStore.role === 'qa_manager' || authStore.role === 'cs_manager')
+    && selectedRows.value.every(r => r.status === 'incoming')
+    && selectedRows.value.length > 0
+})
+
+const canBatchReturnVisit = computed(() => {
+  return (authStore.role === 'qa_manager' || authStore.role === 'cs_manager')
+    && selectedRows.value.every(r => r.status === 'dispatched')
+    && selectedRows.value.length > 0
+})
+
+const canBatchClose = computed(() => {
+  return (authStore.role === 'qa_manager' || authStore.role === 'cs_manager')
+    && selectedRows.value.every(r => r.status === 'return_visit')
+    && selectedRows.value.length > 0
+})
+
+const canBatchHandover = computed(() => {
+  if (authStore.role === 'cs_manager') return false
+  if (selectedRows.value.length === 0) return false
+  return selectedRows.value.every(r => r.status !== 'closed')
+})
+
+function handleSelectionChange(rows) {
+  selectedRows.value = rows
+}
+
+function clearSelection() {
+  tableRef.value?.clearSelection()
+  selectedRows.value = []
+}
+
+function showBatchResult(result, operationName) {
+  const failDetail = result.fail.length
+    ? result.fail.map(f => `  - 工单 ${f.id}：${f.error}`).join('\n')
+    : ''
+  const message = `批量操作结果：
+✅ 成功：${result.success.length} 条
+❌ 失败：${result.fail.length} 条
+${failDetail}`
+  ElMessageBox.alert(message, `${operationName}结果`, {
+    confirmButtonText: '确定',
+    dangerouslyUseHTMLString: false
+  })
+}
+
+async function batchAssign() {
+  try {
+    const { value } = await ElMessageBox.prompt(
+      '请输入派单备注',
+      '批量派单',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        inputPlaceholder: '请输入备注（选填）'
+      }
+    )
+    const ids = selectedRows.value.map(r => r.id)
+    const result = await ticketStore.batchUpdateStatus(ids, { status: 'dispatched', remark: value || '' })
+    clearSelection()
+    showBatchResult(result, '批量派单')
+  } catch {
+  }
+}
+
+async function batchReturnVisit() {
+  try {
+    const { value } = await ElMessageBox.prompt(
+      '请输入回访备注',
+      '批量回访',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        inputPlaceholder: '请输入备注（选填）'
+      }
+    )
+    const ids = selectedRows.value.map(r => r.id)
+    const result = await ticketStore.batchUpdateStatus(ids, { status: 'return_visit', remark: value || '' })
+    clearSelection()
+    showBatchResult(result, '批量回访')
+  } catch {
+  }
+}
+
+async function batchClose() {
+  try {
+    const { value } = await ElMessageBox.prompt(
+      '请输入关闭备注',
+      '批量关闭',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        inputPlaceholder: '请输入备注（选填）'
+      }
+    )
+    const ids = selectedRows.value.map(r => r.id)
+    const result = await ticketStore.batchUpdateStatus(ids, { status: 'closed', remark: value || '' })
+    clearSelection()
+    showBatchResult(result, '批量关闭')
+  } catch {
+  }
+}
+
+function batchHandover() {
+  batchTicketIds.value = selectedRows.value.map(r => r.id)
+  currentTicketId.value = ''
+  currentTicketTitle.value = ''
+  handoverVisible.value = true
+}
+
+function handleHandoverSuccess(result) {
+  clearSelection()
+  batchTicketIds.value = []
+  if (result) {
+    showBatchResult(result, '批量交接')
+  } else {
+    handleRefresh()
+  }
+}
 
 onMounted(() => {
   fetchData()
@@ -709,5 +873,23 @@ function getHandoverStatusType(status) {
 
 .text-gray {
   color: #c0c4cc;
+}
+
+.batch-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: #ecf5ff;
+  border: 1px solid #d9ecff;
+  border-radius: 4px;
+  margin-bottom: 16px;
+}
+
+.batch-count {
+  font-size: 14px;
+  color: #409eff;
+  font-weight: 500;
+  margin-right: 8px;
 }
 </style>

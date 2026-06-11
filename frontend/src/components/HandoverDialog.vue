@@ -12,10 +12,13 @@
       :rules="rules"
       label-width="100px"
     >
-      <el-form-item v-if="ticketId" label="工单号">
+      <el-form-item v-if="ticketIds && ticketIds.length > 1" label="工单数量">
+        <el-input :value="`共 ${ticketIds.length} 个工单`" disabled />
+      </el-form-item>
+      <el-form-item v-if="ticketId && (!ticketIds || ticketIds.length <= 1)" label="工单号">
         <el-input :value="ticketId" disabled />
       </el-form-item>
-      <el-form-item v-if="ticketTitle" label="工单标题">
+      <el-form-item v-if="ticketTitle && (!ticketIds || ticketIds.length <= 1)" label="工单标题">
         <el-input :value="ticketTitle" disabled />
       </el-form-item>
       <el-form-item label="班次" prop="shift">
@@ -75,6 +78,10 @@ const props = defineProps({
   ticketTitle: {
     type: String,
     default: ''
+  },
+  ticketIds: {
+    type: Array,
+    default: () => []
   }
 })
 
@@ -139,12 +146,18 @@ async function handleSubmit() {
       loading.value = true
       try {
         const submitData = { ...formData }
-        if (props.ticketId) {
-          submitData.ticket_id = props.ticketId
+        let result
+        if (props.ticketIds && props.ticketIds.length > 1) {
+          result = await ticketStore.batchSubmitHandover(props.ticketIds, submitData)
+          emit('success', result)
+        } else {
+          if (props.ticketId) {
+            submitData.ticket_id = props.ticketId
+          }
+          await ticketStore.handleSubmitHandover(submitData)
+          emit('success')
         }
-        await ticketStore.handleSubmitHandover(submitData)
         ElMessage.success('交接成功')
-        emit('success')
         handleClose()
       } catch (err) {
         console.error('交接失败:', err)

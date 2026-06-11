@@ -117,6 +117,36 @@ export const useTicketStore = defineStore('ticket', () => {
     return res
   }
 
+  async function batchUpdateStatus(ids, data) {
+    const results = { success: [], fail: [] }
+    for (const id of ids) {
+      try {
+        await updateTicketStatus(id, data)
+        results.success.push(id)
+      } catch (e) {
+        results.fail.push({ id, error: e.message })
+      }
+    }
+    await fetchList()
+    await fetchStats()
+    return results
+  }
+
+  async function batchSubmitHandover(ticketIds, handoverData) {
+    const results = { success: [], fail: [] }
+    for (const tid of ticketIds) {
+      try {
+        await submitHandover({ ...handoverData, ticket_id: tid })
+        results.success.push(tid)
+      } catch (e) {
+        results.fail.push({ id: tid, error: e.message })
+      }
+    }
+    await fetchList()
+    await fetchStats()
+    return results
+  }
+
   function resetQuery() {
     queryParams.page = 1
     queryParams.page_size = 10
@@ -139,6 +169,8 @@ export const useTicketStore = defineStore('ticket', () => {
     handleSubmitHandover,
     handleAcceptHandover,
     handleRejectHandover,
+    batchUpdateStatus,
+    batchSubmitHandover,
     resetQuery
   }
 })

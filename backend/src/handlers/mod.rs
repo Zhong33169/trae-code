@@ -197,7 +197,8 @@ pub async fn create_ticket(
     .execute(pool)
     .await?;
 
-    add_operation_log(pool, &ticket_id, &current_user.id, "create_ticket", Some("创建工单")).await?;
+    let detail = format!("创建工单（{}：{}）", role_display(&current_user.role), current_user.name);
+    add_operation_log(pool, &ticket_id, &current_user.id, "create_ticket", Some(&detail)).await?;
 
     let ticket: Ticket = sqlx::query_as::<_, Ticket>(
         "SELECT * FROM tickets WHERE id = ?"
@@ -240,7 +241,14 @@ pub async fn update_ticket_status(
     .await?;
 
     let action = format!("status_change:{}->{}", ticket.status, req.status);
-    let detail = req.remark.unwrap_or_else(|| format!("状态变更为 {}", status_display(&req.status)));
+    let from_label = status_display(&ticket.status);
+    let to_label = status_display(&req.status);
+    let remark_str = req.remark.clone().unwrap_or_else(|| String::from(""));
+    let detail = if remark_str.is_empty() {
+        format!("状态变更：{} → {}（{}：{}）", from_label, to_label, role_display(&current_user.role), current_user.name)
+    } else {
+        format!("状态变更：{} → {}（{}：{}）：{}", from_label, to_label, role_display(&current_user.role), current_user.name, remark_str)
+    };
     add_operation_log(pool, ticket_id, &current_user.id, &action, Some(&detail)).await?;
 
     let ticket: Ticket = sqlx::query_as::<_, Ticket>(
@@ -271,12 +279,21 @@ fn validate_status_transition(current: &str, next: &str, user: &User) -> Result<
             if roles.contains(&user.role.as_str()) {
                 return Ok(());
             } else {
-                return Err(anyhow!("当前角色无权执行此状态变更"));
+                return Err(anyhow!("当前角色（{}）无权将工单从 {} 变更为 {}", role_display(&user.role), current, next));
             }
         }
     }
 
-    Err(anyhow!("无效的状态流转: {} -> {}", current, next))
+    Err(anyhow!("无效的状态流转：不允许将工单从「{}」变更为「{}」", status_display(current), status_display(next)))
+}
+
+pub fn role_display(role: &str) -> &str {
+    match role {
+        "agent" => "客服坐席",
+        "qa_manager" => "质检主管",
+        "cs_manager" => "客服经理",
+        _ => role,
+    }
 }
 
 fn status_display(status: &str) -> &str {
@@ -295,12 +312,15 @@ pub async fn create_handover(
     req: CreateHandoverRequest,
     current_user: &User,
 ) -> Result<HandoverRecord> {
-    if req.shift.is_empty() || req.to_user.is_empty() {
-        return Err(anyhow!("班次和接收人不能为空"));
+    if req.shift.is_empty() {
+        return Err(anyhow!("请选择班次"));
+    }
+    if req.to_user.is_empty() {
+        return Err(anyhow!("请选择接收人"));
     }
 
     if current_user.role == "cs_manager" {
-        return Err(anyhow!("客服经理是最终确认人，不能提交交接"));
+        return Err(anyhow!("客服经理是最终确认人，不能提交交接，只能执行签收"));
     }
 
     let ticket: Ticket = sqlx::query_as::<_, Ticket>(
@@ -322,7 +342,7 @@ pub async fn create_handover(
     .await?;
 
     if pending_count > 0 {
-        return Err(anyhow!("该工单已有待签收的交接，请先处理"));
+        return Err(anyhow!("该工单已有待签收的交接，请先完成签收或异常回传"));
     }
 
     let to_user = get_user_by_id(pool, &req.to_user).await?;
@@ -349,7 +369,7 @@ pub async fn create_handover(
         .await?;
 
         if prev_accepted == 0 {
-            return Err(anyhow!("请先完成上一级交接的签收后再提交"));
+            return Err(anyhow!("上一级交接尚未签收，不能提交给下一级"));
         }
     }
 
@@ -371,12 +391,24 @@ pub async fn create_handover(
     .execute(pool)
     .await?;
 
+    let shift_display = match req.shift.as_str() {
+        "morning" => "早班",
+        "afternoon" => "中班",
+        "night" => "晚班",
+        _ => req.shift.as_str(),
+    };
+    let remark_str = req.remark.clone().unwrap_or_else(|| String::from(""));
+    let detail = if remark_str.is_empty() {
+        format!("提交交接给 {}（{}：{}）：{}", to_user.name, role_display(&current_user.role), current_user.name, shift_display)
+    } else {
+        format!("提交交接给 {}（{}：{}）：{}：{}", to_user.name, role_display(&current_user.role), current_user.name, shift_display, remark_str)
+    };
     add_operation_log(
         pool,
         &req.ticket_id,
         &current_user.id,
         "handover_submit",
-        Some(&format!("提交交接给 {}", to_user.name)),
+        Some(&detail),
     ).await?;
 
     let record: HandoverRecord = sqlx::query_as::<_, HandoverRecord>(
@@ -421,12 +453,14 @@ pub async fn accept_handover(
         "morning" => "早班",
         "afternoon" => "中班",
         "night" => "晚班",
-        _ => &record.shift,
+        _ => record.shift.as_str(),
     };
-    let mut log_detail = format!("签收交接（{}）", shift_display);
-    if let Some(remark) = &record.remark {
-        log_detail.push_str(&format!("：{}", remark));
-    }
+    let remark_str = record.remark.clone().unwrap_or_else(|| String::from(""));
+    let log_detail = if remark_str.is_empty() {
+        format!("签收交接（{}）（{}：{}）", shift_display, role_display(&current_user.role), current_user.name)
+    } else {
+        format!("签收交接（{}）（{}：{}）：{}", shift_display, role_display(&current_user.role), current_user.name, remark_str)
+    };
     add_operation_log(
         pool,
         &record.ticket_id,
@@ -466,6 +500,8 @@ pub async fn reject_handover(
         return Err(anyhow!("无权回传此交接"));
     }
 
+    let now = Utc::now();
+
     sqlx::query(
         "UPDATE handover_records SET status = ?, remark = COALESCE(?, remark) WHERE id = ?"
     )
@@ -475,38 +511,38 @@ pub async fn reject_handover(
     .execute(pool)
     .await?;
 
-    let ticket: Ticket = sqlx::query_as::<_, Ticket>(
-        "SELECT * FROM tickets WHERE id = ?"
+    sqlx::query(
+        "UPDATE tickets SET status = ?, updated_at = ? WHERE id = ?"
     )
+    .bind("exception")
+    .bind(now)
     .bind(&record.ticket_id)
-    .fetch_one(pool)
+    .execute(pool)
     .await?;
-
-    if ticket.status != "exception" {
-        let now = Utc::now();
-        sqlx::query(
-            "UPDATE tickets SET status = ?, updated_at = ? WHERE id = ?"
-        )
-        .bind("exception")
-        .bind(now)
-        .bind(&record.ticket_id)
-        .execute(pool)
-        .await?;
-    }
 
     let shift_display = match record.shift.as_str() {
         "morning" => "早班",
         "afternoon" => "中班",
         "night" => "晚班",
-        _ => &record.shift,
+        _ => record.shift.as_str(),
     };
     let remark = req.remark.unwrap_or_else(|| "异常回传".to_string());
+    let reject_log = format!("异常回传（{}）（{}：{}）：{}", shift_display, role_display(&current_user.role), current_user.name, remark);
     add_operation_log(
         pool,
         &record.ticket_id,
         &current_user.id,
         "handover_reject",
-        Some(&format!("异常回传（{}）：{}", shift_display, remark)),
+        Some(&reject_log),
+    ).await?;
+
+    let status_log = format!("工单状态变更为异常回传（{}：{}）", role_display(&current_user.role), current_user.name);
+    add_operation_log(
+        pool,
+        &record.ticket_id,
+        &current_user.id,
+        "status_change_to_exception",
+        Some(&status_log),
     ).await?;
 
     let record: HandoverRecord = sqlx::query_as::<_, HandoverRecord>(
