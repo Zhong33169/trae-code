@@ -139,11 +139,13 @@ class OrderController(Controller):
     ) -> EvidenceOut:
         order = db.query(TransportOrder).filter(TransportOrder.id == order_id).first()
         try:
-            evidence = OrderService.add_evidence(db, order_id, data.model_dump(), current_user)
+            evidence = OrderService.add_evidence(
+                db, order_id, data.model_dump(exclude={"expected_version"}),
+                current_user, data.expected_version
+            )
             return EvidenceOut.model_validate(evidence)
         except OrderValidationError as e:
             if order:
-                from app.models.database import AuditLog
                 fail_log = AuditLog(
                     order_id=order.id,
                     order_no=order.order_no,
@@ -214,7 +216,8 @@ class BatchController(Controller):
     ) -> BatchChangeOut:
         try:
             batch = BatchService.retry_failed_items(
-                db, batch_id, data.batch_item_ids, current_user, data.remark
+                db, batch_id, data.batch_item_ids, current_user, data.remark,
+                data.expected_versions
             )
             return BatchChangeOut.model_validate(batch)
         except OrderValidationError as e:

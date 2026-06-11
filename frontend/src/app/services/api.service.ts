@@ -79,7 +79,7 @@ export class ApiService {
     );
   }
 
-  uploadEvidence(orderId: number, data: { evidence_type: EvidenceType; file_name: string; file_ref: string; remark?: string }): Observable<Evidence> {
+  uploadEvidence(orderId: number, data: { evidence_type: EvidenceType; file_name: string; file_ref: string; remark?: string; expected_version: number }): Observable<Evidence> {
     return this.http.post<Evidence>(`${API_BASE}/orders/${orderId}/evidences`, data, { headers: this.getAuthHeaders() }).pipe(
       catchError(this.handleError)
     );
@@ -105,9 +105,10 @@ export class ApiService {
     );
   }
 
-  retryBatch(id: number, batchItemIds: number[], remark?: string): Observable<BatchChange> {
+  retryBatch(id: number, batchItemIds: number[], remark?: string, expectedVersions?: Record<number, number>): Observable<BatchChange> {
     const body: any = { batch_item_ids: batchItemIds };
     if (remark) body.remark = remark;
+    if (expectedVersions) body.expected_versions = expectedVersions;
     return this.http.post<BatchChange>(`${API_BASE}/batches/${id}/retry`, body, { headers: this.getAuthHeaders() }).pipe(
       catchError(this.handleError)
     );

@@ -73,6 +73,7 @@ class EvidenceUpload(BaseModel):
     file_name: str
     file_ref: str
     remark: Optional[str] = None
+    expected_version: int = Field(..., description="客户端当前持有的版本号，用于乐观锁")
 
 
 class OrderTransition(BaseModel):
@@ -89,6 +90,7 @@ class BatchItemOut(BaseModel):
     error_message: Optional[str]
     retry_count: int
     processed_at: Optional[datetime]
+    order_version: Optional[int]
 
     class Config:
         from_attributes = True
@@ -121,6 +123,7 @@ class BatchCreateRequest(BaseModel):
 class BatchRetryRequest(BaseModel):
     batch_item_ids: List[int]
     remark: Optional[str] = None
+    expected_versions: Optional[dict] = Field(default=None, description="订单ID→期望版本号映射，用于乐观锁")
 
 
 class AuditLogOut(BaseModel):

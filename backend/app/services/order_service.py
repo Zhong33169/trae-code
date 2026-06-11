@@ -216,10 +216,16 @@ class OrderService:
         return order
 
     @staticmethod
-    def add_evidence(db: Session, order_id: int, evidence_data: dict, user: User) -> OrderEvidence:
+    def add_evidence(db: Session, order_id: int, evidence_data: dict, user: User, expected_version: Optional[int] = None) -> OrderEvidence:
         order = db.query(TransportOrder).filter(TransportOrder.id == order_id).first()
         if not order:
             raise OrderValidationError(f"订单不存在：id={order_id}", code="ORDER_NOT_FOUND")
+
+        if expected_version is not None and order.version != expected_version:
+            raise OrderValidationError(
+                f"版本冲突：订单已由其他操作修改（当前版本 v{order.version}，您持有版本 v{expected_version}），请刷新后重试",
+                code="VERSION_CONFLICT"
+            )
 
         evidence_type = evidence_data["evidence_type"]
         rule = EVIDENCE_UPLOAD_RULES.get(evidence_type)

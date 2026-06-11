@@ -538,6 +538,7 @@ export class OrderListComponent implements OnInit {
       driver: order.driver || '',
       receiver: order.receiver || '',
     };
+    this.resetEvidenceForm();
     this.api.listAuditLogs(order.id).subscribe((logs) => {
       this.auditLogs = logs;
     });
@@ -590,13 +591,23 @@ export class OrderListComponent implements OnInit {
       alert('请填写文件名和文件标识');
       return;
     }
-    this.api.uploadEvidence(this.selectedOrder.id, this.newEvidence).subscribe({
+    const payload = {
+      ...this.newEvidence,
+      expected_version: this.selectedOrder.version
+    };
+    this.api.uploadEvidence(this.selectedOrder.id, payload).subscribe({
       next: () => {
-        this.newEvidence = { evidence_type: 'entrustment', file_name: '', file_ref: '', remark: '' };
+        this.resetEvidenceForm();
         this.refreshOrders();
       },
       error: (e) => alert('上传失败：' + e.message),
     });
+  }
+
+  resetEvidenceForm() {
+    const types = this.availableEvidenceTypes;
+    const firstType = types.length > 0 ? types[0].value : 'entrustment';
+    this.newEvidence = { evidence_type: firstType as EvidenceType, file_name: '', file_ref: '', remark: '' };
   }
 
   executeTransition(target: OrderStatus, actionLabel: string) {

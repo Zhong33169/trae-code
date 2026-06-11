@@ -57,7 +57,7 @@ class BatchService:
         return batch
 
     @staticmethod
-    def execute_batch(db: Session, batch_id: int, user: User, remark: Optional[str] = None) -> BatchChange:
+    def execute_batch(db: Session, batch_id: int, user: User, remark: Optional[str] = None, expected_versions: Optional[dict] = None) -> BatchChange:
         batch = db.query(BatchChange).filter(BatchChange.id == batch_id).first()
         if not batch:
             raise OrderValidationError(f"批次不存在：id={batch_id}", code="BATCH_NOT_FOUND")
@@ -98,6 +98,32 @@ class BatchService:
                 )
                 db.add(fail_log)
                 continue
+
+            if expected_versions and str(item.order_id) in expected_versions:
+                exp_ver = expected_versions[str(item.order_id)]
+                if order.version != exp_ver:
+                    item.status = BatchItemStatus.FAILED
+                    item.error_message = f"[VERSION_CONFLICT] 版本冲突：订单 {order.order_no} 已由其他操作修改（当前版本 v{order.version}，您持有版本 v{exp_ver}），请刷新后重试"
+                    item.processed_at = datetime.utcnow()
+                    failed_count += 1
+                    fail_log = AuditLog(
+                        order_id=order.id,
+                        order_no=order.order_no,
+                        batch_id=batch.id,
+                        batch_no=batch.batch_no,
+                        user_id=user.id,
+                        username=user.username,
+                        action="batch_item_failed",
+                        old_status=order.status.value if order.status else None,
+                        new_status=None,
+                        old_version=order.version,
+                        new_version=order.version,
+                        detail=f"批量处理失败（版本冲突）：目标状态 {batch.target_status.value}",
+                        remark=remark,
+                        failure_reason=item.error_message,
+                    )
+                    db.add(fail_log)
+                    continue
 
             try:
                 old_status = order.status
@@ -176,7 +202,7 @@ class BatchService:
         return batch
 
     @staticmethod
-    def retry_failed_items(db: Session, batch_id: int, batch_item_ids: List[int], user: User, remark: Optional[str] = None) -> BatchChange:
+    def retry_failed_items(db: Session, batch_id: int, batch_item_ids: List[int], user: User, remark: Optional[str] = None, expected_versions: Optional[dict] = None) -> BatchChange:
         batch = db.query(BatchChange).filter(BatchChange.id == batch_id).first()
         if not batch:
             raise OrderValidationError(f"批次不存在：id={batch_id}", code="BATCH_NOT_FOUND")
@@ -239,4 +265,4 @@ class BatchService:
         db.commit()
         db.refresh(batch)
 
-        return BatchService.execute_batch(db, batch_id, user, remark=remark)
+        return BatchService.execute_batch(db, batch_id, user, remark=remark, expected_versions=expected_versions)

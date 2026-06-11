@@ -126,6 +126,12 @@ class BatchItem(Base):
     batch = relationship("BatchChange", back_populates="items")
     order = relationship("TransportOrder")
 
+    @property
+    def order_version(self):
+        if self.order:
+            return self.order.version
+        return None
+
 
 class AuditLog(Base):
     __tablename__ = "audit_logs"

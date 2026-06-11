@@ -62,6 +62,7 @@ export interface BatchItem {
   error_message?: string;
   retry_count: number;
   processed_at?: string;
+  order_version?: number;
 }
 
 export interface BatchChange {

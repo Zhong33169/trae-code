@@ -344,11 +344,22 @@ export class BatchListComponent implements OnInit {
     else this.selectedRetryIds.push(id);
   }
 
+  buildExpectedVersions(items: BatchItem[]): Record<number, number> {
+    const versions: Record<number, number> = {};
+    for (const item of items) {
+      if (item.order_version != null) {
+        versions[item.order_id] = item.order_version;
+      }
+    }
+    return versions;
+  }
+
   retryAllFailed() {
     if (!this.selectedBatch || !this.hasFailedItems) return;
     const ids = this.failedItems.map((i) => i.id);
     const remark = this.retryRemark;
-    this.api.retryBatch(this.selectedBatch.id, ids, remark).subscribe({
+    const expectedVersions = this.buildExpectedVersions(this.failedItems);
+    this.api.retryBatch(this.selectedBatch.id, ids, remark, expectedVersions).subscribe({
       next: (batch) => {
         this.selectBatch(batch);
         this.refresh();
@@ -362,7 +373,9 @@ export class BatchListComponent implements OnInit {
   retrySelected() {
     if (!this.selectedBatch || this.selectedRetryIds.length === 0) return;
     const remark = this.retryRemark;
-    this.api.retryBatch(this.selectedBatch.id, this.selectedRetryIds, remark).subscribe({
+    const selectedItems = this.selectedBatch.items.filter((i) => this.selectedRetryIds.includes(i.id));
+    const expectedVersions = this.buildExpectedVersions(selectedItems);
+    this.api.retryBatch(this.selectedBatch.id, this.selectedRetryIds, remark, expectedVersions).subscribe({
       next: (batch) => {
         this.selectBatch(batch);
         this.selectedRetryIds = [];
