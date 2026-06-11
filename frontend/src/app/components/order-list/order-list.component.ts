@@ -18,18 +18,38 @@ const STATUS_OPTIONS: { value: OrderStatus | ''; label: string }[] = [
   { value: 'rejected', label: '已驳回' },
 ];
 
-const NEXT_STATUS_MAP: Record<string, { target: OrderStatus; label: string; requires?: EvidenceType[] }[]> = {
-  'initiator:draft': [{ target: 'entrusted', label: '提交运输委托', requires: ['entrustment'] }],
-  'initiator:rejected': [{ target: 'draft', label: '退回草稿修改' }],
-  'handler:entrusted': [{ target: 'dispatched', label: '车辆调度确认', requires: ['dispatch'] }],
-  'handler:dispatched': [{ target: 'in_transit', label: '发车启运' }],
-  'handler:in_transit': [{ target: 'delivered', label: '签收回单', requires: ['receipt'] }],
-  'handler:rejected': [{ target: 'entrusted', label: '重新提交委托' }],
-  'reviewer:delivered': [{ target: 'reviewed', label: '复核归档' }],
-  'reviewer:entrusted': [{ target: 'rejected', label: '驳回（需补充）' }],
-  'reviewer:dispatched': [{ target: 'rejected', label: '驳回（需补充）' }],
-  'reviewer:in_transit': [{ target: 'rejected', label: '驳回（需补充）' }],
-  'reviewer:delivered_reject': [{ target: 'rejected', label: '驳回（需补充）' }],
+const EVIDENCE_UPLOAD_RULES: Record<string, { roles: string[]; statuses: string[]; label: string }> = {
+  entrustment: { roles: ['initiator'], statuses: ['draft', 'entrusted', 'rejected'], label: '运输委托单' },
+  dispatch: { roles: ['handler'], statuses: ['entrusted', 'dispatched', 'in_transit', 'rejected'], label: '车辆调度单' },
+  receipt: { roles: ['handler'], statuses: ['in_transit', 'delivered', 'rejected'], label: '签收回单' },
+};
+
+const EDIT_INFO_RULES: Record<string, Record<string, string[]>> = {
+  handler: {
+    plate_number: ['entrusted', 'dispatched', 'in_transit', 'rejected'],
+    driver: ['entrusted', 'dispatched', 'in_transit', 'rejected'],
+    receiver: ['in_transit', 'delivered', 'rejected'],
+  },
+  initiator: {
+    plate_number: ['draft', 'rejected'],
+    driver: ['draft', 'rejected'],
+  },
+};
+
+const NEXT_STATUS_MAP: Record<string, { target: OrderStatus; label: string; requires?: EvidenceType[]; variant?: string }[]> = {
+  'initiator:draft': [{ target: 'entrusted', label: '提交运输委托', requires: ['entrustment'], variant: 'primary' }],
+  'initiator:rejected': [{ target: 'draft', label: '退回草稿修改', variant: 'secondary' }],
+  'handler:entrusted': [{ target: 'dispatched', label: '车辆调度确认', requires: ['dispatch'], variant: 'primary' }],
+  'handler:dispatched': [{ target: 'in_transit', label: '发车启运', variant: 'primary' }],
+  'handler:in_transit': [{ target: 'delivered', label: '签收回单', requires: ['receipt'], variant: 'primary' }],
+  'handler:rejected': [{ target: 'entrusted', label: '重新提交委托', variant: 'secondary' }],
+  'reviewer:delivered': [
+    { target: 'reviewed', label: '复核归档', variant: 'primary' },
+    { target: 'rejected', label: '驳回（需补充）', variant: 'danger' },
+  ],
+  'reviewer:entrusted': [{ target: 'rejected', label: '驳回（需补充）', variant: 'danger' }],
+  'reviewer:dispatched': [{ target: 'rejected', label: '驳回（需补充）', variant: 'danger' }],
+  'reviewer:in_transit': [{ target: 'rejected', label: '驳回（需补充）', variant: 'danger' }],
 };
 
 @Component({
@@ -407,11 +427,16 @@ export class OrderListComponent implements OnInit {
   newEvidence = { evidence_type: 'entrustment' as EvidenceType, file_name: '', file_ref: '', remark: '' };
   batchForm = { target_status: 'entrusted' as OrderStatus };
 
-  availableEvidenceTypes: { value: EvidenceType; label: string }[] = [
-    { value: 'entrustment', label: '运输委托单' },
-    { value: 'dispatch', label: '车辆调度单' },
-    { value: 'receipt', label: '签收回单' },
-  ];
+  get availableEvidenceTypes(): { value: EvidenceType; label: string }[] {
+    if (!this.currentUser || !this.selectedOrder) return [];
+    const result: { value: EvidenceType; label: string }[] = [];
+    for (const [key, rule] of Object.entries(EVIDENCE_UPLOAD_RULES)) {
+      if (rule.roles.includes(this.currentUser.role) && rule.statuses.includes(this.selectedOrder.status)) {
+        result.push({ value: key as EvidenceType, label: rule.label });
+      }
+    }
+    return result;
+  }
 
   batchStatusOptions: { value: OrderStatus; label: string }[] = [
     { value: 'entrusted', label: '提交运输委托' },
@@ -438,20 +463,21 @@ export class OrderListComponent implements OnInit {
 
   get canEditDispatch() {
     if (!this.currentUser || !this.selectedOrder) return false;
-    return (
-      this.currentUser.role === 'handler' &&
-      ['entrusted', 'dispatched', 'in_transit', 'rejected'].includes(this.selectedOrder.status)
-    );
+    const roleRules = EDIT_INFO_RULES[this.currentUser.role];
+    if (!roleRules) return false;
+    return (roleRules['plate_number']?.includes(this.selectedOrder.status) || false)
+        || (roleRules['driver']?.includes(this.selectedOrder.status) || false);
   }
 
   get canEditReceipt() {
     if (!this.currentUser || !this.selectedOrder) return false;
-    return this.currentUser.role === 'handler' && ['in_transit', 'delivered'].includes(this.selectedOrder.status);
+    const roleRules = EDIT_INFO_RULES[this.currentUser.role];
+    if (!roleRules) return false;
+    return roleRules['receiver']?.includes(this.selectedOrder.status) || false;
   }
 
   get canUploadEvidence() {
-    if (!this.currentUser || !this.selectedOrder) return false;
-    return this.selectedOrder.status !== 'reviewed';
+    return this.availableEvidenceTypes.length > 0;
   }
 
   get canBatchAny() {

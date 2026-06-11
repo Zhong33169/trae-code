@@ -140,4 +140,5 @@ class AuditLog(Base):
     old_status = Column(String(50))
     new_status = Column(String(50))
     detail = Column(Text)
+    failure_reason = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow)

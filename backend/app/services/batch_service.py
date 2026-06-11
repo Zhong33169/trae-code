@@ -1,4 +1,6 @@
 from datetime import datetime
+import random
+import string
 from typing import List, Tuple
 from sqlalchemy.orm import Session
 from app.models.database import (
@@ -11,7 +13,8 @@ from app.services.order_service import OrderService, OrderValidationError
 class BatchService:
     @staticmethod
     def generate_batch_no() -> str:
-        return f"BATCH{datetime.now().strftime('%Y%m%d%H%M%S')}"
+        rand = ''.join(random.choices(string.ascii_uppercase + string.digits, k=4))
+        return f"BATCH{datetime.now().strftime('%Y%m%d%H%M%S')}{rand}"
 
     @staticmethod
     def create_batch(db: Session, order_ids: List[int], target_status: OrderStatus,
