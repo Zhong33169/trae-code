@@ -528,3 +528,108 @@ func GetStats(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"data": stats})
 }
+
+func GetManagerWorkbench(c *gin.Context) {
+	managerRole := "warehouse_manager"
+	var managerID int
+	var managerName string
+	database.DB.QueryRow("SELECT id, display_name FROM users WHERE role = ? LIMIT 1", managerRole).Scan(&managerID, &managerName)
+
+	categories := []string{"reviewing", "rejected", "returned", "conflict"}
+
+	evidenceCN := map[string]string{
+		"temperature": "温度记录",
+		"quality":     "质量检测报告",
+		"quantity":    "数量核实凭证",
+	}
+
+	actionLabels := map[string]bool{"advance": true, "approve": true, "correct": true}
+
+	wb := models.ManagerWorkbench{
+		UserID:    managerID,
+		UserName:  managerName,
+		TodoCount: 0,
+		Counters:  make(map[string]int),
+		Items:     make(map[string][]models.ManagerTodoItem),
+	}
+	for _, cat := range categories {
+		wb.Items[cat] = []models.ManagerTodoItem{}
+		wb.Counters[cat] = 0
+	}
+
+	for _, status := range categories {
+		rows, err := database.DB.Query(`
+			SELECT o.id, o.order_no, o.product_name, o.supplier, o.temperature_range,
+				   o.risk_level, o.status, o.current_handler_id, o.version,
+				   o.evidence_temperature, o.evidence_quality, o.evidence_quantity,
+				   o.updated_at, u.display_name, u.role
+			FROM orders o LEFT JOIN users u ON o.current_handler_id = u.id
+			WHERE o.status = ? ORDER BY o.updated_at DESC`, status)
+		if err != nil {
+			continue
+		}
+
+		items := []models.ManagerTodoItem{}
+		for rows.Next() {
+			var it models.ManagerTodoItem
+			var evTemp, evQual, evQty int
+			var handlerName, handlerRole sql.NullString
+			rows.Scan(&it.ID, &it.OrderNo, &it.ProductName, &it.Supplier, &it.TemperatureRange,
+				&it.RiskLevel, &it.Status, &it.CurrentHandlerID, &it.Version,
+				&evTemp, &evQual, &evQty, &it.UpdatedAt, &handlerName, &handlerRole)
+			it.EvidenceTemperature = evTemp == 1
+			it.EvidenceQuality = evQual == 1
+			it.EvidenceQuantity = evQty == 1
+			it.CurrentHandlerName = handlerName.String
+			it.CurrentHandlerRole = handlerRole.String
+			it.RiskLevelLabel = models.RiskLevelLabels[it.RiskLevel]
+			it.StatusLabel = models.StatusLabels[it.Status]
+
+			for _, ad := range models.StatusActions[it.Status] {
+				it.AvailableActions = append(it.AvailableActions, models.ActionDef{
+					Action: ad.Action, Label: ad.Label, Icon: ad.Icon,
+				})
+			}
+
+			req := models.RiskEvidenceRequirement[it.RiskLevel]
+			reqCN := []string{}
+			for _, r := range req {
+				reqCN = append(reqCN, evidenceCN[r])
+			}
+			it.RequiredEvidence = req
+			it.RequiredEvidenceCN = reqCN
+
+			var opAction, opOpinion, opResult, opHN sql.NullString
+			database.DB.QueryRow(`
+				SELECT action, opinion, result, handler_name FROM operation_records
+				WHERE order_id = ? AND result != 'conflict'
+				ORDER BY created_at DESC LIMIT 1`, it.ID).Scan(&opAction, &opOpinion, &opResult, &opHN)
+			it.LastOpinion = opOpinion.String
+			it.LastHandlerName = opHN.String
+			it.LastActionLabel = models.ActionLabels[opAction.String]
+			it.LastResultLabel = models.ResultLabels[opResult.String]
+
+			if status == "returned" {
+				_ = actionLabels
+			}
+
+			items = append(items, it)
+		}
+		rows.Close()
+
+		sort.Slice(items, func(i, j int) bool {
+			pi := models.RiskPriority[items[i].RiskLevel]
+			pj := models.RiskPriority[items[j].RiskLevel]
+			if pi != pj {
+				return pi < pj
+			}
+			return items[i].UpdatedAt.After(items[j].UpdatedAt)
+		})
+
+		wb.Items[status] = items
+		wb.Counters[status] = len(items)
+		wb.TodoCount += len(items)
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": wb})
+}

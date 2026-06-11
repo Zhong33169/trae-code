@@ -10,6 +10,7 @@
   <div class="nav-links">
     <a href="/" class="nav-link" class:active={$page.url.pathname === '/'}>仪表盘</a>
     <a href="/orders" class="nav-link" class:active={$page.url.pathname === '/orders'}>入库单队列</a>
+    <a href="/workbench" class="nav-link" class:active={$page.url.pathname === '/workbench'}>👔 经理工作台</a>
     <a href="/create" class="nav-link" class:active={$page.url.pathname === '/create'}>新建入库单</a>
   </div>
 </nav>

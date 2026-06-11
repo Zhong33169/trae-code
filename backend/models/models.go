@@ -81,6 +81,48 @@ type Stats struct {
 	RejectedCount  int            `json:"rejected_count"`
 }
 
+type ManagerTodoItem struct {
+	ID                  int      `json:"id"`
+	OrderNo             string   `json:"order_no"`
+	ProductName         string   `json:"product_name"`
+	Supplier            string   `json:"supplier"`
+	TemperatureRange    string   `json:"temperature_range"`
+	RiskLevel           string   `json:"risk_level"`
+	RiskLevelLabel      string   `json:"risk_level_label"`
+	Status              string   `json:"status"`
+	StatusLabel         string   `json:"status_label"`
+	CurrentHandlerID    int      `json:"current_handler_id"`
+	CurrentHandlerName  string   `json:"current_handler_name"`
+	CurrentHandlerRole  string   `json:"current_handler_role"`
+	Version             int      `json:"version"`
+	EvidenceTemperature bool     `json:"evidence_temperature"`
+	EvidenceQuality     bool     `json:"evidence_quality"`
+	EvidenceQuantity    bool     `json:"evidence_quantity"`
+	UpdatedAt           time.Time `json:"updated_at"`
+
+	AvailableActions    []ActionDef `json:"available_actions"`
+	LastOpinion         string      `json:"last_opinion"`
+	LastHandlerName     string      `json:"last_handler_name"`
+	LastActionLabel     string      `json:"last_action_label"`
+	LastResultLabel     string      `json:"last_result_label"`
+	RequiredEvidence    []string    `json:"required_evidence"`
+	RequiredEvidenceCN  []string    `json:"required_evidence_cn"`
+}
+
+type ActionDef struct {
+	Action string `json:"action"`
+	Label  string `json:"label"`
+	Icon   string `json:"icon"`
+}
+
+type ManagerWorkbench struct {
+	UserID    int                     `json:"user_id"`
+	UserName  string                  `json:"user_name"`
+	TodoCount int                     `json:"todo_count"`
+	Counters  map[string]int          `json:"counters"`
+	Items     map[string][]ManagerTodoItem `json:"items"`
+}
+
 var RoleLabels = map[string]string{
 	"warehouse_keeper":  "仓管员",
 	"temp_supervisor":   "温控主管",
@@ -185,4 +227,40 @@ var RiskEvidenceRequirement = map[string][]string{
 	"high":   {"temperature", "quality", "quantity"},
 	"medium": {"temperature"},
 	"low":    {},
+}
+
+type StatusActionDef struct {
+	Action string
+	Label  string
+	Icon   string
+}
+
+var StatusActions = map[string][]StatusActionDef{
+	"registered": {
+		{Action: "advance", Label: "推进至核验", Icon: "➡️"},
+		{Action: "return", Label: "退回补正", Icon: "↩️"},
+	},
+	"verifying": {
+		{Action: "advance", Label: "推进至经理复核", Icon: "➡️"},
+		{Action: "return", Label: "退回补正", Icon: "↩️"},
+	},
+	"reviewing": {
+		{Action: "approve", Label: "复核通过归档", Icon: "✅"},
+		{Action: "reject", Label: "经理驳回", Icon: "❌"},
+		{Action: "return", Label: "退回补正", Icon: "↩️"},
+	},
+	"rejected": {
+		{Action: "correct", Label: "经理特批回核验", Icon: "🔄"},
+		{Action: "force_fix", Label: "强制回登记重走", Icon: "🔧"},
+	},
+	"returned": {
+		{Action: "correct", Label: "补正提交", Icon: "🔄"},
+	},
+	"overdue": {
+		{Action: "advance", Label: "推进至核验", Icon: "➡️"},
+	},
+	"conflict": {
+		{Action: "force_fix", Label: "强制修复（回登记）", Icon: "🔧"},
+	},
+	"archived": {},
 }

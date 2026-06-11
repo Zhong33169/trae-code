@@ -52,6 +52,12 @@ export async function markOverdue() {
   return res.json();
 }
 
+export async function fetchManagerWorkbench() {
+  const res = await fetch(`${API_BASE}/manager/workbench`);
+  const json = await res.json();
+  return json.data || null;
+}
+
 export const STATUS_MAP = {
   registered: { label: '登记',     color: '#3b82f6', bg: '#eff6ff' },
   verifying:  { label: '核验',     color: '#f59e0b', bg: '#fffbeb' },

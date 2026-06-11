@@ -49,6 +49,7 @@ func main() {
 		api.GET("/orders/:id", handlers.GetOrder)
 		api.PUT("/orders/:id/process", handlers.ProcessOrder)
 		api.POST("/orders/mark-overdue", handlers.MarkOverdue)
+		api.GET("/manager/workbench", handlers.GetManagerWorkbench)
 	}
 
 	addr := fmt.Sprintf(":%d", *port)
