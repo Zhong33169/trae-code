@@ -146,7 +146,7 @@ func seedData() {
 	}{
 		{
 			Form: models.SubcontractForm{
-				ID: utils.NewID(), Code: "FB-2025-001", SubcontractorName: "安徽宏建劳务有限公司",
+				ID: utils.NewID(), Code: "FB-0001", SubcontractorName: "安徽宏建劳务有限公司",
 				ProjectName: "中央商务区A座", EntryDate: now.AddDate(0, 0, -5), WorkersCount: 35,
 				WorkContent: "主体结构钢筋绑扎", Status: models.StatusPendingForeman,
 				Version: 1, CreatedBy: clerkID, CurrentHandler: foremanID,
@@ -158,7 +158,7 @@ func seedData() {
 		},
 		{
 			Form: models.SubcontractForm{
-				ID: utils.NewID(), Code: "FB-2025-002", SubcontractorName: "江苏华宇装饰工程有限公司",
+				ID: utils.NewID(), Code: "FB-0002", SubcontractorName: "江苏华宇装饰工程有限公司",
 				ProjectName: "中央商务区A座", EntryDate: now.AddDate(0, 0, -3), WorkersCount: 20,
 				WorkContent: "室内精装修工程", Status: models.StatusPendingClerk,
 				Version: 2, CreatedBy: clerkID, CurrentHandler: clerkID,
@@ -171,7 +171,7 @@ func seedData() {
 		},
 		{
 			Form: models.SubcontractForm{
-				ID: utils.NewID(), Code: "FB-2025-003", SubcontractorName: "山东鲁建机电安装公司",
+				ID: utils.NewID(), Code: "FB-0003", SubcontractorName: "山东鲁建机电安装公司",
 				ProjectName: "中央商务区B座", EntryDate: now.AddDate(0, 0, -10), WorkersCount: 15,
 				WorkContent: "机电管线预埋", Status: models.StatusPendingManager,
 				Version: 3, CreatedBy: clerkID, CurrentHandler: managerID,
@@ -184,7 +184,7 @@ func seedData() {
 		},
 		{
 			Form: models.SubcontractForm{
-				ID: utils.NewID(), Code: "FB-2025-004", SubcontractorName: "浙江大地防水工程有限公司",
+				ID: utils.NewID(), Code: "FB-0004", SubcontractorName: "浙江大地防水工程有限公司",
 				ProjectName: "中央商务区A座", EntryDate: now.AddDate(0, 0, -20), WorkersCount: 8,
 				WorkContent: "地下室防水施工", Status: models.StatusVerified,
 				Version: 1, CreatedBy: clerkID, CurrentHandler: "",
@@ -197,7 +197,7 @@ func seedData() {
 		},
 		{
 			Form: models.SubcontractForm{
-				ID: utils.NewID(), Code: "FB-2025-005", SubcontractorName: "四川川渝脚手架工程队",
+				ID: utils.NewID(), Code: "FB-0005", SubcontractorName: "四川川渝脚手架工程队",
 				ProjectName: "中央商务区C座", EntryDate: now.AddDate(0, 0, -1), WorkersCount: 25,
 				WorkContent: "外脚手架搭设", Status: models.StatusDraft,
 				Version: 1, CreatedBy: clerkID, CurrentHandler: clerkID,
@@ -206,7 +206,7 @@ func seedData() {
 		},
 		{
 			Form: models.SubcontractForm{
-				ID: utils.NewID(), Code: "FB-2025-006", SubcontractorName: "河北冀东混凝土搅拌站",
+				ID: utils.NewID(), Code: "FB-0006", SubcontractorName: "河北冀东混凝土搅拌站",
 				ProjectName: "中央商务区B座", EntryDate: now.AddDate(0, 0, -2), WorkersCount: 5,
 				WorkContent: "商品混凝土供应", Status: models.StatusRejected,
 				Version: 1, CreatedBy: clerkID, CurrentHandler: clerkID,

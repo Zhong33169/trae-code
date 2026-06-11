@@ -1,14 +1,16 @@
 import React, { useState } from 'react'
+import { api } from '../api'
 
 const ACTION_LABELS = {
   clerk: [
-    { value: 'submit', label: '批量提交登记', status: ['draft', 'pending_clerk', 'rejected'] }
+    { value: 'submit', label: '批量提交登记' },
+    { value: 'archive', label: '批量归档' }
   ],
   foreman: [
-    { value: 'verify_foreman', label: '批量现场核验通过', status: ['pending_foreman'] }
+    { value: 'verify_foreman', label: '批量现场核验通过' }
   ],
   manager: [
-    { value: 'confirm_manager', label: '批量确认通过', status: ['pending_manager'] }
+    { value: 'confirm_manager', label: '批量确认通过' }
   ]
 }
 

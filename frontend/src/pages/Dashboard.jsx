@@ -6,6 +6,7 @@ import EvidencePanel from '../components/EvidencePanel'
 import FormDetail from '../components/FormDetail'
 import CreateFormModal from '../components/CreateFormModal'
 import BatchToolbar from '../components/BatchToolbar'
+import BatchResultModal from '../components/BatchResultModal'
 
 const ROLE_LABELS = {
   clerk: '资料员',
@@ -34,13 +35,14 @@ export default function Dashboard() {
   const [showCreate, setShowCreate] = useState(false)
   const [loading, setLoading] = useState(true)
   const [notification, setNotification] = useState(null)
+  const [batchResult, setBatchResult] = useState(null)
 
   const showNotification = (message, type = 'info') => {
     setNotification({ message, type })
     setTimeout(() => setNotification(null), 3500)
   }
 
-  const loadData = useCallback(async () => {
+  const refreshAll = useCallback(async (keepSelection = true) => {
     setLoading(true)
     try {
       const [formsData, projectsData] = await Promise.all([
@@ -49,7 +51,7 @@ export default function Dashboard() {
       ])
       setForms(formsData)
       setProjects(projectsData)
-      if (selectedId) {
+      if (keepSelection && selectedId) {
         try {
           const detail = await api.getForm(selectedId)
           setSelectedForm(detail)
@@ -65,8 +67,8 @@ export default function Dashboard() {
   }, [filters, selectedId])
 
   useEffect(() => {
-    loadData()
-  }, [loadData])
+    refreshAll()
+  }, [refreshAll])
 
   const handleSelectForm = async (id) => {
     setSelectedId(id)
@@ -97,7 +99,7 @@ export default function Dashboard() {
       })
       showNotification('操作成功', 'success')
       setSelectedIds(new Set())
-      loadData()
+      refreshAll()
     } catch (err) {
       showNotification(`${err.data?.reason || err.data?.message || err.message}`, 'error')
     }
@@ -110,10 +112,13 @@ export default function Dashboard() {
         action,
         reason
       })
-      showNotification(`批量处理完成：成功${result.success_count}，失败${result.fail_count}`,
-        result.fail_count > 0 ? 'warning' : 'success')
       setSelectedIds(new Set())
-      loadData()
+      refreshAll()
+      if (result.fail_count > 0) {
+        setBatchResult(result)
+      } else {
+        showNotification(`批量处理完成：全部 ${result.success_count} 项成功`, 'success')
+      }
     } catch (err) {
       showNotification(err.data?.message || err.message, 'error')
     }
@@ -123,7 +128,7 @@ export default function Dashboard() {
     try {
       await api.uploadEvidence(ev)
       showNotification('证据上传成功', 'success')
-      loadData()
+      refreshAll()
     } catch (err) {
       showNotification(`${err.data?.reason}: ${err.data?.message || ''}`, 'error')
     }
@@ -218,7 +223,7 @@ export default function Dashboard() {
               formData={selectedForm}
               user={user}
               onProcess={handleProcess}
-              onRefresh={loadData}
+              onRefresh={refreshAll}
               onNotify={showNotification}
             />
           ) : (
@@ -254,8 +259,15 @@ export default function Dashboard() {
           onCreated={() => {
             setShowCreate(false)
             showNotification('创建成功', 'success')
-            loadData()
+            refreshAll()
           }}
+        />
+      )}
+
+      {batchResult && (
+        <BatchResultModal
+          result={batchResult}
+          onClose={() => setBatchResult(null)}
         />
       )}
     </div>

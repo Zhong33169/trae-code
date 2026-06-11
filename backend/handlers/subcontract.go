@@ -16,6 +16,14 @@ import (
 	"subcontract-system/utils"
 )
 
+type BatchItemResult struct {
+	FormID  string `json:"form_id"`
+	Code    string `json:"code"`
+	Success bool   `json:"success"`
+	Message string `json:"message,omitempty"`
+	Reason  string `json:"reason,omitempty"`
+}
+
 func scanForm(row *sql.Row) (*models.SubcontractForm, error) {
 	var f models.SubcontractForm
 	var rejectReason sql.NullString
@@ -32,13 +40,6 @@ func getFormByID(id string) (*models.SubcontractForm, error) {
 	row := db.DB.QueryRow(`SELECT id, code, subcontractor_name, project_name, entry_date, workers_count,
 		work_content, status, version, created_by, created_at, updated_at, current_handler, reject_reason
 		FROM subcontract_forms WHERE id = ?`, id)
-	return scanForm(row)
-}
-
-func getFormByCode(code string) (*models.SubcontractForm, error) {
-	row := db.DB.QueryRow(`SELECT id, code, subcontractor_name, project_name, entry_date, workers_count,
-		work_content, status, version, created_by, created_at, updated_at, current_handler, reject_reason
-		FROM subcontract_forms WHERE code = ?`, code)
 	return scanForm(row)
 }
 
@@ -140,6 +141,210 @@ func hasEvidenceType(evidences []models.Evidence, et models.EvidenceType) bool {
 	return false
 }
 
+func processFormCore(formID, action, userID string, userRole models.Role, expectedVersion int, reason string) (*models.SubcontractForm, *models.ErrorResponse) {
+	form, err := getFormByID(formID)
+	if err == sql.ErrNoRows {
+		return nil, &models.ErrorResponse{Code: 404, Message: "分包进场单不存在", Reason: "form_not_found"}
+	}
+	if err != nil {
+		return nil, &models.ErrorResponse{Code: 500, Message: "查询失败", Reason: "db_error"}
+	}
+
+	if expectedVersion > 0 && expectedVersion != form.Version {
+		return form, &models.ErrorResponse{
+			Code:    409,
+			Message: fmt.Sprintf("表单版本冲突，当前版本为%d，您提交的是%d", form.Version, expectedVersion),
+			Reason:  "version_conflict",
+		}
+	}
+
+	switch action {
+	case "submit":
+		if userRole != models.RoleClerk {
+			return form, &models.ErrorResponse{Code: 403, Message: "只有资料员可以提交登记", Reason: "wrong_role_submit"}
+		}
+		if form.Status != models.StatusDraft && form.Status != models.StatusRejected && form.Status != models.StatusPendingClerk {
+			return form, &models.ErrorResponse{Code: 400, Message: fmt.Sprintf("当前状态%s不允许提交登记", form.Status), Reason: "wrong_status_submit"}
+		}
+		evidences, _ := getEvidencesByFormID(form.ID)
+		required := getRequiredEvidenceTypes(models.StatusPendingForeman)
+		var missing []string
+		for _, et := range required {
+			if !hasEvidenceType(evidences, et) {
+				missing = append(missing, string(et))
+			}
+		}
+		if len(missing) > 0 {
+			return form, &models.ErrorResponse{Code: 400, Message: fmt.Sprintf("缺少必要证据: %s", strings.Join(missing, ", ")), Reason: "missing_evidence_registration"}
+		}
+		var foremanID string
+		db.DB.QueryRow("SELECT id FROM users WHERE role = 'foreman' LIMIT 1").Scan(&foremanID)
+		newVersion := form.Version + 1
+		newStatus := models.StatusPendingForeman
+		oldStatus := form.Status
+		db.DB.Exec(`UPDATE subcontract_forms SET status=?, version=?, current_handler=?, updated_at=?, reject_reason='' WHERE id=?`,
+			newStatus, newVersion, foremanID, time.Now(), form.ID)
+		insertAuditLog(form.ID, userID, "submit", string(oldStatus), string(newStatus), "资料员提交登记，转施工负责人核验")
+		insertSupplement(form.ID, userID, "submit", map[string]string{
+			"from_version": fmt.Sprintf("%d", form.Version),
+			"to_version":   fmt.Sprintf("%d", newVersion),
+		}, "提交登记")
+		form.Status = newStatus
+		form.Version = newVersion
+		form.CurrentHandler = foremanID
+		form.RejectReason = ""
+
+	case "verify_foreman":
+		if userRole != models.RoleForeman {
+			return form, &models.ErrorResponse{Code: 403, Message: "只有施工负责人可以执行现场核验", Reason: "wrong_role_foreman_verify"}
+		}
+		if form.Status != models.StatusPendingForeman {
+			return form, &models.ErrorResponse{Code: 400, Message: fmt.Sprintf("当前状态%s不是待施工负责人核验", form.Status), Reason: "wrong_status_foreman_verify"}
+		}
+		if form.CurrentHandler != userID {
+			return form, &models.ErrorResponse{Code: 403, Message: "该表单不由您处理，请等待分配", Reason: "not_current_handler"}
+		}
+		evidences, _ := getEvidencesByFormID(form.ID)
+		if !hasEvidenceType(evidences, models.EvidenceInspection) {
+			return form, &models.ErrorResponse{Code: 400, Message: "缺少现场核验证据，请先上传核验记录", Reason: "missing_evidence_inspection"}
+		}
+		var managerID string
+		db.DB.QueryRow("SELECT id FROM users WHERE role = 'manager' LIMIT 1").Scan(&managerID)
+		newVersion := form.Version + 1
+		newStatus := models.StatusPendingManager
+		oldStatus := form.Status
+		db.DB.Exec(`UPDATE subcontract_forms SET status=?, version=?, current_handler=?, updated_at=? WHERE id=?`,
+			newStatus, newVersion, managerID, time.Now(), form.ID)
+		insertAuditLog(form.ID, userID, "verify_foreman", string(oldStatus), string(newStatus), "施工负责人现场核验通过，转项目经理确认")
+		insertSupplement(form.ID, userID, "verify_foreman", map[string]string{
+			"from_version": fmt.Sprintf("%d", form.Version),
+			"to_version":   fmt.Sprintf("%d", newVersion),
+		}, "现场核验通过")
+		form.Status = newStatus
+		form.Version = newVersion
+		form.CurrentHandler = managerID
+
+	case "reject_foreman":
+		if userRole != models.RoleForeman {
+			return form, &models.ErrorResponse{Code: 403, Message: "只有施工负责人可以驳回", Reason: "wrong_role_foreman_reject"}
+		}
+		if form.Status != models.StatusPendingForeman {
+			return form, &models.ErrorResponse{Code: 400, Message: fmt.Sprintf("当前状态%s不允许驳回", form.Status), Reason: "wrong_status_foreman_reject"}
+		}
+		if form.CurrentHandler != userID {
+			return form, &models.ErrorResponse{Code: 403, Message: "该表单不由您处理", Reason: "not_current_handler"}
+		}
+		if strings.TrimSpace(reason) == "" {
+			return form, &models.ErrorResponse{Code: 400, Message: "驳回必须填写原因", Reason: "missing_reject_reason"}
+		}
+		var clerkID string
+		db.DB.QueryRow("SELECT id FROM users WHERE role = 'clerk' LIMIT 1").Scan(&clerkID)
+		newVersion := form.Version + 1
+		newStatus := models.StatusPendingClerk
+		oldStatus := form.Status
+		db.DB.Exec(`UPDATE subcontract_forms SET status=?, version=?, current_handler=?, updated_at=?, reject_reason=? WHERE id=?`,
+			newStatus, newVersion, clerkID, time.Now(), reason, form.ID)
+		insertAuditLog(form.ID, userID, "reject_foreman", string(oldStatus), string(newStatus), "施工负责人核验驳回: "+reason)
+		insertSupplement(form.ID, userID, "reject_foreman", map[string]string{"reason": reason}, reason)
+		form.Status = newStatus
+		form.Version = newVersion
+		form.CurrentHandler = clerkID
+		form.RejectReason = reason
+
+	case "confirm_manager":
+		if userRole != models.RoleManager {
+			return form, &models.ErrorResponse{Code: 403, Message: "只有项目经理可以确认", Reason: "wrong_role_manager_confirm"}
+		}
+		if form.Status != models.StatusPendingManager {
+			return form, &models.ErrorResponse{Code: 400, Message: fmt.Sprintf("当前状态%s不是待项目经理确认", form.Status), Reason: "wrong_status_manager_confirm"}
+		}
+		if form.CurrentHandler != userID {
+			return form, &models.ErrorResponse{Code: 403, Message: "该表单不由您处理", Reason: "not_current_handler"}
+		}
+		evidences, _ := getEvidencesByFormID(form.ID)
+		required := getRequiredEvidenceTypes(models.StatusVerified)
+		var missing []string
+		for _, et := range required {
+			if !hasEvidenceType(evidences, et) {
+				missing = append(missing, string(et))
+			}
+		}
+		if len(missing) > 0 {
+			return form, &models.ErrorResponse{Code: 400, Message: fmt.Sprintf("缺少必要证据: %s", strings.Join(missing, ", ")), Reason: "missing_evidence_final"}
+		}
+		newVersion := form.Version + 1
+		newStatus := models.StatusVerified
+		oldStatus := form.Status
+		db.DB.Exec(`UPDATE subcontract_forms SET status=?, version=?, current_handler='', updated_at=? WHERE id=?`,
+			newStatus, newVersion, time.Now(), form.ID)
+		insertAuditLog(form.ID, userID, "confirm_manager", string(oldStatus), string(newStatus), "项目经理确认通过")
+		insertSupplement(form.ID, userID, "confirm_manager", map[string]string{
+			"from_version": fmt.Sprintf("%d", form.Version),
+			"to_version":   fmt.Sprintf("%d", newVersion),
+		}, "项目经理确认通过")
+		form.Status = newStatus
+		form.Version = newVersion
+		form.CurrentHandler = ""
+
+	case "reject_manager":
+		if userRole != models.RoleManager {
+			return form, &models.ErrorResponse{Code: 403, Message: "只有项目经理可以驳回", Reason: "wrong_role_manager_reject"}
+		}
+		if form.Status != models.StatusPendingManager {
+			return form, &models.ErrorResponse{Code: 400, Message: fmt.Sprintf("当前状态%s不允许驳回", form.Status), Reason: "wrong_status_manager_reject"}
+		}
+		if form.CurrentHandler != userID {
+			return form, &models.ErrorResponse{Code: 403, Message: "该表单不由您处理", Reason: "not_current_handler"}
+		}
+		if strings.TrimSpace(reason) == "" {
+			return form, &models.ErrorResponse{Code: 400, Message: "驳回必须填写原因", Reason: "missing_reject_reason"}
+		}
+		var clerkID string
+		db.DB.QueryRow("SELECT id FROM users WHERE role = 'clerk' LIMIT 1").Scan(&clerkID)
+		newVersion := form.Version + 1
+		newStatus := models.StatusPendingClerk
+		oldStatus := form.Status
+		db.DB.Exec(`UPDATE subcontract_forms SET status=?, version=?, current_handler=?, updated_at=?, reject_reason=? WHERE id=?`,
+			newStatus, newVersion, clerkID, time.Now(), reason, form.ID)
+		insertAuditLog(form.ID, userID, "reject_manager", string(oldStatus), string(newStatus), "项目经理驳回: "+reason)
+		insertSupplement(form.ID, userID, "reject_manager", map[string]string{"reason": reason}, reason)
+		form.Status = newStatus
+		form.Version = newVersion
+		form.CurrentHandler = clerkID
+		form.RejectReason = reason
+
+	case "archive":
+		if userRole != models.RoleClerk {
+			return form, &models.ErrorResponse{Code: 403, Message: "只有资料员可以归档", Reason: "wrong_role_archive"}
+		}
+		if form.Status != models.StatusVerified {
+			return form, &models.ErrorResponse{Code: 400, Message: fmt.Sprintf("当前状态%s不允许归档，需先通过确认", form.Status), Reason: "wrong_status_archive"}
+		}
+		newStatus := models.StatusArchived
+		oldStatus := form.Status
+		db.DB.Exec(`UPDATE subcontract_forms SET status=?, updated_at=? WHERE id=?`,
+			newStatus, time.Now(), form.ID)
+		insertAuditLog(form.ID, userID, "archive", string(oldStatus), string(newStatus), "资料员归档")
+		insertSupplement(form.ID, userID, "archive", map[string]string{}, "资料归档")
+		form.Status = newStatus
+
+	case "update_draft":
+		if userRole != models.RoleClerk {
+			return form, &models.ErrorResponse{Code: 403, Message: "只有资料员可以编辑草稿", Reason: "wrong_role_update_draft"}
+		}
+		if form.Status != models.StatusDraft && form.Status != models.StatusPendingClerk && form.Status != models.StatusRejected {
+			return form, &models.ErrorResponse{Code: 400, Message: fmt.Sprintf("当前状态%s不允许编辑", form.Status), Reason: "wrong_status_update"}
+		}
+		db.DB.Exec(`UPDATE subcontract_forms SET updated_at=? WHERE id=?`, time.Now(), form.ID)
+		insertSupplement(form.ID, userID, "update_draft", map[string]string{}, "编辑表单内容")
+
+	default:
+		return form, &models.ErrorResponse{Code: 400, Message: fmt.Sprintf("未知操作: %s", action), Reason: "unknown_action"}
+	}
+
+	return form, nil
+}
+
 func ListForms(c echo.Context) error {
 	userRole := middleware.GetUserRole(c)
 	userID := middleware.GetUserID(c)
@@ -223,6 +428,21 @@ func GetFormDetail(c echo.Context) error {
 	})
 }
 
+func nextFormCode() string {
+	var maxCode string
+	db.DB.QueryRow("SELECT code FROM subcontract_forms ORDER BY code DESC LIMIT 1").Scan(&maxCode)
+	nextNum := 1
+	if maxCode != "" {
+		parts := strings.Split(maxCode, "-")
+		if len(parts) >= 2 {
+			lastPart := parts[len(parts)-1]
+			fmt.Sscanf(lastPart, "%d", &nextNum)
+			nextNum++
+		}
+	}
+	return fmt.Sprintf("FB-%04d", nextNum)
+}
+
 func CreateForm(c echo.Context) error {
 	userRole := middleware.GetUserRole(c)
 	if userRole != models.RoleClerk {
@@ -259,16 +479,7 @@ func CreateForm(c echo.Context) error {
 		entryDate = time.Now()
 	}
 
-	var existingID string
-	db.DB.QueryRow("SELECT id FROM subcontract_forms WHERE code LIKE 'FB-%' ORDER BY code DESC LIMIT 1").Scan(&existingID)
-	var nextNum = 1
-	if existingID != "" {
-		fmt.Sscanf(existingID, "FB-%d", &nextNum)
-	}
-	code := fmt.Sprintf("FB-%04d", nextNum)
-
-	var clerkID string
-	db.DB.QueryRow("SELECT id FROM users WHERE role = 'clerk' LIMIT 1").Scan(&clerkID)
+	code := nextFormCode()
 
 	form := models.SubcontractForm{
 		ID:                utils.NewID(),
@@ -318,339 +529,12 @@ func ProcessForm(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, models.ErrorResponse{Code: 400, Message: "表单ID不能为空", Reason: "missing_form_id"})
 	}
 
-	form, err := getFormByID(req.FormID)
-	if err == sql.ErrNoRows {
-		return c.JSON(http.StatusNotFound, models.ErrorResponse{Code: 404, Message: "分包进场单不存在", Reason: "form_not_found"})
-	}
-	if err != nil {
-		return c.JSON(http.StatusInternalServerError, models.ErrorResponse{Code: 500, Message: "查询失败"})
-	}
-
-	if req.ExpectedVersion > 0 && req.ExpectedVersion != form.Version {
-		return c.JSON(http.StatusConflict, models.ErrorResponse{
-			Code:    409,
-			Message: fmt.Sprintf("表单版本冲突，当前版本为%d，您提交的是%d", form.Version, req.ExpectedVersion),
-			Reason:  "version_conflict",
-		})
-	}
-
 	userID := middleware.GetUserID(c)
 	userRole := middleware.GetUserRole(c)
 
-	if req.Action == "submit" {
-		if userRole != models.RoleClerk {
-			return c.JSON(http.StatusForbidden, models.ErrorResponse{
-				Code:    403,
-				Message: "只有资料员可以提交登记",
-				Reason:  "wrong_role_submit",
-			})
-		}
-		if form.Status != models.StatusDraft && form.Status != models.StatusRejected && form.Status != models.StatusPendingClerk {
-			return c.JSON(http.StatusBadRequest, models.ErrorResponse{
-				Code:    400,
-				Message: fmt.Sprintf("当前状态%s不允许提交登记", form.Status),
-				Reason:  "wrong_status_submit",
-			})
-		}
-
-		evidences, _ := getEvidencesByFormID(form.ID)
-		required := getRequiredEvidenceTypes(models.StatusPendingForeman)
-		missing := []string{}
-		for _, et := range required {
-			if !hasEvidenceType(evidences, et) {
-				missing = append(missing, string(et))
-			}
-		}
-		if len(missing) > 0 {
-			return c.JSON(http.StatusBadRequest, models.ErrorResponse{
-				Code:    400,
-				Message: fmt.Sprintf("缺少必要证据: %s", strings.Join(missing, ", ")),
-				Reason:  "missing_evidence_registration",
-			})
-		}
-
-		var foremanID string
-		db.DB.QueryRow("SELECT id FROM users WHERE role = 'foreman' LIMIT 1").Scan(&foremanID)
-
-		newVersion := form.Version + 1
-		newStatus := models.StatusPendingForeman
-		oldStatus := form.Status
-
-		db.DB.Exec(`UPDATE subcontract_forms SET status=?, version=?, current_handler=?, updated_at=?, reject_reason='' WHERE id=?`,
-			newStatus, newVersion, foremanID, time.Now(), form.ID)
-
-		insertAuditLog(form.ID, userID, "submit", string(oldStatus), string(newStatus),
-			"资料员提交登记，转施工负责人核验")
-		insertSupplement(form.ID, userID, "submit", map[string]string{
-			"from_version": fmt.Sprintf("%d", form.Version),
-			"to_version":   fmt.Sprintf("%d", newVersion),
-		}, "提交登记")
-
-		form.Status = newStatus
-		form.Version = newVersion
-		form.CurrentHandler = foremanID
-		form.RejectReason = ""
-
-	} else if req.Action == "verify_foreman" {
-		if userRole != models.RoleForeman {
-			return c.JSON(http.StatusForbidden, models.ErrorResponse{
-				Code:    403,
-				Message: "只有施工负责人可以执行现场核验",
-				Reason:  "wrong_role_foreman_verify",
-			})
-		}
-		if form.Status != models.StatusPendingForeman {
-			return c.JSON(http.StatusBadRequest, models.ErrorResponse{
-				Code:    400,
-				Message: fmt.Sprintf("当前状态%s不是待施工负责人核验", form.Status),
-				Reason:  "wrong_status_foreman_verify",
-			})
-		}
-		if form.CurrentHandler != userID {
-			return c.JSON(http.StatusForbidden, models.ErrorResponse{
-				Code:    403,
-				Message: "该表单不由您处理，请等待分配",
-				Reason:  "not_current_handler",
-			})
-		}
-
-		evidences, _ := getEvidencesByFormID(form.ID)
-		if !hasEvidenceType(evidences, models.EvidenceInspection) {
-			return c.JSON(http.StatusBadRequest, models.ErrorResponse{
-				Code:    400,
-				Message: "缺少现场核验证据，请先上传核验记录",
-				Reason:  "missing_evidence_inspection",
-			})
-		}
-
-		var managerID string
-		db.DB.QueryRow("SELECT id FROM users WHERE role = 'manager' LIMIT 1").Scan(&managerID)
-
-		newVersion := form.Version + 1
-		newStatus := models.StatusPendingManager
-		oldStatus := form.Status
-
-		db.DB.Exec(`UPDATE subcontract_forms SET status=?, version=?, current_handler=?, updated_at=? WHERE id=?`,
-			newStatus, newVersion, managerID, time.Now(), form.ID)
-
-		insertAuditLog(form.ID, userID, "verify_foreman", string(oldStatus), string(newStatus),
-			"施工负责人现场核验通过，转项目经理确认")
-		insertSupplement(form.ID, userID, "verify_foreman", map[string]string{
-			"from_version": fmt.Sprintf("%d", form.Version),
-			"to_version":   fmt.Sprintf("%d", newVersion),
-		}, "现场核验通过")
-
-		form.Status = newStatus
-		form.Version = newVersion
-		form.CurrentHandler = managerID
-
-	} else if req.Action == "reject_foreman" {
-		if userRole != models.RoleForeman {
-			return c.JSON(http.StatusForbidden, models.ErrorResponse{
-				Code:    403,
-				Message: "只有施工负责人可以驳回",
-				Reason:  "wrong_role_foreman_reject",
-			})
-		}
-		if form.Status != models.StatusPendingForeman {
-			return c.JSON(http.StatusBadRequest, models.ErrorResponse{
-				Code:    400,
-				Message: fmt.Sprintf("当前状态%s不允许驳回", form.Status),
-				Reason:  "wrong_status_foreman_reject",
-			})
-		}
-		if strings.TrimSpace(req.Reason) == "" {
-			return c.JSON(http.StatusBadRequest, models.ErrorResponse{
-				Code:    400,
-				Message: "驳回必须填写原因",
-				Reason:  "missing_reject_reason",
-			})
-		}
-
-		var clerkID string
-		db.DB.QueryRow("SELECT id FROM users WHERE role = 'clerk' LIMIT 1").Scan(&clerkID)
-
-		newVersion := form.Version + 1
-		newStatus := models.StatusPendingClerk
-		oldStatus := form.Status
-
-		db.DB.Exec(`UPDATE subcontract_forms SET status=?, version=?, current_handler=?, updated_at=?, reject_reason=? WHERE id=?`,
-			newStatus, newVersion, clerkID, time.Now(), req.Reason, form.ID)
-
-		insertAuditLog(form.ID, userID, "reject_foreman", string(oldStatus), string(newStatus),
-			"施工负责人核验驳回: "+req.Reason)
-		insertSupplement(form.ID, userID, "reject_foreman", map[string]string{
-			"reason": req.Reason,
-		}, req.Reason)
-
-		form.Status = newStatus
-		form.Version = newVersion
-		form.CurrentHandler = clerkID
-		form.RejectReason = req.Reason
-
-	} else if req.Action == "confirm_manager" {
-		if userRole != models.RoleManager {
-			return c.JSON(http.StatusForbidden, models.ErrorResponse{
-				Code:    403,
-				Message: "只有项目经理可以确认",
-				Reason:  "wrong_role_manager_confirm",
-			})
-		}
-		if form.Status != models.StatusPendingManager {
-			return c.JSON(http.StatusBadRequest, models.ErrorResponse{
-				Code:    400,
-				Message: fmt.Sprintf("当前状态%s不是待项目经理确认", form.Status),
-				Reason:  "wrong_status_manager_confirm",
-			})
-		}
-		if form.CurrentHandler != userID {
-			return c.JSON(http.StatusForbidden, models.ErrorResponse{
-				Code:    403,
-				Message: "该表单不由您处理",
-				Reason:  "not_current_handler",
-			})
-		}
-
-		evidences, _ := getEvidencesByFormID(form.ID)
-		required := getRequiredEvidenceTypes(models.StatusVerified)
-		missing := []string{}
-		for _, et := range required {
-			if !hasEvidenceType(evidences, et) {
-				missing = append(missing, string(et))
-			}
-		}
-		if len(missing) > 0 {
-			return c.JSON(http.StatusBadRequest, models.ErrorResponse{
-				Code:    400,
-				Message: fmt.Sprintf("缺少必要证据: %s", strings.Join(missing, ", ")),
-				Reason:  "missing_evidence_final",
-			})
-		}
-
-		newVersion := form.Version + 1
-		newStatus := models.StatusVerified
-		oldStatus := form.Status
-
-		db.DB.Exec(`UPDATE subcontract_forms SET status=?, version=?, current_handler='', updated_at=? WHERE id=?`,
-			newStatus, newVersion, time.Now(), form.ID)
-
-		insertAuditLog(form.ID, userID, "confirm_manager", string(oldStatus), string(newStatus),
-			"项目经理确认通过")
-		insertSupplement(form.ID, userID, "confirm_manager", map[string]string{
-			"from_version": fmt.Sprintf("%d", form.Version),
-			"to_version":   fmt.Sprintf("%d", newVersion),
-		}, "项目经理确认通过")
-
-		form.Status = newStatus
-		form.Version = newVersion
-		form.CurrentHandler = ""
-
-	} else if req.Action == "reject_manager" {
-		if userRole != models.RoleManager {
-			return c.JSON(http.StatusForbidden, models.ErrorResponse{
-				Code:    403,
-				Message: "只有项目经理可以驳回",
-				Reason:  "wrong_role_manager_reject",
-			})
-		}
-		if form.Status != models.StatusPendingManager {
-			return c.JSON(http.StatusBadRequest, models.ErrorResponse{
-				Code:    400,
-				Message: fmt.Sprintf("当前状态%s不允许驳回", form.Status),
-				Reason:  "wrong_status_manager_reject",
-			})
-		}
-		if strings.TrimSpace(req.Reason) == "" {
-			return c.JSON(http.StatusBadRequest, models.ErrorResponse{
-				Code:    400,
-				Message: "驳回必须填写原因",
-				Reason:  "missing_reject_reason",
-			})
-		}
-
-		var clerkID string
-		db.DB.QueryRow("SELECT id FROM users WHERE role = 'clerk' LIMIT 1").Scan(&clerkID)
-
-		newVersion := form.Version + 1
-		newStatus := models.StatusPendingClerk
-		oldStatus := form.Status
-
-		db.DB.Exec(`UPDATE subcontract_forms SET status=?, version=?, current_handler=?, updated_at=?, reject_reason=? WHERE id=?`,
-			newStatus, newVersion, clerkID, time.Now(), req.Reason, form.ID)
-
-		insertAuditLog(form.ID, userID, "reject_manager", string(oldStatus), string(newStatus),
-			"项目经理驳回: "+req.Reason)
-		insertSupplement(form.ID, userID, "reject_manager", map[string]string{
-			"reason": req.Reason,
-		}, req.Reason)
-
-		form.Status = newStatus
-		form.Version = newVersion
-		form.CurrentHandler = clerkID
-		form.RejectReason = req.Reason
-
-	} else if req.Action == "archive" {
-		if userRole != models.RoleClerk {
-			return c.JSON(http.StatusForbidden, models.ErrorResponse{
-				Code:    403,
-				Message: "只有资料员可以归档",
-				Reason:  "wrong_role_archive",
-			})
-		}
-		if form.Status != models.StatusVerified {
-			return c.JSON(http.StatusBadRequest, models.ErrorResponse{
-				Code:    400,
-				Message: fmt.Sprintf("当前状态%s不允许归档，需先通过确认", form.Status),
-				Reason:  "wrong_status_archive",
-			})
-		}
-
-		newStatus := models.StatusArchived
-		oldStatus := form.Status
-
-		db.DB.Exec(`UPDATE subcontract_forms SET status=?, updated_at=? WHERE id=?`,
-			newStatus, time.Now(), form.ID)
-
-		insertAuditLog(form.ID, userID, "archive", string(oldStatus), string(newStatus), "资料员归档")
-		insertSupplement(form.ID, userID, "archive", map[string]string{}, "资料归档")
-
-		form.Status = newStatus
-
-	} else if req.Action == "update_draft" {
-		if userRole != models.RoleClerk {
-			return c.JSON(http.StatusForbidden, models.ErrorResponse{
-				Code:    403,
-				Message: "只有资料员可以编辑草稿",
-				Reason:  "wrong_role_update_draft",
-			})
-		}
-		if form.Status != models.StatusDraft && form.Status != models.StatusPendingClerk && form.Status != models.StatusRejected {
-			return c.JSON(http.StatusBadRequest, models.ErrorResponse{
-				Code:    400,
-				Message: fmt.Sprintf("当前状态%s不允许编辑", form.Status),
-				Reason:  "wrong_status_update",
-			})
-		}
-
-		details := map[string]string{}
-		if req.Details != nil {
-			fields := []string{"subcontractor_name", "project_name", "workers_count", "work_content"}
-			for _, f := range fields {
-				if v, ok := req.Details[f]; ok {
-					details[f] = v
-				}
-			}
-		}
-
-		db.DB.Exec(`UPDATE subcontract_forms SET updated_at=? WHERE id=?`, time.Now(), form.ID)
-		insertSupplement(form.ID, userID, "update_draft", details, "编辑表单内容")
-
-	} else {
-		return c.JSON(http.StatusBadRequest, models.ErrorResponse{
-			Code:    400,
-			Message: fmt.Sprintf("未知操作: %s", req.Action),
-			Reason:  "unknown_action",
-		})
+	form, errResp := processFormCore(req.FormID, req.Action, userID, userRole, req.ExpectedVersion, req.Reason)
+	if errResp != nil {
+		return c.JSON(errResp.Code, errResp)
 	}
 
 	return c.JSON(http.StatusOK, form)
@@ -659,54 +543,39 @@ func ProcessForm(c echo.Context) error {
 func BatchProcess(c echo.Context) error {
 	var req models.BatchProcessRequest
 	if err := c.Bind(&req); err != nil {
-		return c.JSON(http.StatusBadRequest, models.ErrorResponse{Code: 400, Message: "参数格式错误"})
+		return c.JSON(http.StatusBadRequest, models.ErrorResponse{Code: 400, Message: "参数格式错误", Reason: "invalid_request"})
 	}
 
 	if len(req.FormIDs) == 0 {
 		return c.JSON(http.StatusBadRequest, models.ErrorResponse{Code: 400, Message: "未选择任何表单", Reason: "no_forms_selected"})
 	}
 
-	userRole := middleware.GetUserRole(c)
 	userID := middleware.GetUserID(c)
+	userRole := middleware.GetUserRole(c)
 
-	results := map[string]interface{}{}
+	results := []BatchItemResult{}
 	successCount := 0
 	failCount := 0
 
 	for _, fid := range req.FormIDs {
-		form, err := getFormByID(fid)
-		if err != nil {
-			results[fid] = map[string]interface{}{"success": false, "reason": "form_not_found"}
+		form, errResp := processFormCore(fid, req.Action, userID, userRole, 0, req.Reason)
+		item := BatchItemResult{
+			FormID:  fid,
+			Success: errResp == nil,
+		}
+		if form != nil {
+			item.Code = form.Code
+		} else {
+			item.Code = fid
+		}
+		if errResp != nil {
+			item.Message = errResp.Message
+			item.Reason = errResp.Reason
 			failCount++
-			continue
+		} else {
+			successCount++
 		}
-
-		allowed := false
-		switch req.Action {
-		case "submit":
-			allowed = userRole == models.RoleClerk && (form.Status == models.StatusDraft || form.Status == models.StatusPendingClerk)
-		case "verify_foreman":
-			allowed = userRole == models.RoleForeman && form.Status == models.StatusPendingForeman && form.CurrentHandler == userID
-		case "confirm_manager":
-			allowed = userRole == models.RoleManager && form.Status == models.StatusPendingManager && form.CurrentHandler == userID
-		case "archive":
-			allowed = userRole == models.RoleClerk && form.Status == models.StatusVerified
-		}
-
-		if !allowed {
-			results[fid] = map[string]interface{}{"success": false, "reason": "not_allowed", "status": form.Status, "role": userRole}
-			failCount++
-			continue
-		}
-
-		processReq := models.ProcessFormRequest{
-			FormID: fid,
-			Action: req.Action,
-			Reason: req.Reason,
-		}
-		c.Set("__batch_internal", processReq)
-		results[fid] = map[string]interface{}{"success": true}
-		successCount++
+		results = append(results, item)
 	}
 
 	return c.JSON(http.StatusOK, map[string]interface{}{
