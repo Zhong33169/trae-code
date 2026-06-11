@@ -2,7 +2,7 @@ import { createSignal, createEffect, onMount } from "solid-js";
 import { A, useNavigate } from "@solidjs/router";
 import Layout from "~/components/Layout";
 import { api } from "~/lib/api";
-import { authStore, statusNames, statusTagTypes, cropTypeNames } from "~/store/auth";
+import { authStore, statusNames, statusTagTypes, cropTypeNames, roleStatusOptions } from "~/store/auth";
 import { formatDate } from "~/utils/date";
 import { showToast } from "~/store/toast";
 
@@ -17,6 +17,9 @@ export default function TaskList() {
   const [loading, setLoading] = createSignal(false);
   const [hasTimeoutFilter, setHasTimeoutFilter] = createSignal<boolean | undefined>(undefined);
 
+  const currentRole = () => authStore.user()?.role || "";
+  const statusOptions = () => roleStatusOptions[currentRole()] || [];
+
   const loadTasks = async () => {
     setLoading(true);
     try {
@@ -30,7 +33,7 @@ export default function TaskList() {
 
       const result = await api.getTaskList(params);
       setTasks(result.data.list);
-      setTotal(result.data.total);
+      setTotal(result.data.filteredTotal !== undefined ? result.data.filteredTotal : result.data.total);
     } catch (err: any) {
       showToast(err.message || "加载失败", "error");
     } finally {
@@ -43,7 +46,9 @@ export default function TaskList() {
   });
 
   createEffect(() => {
-    loadTasks();
+    if (authStore.user()) {
+      loadTasks();
+    }
   });
 
   const handleSearch = () => {
@@ -66,11 +71,28 @@ export default function TaskList() {
     navigate(`/tasks/${id}`);
   };
 
+  const getColumnForRole = () => {
+    const role = currentRole();
+    if (role === "registrar") {
+      return "待办任务";
+    } else if (role === "auditor") {
+      return "待审核任务";
+    } else if (role === "reviewer") {
+      return "待复核任务";
+    }
+    return "任务列表";
+  };
+
   return (
     <Layout>
       <div class="card">
         <div class="card-header">
-          <h2 class="card-title">种植任务列表</h2>
+          <h2 class="card-title">
+            种植任务列表
+            <span style="margin-left: 8px; font-size: 13px; color: #888; font-weight: normal;">
+              （按当前岗位默认显示{getColumnForRole()}）
+            </span>
+          </h2>
           {canCreate && (
             <button class="btn btn-primary" onClick={() => navigate("/tasks/create")}>
               + 新建任务
@@ -82,13 +104,9 @@ export default function TaskList() {
           <div class="form-item">
             <label class="form-label">状态筛选</label>
             <select class="form-select" value={status()} onChange={(e) => setStatus(e.target.value)}>
-              <option value="">全部状态</option>
-              <option value="pending_registration">待登记</option>
-              <option value="registered">待审核</option>
-              <option value="audit_rejected">审核驳回</option>
-              <option value="audit_passed">待复核</option>
-              <option value="review_rejected">复核驳回</option>
-              <option value="archived">已归档</option>
+              {statusOptions().map((opt) => (
+                <option value={opt.value}>{opt.label}</option>
+              ))}
             </select>
           </div>
 

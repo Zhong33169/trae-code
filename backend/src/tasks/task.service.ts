@@ -85,37 +85,67 @@ export class TaskService {
       const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
       node.isTimeout = true;
       node.timeoutHours = diffHours;
+    } else {
+      node.isTimeout = false;
+      node.timeoutHours = 0;
     }
 
     return node;
   }
 
-  private checkTaskTimeout(task: PlantingTask, nodes: TaskNode[]): PlantingTask {
+  private enrichTaskWithTimeout(task: PlantingTask, nodes: TaskNode[]): PlantingTask {
     let hasTimeout = false;
     let timeoutNodeIndex = -1;
+    let timeoutNodeName = '';
+    let timeoutHandlerName = '';
 
     for (const node of nodes) {
       if (node.isTimeout) {
         hasTimeout = true;
         if (timeoutNodeIndex === -1 || node.nodeIndex < timeoutNodeIndex) {
           timeoutNodeIndex = node.nodeIndex;
+          timeoutNodeName = node.nodeName;
+          timeoutHandlerName = node.handlerName || '';
         }
       }
     }
 
     task.hasTimeout = hasTimeout;
     task.timeoutNodeIndex = timeoutNodeIndex >= 0 ? timeoutNodeIndex : 0;
+    (task as any).timeoutNodeName = timeoutNodeName;
+    (task as any).timeoutHandlerName = timeoutHandlerName;
 
     return task;
   }
 
-  async createTask(dto: CreateTaskDto, userId: number, userName: string) {
+  private processTaskNodes(nodes: TaskNode[]): TaskNode[] {
+    return nodes.map(n => this.calculateNodeTimeout(n));
+  }
+
+  private getRoleDefaultStatuses(role: UserRole): string[] {
+    switch (role) {
+      case 'registrar':
+        return ['pending_registration', 'audit_rejected'];
+      case 'auditor':
+        return ['registered', 'review_rejected'];
+      case 'reviewer':
+        return ['audit_passed', 'archived'];
+      default:
+        return [];
+    }
+  }
+
+  async createTask(dto: CreateTaskDto, userId: number, userName: string, userRole: UserRole) {
+    if (userRole !== 'registrar') {
+      throw new ForbiddenException('只有种植登记员可以创建种植任务');
+    }
+
     if (!dto.taskName || !dto.cropType || !dto.plantingArea || !dto.location || !dto.planterName || !dto.planterPhone) {
-      throw new BadRequestException('请填写所有必填字段');
+      throw new BadRequestException('请填写所有必填字段：任务名称、作物类型、种植面积、种植地点、种植户姓名、联系电话');
     }
 
     if (dto.plantingArea <= 0) {
-      throw new BadRequestException('种植面积必须大于0');
+      throw new BadRequestException('种植面积必须大于0亩');
     }
 
     let taskNo = this.generateTaskNo();
@@ -184,14 +214,18 @@ export class TaskService {
     return task;
   }
 
-  async registerTask(taskId: number, userId: number, userName: string) {
+  async registerTask(taskId: number, userId: number, userName: string, userRole: UserRole) {
+    if (userRole !== 'registrar') {
+      throw new ForbiddenException('只有种植登记员可以执行登记或补正操作');
+    }
+
     const task = await this.taskRepository.findOne({ where: { id: taskId } });
     if (!task) {
       throw new NotFoundException('种植任务不存在');
     }
 
-    if (task.status !== 'pending_registration' && task.status !== 'audit_rejected' && task.status !== 'review_rejected') {
-      throw new BadRequestException('当前任务状态不支持登记操作');
+    if (task.status !== 'pending_registration' && task.status !== 'audit_rejected') {
+      throw new BadRequestException(`当前任务状态为「${task.status}」，不支持登记操作，仅待登记或审核驳回的任务可登记`);
     }
 
     const nodes = await this.nodeRepository.find({ where: { taskId }, order: { nodeIndex: 'ASC' } });
@@ -213,7 +247,7 @@ export class TaskService {
       await this.nodeRepository.save(auditNode);
     }
 
-    const originalStatus = task.status;
+    const originalStatus = task.status as TaskStatus;
 
     task.status = 'registered';
     task.currentNodeIndex = 1;
@@ -249,8 +283,8 @@ export class TaskService {
       throw new NotFoundException('种植任务不存在');
     }
 
-    if (task.status !== 'registered') {
-      throw new BadRequestException('当前任务状态不支持审核操作');
+    if (task.status !== 'registered' && task.status !== 'review_rejected') {
+      throw new BadRequestException(`当前任务状态为「${task.status}」，不支持审核操作，仅待审核或复核驳回的任务可审核`);
     }
 
     const nodes = await this.nodeRepository.find({ where: { taskId: dto.taskId }, order: { nodeIndex: 'ASC' } });
@@ -347,7 +381,7 @@ export class TaskService {
     }
 
     if (task.status !== 'audit_passed') {
-      throw new BadRequestException('当前任务状态不支持复核操作');
+      throw new BadRequestException(`当前任务状态为「${task.status}」，不支持复核操作，仅审核通过的任务可复核`);
     }
 
     const nodes = await this.nodeRepository.find({ where: { taskId: dto.taskId }, order: { nodeIndex: 'ASC' } });
@@ -435,10 +469,24 @@ export class TaskService {
 
     if (query.status) {
       where.status = query.status;
+    } else {
+      const defaultStatuses = this.getRoleDefaultStatuses(userRole);
+      if (defaultStatuses.length > 0) {
+        where.status = In(defaultStatuses);
+      }
     }
 
     if (query.keyword) {
       where.taskName = Like(`%${query.keyword}%`);
+    }
+
+    let hasTimeoutFilter: boolean | undefined = undefined;
+    if (query.hasTimeout !== undefined && query.hasTimeout !== null) {
+      if (typeof query.hasTimeout === 'boolean') {
+        hasTimeoutFilter = query.hasTimeout;
+      } else if (typeof query.hasTimeout === 'string') {
+        hasTimeoutFilter = query.hasTimeout === 'true';
+      }
     }
 
     const [tasks, total] = await this.taskRepository.findAndCount({
@@ -451,15 +499,20 @@ export class TaskService {
     const taskIds = tasks.map(t => t.id);
     const allNodes = await this.nodeRepository.find({ where: { taskId: In(taskIds) } });
 
-    const tasksWithTimeout = tasks.map(task => {
+    let tasksWithTimeout = tasks.map(task => {
       const nodes = allNodes.filter(n => n.taskId === task.id);
-      const processedNodes = nodes.map(n => this.calculateNodeTimeout(n));
-      return this.checkTaskTimeout(task, processedNodes);
+      const processedNodes = this.processTaskNodes(nodes);
+      return this.enrichTaskWithTimeout(task, processedNodes);
     });
+
+    if (hasTimeoutFilter !== undefined) {
+      tasksWithTimeout = tasksWithTimeout.filter(t => t.hasTimeout === hasTimeoutFilter);
+    }
 
     return {
       list: tasksWithTimeout,
-      total,
+      total: hasTimeoutFilter !== undefined ? tasksWithTimeout.length : total,
+      filteredTotal: tasksWithTimeout.length,
       page,
       pageSize,
     };
@@ -476,8 +529,8 @@ export class TaskService {
       order: { nodeIndex: 'ASC' },
     });
 
-    const processedNodes = nodes.map(n => this.calculateNodeTimeout(n));
-    const taskWithTimeout = this.checkTaskTimeout(task, processedNodes);
+    const processedNodes = this.processTaskNodes(nodes);
+    const taskWithTimeout = this.enrichTaskWithTimeout(task, processedNodes);
 
     const logs = await this.logRepository.find({
       where: { taskId },
@@ -491,33 +544,38 @@ export class TaskService {
     };
   }
 
-  async getStatistics() {
-    const totalTasks = await this.taskRepository.count();
+  async getStatistics(userRole?: UserRole) {
+    const where: any = {};
 
-    const statusCounts = await this.taskRepository
-      .createQueryBuilder('task')
-      .select('task.status', 'status')
-      .addSelect('COUNT(*)', 'count')
-      .groupBy('task.status')
-      .getRawMany();
+    if (userRole) {
+      const defaultStatuses = this.getRoleDefaultStatuses(userRole);
+      if (defaultStatuses.length > 0) {
+        where.status = In(defaultStatuses);
+      }
+    }
+
+    const tasks = await this.taskRepository.find({ where });
+    const totalTasks = tasks.length;
 
     const statusMap: Record<string, number> = {};
-    statusCounts.forEach(item => {
-      statusMap[item.status] = parseInt(item.count, 10);
+    tasks.forEach(task => {
+      statusMap[task.status] = (statusMap[task.status] || 0) + 1;
     });
 
-    const taskIds = (await this.taskRepository.find({ select: ['id'] })).map(t => t.id);
+    const taskIds = tasks.map(t => t.id);
     const allNodes = await this.nodeRepository.find({ where: { taskId: In(taskIds) } });
 
     let timeoutCount = 0;
-    const processedNodes = allNodes.map(n => this.calculateNodeTimeout(n));
     const timeoutTaskIds = new Set<number>();
-    for (const node of processedNodes) {
-      if (node.isTimeout && node.status !== 'completed' && node.status !== 'rejected') {
-        timeoutTaskIds.add(node.taskId);
+    for (const task of tasks) {
+      const nodes = allNodes.filter(n => n.taskId === task.id);
+      const processedNodes = this.processTaskNodes(nodes);
+      const enrichedTask = this.enrichTaskWithTimeout(task, processedNodes);
+      if (enrichedTask.hasTimeout) {
+        timeoutCount++;
+        timeoutTaskIds.add(task.id);
       }
     }
-    timeoutCount = timeoutTaskIds.size;
 
     return {
       total: totalTasks,

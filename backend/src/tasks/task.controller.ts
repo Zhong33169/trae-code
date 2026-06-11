@@ -18,8 +18,8 @@ export class TaskController {
   }
 
   @Get('statistics')
-  async getStatistics() {
-    const result = await this.taskService.getStatistics();
+  async getStatistics(@Req() req) {
+    const result = await this.taskService.getStatistics(req.user.role);
     return {
       code: 0,
       message: '获取成功',
@@ -49,7 +49,7 @@ export class TaskController {
 
   @Post('create')
   async createTask(@Body() body: CreateTaskDto, @Req() req) {
-    const result = await this.taskService.createTask(body, req.user.id, req.user.name);
+    const result = await this.taskService.createTask(body, req.user.id, req.user.name, req.user.role);
     return {
       code: 0,
       message: '创建成功',
@@ -59,7 +59,7 @@ export class TaskController {
 
   @Post('register')
   async registerTask(@Body() body: { taskId: number }, @Req() req) {
-    const result = await this.taskService.registerTask(body.taskId, req.user.id, req.user.name);
+    const result = await this.taskService.registerTask(body.taskId, req.user.id, req.user.name, req.user.role);
     return {
       code: 0,
       message: '登记成功',

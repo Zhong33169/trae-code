@@ -2,6 +2,7 @@ import { createSignal, onMount } from "solid-js";
 import Layout from "~/components/Layout";
 import { api } from "~/lib/api";
 import { showToast } from "~/store/toast";
+import { authStore, roleNames } from "~/store/auth";
 
 export default function Statistics() {
   const [stats, setStats] = createSignal<any>(null);
@@ -23,11 +24,29 @@ export default function Statistics() {
     loadStats();
   });
 
+  const currentRole = () => authStore.user()?.role || "";
+  const currentRoleName = () => roleNames[currentRole()] || "";
+
+  const getMyTodoCount = () => {
+    const s = stats();
+    if (!s) return 0;
+    const role = currentRole();
+    if (role === "registrar") return s.pendingRegistration + s.auditRejected;
+    if (role === "auditor") return s.registered + s.reviewRejected;
+    if (role === "reviewer") return s.auditPassed;
+    return 0;
+  };
+
   return (
     <Layout>
       <div class="card">
         <div class="card-header">
-          <h2 class="card-title">数据统计</h2>
+          <h2 class="card-title">
+            数据统计
+            <span style="margin-left: 8px; font-size: 13px; color: #888; font-weight: normal;">
+              （当前岗位：{currentRoleName()}，统计范围与列表一致）
+            </span>
+          </h2>
         </div>
 
         {loading() ? (
@@ -41,6 +60,13 @@ export default function Statistics() {
               </div>
 
               <div class="stat-card">
+                <div class="stat-value" style="color: #52c41a;">
+                  {getMyTodoCount()}
+                </div>
+                <div class="stat-label">我的待办</div>
+              </div>
+
+              <div class="stat-card">
                 <div class="stat-value warning">{stats().timeoutCount}</div>
                 <div class="stat-label">超时任务数</div>
               </div>
@@ -48,13 +74,6 @@ export default function Statistics() {
               <div class="stat-card">
                 <div class="stat-value">{stats().archived}</div>
                 <div class="stat-label">已归档任务</div>
-              </div>
-
-              <div class="stat-card">
-                <div class="stat-value" style="color: #1890ff;">
-                  {stats().registered + stats().auditPassed + stats().reviewRejected + stats().auditRejected + stats().pendingRegistration}
-                </div>
-                <div class="stat-label">进行中任务</div>
               </div>
             </div>
 
@@ -87,6 +106,23 @@ export default function Statistics() {
                 <div class="stat-label">已驳回</div>
               </div>
             </div>
+
+            {stats().auditRejected > 0 || stats().reviewRejected > 0 ? (
+              <div class="stat-grid" style="margin-top: 16px;">
+                {stats().auditRejected > 0 && (
+                  <div class="stat-card">
+                    <div class="stat-value danger">{stats().auditRejected}</div>
+                    <div class="stat-label">审核驳回（需登记员补正）</div>
+                  </div>
+                )}
+                {stats().reviewRejected > 0 && (
+                  <div class="stat-card">
+                    <div class="stat-value danger">{stats().reviewRejected}</div>
+                    <div class="stat-label">复核驳回（需审核员重审）</div>
+                  </div>
+                )}
+              </div>
+            ) : null}
 
             <div class="detail-section" style="margin-top: 24px;">
               <h3>状态说明</h3>

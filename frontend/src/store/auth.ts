@@ -94,3 +94,35 @@ export const nodeStatusNames: Record<string, string> = {
   rejected: "已驳回",
   timeout: "已超时",
 };
+
+export interface RoleStatusOption {
+  value: string;
+  label: string;
+}
+
+export const roleStatusOptions: Record<string, RoleStatusOption[]> = {
+  registrar: [
+    { value: "", label: "全部" },
+    { value: "pending_registration", label: "待登记" },
+    { value: "audit_rejected", label: "审核驳回（需补正）" },
+    { value: "registered", label: "待审核" },
+    { value: "audit_passed", label: "待复核" },
+    { value: "archived", label: "已归档" },
+  ],
+  auditor: [
+    { value: "", label: "全部" },
+    { value: "registered", label: "待审核" },
+    { value: "review_rejected", label: "复核驳回（需重审）" },
+    { value: "audit_passed", label: "待复核" },
+    { value: "audit_rejected", label: "审核驳回" },
+    { value: "archived", label: "已归档" },
+  ],
+  reviewer: [
+    { value: "", label: "全部" },
+    { value: "audit_passed", label: "待复核" },
+    { value: "review_rejected", label: "复核驳回" },
+    { value: "archived", label: "已归档" },
+    { value: "registered", label: "待审核" },
+    { value: "audit_rejected", label: "审核驳回" },
+  ],
+};

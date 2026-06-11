@@ -48,18 +48,23 @@ export default function TaskDetail() {
   const canRegister = () => {
     if (!authStore.hasRole("registrar")) return false;
     const status = task()?.status;
-    return status === "pending_registration" || status === "audit_rejected" || status === "review_rejected";
+    return status === "pending_registration" || status === "audit_rejected";
   };
 
   const canAudit = () => {
     if (!authStore.hasRole("auditor")) return false;
-    return task()?.status === "registered";
+    const status = task()?.status;
+    return status === "registered" || status === "review_rejected";
   };
 
   const canReview = () => {
     if (!authStore.hasRole("reviewer")) return false;
     return task()?.status === "audit_passed";
   };
+
+  const isRegistrar = () => authStore.hasRole("registrar");
+  const isAuditor = () => authStore.hasRole("auditor");
+  const isReviewer = () => authStore.hasRole("reviewer");
 
   const handleRegister = async () => {
     setActionLoading(true);
@@ -220,11 +225,63 @@ export default function TaskDetail() {
                   <span class="label">创建时间：</span>
                   <span class="value">{formatDate(task().createdAt)}</span>
                 </div>
+                {task().registeredByName && (
+                  <div class="detail-item">
+                    <span class="label">登记人：</span>
+                    <span class="value">{task().registeredByName}</span>
+                  </div>
+                )}
+                {task().registeredAt && (
+                  <div class="detail-item">
+                    <span class="label">登记时间：</span>
+                    <span class="value">{formatDate(task().registeredAt)}</span>
+                  </div>
+                )}
+                {(isAuditor() || isReviewer()) && task().auditorName && (
+                  <div class="detail-item">
+                    <span class="label">审核人：</span>
+                    <span class="value">{task().auditorName}</span>
+                  </div>
+                )}
+                {(isAuditor() || isReviewer()) && task().auditAt && (
+                  <div class="detail-item">
+                    <span class="label">审核时间：</span>
+                    <span class="value">{formatDate(task().auditAt)}</span>
+                  </div>
+                )}
+                {isReviewer() && task().reviewerName && (
+                  <div class="detail-item">
+                    <span class="label">复核人：</span>
+                    <span class="value">{task().reviewerName}</span>
+                  </div>
+                )}
+                {isReviewer() && task().reviewAt && (
+                  <div class="detail-item">
+                    <span class="label">复核时间：</span>
+                    <span class="value">{formatDate(task().reviewAt)}</span>
+                  </div>
+                )}
+                {task().archivedAt && (
+                  <div class="detail-item">
+                    <span class="label">归档时间：</span>
+                    <span class="value">{formatDate(task().archivedAt)}</span>
+                  </div>
+                )}
               </div>
               {task().description && (
                 <div style="margin-top: 12px;">
                   <span class="label">任务描述：</span>
                   <span class="value">{task().description}</span>
+                </div>
+              )}
+              {task().hasTimeout && (
+                <div style="margin-top: 12px; padding: 10px 14px; background: #fff2f0; border: 1px solid #ffccc7; border-radius: 4px;">
+                  <span style="color: #ff4d4f; font-weight: 600;">⚠ 超时预警：</span>
+                  <span style="color: #ff4d4f; margin-left: 6px;">
+                    {task().timeoutNodeName || "当前节点"}已超时
+                    {task().timeoutHandlerName && `，责任人：${task().timeoutHandlerName}`}
+                    ，请及时补正处理
+                  </span>
                 </div>
               )}
             </div>
@@ -321,19 +378,19 @@ export default function TaskDetail() {
               <div class="action-bar">
                 {canRegister() && (
                   <button class="btn btn-primary" onClick={() => setShowRegisterModal(true)}>
-                    {task().status === "pending_registration" ? "提交登记" : "提交补正"}
+                    {task().status === "pending_registration" ? "提交登记" : "提交补正重审"}
                   </button>
                 )}
 
                 {canAudit() && (
                   <button class="btn btn-primary" onClick={openAuditModal}>
-                    办理审核
+                    {task().status === "review_rejected" ? "重新办理审核" : "办理审核"}
                   </button>
                 )}
 
                 {canReview() && (
                   <button class="btn btn-primary" onClick={openReviewModal}>
-                    办理复核
+                    办理复核归档
                   </button>
                 )}
               </div>
