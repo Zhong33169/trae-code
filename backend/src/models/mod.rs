@@ -64,8 +64,15 @@ pub struct Ticket {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Object)]
 pub struct TicketDetail {
-    #[serde(flatten)]
-    pub ticket: Ticket,
+    pub id: String,
+    pub title: String,
+    pub customer_name: String,
+    pub customer_phone: String,
+    pub description: String,
+    pub status: String,
+    pub created_by: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
     pub creator_name: String,
     pub handover_records: Vec<HandoverRecordDetail>,
     pub operation_logs: Vec<OperationLogDetail>,
@@ -119,10 +126,19 @@ pub struct HandoverRecord {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Object)]
 pub struct HandoverRecordDetail {
-    #[serde(flatten)]
-    pub record: HandoverRecord,
+    pub id: String,
+    pub ticket_id: String,
+    pub shift: String,
+    pub from_user: String,
     pub from_user_name: String,
+    pub from_role: String,
+    pub to_user: String,
     pub to_user_name: String,
+    pub to_role: String,
+    pub handover_time: DateTime<Utc>,
+    pub status: String,
+    pub remark: Option<String>,
+    pub created_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Object)]
@@ -150,9 +166,13 @@ pub struct OperationLog {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Object)]
 pub struct OperationLogDetail {
-    #[serde(flatten)]
-    pub log: OperationLog,
+    pub id: String,
+    pub ticket_id: String,
+    pub user_id: String,
     pub user_name: String,
+    pub action: String,
+    pub detail: Option<String>,
+    pub created_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Object)]

@@ -55,7 +55,7 @@
                 {{ ticket?.customer_phone }}
               </el-descriptions-item>
               <el-descriptions-item label="创建人">
-                {{ detailData?.creator_name || '-' }}
+                {{ ticket?.creator_name || '-' }}
               </el-descriptions-item>
               <el-descriptions-item label="创建时间">
                 {{ formatDateTime(ticket?.created_at) }}
@@ -116,10 +116,10 @@
                   {{ formatDateTime(record.handover_time || record.created_at) }}
                 </div>
                 <div class="handover-info">
-                  <span>交出人：{{ record.from_user_name || record.from_user }}</span>
+                  <span>交出人：{{ record.from_user_name }}（{{ getRoleLabel(record.from_role) }}）</span>
                 </div>
                 <div class="handover-info">
-                  <span>接收人：{{ record.to_user_name || record.to_user }}</span>
+                  <span>接收人：{{ record.to_user_name }}（{{ getRoleLabel(record.to_role) }}）</span>
                 </div>
                 <div class="handover-info" v-if="record.remark">
                   <span>备注：{{ record.remark }}</span>
@@ -209,7 +209,7 @@ const ticketStore = useTicketStore()
 
 const ticketId = computed(() => route.params.id)
 const detailData = computed(() => ticketStore.detail)
-const ticket = computed(() => detailData.value?.ticket)
+const ticket = computed(() => detailData.value)
 const handoverRecords = computed(() => detailData.value?.handover_records || [])
 const operationLogs = computed(() => detailData.value?.operation_logs || [])
 
@@ -222,7 +222,7 @@ const tracks = computed(() => {
       type: 'create',
       title: '工单创建',
       time: ticket.value.created_at,
-      operator: detailData.value?.creator_name || '系统',
+      operator: ticket.value.creator_name || '系统',
       remark: ticket.value.description
     })
   }
@@ -233,7 +233,7 @@ const tracks = computed(() => {
       type: record.status === 'accepted' ? 'sign' : record.status === 'rejected' ? 'abnormal' : 'assign',
       title: getHandoverStatusLabel(record.status) + '交接',
       time: record.handover_time || record.created_at,
-      operator: record.to_user_name || record.to_user || '未知',
+      operator: record.to_user_name || '未知',
       remark: record.remark
     })
   })
@@ -424,6 +424,15 @@ function getShiftLabel(shift) {
     night: '晚班'
   }
   return map[shift] || shift
+}
+
+function getRoleLabel(role) {
+  const map = {
+    agent: '坐席',
+    qa_manager: '质检主管',
+    cs_manager: '客服经理'
+  }
+  return map[role] || role
 }
 
 function getTimelineType(type) {

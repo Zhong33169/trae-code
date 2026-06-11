@@ -74,7 +74,7 @@ export const useTicketStore = defineStore('ticket', () => {
   async function handleUpdateStatus(id, data) {
     const res = await updateTicketStatus(id, data)
     await fetchList()
-    if (detail.value && detail.value.ticket && detail.value.ticket.id === id) {
+    if (detail.value && detail.value.id === id) {
       await fetchDetail(id)
     }
     await fetchStats()
@@ -84,7 +84,7 @@ export const useTicketStore = defineStore('ticket', () => {
   async function handleSubmitHandover(data) {
     const res = await submitHandover(data)
     await fetchList()
-    if (detail.value && detail.value.ticket && detail.value.ticket.id === data.ticket_id) {
+    if (detail.value && detail.value.id === data.ticket_id) {
       await fetchDetail(data.ticket_id)
     }
     await fetchStats()
@@ -96,8 +96,8 @@ export const useTicketStore = defineStore('ticket', () => {
     await fetchList()
     if (detail.value && detail.value.handover_records) {
       const record = detail.value.handover_records.find(r => r.id === id)
-      if (record && detail.value.ticket) {
-        await fetchDetail(detail.value.ticket.id)
+      if (record) {
+        await fetchDetail(detail.value.id)
       }
     }
     await fetchStats()
@@ -109,8 +109,8 @@ export const useTicketStore = defineStore('ticket', () => {
     await fetchList()
     if (detail.value && detail.value.handover_records) {
       const record = detail.value.handover_records.find(r => r.id === id)
-      if (record && detail.value.ticket) {
-        await fetchDetail(detail.value.ticket.id)
+      if (record) {
+        await fetchDetail(detail.value.id)
       }
     }
     await fetchStats()

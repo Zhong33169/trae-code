@@ -121,9 +121,19 @@ pub async fn get_ticket_detail(
         let from_user = get_user_by_id(pool, &record.from_user).await?;
         let to_user = get_user_by_id(pool, &record.to_user).await?;
         handover_records.push(HandoverRecordDetail {
-            record,
+            id: record.id,
+            ticket_id: record.ticket_id,
+            shift: record.shift,
+            from_user: record.from_user,
             from_user_name: from_user.name,
+            from_role: from_user.role,
+            to_user: record.to_user,
             to_user_name: to_user.name,
+            to_role: to_user.role,
+            handover_time: record.handover_time,
+            status: record.status,
+            remark: record.remark,
+            created_at: record.created_at,
         });
     }
 
@@ -138,13 +148,26 @@ pub async fn get_ticket_detail(
     for log in logs_raw {
         let user = get_user_by_id(pool, &log.user_id).await?;
         operation_logs.push(OperationLogDetail {
-            log,
+            id: log.id,
+            ticket_id: log.ticket_id,
+            user_id: log.user_id,
             user_name: user.name,
+            action: log.action,
+            detail: log.detail,
+            created_at: log.created_at,
         });
     }
 
     Ok(TicketDetail {
-        ticket,
+        id: ticket.id,
+        title: ticket.title,
+        customer_name: ticket.customer_name,
+        customer_phone: ticket.customer_phone,
+        description: ticket.description,
+        status: ticket.status,
+        created_by: ticket.created_by,
+        created_at: ticket.created_at,
+        updated_at: ticket.updated_at,
         creator_name: creator.name,
         handover_records,
         operation_logs,
@@ -524,9 +547,19 @@ pub async fn list_my_handovers(
     for record in records {
         let from_user = get_user_by_id(pool, &record.from_user).await?;
         result.push(HandoverRecordDetail {
-            record,
+            id: record.id,
+            ticket_id: record.ticket_id,
+            shift: record.shift,
+            from_user: record.from_user,
             from_user_name: from_user.name,
+            from_role: from_user.role,
+            to_user: record.to_user,
             to_user_name: current_user.name.clone(),
+            to_role: current_user.role.clone(),
+            handover_time: record.handover_time,
+            status: record.status,
+            remark: record.remark,
+            created_at: record.created_at,
         });
     }
 
@@ -589,8 +622,13 @@ pub async fn get_operation_logs(
     for log in logs {
         let user = get_user_by_id(pool, &log.user_id).await?;
         result.push(OperationLogDetail {
-            log,
+            id: log.id,
+            ticket_id: log.ticket_id,
+            user_id: log.user_id,
             user_name: user.name,
+            action: log.action,
+            detail: log.detail,
+            created_at: log.created_at,
         });
     }
 

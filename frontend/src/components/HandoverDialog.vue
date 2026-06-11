@@ -142,7 +142,6 @@ async function handleSubmit() {
         if (props.ticketId) {
           submitData.ticket_id = props.ticketId
         }
-        submitData.from_role = authStore.role
         await ticketStore.handleSubmitHandover(submitData)
         ElMessage.success('交接成功')
         emit('success')
