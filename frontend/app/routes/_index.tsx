@@ -312,7 +312,7 @@ export default function Index() {
                 <div className="flex items-center gap-2">
                   <span>{record.scan_result === "success" ? "✅" : "❌"}</span>
                   <span className="font-mono text-xs text-gray-500">
-                    {record.creative_demand_code || record.creative_demand_id.slice(0, 8)}
+                    {record.creative_demand_code || (record.creative_demand_id ? record.creative_demand_id.slice(0, 8) : "无效码")}
                   </span>
                   <span className="text-gray-700">
                     {record.user_name}

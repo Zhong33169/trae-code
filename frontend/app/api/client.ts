@@ -135,7 +135,7 @@ export interface ScanResponse {
 
 export interface ScanRecord {
   id: string;
-  creative_demand_id: string;
+  creative_demand_id: string | null;
   creative_demand_code: string | null;
   creative_demand_title: string | null;
   user_id: string;

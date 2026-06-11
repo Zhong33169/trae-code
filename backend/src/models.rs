@@ -150,7 +150,7 @@ pub struct ScanResponse {
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct ScanRecord {
     pub id: String,
-    pub creative_demand_id: String,
+    pub creative_demand_id: Option<String>,
     pub user_id: String,
     pub user_name: String,
     pub user_role: String,
@@ -163,7 +163,7 @@ pub struct ScanRecord {
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct ScanRecordWithDetails {
     pub id: String,
-    pub creative_demand_id: String,
+    pub creative_demand_id: Option<String>,
     pub creative_demand_code: Option<String>,
     pub creative_demand_title: Option<String>,
     pub user_id: String,

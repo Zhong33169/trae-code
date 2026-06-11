@@ -30,12 +30,12 @@ pub async fn scan_code(
                 "#
             )
             .bind(&record_id)
-            .bind(None::<String>)
-            .bind(user_id)
-            .bind(user_name)
-            .bind(user_role)
-            .bind(err_code)
-            .bind(&err_msg)
+                .bind(None::<&str>)
+                .bind(user_id)
+                .bind(user_name)
+                .bind(user_role)
+                .bind(err_code)
+                .bind(&err_msg)
             .execute(pool)
             .await?;
 
@@ -59,7 +59,7 @@ pub async fn scan_code(
                 WHERE creative_demand_id = ? AND user_id = ? AND scan_result = 'success'
                 "#
             )
-            .bind(&demand_id)
+            .bind(Some(&demand_id))
             .bind(user_id)
             .fetch_one(pool)
             .await?;
@@ -76,7 +76,7 @@ pub async fn scan_code(
                     "#
                 )
                 .bind(&record_id)
-                .bind(&demand_id)
+                .bind(Some(&demand_id))
                 .bind(user_id)
                 .bind(user_name)
                 .bind(user_role)
@@ -116,7 +116,7 @@ pub async fn scan_code(
                     "#
                 )
                 .bind(&record_id)
-                .bind(&demand_id)
+                .bind(Some(&demand_id))
                 .bind(user_id)
                 .bind(user_name)
                 .bind(user_role)
@@ -143,7 +143,7 @@ pub async fn scan_code(
                 "#
             )
             .bind(&record_id)
-            .bind(&demand_id)
+            .bind(Some(&demand_id))
             .bind(user_id)
             .bind(user_name)
             .bind(user_role)

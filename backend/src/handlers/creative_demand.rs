@@ -464,9 +464,10 @@ pub async fn transition(
             })).into_response()
         }
         Ok(r) => {
-            let status_code = if r.error_code.as_deref() == Some("VERSION_CONFLICT") {
+            let error_code = r.error_code.clone().unwrap_or("TRANSITION_FAILED".to_string());
+            let status_code = if error_code == "VERSION_CONFLICT" {
                 StatusCode::CONFLICT
-            } else if r.error_code.as_deref() == Some("PERMISSION_DENIED") {
+            } else if error_code == "PERMISSION_DENIED" {
                 StatusCode::FORBIDDEN
             } else {
                 StatusCode::BAD_REQUEST
@@ -476,7 +477,8 @@ pub async fn transition(
                 Json(serde_json::json!({
                     "success": false,
                     "error": r.message,
-                    "code": r.error_code.unwrap_or("TRANSITION_FAILED".to_string()),
+                    "code": error_code.clone(),
+                    "error_code": error_code,
                     "data": r.demand
                 }))
             ).into_response()
@@ -523,16 +525,20 @@ pub async fn batch_transition(
                 results.push(serde_json::json!({
                     "id": id,
                     "success": true,
-                    "message": r.message
+                    "message": r.message,
+                    "data": r.demand
                 }));
             }
             Ok(r) => {
                 fail_count += 1;
+                let error_code = r.error_code.clone();
                 results.push(serde_json::json!({
                     "id": id,
                     "success": false,
                     "error": r.message,
-                    "code": r.error_code
+                    "code": error_code.clone(),
+                    "error_code": error_code,
+                    "data": r.demand
                 }));
             }
             Err(e) => {
@@ -540,7 +546,9 @@ pub async fn batch_transition(
                 results.push(serde_json::json!({
                     "id": id,
                     "success": false,
-                    "error": format!("系统错误: {}", e)
+                    "error": format!("系统错误: {}", e),
+                    "code": "SYSTEM_ERROR",
+                    "error_code": "SYSTEM_ERROR"
                 }));
             }
         }

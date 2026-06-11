@@ -2,6 +2,7 @@ use sqlx::SqlitePool;
 use anyhow::Result;
 
 pub async fn init_db(pool: &SqlitePool) -> Result<()> {
+    migrate_scan_records_table(pool).await?;
     sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS users (
@@ -211,6 +212,109 @@ pub async fn seed_initial_data(pool: &SqlitePool) -> Result<()> {
         .execute(pool)
         .await?;
     }
+
+    Ok(())
+}
+
+async fn migrate_scan_records_table(pool: &SqlitePool) -> Result<()> {
+    let columns: Vec<String> = sqlx::query_scalar(
+        "SELECT name FROM pragma_table_info('scan_records') ORDER BY cid"
+    )
+    .fetch_all(pool)
+    .await
+    .unwrap_or_default();
+
+    if columns.is_empty() {
+        return Ok(());
+    }
+
+    let has_user_name = columns.contains(&"user_name".to_string());
+    let has_error_code = columns.contains(&"error_code".to_string());
+    
+    let mut has_nullable_demand_id = false;
+    if let Some(idx) = columns.iter().position(|c| c == "creative_demand_id") {
+        let notnull: Option<i64> = sqlx::query_scalar(
+            "SELECT notnull FROM pragma_table_info('scan_records') WHERE cid = ?"
+        )
+        .bind(idx as i64)
+        .fetch_one(pool)
+        .await
+        .unwrap_or(Some(1));
+        has_nullable_demand_id = notnull.unwrap_or(1) == 0;
+    }
+
+    if has_user_name && has_error_code && has_nullable_demand_id {
+        return Ok(());
+    }
+
+    sqlx::query("PRAGMA foreign_keys = OFF").execute(pool).await?;
+
+    sqlx::query("DROP TABLE IF EXISTS scan_records_new").execute(pool).await?;
+    sqlx::query("DROP INDEX IF EXISTS idx_scan_records_creative_demand").execute(pool).await?;
+    sqlx::query("DROP INDEX IF EXISTS idx_scan_records_user").execute(pool).await?;
+
+    sqlx::query(
+        r#"
+        CREATE TABLE scan_records_new (
+            id TEXT PRIMARY KEY,
+            creative_demand_id TEXT,
+            user_id TEXT NOT NULL,
+            user_name TEXT NOT NULL,
+            user_role TEXT NOT NULL,
+            scan_result TEXT NOT NULL,
+            error_code TEXT,
+            error_message TEXT,
+            scanned_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+        "#
+    ).execute(pool).await?;
+
+    let old_columns: Vec<String> = columns.iter()
+        .filter(|c| {
+            matches!(c.as_str(), 
+                "id" | "creative_demand_id" | "user_id" | "user_name" | 
+                "user_role" | "scan_result" | "error_code" | "error_message" | "scanned_at"
+            )
+        })
+        .cloned()
+        .collect();
+
+    let col_str = old_columns.join(", ");
+    let copy_sql = format!(
+        "INSERT INTO scan_records_new ({}) SELECT {} FROM scan_records",
+        col_str, col_str
+    );
+    sqlx::query(&copy_sql).execute(pool).await?;
+
+    if !has_user_name {
+        sqlx::query(
+            "UPDATE scan_records_new SET user_name = (SELECT name FROM users WHERE users.id = scan_records_new.user_id) WHERE user_name IS NULL OR user_name = ''"
+        ).execute(pool).await?;
+    }
+
+    if !has_error_code {
+        sqlx::query(
+            "UPDATE scan_records_new SET error_code = CASE 
+                WHEN scan_result = 'failed' AND error_message LIKE '%无效%' THEN 'INVALID_CODE'
+                WHEN scan_result = 'failed' AND error_message LIKE '%重复%' THEN 'DUPLICATE_SCAN'
+                WHEN scan_result = 'failed' AND error_message LIKE '%处理人%' THEN 'WRONG_HANDLER'
+                ELSE error_code 
+            END"
+        ).execute(pool).await?;
+    }
+
+    sqlx::query("DROP TABLE IF EXISTS scan_records").execute(pool).await?;
+    sqlx::query("ALTER TABLE scan_records_new RENAME TO scan_records").execute(pool).await?;
+
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_scan_records_creative_demand ON scan_records(creative_demand_id)"
+    ).execute(pool).await?;
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_scan_records_user ON scan_records(user_id)"
+    ).execute(pool).await?;
+
+    sqlx::query("PRAGMA foreign_keys = ON").execute(pool).await?;
 
     Ok(())
 }
