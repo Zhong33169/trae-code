@@ -58,6 +58,9 @@ export class TaskNode {
   @Column({ nullable: true, type: 'text' })
   rejectReason: string;
 
+  @Column({ nullable: true, type: 'text' })
+  abnormalReason: string;
+
   @Column({ default: false })
   isTimeout: boolean;
 

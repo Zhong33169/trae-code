@@ -332,6 +332,13 @@ export default function TaskDetail() {
                           {node.rejectReason}
                         </div>
                       )}
+
+                      {node.abnormalReason && (
+                        <div class="timeline-reason" style="background: #fff7e6; border-color: #ffd591;">
+                          <strong style="color: #d46b08;">异常原因：</strong>
+                          <span style="color: #d46b08;">{node.abnormalReason}</span>
+                        </div>
+                      )}
                     </div>
                   </div>
                 );

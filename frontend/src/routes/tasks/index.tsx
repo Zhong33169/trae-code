@@ -1,4 +1,4 @@
-import { createSignal, createEffect, onMount } from "solid-js";
+import { createSignal, createEffect, onMount, on } from "solid-js";
 import { A, useNavigate } from "@solidjs/router";
 import Layout from "~/components/Layout";
 import { api } from "~/lib/api";
@@ -45,11 +45,22 @@ export default function TaskList() {
     loadTasks();
   });
 
-  createEffect(() => {
-    if (authStore.user()) {
-      loadTasks();
-    }
-  });
+  createEffect(
+    on(
+      () => authStore.user()?.role,
+      (role, prevRole) => {
+        if (role && prevRole && role !== prevRole) {
+          setStatus("");
+          setHasTimeoutFilter(undefined);
+          setKeyword("");
+          setPage(1);
+        }
+        if (role) {
+          loadTasks();
+        }
+      }
+    )
+  );
 
   const handleSearch = () => {
     setPage(1);

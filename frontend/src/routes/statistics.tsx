@@ -1,4 +1,4 @@
-import { createSignal, onMount } from "solid-js";
+import { createSignal, onMount, createEffect, on } from "solid-js";
 import Layout from "~/components/Layout";
 import { api } from "~/lib/api";
 import { showToast } from "~/store/toast";
@@ -23,6 +23,17 @@ export default function Statistics() {
   onMount(() => {
     loadStats();
   });
+
+  createEffect(
+    on(
+      () => authStore.user()?.role,
+      (role) => {
+        if (role) {
+          loadStats();
+        }
+      }
+    )
+  );
 
   const currentRole = () => authStore.user()?.role || "";
   const currentRoleName = () => roleNames[currentRole()] || "";

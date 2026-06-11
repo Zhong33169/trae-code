@@ -297,6 +297,7 @@ export class TaskService {
         auditNode.handlerName = userName;
         auditNode.completedAt = new Date();
         auditNode.remark = dto.remark || '审核通过';
+        auditNode.abnormalReason = dto.abnormalReason || '';
         await this.nodeRepository.save(auditNode);
       }
 
@@ -337,6 +338,7 @@ export class TaskService {
         auditNode.completedAt = new Date();
         auditNode.rejectReason = dto.rejectReason;
         auditNode.remark = dto.remark || '';
+        auditNode.abnormalReason = dto.abnormalReason || '';
         await this.nodeRepository.save(auditNode);
       }
 
@@ -394,6 +396,7 @@ export class TaskService {
         reviewNode.handlerName = userName;
         reviewNode.completedAt = new Date();
         reviewNode.remark = dto.remark || '复核通过，已归档';
+        reviewNode.abnormalReason = dto.abnormalReason || '';
         await this.nodeRepository.save(reviewNode);
       }
 
@@ -427,6 +430,7 @@ export class TaskService {
         reviewNode.completedAt = new Date();
         reviewNode.rejectReason = dto.rejectReason;
         reviewNode.remark = dto.remark || '';
+        reviewNode.abnormalReason = dto.abnormalReason || '';
         await this.nodeRepository.save(reviewNode);
       }
 
@@ -465,20 +469,37 @@ export class TaskService {
     const pageSize = query.pageSize || 10;
     const skip = (page - 1) * pageSize;
 
+    const roleStatuses = this.getRoleDefaultStatuses(userRole);
+
     const where: any = {};
 
     if (query.status) {
-      where.status = query.status;
-    } else {
-      const defaultStatuses = this.getRoleDefaultStatuses(userRole);
-      if (defaultStatuses.length > 0) {
-        where.status = In(defaultStatuses);
+      if (roleStatuses.includes(query.status as any)) {
+        where.status = query.status;
+      } else {
+        where.status = In(roleStatuses);
       }
+    } else {
+      where.status = In(roleStatuses);
     }
 
     if (query.keyword) {
       where.taskName = Like(`%${query.keyword}%`);
     }
+
+    const allTasks = await this.taskRepository.find({
+      where,
+      order: { createdAt: 'DESC' },
+    });
+
+    const taskIds = allTasks.map(t => t.id);
+    const allNodes = await this.nodeRepository.find({ where: { taskId: In(taskIds) } });
+
+    let tasksWithTimeout = allTasks.map(task => {
+      const nodes = allNodes.filter(n => n.taskId === task.id);
+      const processedNodes = this.processTaskNodes(nodes);
+      return this.enrichTaskWithTimeout(task, processedNodes);
+    });
 
     let hasTimeoutFilter: boolean | undefined = undefined;
     if (query.hasTimeout !== undefined && query.hasTimeout !== null) {
@@ -489,30 +510,17 @@ export class TaskService {
       }
     }
 
-    const [tasks, total] = await this.taskRepository.findAndCount({
-      where,
-      order: { createdAt: 'DESC' },
-      skip,
-      take: pageSize,
-    });
-
-    const taskIds = tasks.map(t => t.id);
-    const allNodes = await this.nodeRepository.find({ where: { taskId: In(taskIds) } });
-
-    let tasksWithTimeout = tasks.map(task => {
-      const nodes = allNodes.filter(n => n.taskId === task.id);
-      const processedNodes = this.processTaskNodes(nodes);
-      return this.enrichTaskWithTimeout(task, processedNodes);
-    });
-
     if (hasTimeoutFilter !== undefined) {
       tasksWithTimeout = tasksWithTimeout.filter(t => t.hasTimeout === hasTimeoutFilter);
     }
 
+    const total = tasksWithTimeout.length;
+    const pagedTasks = tasksWithTimeout.slice(skip, skip + pageSize);
+
     return {
-      list: tasksWithTimeout,
-      total: hasTimeoutFilter !== undefined ? tasksWithTimeout.length : total,
-      filteredTotal: tasksWithTimeout.length,
+      list: pagedTasks,
+      total,
+      filteredTotal: total,
       page,
       pageSize,
     };
