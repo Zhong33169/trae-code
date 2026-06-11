@@ -143,10 +143,10 @@ const getRoleForStatus = (status) => {
     [RECORD_STATUSES.CORRECTED]: ROLES.SUPERVISOR,
     [RECORD_STATUSES.IN_FINAL_REVIEW]: ROLES.REVIEWER,
     [RECORD_STATUSES.EVIDENCE_MISSING]: ROLES.REGISTRAR,
-    [RECORD_STATUSES.OVERDUE]: null,
-    [RECORD_STATUSES.STATUS_CONFLICT]: ROLES.SUPERVISOR,
-    [RECORD_STATUSES.FINAL_PASSED]: null,
-    [RECORD_STATUSES.FINAL_REJECTED]: null,
+    [RECORD_STATUSES.OVERDUE]: ROLES.SUPERVISOR,
+    [RECORD_STATUSES.STATUS_CONFLICT]: ROLES.REGISTRAR,
+    [RECORD_STATUSES.FINAL_PASSED]: ROLES.REVIEWER,
+    [RECORD_STATUSES.FINAL_REJECTED]: ROLES.REGISTRAR,
     [RECORD_STATUSES.REVIEW_REJECTED]: ROLES.REGISTRAR,
     [RECORD_STATUSES.ARCHIVED]: null,
   };
@@ -268,10 +268,38 @@ const validateStatusTransition = (record, operation, userId, role) => {
         requireRejectReason: true,
       },
     },
+    [RECORD_STATUSES.OVERDUE]: {
+      [OPERATION_TYPES.REQUEST_CORRECTION]: {
+        allowedRoles: [ROLES.SUPERVISOR],
+        newStatus: RECORD_STATUSES.NEEDS_CORRECTION,
+        requireOpinion: true,
+        requireRejectReason: true,
+      },
+      [OPERATION_TYPES.REVIEW_PASS]: {
+        allowedRoles: [ROLES.SUPERVISOR],
+        newStatus: RECORD_STATUSES.REVIEW_PASSED,
+        requireOpinion: true,
+      },
+      [OPERATION_TYPES.REVIEW_REJECT]: {
+        allowedRoles: [ROLES.SUPERVISOR],
+        newStatus: RECORD_STATUSES.REVIEW_REJECTED,
+        requireOpinion: true,
+        requireRejectReason: true,
+      },
+    },
     [RECORD_STATUSES.FINAL_PASSED]: {
       [OPERATION_TYPES.ARCHIVE]: {
         allowedRoles: [ROLES.REVIEWER],
         newStatus: RECORD_STATUSES.ARCHIVED,
+      },
+    },
+    [RECORD_STATUSES.FINAL_REJECTED]: {
+      [OPERATION_TYPES.CORRECT]: {
+        allowedRoles: [ROLES.REGISTRAR],
+        newStatus: RECORD_STATUSES.CORRECTED,
+        requireOpinion: true,
+        requireCreator: true,
+        requireEvidence: true,
       },
     },
   };
@@ -340,8 +368,16 @@ const getAvailableOperations = (record, userRole) => {
       { operation: OPERATION_TYPES.CORRECT, label: '整改后重新提交', roles: [ROLES.REGISTRAR] },
     ],
     [RECORD_STATUSES.STATUS_CONFLICT]: [
-      { operation: OPERATION_TYPES.CORRECT, label: '核实后补正', roles: [ROLES.REGISTRAR] },
-      { operation: OPERATION_TYPES.FINAL_REJECT, label: '复核驳回', roles: [ROLES.REVIEWER] },
+      { operation: OPERATION_TYPES.CORRECT, label: '现场核实后补正', roles: [ROLES.REGISTRAR] },
+      { operation: OPERATION_TYPES.FINAL_REJECT, label: '最终裁定驳回', roles: [ROLES.REVIEWER] },
+    ],
+    [RECORD_STATUSES.OVERDUE]: [
+      { operation: OPERATION_TYPES.REVIEW_PASS, label: '逾期情况确认通过', roles: [ROLES.SUPERVISOR] },
+      { operation: OPERATION_TYPES.REVIEW_REJECT, label: '逾期并审核驳回', roles: [ROLES.SUPERVISOR] },
+      { operation: OPERATION_TYPES.REQUEST_CORRECTION, label: '逾期要求补正', roles: [ROLES.SUPERVISOR] },
+    ],
+    [RECORD_STATUSES.FINAL_REJECTED]: [
+      { operation: OPERATION_TYPES.CORRECT, label: '复核驳回后补正', roles: [ROLES.REGISTRAR] },
     ],
     [RECORD_STATUSES.FINAL_PASSED]: [
       { operation: OPERATION_TYPES.ARCHIVE, label: '归档', roles: [ROLES.REVIEWER] },

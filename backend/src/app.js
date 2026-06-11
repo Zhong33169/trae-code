@@ -3,6 +3,7 @@ const bodyParser = require('koa-bodyparser');
 const cors = require('koa-cors');
 const path = require('path');
 const dotenv = require('dotenv');
+const { initializeDatabase } = require('./db');
 
 dotenv.config({ path: path.join(__dirname, '../.env') });
 
@@ -55,13 +56,25 @@ app.use(logRoutes.routes()).use(logRoutes.allowedMethods());
 
 const PORT = process.env.PORT || 8004;
 
-app.listen(PORT, () => {
-  console.log(`\n========================================`);
-  console.log(`工程监理旁站记录系统 - 后端服务`);
-  console.log(`运行端口: ${PORT}`);
-  console.log(`服务地址: http://localhost:${PORT}`);
-  console.log(`数据库: ${process.env.DB_PATH || './data/supervision.db'}`);
-  console.log(`========================================\n`);
-});
+async function start() {
+  try {
+    await initializeDatabase();
+    app.listen(PORT, () => {
+      console.log(`\n========================================`);
+      console.log(`工程监理旁站记录系统 - 后端服务`);
+      console.log(`运行端口: ${PORT}`);
+      console.log(`服务地址: http://localhost:${PORT}`);
+      console.log(`数据库: ${process.env.DB_PATH || './data/supervision.db'}`);
+      console.log(`========================================\n`);
+    });
+  } catch (e) {
+    console.error('服务启动失败:', e);
+    process.exit(1);
+  }
+}
+
+if (require.main === module) {
+  start();
+}
 
 module.exports = app;

@@ -244,7 +244,7 @@ const operationSchema = {
 
 router.post('/:id/operate', authMiddleware(), allRoles, async (ctx) => {
   const { id } = ctx.params;
-  const { operation, opinion, rejectReason, version, deadline, handlerId } = ctx.request.body;
+  const { operation, opinion, rejectReason, version, deadline, handlerId, evidences } = ctx.request.body;
   const user = ctx.state.user;
 
   const errors = validateObject({ operation, opinion, rejectReason }, operationSchema);
@@ -263,9 +263,13 @@ router.post('/:id/operate', authMiddleware(), allRoles, async (ctx) => {
     return error(ctx, versionCheck.message, 409);
   }
 
-  if (record.current_handler_id && record.current_handler_id !== user.id && 
-      ![OPERATION_TYPES.SUBMIT, OPERATION_TYPES.RESUBMIT].includes(operation)) {
-    const handlerCheck = validateHandler(record, user.id, user.role);
+  const handlerCheck = validateHandler(record, user.id, user.role);
+  if ([OPERATION_TYPES.CORRECT, OPERATION_TYPES.RESUBMIT, OPERATION_TYPES.SUBMIT].includes(operation)) {
+    if (record.created_by !== user.id) {
+      logOperation(id, user.id, operation, '操作失败: 只有记录创建人才能执行此操作', ctx.request.ip);
+      return error(ctx, '只有记录创建人才能执行此操作', 403);
+    }
+  } else if (record.current_handler_id && record.current_handler_id !== user.id) {
     if (!handlerCheck.valid) {
       logOperation(id, user.id, operation, `操作失败: ${handlerCheck.message}`, ctx.request.ip);
       return error(ctx, handlerCheck.message, 403);
@@ -291,10 +295,22 @@ router.post('/:id/operate', authMiddleware(), allRoles, async (ctx) => {
     return error(ctx, '请填写驳回原因', 400);
   }
 
+  if (transition.requireEvidence && operation === OPERATION_TYPES.CORRECT) {
+    const existingEvidences = getEvidencesByRecordId(id);
+    const newEvidences = evidences || [];
+    const allEvidences = [...existingEvidences, ...newEvidences];
+    const hasPhoto = allEvidences.some(e => e.type === 'photo');
+    if (!hasPhoto) {
+      logOperation(id, user.id, operation, '操作失败: 缺少必要证据-照片证据', ctx.request.ip);
+      return error(ctx, '缺少必要证据：至少需要包含1份照片证据', 400);
+    }
+  }
+
   const previousStatus = record.status;
   const newStatus = transition.newStatus;
   const resultType = operation.includes('pass') ? 'pass' : 
                      operation.includes('reject') ? 'reject' : 
+                     operation === OPERATION_TYPES.CORRECT ? 'corrected' :
                      operation.includes('correction') ? 'correction' : 'process';
 
   let nextHandlerId = null;
@@ -310,6 +326,16 @@ router.post('/:id/operate', authMiddleware(), allRoles, async (ctx) => {
 
   db.exec('BEGIN TRANSACTION');
   try {
+    if (evidences && evidences.length > 0 && [OPERATION_TYPES.CORRECT, OPERATION_TYPES.RESUBMIT].includes(operation)) {
+      const insertEvidence = db.prepare(`
+        INSERT INTO evidences (record_id, type, name, description, file_url, uploaded_by)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `);
+      evidences.forEach(e => {
+        insertEvidence.run(id, e.type, e.name, e.description || '', e.fileUrl || e.file_url || '', user.id);
+      });
+    }
+
     addReviewRecord(
       id, user.id, operation, opinion || '', resultType,
       previousStatus, newStatus, rejectReason || null, version
@@ -322,13 +348,14 @@ router.post('/:id/operate', authMiddleware(), allRoles, async (ctx) => {
 
     incrementVersion(id);
 
-    if (deadline && [RECORD_STATUSES.IN_REVIEW, RECORD_STATUSES.IN_FINAL_REVIEW, RECORD_STATUSES.NEEDS_CORRECTION].includes(newStatus)) {
+    if (deadline && [RECORD_STATUSES.IN_REVIEW, RECORD_STATUSES.IN_FINAL_REVIEW, RECORD_STATUSES.NEEDS_CORRECTION, RECORD_STATUSES.EVIDENCE_MISSING].includes(newStatus)) {
       db.prepare('UPDATE supervision_records SET deadline = ? WHERE id = ?').run(deadline, id);
     }
 
+    const evidenceNote = evidences && evidences.length > 0 ? `（新增证据${evidences.length}份）` : '';
     logOperation(
       id, user.id, operation,
-      `${OPERATION_NAMES[operation] || operation} - ${opinion || ''}`,
+      `${OPERATION_NAMES[operation] || operation}${evidenceNote} - ${opinion || ''}`,
       ctx.request.ip
     );
 
@@ -342,11 +369,32 @@ router.post('/:id/operate', authMiddleware(), allRoles, async (ctx) => {
   }
 
   const updatedRecord = getRecordById(id);
+  const updatedEvidences = getEvidencesByRecordId(id);
+  const updatedReviews = getReviewRecordsByRecordId(id);
+  const updatedLogs = getOperationLogsByRecordId(id);
+  const updatedLastReview = updatedReviews.length > 0 ? updatedReviews[updatedReviews.length - 1] : null;
+  const updatedAvailableOps = getAvailableOperations({ ...updatedRecord }, user.role);
+
   success(ctx, {
     record: {
       ...updatedRecord,
       statusName: STATUS_NAMES[updatedRecord.status] || updatedRecord.status,
     },
+    evidences: updatedEvidences,
+    reviewRecords: updatedReviews.map(r => ({
+      ...r,
+      operationTypeName: OPERATION_NAMES[r.operation_type] || r.operation_type,
+      handlerRoleName: ROLE_NAMES[r.handler_role] || r.handler_role,
+      previousStatusName: STATUS_NAMES[r.previous_status] || r.previous_status,
+      newStatusName: STATUS_NAMES[r.new_status] || r.new_status,
+    })),
+    operationLogs: updatedLogs.map(l => ({
+      ...l,
+      operationTypeName: OPERATION_NAMES[l.operation_type] || l.operation_type,
+      userRoleName: ROLE_NAMES[l.user_role] || l.user_role,
+    })),
+    availableOperations: updatedAvailableOps,
+    lastReview: updatedLastReview,
     newStatus,
     previousStatus,
   }, `${OPERATION_NAMES[operation] || '操作'}成功`);

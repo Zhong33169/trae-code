@@ -1,5 +1,5 @@
 import { json, LoaderFunctionArgs, ActionFunctionArgs, redirect } from "@remix-run/node";
-import { useLoaderData, useActionData, useRevalidator, Link } from "@remix-run/react";
+import { useLoaderData, useActionData, useRevalidator, Link, useFetcher } from "@remix-run/react";
 import {
   Card,
   Descriptions,
@@ -11,35 +11,34 @@ import {
   Input,
   Select,
   DatePicker,
-  Upload,
   Table,
   Timeline,
   Row,
   Col,
   Divider,
-  List,
   App,
   message,
   Popconfirm,
+  List,
 } from "antd";
 import {
   ArrowLeftOutlined,
   CheckCircleOutlined,
   CloseCircleOutlined,
   ExclamationCircleOutlined,
-  UploadOutlined,
   FileImageOutlined,
   VideoCameraOutlined,
   FileTextOutlined,
-  EditOutlined,
   CameraOutlined,
+  PlusOutlined,
+  DeleteOutlined,
+  EditOutlined,
 } from "@ant-design/icons";
 import { requireAuth } from "~/utils/auth.server";
-import { apiGet, apiPost, apiPut, apiDelete } from "~/utils/api.server";
+import { apiGet, apiPost, apiDelete } from "~/utils/api.server";
 import { RecordDetailResponse, Evidence, ReviewRecord, OperationLog, SupervisionRecord } from "~/types";
 import dayjs from "dayjs";
-import { useState } from "react";
-import type { UploadProps } from "antd";
+import { useState, useEffect } from "react";
 
 const STATUS_COLORS: Record<string, string> = {
   draft: "default",
@@ -74,6 +73,14 @@ const EVIDENCE_TYPE_NAMES: Record<string, string> = {
   other: "其他",
 };
 
+const EVIDENCE_TYPE_OPTIONS = [
+  { value: "photo", label: "照片" },
+  { value: "video", label: "视频" },
+  { value: "document", label: "文档" },
+  { value: "signature", label: "签字" },
+  { value: "other", label: "其他" },
+];
+
 const RESULT_COLORS: Record<string, string> = {
   pass: "success",
   reject: "error",
@@ -86,17 +93,24 @@ const RESULT_COLORS: Record<string, string> = {
 const RESULT_NAMES: Record<string, string> = {
   pass: "通过",
   reject: "驳回",
-  correction: "补正",
+  correction: "补正要求",
   process: "处理中",
   corrected: "已补正",
   conflict: "冲突",
+};
+
+type EvidenceFormItem = {
+  type: string;
+  name: string;
+  description?: string;
+  fileUrl: string;
 };
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const { token } = await requireAuth(request);
   const response = await apiGet<RecordDetailResponse>(token, `/api/records/${params.id}`);
   if (response.code !== 200) {
-    throw new Error(response.message);
+    throw new Error(response.message || "获取记录详情失败");
   }
   return json(response.data);
 };
@@ -113,10 +127,21 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     const version = parseInt(formData.get("version") as string);
     const deadline = formData.get("deadline") as string;
     const handlerId = formData.get("handlerId") ? parseInt(formData.get("handlerId") as string) : undefined;
-
+    const evidencesStr = formData.get("evidences") as string;
+    
     const body: any = { operation, opinion, rejectReason, version };
     if (deadline) body.deadline = deadline;
     if (handlerId) body.handlerId = handlerId;
+    if (evidencesStr) {
+      try {
+        const evidences = JSON.parse(evidencesStr);
+        if (Array.isArray(evidences) && evidences.length > 0) {
+          body.evidences = evidences;
+        }
+      } catch (e) {
+        console.error("解析证据数据失败", e);
+      }
+    }
 
     const response = await apiPost(token, `/api/records/${params.id}/operate`, body);
     return json({ ...response, operation });
@@ -134,7 +159,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 };
 
 export default function RecordDetail() {
-  const data = useLoaderData<typeof loader>();
+  const initialData = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const revalidator = useRevalidator();
   const { message: messageApi } = App.useApp();
@@ -142,28 +167,81 @@ export default function RecordDetail() {
   const [operationModal, setOperationModal] = useState<{ open: boolean; operation: string; label: string }>({ open: false, operation: "", label: "" });
   const [form] = Form.useForm();
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [newEvidences, setNewEvidences] = useState<EvidenceFormItem[]>([]);
+  
+  const [pageData, setPageData] = useState(initialData);
 
-  const { record, evidences, reviewRecords, operationLogs, availableOperations, lastReview } = data;
+  useEffect(() => {
+    setPageData(initialData);
+  }, [initialData]);
 
-  if (actionData && "code" in actionData) {
-    if (actionData.code === 200) {
-      messageApi.success(`${operationModal.label}成功`);
-      setOperationModal({ open: false, operation: "", label: "" });
-      revalidator.revalidate();
-    } else {
-      messageApi.error(actionData.message || "操作失败");
-      setIsSubmitting(false);
+  const { record, evidences, reviewRecords, operationLogs, availableOperations, lastReview } = pageData;
+
+  useEffect(() => {
+    if (actionData && "code" in actionData) {
+      if (actionData.code === 200) {
+        messageApi.success(`${operationModal.label}成功`);
+        setOperationModal({ open: false, operation: "", label: "" });
+        setIsSubmitting(false);
+        setNewEvidences([]);
+        form.resetFields();
+        if ((actionData as any).record) {
+          setPageData({
+            record: (actionData as any).record,
+            evidences: (actionData as any).evidences || evidences,
+            reviewRecords: (actionData as any).reviewRecords || reviewRecords,
+            operationLogs: (actionData as any).operationLogs || operationLogs,
+            availableOperations: (actionData as any).availableOperations || [],
+            lastReview: (actionData as any).lastReview || lastReview,
+          });
+        } else {
+          revalidator.revalidate();
+        }
+      } else {
+        messageApi.error(actionData.message || "操作失败");
+        setIsSubmitting(false);
+      }
     }
-  }
+  }, [actionData]);
 
   const handleOperation = (op: string, label: string) => {
     setOperationModal({ open: true, operation: op, label });
+    setNewEvidences([]);
     form.resetFields();
+  };
+
+  const addEvidenceItem = () => {
+    setNewEvidences([
+      ...newEvidences,
+      { type: "photo", name: "", description: "", fileUrl: `/demo/evidence-${Date.now()}.jpg` },
+    ]);
+  };
+
+  const removeEvidenceItem = (index: number) => {
+    const updated = [...newEvidences];
+    updated.splice(index, 1);
+    setNewEvidences(updated);
+  };
+
+  const updateEvidenceItem = (index: number, field: keyof EvidenceFormItem, value: any) => {
+    const updated = [...newEvidences];
+    updated[index] = { ...updated[index], [field]: value };
+    setNewEvidences(updated);
   };
 
   const handleSubmitOperation = async () => {
     try {
       const values = await form.validateFields();
+      
+      const needEvidences = ["correct", "resubmit"].includes(operationModal.operation);
+      if (needEvidences && operationModal.operation === "correct") {
+        const hasPhoto = [...(evidences || []), ...newEvidences].some(e => e.type === "photo");
+        if (!hasPhoto) {
+          messageApi.warning("至少需要包含1份照片证据，请补充证据材料");
+          return;
+        }
+      }
+      
       setIsSubmitting(true);
       
       const formEl = document.createElement('form');
@@ -189,17 +267,26 @@ export default function RecordDetail() {
       if (values.handlerId) {
         addField('handlerId', values.handlerId);
       }
+      if (newEvidences.length > 0 && needEvidences) {
+        addField('evidences', JSON.stringify(newEvidences));
+      }
       
       document.body.appendChild(formEl);
       formEl.submit();
-    } catch {
-      messageApi.error("请填写必填项");
+    } catch (e: any) {
+      if (e?.errorFields) {
+        messageApi.error("请填写必填项");
+      } else {
+        messageApi.error("提交失败，请检查填写内容");
+      }
     }
   };
 
   const needOpinion = ["review_pass", "review_reject", "request_correction", "mark_evidence_missing", "mark_status_conflict", "final_pass", "final_reject", "correct"].includes(operationModal.operation);
   const needRejectReason = ["review_reject", "request_correction", "mark_evidence_missing", "mark_status_conflict", "final_reject"].includes(operationModal.operation);
-  const needDeadline = ["review", "final_review", "correct"].includes(operationModal.operation);
+  const needDeadline = ["review", "final_review", "correct", "mark_evidence_missing", "request_correction"].includes(operationModal.operation);
+  const showEvidences = ["correct", "resubmit"].includes(operationModal.operation);
+  const opIsCorrect = operationModal.operation === "correct";
 
   const evidenceColumns = [
     {
@@ -252,10 +339,10 @@ export default function RecordDetail() {
       dataIndex: "user_name",
       key: "user_name",
       width: 100,
-      render: (text: string, record: OperationLog) => (
+      render: (text: string, lrecord: OperationLog) => (
         <Space>
           {text}
-          <Tag color="blue" size="small">{record.user_role_name}</Tag>
+          <Tag color="blue" size="small">{lrecord.user_role_name}</Tag>
         </Space>
       ),
     },
@@ -293,24 +380,24 @@ export default function RecordDetail() {
           </Space>
         }
         extra={
-          <Space>
-            {availableOperations.map((op: any) => (
+          <Space wrap>
+            {availableOperations && availableOperations.length > 0 && availableOperations.map((op: any) => (
               <Button
                 key={op.operation}
-                type={op.operation.includes("pass") ? "primary" : op.operation.includes("reject") ? "default" : "default"}
+                type={op.operation.includes("pass") ? "primary" : "default"}
                 danger={op.operation.includes("reject")}
                 onClick={() => handleOperation(op.operation, op.label)}
                 icon={
                   op.operation.includes("pass") ? <CheckCircleOutlined /> :
                   op.operation.includes("reject") ? <CloseCircleOutlined /> :
-                  op.operation.includes("correction") ? <ExclamationCircleOutlined /> :
+                  op.operation.includes("correction") || op.operation === "correct" ? <ExclamationCircleOutlined /> :
                   undefined
                 }
               >
                 {op.label}
               </Button>
             ))}
-            {record.status === "draft" && record.created_by_name && (
+            {record.status === "draft" && (
               <Space>
                 <Link to={`/records/${record.id}/edit`}>
                   <Button icon={<EditOutlined />}>编辑</Button>
@@ -378,43 +465,49 @@ export default function RecordDetail() {
       {lastReview && (
         <Card
           style={{ marginBottom: 16 }}
-          title="上一处理人意见"
+          title={
+            <Space>
+              <ExclamationCircleOutlined style={{ color: "#fa8c16" }} />
+              <span style={{ color: "#fa8c16" }}>上一处理人意见（请参考此内容进行办理）</span>
+            </Space>
+          }
           size="small"
+          style={{ marginBottom: 16, border: "1px solid #ffd591", background: "#fffbe6" } as any}
         >
           <Row gutter={16}>
-            <Col span={6}>
+            <Col xs={24} sm={12} md={6}>
               <div style={{ color: "#666", fontSize: 12 }}>处理人</div>
               <div style={{ fontWeight: 500 }}>
                 {lastReview.handler_name}
                 <Tag style={{ marginLeft: 8 }} color="blue" size="small">{lastReview.handler_role_name}</Tag>
               </div>
             </Col>
-            <Col span={6}>
-              <div style={{ color: "#666", fontSize: 12 }}>操作</div>
+            <Col xs={24} sm={12} md={6}>
+              <div style={{ color: "#666", fontSize: 12 }}>操作类型</div>
               <div style={{ fontWeight: 500 }}>{lastReview.operation_type_name}</div>
             </Col>
-            <Col span={6}>
-              <div style={{ color: "#666", fontSize: 12 }}>结果</div>
+            <Col xs={24} sm={12} md={6}>
+              <div style={{ color: "#666", fontSize: 12 }}>办理结果</div>
               <div>
                 <Tag color={RESULT_COLORS[lastReview.result]}>
                   {RESULT_NAMES[lastReview.result] || lastReview.result}
                 </Tag>
               </div>
             </Col>
-            <Col span={6}>
+            <Col xs={24} sm={12} md={6}>
               <div style={{ color: "#666", fontSize: 12 }}>处理时间</div>
               <div style={{ fontWeight: 500 }}>{dayjs(lastReview.created_at).format("YYYY-MM-DD HH:mm")}</div>
             </Col>
           </Row>
           <Divider style={{ margin: "12px 0" }} />
-          <div>
-            <div style={{ color: "#666", fontSize: 12, marginBottom: 4 }}>处理意见</div>
-            <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.8 }}>{lastReview.opinion}</div>
+          <div style={{ marginBottom: 12 }}>
+            <div style={{ color: "#666", fontSize: 12, marginBottom: 4 }}>处理意见：</div>
+            <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.8, background: "white", padding: 12, borderRadius: 4 }}>{lastReview.opinion}</div>
           </div>
           {lastReview.reject_reason && (
-            <div style={{ marginTop: 12 }}>
-              <div style={{ color: "#666", fontSize: 12, marginBottom: 4 }}>驳回/补正原因</div>
-              <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.8, color: "#ff4d4f" }}>{lastReview.reject_reason}</div>
+            <div>
+              <div style={{ color: "#ff4d4f", fontSize: 12, marginBottom: 4 }}>驳回/补正原因：</div>
+              <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.8, color: "#ff4d4f", background: "#fff2f0", padding: 12, borderRadius: 4 }}>{lastReview.reject_reason}</div>
             </div>
           )}
         </Card>
@@ -422,11 +515,88 @@ export default function RecordDetail() {
 
       <Card
         style={{ marginBottom: 16 }}
-        title="证据材料"
+        title={
+          <Space>
+            <FileImageOutlined />
+            <span>证据材料</span>
+            <Tag color={evidences && evidences.length > 0 ? "success" : "warning"}>共 {evidences?.length || 0} 份</Tag>
+            {showEvidences && (
+              <Button type="dashed" size="small" icon={<PlusOutlined />} onClick={addEvidenceItem}>
+                新增证据
+              </Button>
+            )}
+          </Space>
+        }
         size="small"
-        extra={<Tag color={evidences.length > 0 ? "success" : "warning"}>共 {evidences.length} 份</Tag>}
       >
-        {evidences.length > 0 ? (
+        {showEvidences && newEvidences.length > 0 && (
+          <div style={{ marginBottom: 16, padding: 12, background: "#e6f7ff", borderRadius: 4, border: "1px solid #91d5ff" }}>
+            <div style={{ marginBottom: 8, fontWeight: 500, color: "#1890ff" }}>
+              待提交的新证据（{newEvidences.length} 份）
+            </div>
+            <List
+              size="small"
+              bordered
+              dataSource={newEvidences}
+              renderItem={(item, index) => (
+                <List.Item
+                  actions={[
+                    <Button type="text" danger size="small" icon={<DeleteOutlined />} onClick={() => removeEvidenceItem(index)}>
+                      删除
+                    </Button>
+                  ]}
+                >
+                  <div style={{ width: "100%" }}>
+                    <Row gutter={8} align="middle">
+                      <Col xs={24} sm={8} md={5} style={{ marginBottom: 4 }}>
+                        <Select
+                          size="small"
+                          value={item.type}
+                          onChange={(v) => updateEvidenceItem(index, "type", v)}
+                          options={EVIDENCE_TYPE_OPTIONS}
+                          style={{ width: "100%" }}
+                        />
+                      </Col>
+                      <Col xs={24} sm={16} md={7} style={{ marginBottom: 4 }}>
+                        <Input
+                          size="small"
+                          placeholder="证据名称"
+                          value={item.name}
+                          onChange={(e) => updateEvidenceItem(index, "name", e.target.value)}
+                        />
+                      </Col>
+                      <Col xs={24} sm={16} md={8} style={{ marginBottom: 4 }}>
+                        <Input
+                          size="small"
+                          placeholder="描述（选填）"
+                          value={item.description}
+                          onChange={(e) => updateEvidenceItem(index, "description", e.target.value)}
+                        />
+                      </Col>
+                      <Col xs={24} sm={8} md={4}>
+                        <Input
+                          size="small"
+                          placeholder="文件标识/URL"
+                          value={item.fileUrl}
+                          onChange={(e) => updateEvidenceItem(index, "fileUrl", e.target.value)}
+                        />
+                      </Col>
+                    </Row>
+                    {!item.name && (
+                      <div style={{ color: "#ff4d4f", fontSize: 12, marginTop: 4 }}>请填写证据名称</div>
+                    )}
+                  </div>
+                </List.Item>
+              )}
+            />
+            {opIsCorrect && (
+              <div style={{ marginTop: 8, fontSize: 12, color: "#fa8c16" }}>
+                提示：补正提交时必须包含至少1份照片证据
+              </div>
+            )}
+          </div>
+        )}
+        {evidences && evidences.length > 0 ? (
           <Table
             dataSource={evidences}
             columns={evidenceColumns}
@@ -437,23 +607,34 @@ export default function RecordDetail() {
         ) : (
           <div style={{ textAlign: "center", padding: 20, color: "#999" }}>
             暂无证据材料
+            {showEvidences && (
+              <div style={{ marginTop: 8 }}>
+                点击上方"新增证据"按钮添加
+              </div>
+            )}
           </div>
         )}
       </Card>
 
-      {reviewRecords.length > 0 && (
+      {reviewRecords && reviewRecords.length > 0 && (
         <Card
           style={{ marginBottom: 16 }}
-          title="审核复核历史"
+          title={
+            <Space>
+              <CheckCircleOutlined />
+              <span>审核复核历史</span>
+            </Space>
+          }
           size="small"
         >
           <Timeline
+            mode="left"
             items={reviewRecords.map((rv: ReviewRecord) => ({
-              color: rv.result === "pass" ? "green" : rv.result === "reject" ? "red" : rv.result === "correction" ? "orange" : "blue",
+              color: rv.result === "pass" ? "green" : rv.result === "reject" ? "red" : rv.result === "correction" || rv.result === "corrected" ? "orange" : "blue",
               children: (
                 <Card size="small" style={{ marginBottom: 8 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
-                    <Space>
+                  <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
+                    <Space wrap>
                       <strong>{rv.handler_name}</strong>
                       <Tag color="blue" size="small">{rv.handler_role_name}</Tag>
                       <Tag>{rv.operation_type_name}</Tag>
@@ -464,21 +645,22 @@ export default function RecordDetail() {
                       <span style={{ color: "#999" }}>{dayjs(rv.created_at).format("YYYY-MM-DD HH:mm")}</span>
                     </Space>
                   </div>
-                  <div style={{ display: "flex", gap: 16, marginBottom: 8 }}>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 16, marginBottom: 8 }}>
                     <div>
-                      <span style={{ color: "#666" }}>从：</span>
+                      <span style={{ color: "#666" }}>状态流转：</span>
                       <Tag color={STATUS_COLORS[rv.previous_status]}>{rv.previous_status_name}</Tag>
                       <span style={{ color: "#666", margin: "0 8px" }}>→</span>
-                      <span style={{ color: "#666" }}>到：</span>
                       <Tag color={STATUS_COLORS[rv.new_status]}>{rv.new_status_name}</Tag>
                     </div>
                   </div>
-                  <div style={{ background: "#fafafa", padding: 12, borderRadius: 4 }}>
-                    <div style={{ color: "#666", fontSize: 12, marginBottom: 4 }}>意见：</div>
-                    <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.8 }}>{rv.opinion}</div>
-                  </div>
+                  {rv.opinion && (
+                    <div style={{ background: "#fafafa", padding: 12, borderRadius: 4, marginBottom: 8 }}>
+                      <div style={{ color: "#666", fontSize: 12, marginBottom: 4 }}>处理意见：</div>
+                      <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.8 }}>{rv.opinion}</div>
+                    </div>
+                  )}
                   {rv.reject_reason && (
-                    <div style={{ marginTop: 8, background: "#fff2f0", padding: 12, borderRadius: 4, border: "1px solid #ffccc7" }}>
+                    <div style={{ background: "#fff2f0", padding: 12, borderRadius: 4, border: "1px solid #ffccc7" }}>
                       <div style={{ color: "#ff4d4f", fontSize: 12, marginBottom: 4 }}>驳回/补正原因：</div>
                       <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.8, color: "#ff4d4f" }}>{rv.reject_reason}</div>
                     </div>
@@ -490,8 +672,16 @@ export default function RecordDetail() {
         </Card>
       )}
 
-      <Card title="操作日志" size="small">
-        {operationLogs.length > 0 ? (
+      <Card
+        title={
+          <Space>
+            <FileTextOutlined />
+            <span>操作日志</span>
+          </Space>
+        }
+        size="small"
+      >
+        {operationLogs && operationLogs.length > 0 ? (
           <Table
             dataSource={operationLogs}
             columns={operationLogColumns}
@@ -507,14 +697,25 @@ export default function RecordDetail() {
       </Card>
 
       <Modal
-        title={operationModal.label}
+        title={
+          <Space>
+            {operationModal.operation.includes("pass") ? <CheckCircleOutlined style={{ color: "#52c41a" }} /> :
+             operationModal.operation.includes("reject") ? <CloseCircleOutlined style={{ color: "#ff4d4f" }} /> :
+             opIsCorrect ? <ExclamationCircleOutlined style={{ color: "#fa8c16" }} /> : null}
+            {operationModal.label}
+          </Space>
+        }
         open={operationModal.open}
         onCancel={() => {
           setOperationModal({ open: false, operation: "", label: "" });
           setIsSubmitting(false);
+          setNewEvidences([]);
         }}
         footer={[
-          <Button key="cancel" onClick={() => setOperationModal({ open: false, operation: "", label: "" })}>
+          <Button key="cancel" onClick={() => {
+            setOperationModal({ open: false, operation: "", label: "" });
+            setNewEvidences([]);
+          }}>
             取消
           </Button>,
           <Button
@@ -527,19 +728,28 @@ export default function RecordDetail() {
             确认{operationModal.label}
           </Button>,
         ]}
-        width={600}
+        width={showEvidences ? 800 : 600}
         destroyOnClose
       >
         <Form form={form} layout="vertical">
+          {showEvidences && opIsCorrect && (
+            <Alert
+              message="补正要求"
+              description={lastReview ? `上一处理人：${lastReview.handler_name} 要求：${lastReview.reject_reason || lastReview.opinion}` : "请根据上一环节意见补正相关内容，并补充相应证据材料"}
+              type="warning"
+              showIcon
+              style={{ marginBottom: 16 }}
+            />
+          )}
           {needOpinion && (
             <Form.Item
               name="opinion"
-              label="处理意见"
+              label={opIsCorrect ? "补正说明/处理意见" : "处理意见"}
               rules={[{ required: true, message: "请填写处理意见" }]}
             >
               <Input.TextArea
                 rows={4}
-                placeholder="请详细填写处理意见..."
+                placeholder={opIsCorrect ? "请详细填写补正情况说明、整改措施等..." : "请详细填写处理意见..."}
                 maxLength={1000}
                 showCount
               />
@@ -559,6 +769,79 @@ export default function RecordDetail() {
               />
             </Form.Item>
           )}
+          {showEvidences && (
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontWeight: 500, marginBottom: 8 }}>
+                补充证据材料
+                <Button type="dashed" size="small" icon={<PlusOutlined />} onClick={addEvidenceItem} style={{ marginLeft: 8 }}>
+                  添加证据
+                </Button>
+                <span style={{ color: "#999", marginLeft: 8, fontSize: 12 }}>（至少需要1份照片证据）</span>
+              </div>
+              {newEvidences.length === 0 ? (
+                <div style={{ textAlign: "center", padding: 20, color: "#999", border: "1px dashed #d9d9d9", borderRadius: 4 }}>
+                  暂无新增证据，点击上方"添加证据"按钮添加
+                </div>
+              ) : (
+                <List
+                  size="small"
+                  bordered
+                  dataSource={newEvidences}
+                  renderItem={(item, index) => (
+                    <List.Item
+                      actions={[
+                        <Button type="text" danger size="small" icon={<DeleteOutlined />} onClick={() => removeEvidenceItem(index)}>
+                          删除
+                        </Button>
+                      ]}
+                    >
+                      <div style={{ width: "100%" }}>
+                        <Row gutter={[8, 8]} align="middle">
+                          <Col xs={24} sm={12} md={6}>
+                            <div style={{ color: "#666", fontSize: 12, marginBottom: 4 }}>证据类型 *</div>
+                            <Select
+                              size="small"
+                              value={item.type}
+                              onChange={(v) => updateEvidenceItem(index, "type", v)}
+                              options={EVIDENCE_TYPE_OPTIONS}
+                              style={{ width: "100%" }}
+                            />
+                          </Col>
+                          <Col xs={24} sm={12} md={8}>
+                            <div style={{ color: "#666", fontSize: 12, marginBottom: 4 }}>证据名称 *</div>
+                            <Input
+                              size="small"
+                              placeholder="证据名称（必填）"
+                              value={item.name}
+                              onChange={(e) => updateEvidenceItem(index, "name", e.target.value)}
+                            />
+                          </Col>
+                          <Col xs={24} sm={12} md={6}>
+                            <div style={{ color: "#666", fontSize: 12, marginBottom: 4 }}>描述</div>
+                            <Input
+                              size="small"
+                              placeholder="证据描述（选填）"
+                              value={item.description}
+                              onChange={(e) => updateEvidenceItem(index, "description", e.target.value)}
+                            />
+                          </Col>
+                          <Col xs={24} sm={12} md={4}>
+                            <div style={{ color: "#666", fontSize: 12, marginBottom: 4 }}>文件标识</div>
+                            <Input
+                              size="small"
+                              placeholder="文件URL/标识"
+                              value={item.fileUrl}
+                              onChange={(e) => updateEvidenceItem(index, "fileUrl", e.target.value)}
+                            />
+                          </Col>
+                        </Row>
+                      </div>
+                    </List.Item>
+                  )}
+                />
+              )}
+            </div>
+          )}
           {needDeadline && (
             <Form.Item name="deadline" label="要求完成截止时间">
               <DatePicker
@@ -571,7 +854,8 @@ export default function RecordDetail() {
           {operationModal.operation === "submit" && (
             <Form.Item name="handlerId" label="指派审核主管">
               <Select
-                placeholder="请选择审核主管"
+                placeholder="请选择审核主管（可不选，系统自动分配）"
+                allowClear
                 options={[
                   { value: 3, label: "王审核 (supervisor1)" },
                   { value: 4, label: "赵审核 (supervisor2)" },
@@ -582,7 +866,8 @@ export default function RecordDetail() {
           {operationModal.operation === "review_pass" && (
             <Form.Item name="handlerId" label="指派复核负责人">
               <Select
-                placeholder="请选择复核负责人"
+                placeholder="请选择复核负责人（可不选）"
+                allowClear
                 options={[
                   { value: 5, label: "刘复核 (reviewer1)" },
                   { value: 6, label: "陈复核 (reviewer2)" },
@@ -592,6 +877,20 @@ export default function RecordDetail() {
           )}
         </Form>
       </Modal>
+    </div>
+  );
+}
+
+function Alert(props: any) {
+  return (
+    <div style={{
+      padding: "12px 16px",
+      borderRadius: 4,
+      background: props.type === "warning" ? "#fffbe6" : "#e6f7ff",
+      border: `1px solid ${props.type === "warning" ? "#ffe58f" : "#91d5ff"}`,
+    }}>
+      <div style={{ fontWeight: 500, marginBottom: 4 }}>{props.message}</div>
+      <div style={{ fontSize: 13 }}>{props.description}</div>
     </div>
   );
 }
