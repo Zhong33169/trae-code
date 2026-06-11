@@ -444,12 +444,68 @@ func (h *ApplicationHandler) Process(c *gin.Context) {
 		reason := "非当前登记责任人无法推进申请：该申请登记责任人为 " + app.CurrentHandlerName +
 			"（ID: " + strconv.FormatUint(uint64(*app.CurrentHandlerID), 10) +
 			"），当前操作人 " + userName + "（ID: " + strconv.FormatUint(uint64(userID), 10) + "）"
+
+		interceptTime := time.Now()
+		interceptRecord := &models.ProcessRecord{
+			ApplicationID:   app.ID,
+			Action:          "handler_mismatch_intercepted",
+			FromStatus:      app.Status,
+			ToStatus:        app.Status,
+			HandlerRole:     userRole,
+			HandlerID:       userID,
+			HandlerName:     userName,
+			Opinion:         reason + "。处理意见：" + req.Opinion,
+			FailureReason:   reason,
+			OldVersion:      app.Version,
+			NewVersion:      app.Version,
+			MaterialsChecked: req.MaterialsChecked,
+			TimeLimitMet:    true,
+			ProcessingTime:  0,
+			CreatedAt:       interceptTime,
+		}
+
+		interceptTx := h.db.Begin()
+
+		app.ExceptionReason = reason
+		app.LastProcessResult = "办理被拦截(责任人不匹配)：登记责任人 " + app.CurrentHandlerName + "(" + string(app.CurrentHandlerRole) + ")，操作人 " + userName + "(" + string(userRole) + ")"
+		app.LastProcessedAt = &interceptTime
+		app.LastProcessedByID = &userID
+		app.LastProcessedByName = userName
+		_ = interceptTx.Save(&app).Error
+
+		_ = interceptTx.Create(interceptRecord).Error
+		_ = h.workflow.CreateAuditLog(
+			interceptTx,
+			userID,
+			username,
+			userRole,
+			"process_intercepted",
+			"application",
+			app.ID,
+			c.ClientIP(),
+			c.Request.UserAgent(),
+			"办理被拦截(责任人不匹配): "+app.ApplicationNo+
+				", 申请动作: "+req.Action+
+				", 登记责任人: "+app.CurrentHandlerName+"(ID:"+strconv.FormatUint(uint64(*app.CurrentHandlerID), 10)+")"+
+				", 操作人: "+userName+"("+string(userRole)+", ID:"+strconv.FormatUint(uint64(userID), 10)+")"+
+				", 状态保持: "+string(app.Status)+
+				", 版本不变: v"+strconv.Itoa(app.Version),
+		)
+		_ = interceptTx.Commit().Error
+
 		c.JSON(http.StatusForbidden, gin.H{
-			"error":                reason,
-			"expected_handler_id":  *app.CurrentHandlerID,
-			"expected_handler_name": app.CurrentHandlerName,
-			"current_user_id":      userID,
-			"current_user_name":    userName,
+			"error":                  reason,
+			"expected_handler_id":    *app.CurrentHandlerID,
+			"expected_handler_name":  app.CurrentHandlerName,
+			"current_user_id":        userID,
+			"current_user_name":      userName,
+			"intercepted":            true,
+			"record_id":              interceptRecord.ID,
+			"action_requested":       req.Action,
+			"status_before":          string(app.Status),
+			"status_after":           string(app.Status),
+			"version":                app.Version,
+			"last_process_result":    "办理被拦截(责任人不匹配)：登记责任人 " + app.CurrentHandlerName + "，操作人 " + userName,
 		})
 		return
 	}
@@ -593,17 +649,6 @@ func (h *ApplicationHandler) BatchProcess(c *gin.Context) {
 			})
 			return
 		}
-		if app.CurrentHandlerID != nil && *app.CurrentHandlerID != userID {
-			c.JSON(http.StatusForbidden, gin.H{
-				"error": "非当前登记责任人无法推进：申请 " + app.ApplicationNo +
-					" 的责任人为 " + app.CurrentHandlerName +
-					"（ID: " + strconv.FormatUint(uint64(*app.CurrentHandlerID), 10) +
-					"），当前操作人 " + userName + "（ID: " + strconv.FormatUint(uint64(userID), 10) + "）",
-				"expected_handler_id":  *app.CurrentHandlerID,
-				"expected_handler_name": app.CurrentHandlerName,
-			})
-			return
-		}
 	}
 
 	results := make([]gin.H, 0)
@@ -665,6 +710,72 @@ func (h *ApplicationHandler) BatchProcess(c *gin.Context) {
 				"application_no": app.ApplicationNo,
 				"success": false,
 				"error":  err.Error(),
+			})
+			failCount++
+			continue
+		}
+
+		if app.CurrentHandlerID != nil && *app.CurrentHandlerID != userID {
+			reason := "非当前登记责任人无法推进：登记责任人为 " + app.CurrentHandlerName +
+				"（ID: " + strconv.FormatUint(uint64(*app.CurrentHandlerID), 10) +
+				"），当前操作人 " + userName + "（ID: " + strconv.FormatUint(uint64(userID), 10) + "）"
+
+			interceptTime := time.Now()
+			interceptRecord := &models.ProcessRecord{
+				ApplicationID:   app.ID,
+				Action:          "handler_mismatch_intercepted",
+				FromStatus:      app.Status,
+				ToStatus:        app.Status,
+				HandlerRole:     userRole,
+				HandlerID:       userID,
+				HandlerName:     userName,
+				Opinion:         reason + "。批量处理意见：" + req.Opinion,
+				FailureReason:   reason,
+				OldVersion:      app.Version,
+				NewVersion:      app.Version,
+				MaterialsChecked: req.MaterialsChecked,
+				TimeLimitMet:    true,
+				ProcessingTime:  0,
+				CreatedAt:       interceptTime,
+			}
+
+			interceptTx := h.db.Begin()
+			_ = interceptTx.Create(interceptRecord).Error
+			_ = h.workflow.CreateAuditLog(
+				interceptTx,
+				userID,
+				username,
+				userRole,
+				"batch_process_intercepted",
+				"application",
+				app.ID,
+				c.ClientIP(),
+				c.Request.UserAgent(),
+				"批量办理被拦截(责任人不匹配): "+app.ApplicationNo+
+					", 批次"+strconv.Itoa(len(req.IDs))+"条, 申请动作: "+req.Action+
+					", 登记责任人: "+app.CurrentHandlerName+"(ID:"+strconv.FormatUint(uint64(*app.CurrentHandlerID), 10)+")"+
+					", 操作人: "+userName+"("+string(userRole)+")"+
+					", 状态保持: "+string(app.Status)+", 版本不变: v"+strconv.Itoa(app.Version),
+			)
+			_ = interceptTx.Commit().Error
+
+			unlock()
+			results = append(results, gin.H{
+				"id":                   appID,
+				"application_no":       app.ApplicationNo,
+				"success":              false,
+				"error":                reason,
+				"intercepted":          true,
+				"record_id":            interceptRecord.ID,
+				"expected_handler_id":  *app.CurrentHandlerID,
+				"expected_handler_name": app.CurrentHandlerName,
+				"current_user_id":      userID,
+				"current_user_name":    userName,
+				"action_requested":     req.Action,
+				"status":               string(app.Status),
+				"version":              app.Version,
+				"new_status":           string(app.Status),
+				"new_version":          app.Version,
 			})
 			failCount++
 			continue

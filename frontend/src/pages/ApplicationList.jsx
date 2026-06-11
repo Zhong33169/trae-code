@@ -8,7 +8,7 @@ import {
   AppstoreOutlined, FilterOutlined, UserOutlined,
   ExclamationCircleOutlined, CheckCircleOutlined,
   SafetyCertificateOutlined, LockOutlined, TeamOutlined,
-  CopyOutlined, EyeOutlined
+  CopyOutlined, EyeOutlined, WarningOutlined
 } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { applicationAPI } from '../api'
@@ -74,14 +74,24 @@ export default function ApplicationList({ user }) {
   const handleScan = (app) => {
     if (app.current_handler_id && app.current_handler_id !== user?.id) {
       Modal.warning({
-        title: '扫码人不匹配',
+        title: '扫码人与登记责任人不匹配',
         content: (
           <div>
-            <p>该申请的当前责任人是：<strong>{app.current_handler_name}</strong>（ID: {app.current_handler_id}）</p>
-            <p>您的ID是：<strong>{user?.id}</strong></p>
-            <p>请由指定责任人扫码，或先在详情页认领此任务</p>
+            <p>该申请登记责任人是：<Tag color="blue">{app.current_handler_name}</Tag>（ID: {app.current_handler_id}）</p>
+            <p>您：<Tag color="orange">{user?.name}</Tag>（ID: {user?.id}）</p>
+            <Divider style={{ margin: '8px 0' }} />
+            <p style={{ color: '#faad14' }}>
+              <WarningOutlined /> 继续扫码会记录您的操作，但会标记"处理人不匹配"并停在原队列，不会推进申请流转。
+            </p>
+            <p style={{ color: '#666' }}>是否继续打开扫码弹窗？</p>
           </div>
         ),
+        okText: '继续打开扫码弹窗',
+        cancelText: '取消',
+        onOk: () => {
+          setScanApp(app)
+          setScanModalVisible(true)
+        },
       })
       return
     }
