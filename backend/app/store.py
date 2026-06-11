@@ -5,9 +5,12 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
 from .models import (
+    ContractConfirmation,
     ContractStatus,
+    Customer,
     Material,
     MaterialType,
+    PriceQuotation,
     Role,
     SalesContract,
     Statistics,
@@ -175,6 +178,8 @@ def seed_demo_data() -> None:
     c3.contract_confirm = {
         "confirmed_price": 0.65,
         "confirmed_term_months": 12,
+        "settlement_method": "按月结算，违约金按日万分之五",
+        "breach_clause": "逾期付款按日万分之五收取违约金；提前解约需支付剩余电量10%补偿金",
         "signing_date": now - timedelta(days=1),
         "effective_date": now + timedelta(days=7),
         "expiry_date": now + timedelta(days=372),
@@ -233,6 +238,8 @@ def seed_demo_data() -> None:
     c5.contract_confirm = {
         "confirmed_price": 0.60,
         "confirmed_term_months": 12,
+        "settlement_method": "按月结算",
+        "breach_clause": "逾期付款按日千分之一收取违约金",
         "signing_date": now - timedelta(days=400),
         "effective_date": now - timedelta(days=390),
         "expiry_date": now - timedelta(days=30),
@@ -278,6 +285,8 @@ def seed_demo_data() -> None:
     c6.contract_confirm = {
         "confirmed_price": 0.63,
         "confirmed_term_months": 24,
+        "settlement_method": "按月结算",
+        "breach_clause": "逾期付款按日万分之三",
         "signing_date": now - timedelta(days=2),
     }
     c6.materials = make_materials() + [
@@ -292,3 +301,79 @@ def seed_demo_data() -> None:
     c6.add_audit_record(Role.AUDITOR, "审核主管李四", "审核通过", ContractStatus.PENDING_REVIEW)
     c6.add_audit_record(Role.REVIEWER, "复核负责人王五", "复核驳回", ContractStatus.REVIEW_REJECTED, c6.reviewer_comment)
     store.add(c6)
+
+    c7 = SalesContract(
+        title="鑫盛化工有限公司售电合同",
+        created_by="登记员张三",
+        created_by_role=Role.REGISTRAR,
+        status=ContractStatus.PENDING_AUDIT,
+        current_handler_role=Role.AUDITOR,
+        current_deadline=now + timedelta(hours=36),
+    )
+    c7.customer = {
+        "name": "鑫盛化工有限公司",
+        "customer_id": "CUS2026007",
+        "address": "化工园区反应路33号",
+        "contact_person": "钱工",
+        "contact_phone": "13300133007",
+        "power_consumption": 210.0,
+    }
+    c7.price_quotation = {
+        "quoted_price": 0.55,
+        "contract_term_months": 12,
+        "estimated_annual_amount": 1386.0,
+        "settlement_method": "按月结算，次月10日前付款",
+        "quotation_valid_until": now + timedelta(days=25),
+    }
+    c7.materials = make_materials()
+    c7.add_audit_record(Role.REGISTRAR, "登记员张三", "提交审核", ContractStatus.PENDING_AUDIT, "大型客户，报价含阶梯优惠")
+    store.add(c7)
+
+    c8 = SalesContract(
+        title="中瑞光电技术公司售电合同",
+        created_by="登记员张三",
+        created_by_role=Role.REGISTRAR,
+        status=ContractStatus.PENDING_REVIEW,
+        current_handler_role=Role.REVIEWER,
+        current_deadline=now + timedelta(hours=48),
+    )
+    c8.customer = {
+        "name": "中瑞光电技术公司",
+        "customer_id": "CUS2026008",
+        "address": "光电产业基地创新路77号",
+        "contact_person": "冯总",
+        "contact_phone": "13200132008",
+        "power_consumption": 78.5,
+    }
+    c8.price_quotation = {
+        "quoted_price": 0.61,
+        "contract_term_months": 24,
+        "estimated_annual_amount": 574.7,
+        "settlement_method": "按月结算，次月15日前付款",
+        "quotation_valid_until": now + timedelta(days=40),
+    }
+    c8.contract_confirm = {
+        "confirmed_price": 0.61,
+        "confirmed_term_months": 24,
+        "settlement_method": "按月结算，次月15日前付款",
+        "breach_clause": "逾期付款按日万分之五收取违约金；用电方提前解约需支付剩余电量5%补偿金",
+        "signing_date": now - timedelta(hours=6),
+        "effective_date": now + timedelta(days=3),
+        "expiry_date": now + timedelta(days=733),
+    }
+    c8.materials = make_materials() + [
+        Material(
+            type=MaterialType.CONTRACT_CONFIRM,
+            name="合同确认书正本.pdf",
+            uploaded_at=now - timedelta(hours=6),
+            uploaded_by="审核主管李四",
+            note="双方签字盖章齐全，已核对电价和期限一致性",
+        )
+    ]
+    c8.auditor_comment = "审核通过：电价和期限与报价一致，材料齐全，提交复核"
+    c8.add_audit_record(Role.REGISTRAR, "登记员张三", "提交审核", ContractStatus.PENDING_AUDIT, "请审核")
+    c8.add_audit_record(
+        Role.AUDITOR, "审核主管李四", "审核通过，提交复核", ContractStatus.PENDING_REVIEW,
+        "审核通过：电价和期限与报价一致，材料齐全，提交复核\n合同确认信息快照: [确认电价:0.61元/kWh, 确认期限:24月, 结算方式:按月结算，次月15日前付款, 违约条款:逾期付款按日万分之五收取违约金；用电方提前解约需支付剩余电量5%补偿金, 签署日期:" + (now - timedelta(hours=6)).strftime("%Y-%m-%d") + "]"
+    )
+    store.add(c8)

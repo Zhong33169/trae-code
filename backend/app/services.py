@@ -5,9 +5,12 @@ from typing import List, Optional, Tuple
 from uuid import uuid4
 
 from .models import (
+    ContractConfirmation,
     ContractStatus,
+    Customer,
     Material,
     MaterialType,
+    PriceQuotation,
     Role,
     SalesContract,
     Statistics,
@@ -45,17 +48,40 @@ def _validate_for_review(contract: SalesContract) -> List[str]:
         errors.append("缺少合同确认材料")
     if not contract.contract_confirm:
         errors.append("未填写合同确认信息")
-    elif not contract.contract_confirm.signing_date:
-        errors.append("合同确认信息缺少签署日期")
+    else:
+        cc = contract.contract_confirm
+        if not cc.signing_date:
+            errors.append("合同确认信息缺少签署日期")
+        if not cc.settlement_method or len(cc.settlement_method.strip()) < 2:
+            errors.append("合同确认信息缺少结算方式")
+        if not cc.breach_clause or len(cc.breach_clause.strip()) < 2:
+            errors.append("合同确认信息缺少违约条款")
+        if cc.confirmed_price <= 0:
+            errors.append("合同确认电价必须大于0")
+        if cc.confirmed_term_months <= 0:
+            errors.append("合同确认期限必须大于0")
     if not contract.customer:
         errors.append("用电客户信息不完整")
     if not contract.price_quotation:
         errors.append("报价测算信息不完整")
     if contract.contract_confirm and contract.price_quotation:
-        if abs(contract.contract_confirm.confirmed_price - contract.price_quotation.quoted_price) > 0.001:
-            errors.append("合同确认电价与报价测算不一致")
-        if contract.contract_confirm.confirmed_term_months != contract.price_quotation.contract_term_months:
-            errors.append("合同确认期限与报价测算不一致")
+        cc = contract.contract_confirm
+        pq = contract.price_quotation
+        if abs(cc.confirmed_price - pq.quoted_price) > 0.001:
+            errors.append(
+                f"合同确认电价({cc.confirmed_price})与报价测算电价({pq.quoted_price})不一致"
+            )
+        if cc.confirmed_term_months != pq.contract_term_months:
+            errors.append(
+                f"合同确认期限({cc.confirmed_term_months}月)与报价测算期限({pq.contract_term_months}月)不一致"
+            )
+        if cc.settlement_method and pq.settlement_method:
+            cc_key = cc.settlement_method.split("，")[0].split(",")[0].strip()
+            pq_key = pq.settlement_method.split("，")[0].split(",")[0].strip()
+            if cc_key != pq_key:
+                errors.append(
+                    f"合同确认结算方式({cc.settlement_method})与报价测算({pq.settlement_method})不一致"
+                )
     return errors
 
 
@@ -153,9 +179,9 @@ def update_draft(
     _check_concurrency(contract, expected_version)
 
     if customer:
-        contract.customer = customer
+        contract.customer = Customer(**customer)
     if price_quotation:
-        contract.price_quotation = price_quotation
+        contract.price_quotation = PriceQuotation(**price_quotation)
     if materials is not None:
         contract.materials = [Material(**m) for m in materials]
 
@@ -234,7 +260,12 @@ def audit_pass(
         raise ValidationError("请填写审核意见（至少2个字符）")
 
     if contract_confirm:
-        contract.contract_confirm = contract_confirm
+        try:
+            cc = ContractConfirmation(**contract_confirm)
+            contract.contract_confirm = cc
+        except Exception as e:
+            raise ValidationError(f"合同确认信息格式错误：{e}")
+
     if materials is not None:
         for m in materials:
             material = Material(**m)
@@ -244,18 +275,33 @@ def audit_pass(
     if errors:
         raise ValidationError("提交复核前请补充以下内容：\n" + "\n".join(errors))
 
+    confirm_snapshot = ""
+    if contract.contract_confirm:
+        cc = contract.contract_confirm
+        confirm_snapshot = (
+            f"[确认电价:{cc.confirmed_price}元/kWh, "
+            f"确认期限:{cc.confirmed_term_months}月, "
+            f"结算方式:{cc.settlement_method or '未填'}, "
+            f"违约条款:{cc.breach_clause or '未填'}, "
+            f"签署日期:{cc.signing_date.strftime('%Y-%m-%d') if cc.signing_date else '未填'}]"
+        )
+
     contract.auditor_comment = comment
     contract.status = ContractStatus.PENDING_REVIEW
     contract.current_handler_role = Role.REVIEWER
     contract.current_deadline = datetime.now() + timedelta(hours=deadline_hours)
     contract.version += 1
 
+    audit_comment = comment
+    if confirm_snapshot:
+        audit_comment = f"{comment}\n合同确认信息快照: {confirm_snapshot}"
+
     contract.add_audit_record(
         role,
         operator,
         "审核通过，提交复核",
         ContractStatus.PENDING_REVIEW,
-        comment,
+        audit_comment,
     )
     store.update(contract)
     return get_contract_detail(contract_id)

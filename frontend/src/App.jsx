@@ -273,31 +273,83 @@ export default function App() {
     }
   }
 
+  const [auditForm, setAuditForm] = createSignal({
+    comment: '',
+    contract_confirm: null,
+    new_materials: [],
+  });
+
+  function updateAuditForm(key, value) {
+    setAuditForm((f) => ({ ...f, [key]: value }));
+  }
+
+  function updateAuditConfirmField(field, value) {
+    setAuditForm((f) => {
+      const cc = f.contract_confirm || {};
+      return { ...f, contract_confirm: { ...cc, [field]: value } };
+    });
+  }
+
+  function addAuditMaterial() {
+    setAuditForm((f) => {
+      const mats = [...(f.new_materials || [])];
+      mats.push({
+        id: Math.random().toString(36).slice(2, 10),
+        type: 'contract_confirm',
+        name: '合同确认材料.pdf',
+        uploaded_at: new Date().toISOString(),
+        uploaded_by: listMeta().current_user || '审核主管',
+        note: '',
+      });
+      return { ...f, new_materials: mats };
+    });
+  }
+
+  function removeAuditMaterial(idx) {
+    setAuditForm((f) => {
+      const mats = [...(f.new_materials || [])];
+      mats.splice(idx, 1);
+      return { ...f, new_materials: mats };
+    });
+  }
+
+  function updateAuditMaterial(idx, field, value) {
+    setAuditForm((f) => {
+      const mats = [...(f.new_materials || [])];
+      mats[idx] = { ...mats[idx], [field]: value };
+      return { ...f, new_materials: mats };
+    });
+  }
+
   async function doAudit(pass) {
     if (!detail()) return;
     const d = detail();
-    const commentEl = document.getElementById('audit-comment');
-    const comment = commentEl ? commentEl.value.trim() : '';
+    const af = auditForm();
+    const comment = af.comment.trim();
     const action = pass ? '审核通过并提交复核' : '退回补正';
     if (!confirm(`确认${action}？`)) return;
     setActionLoading(true);
     try {
       let res;
       if (pass) {
-        const contractConfirm = d.contract_confirm ? { ...d.contract_confirm } : null;
+        const contractConfirm = af.contract_confirm || (d.contract_confirm ? { ...d.contract_confirm } : null);
         if (contractConfirm) {
           for (const k of ['signing_date', 'effective_date', 'expiry_date']) {
-            if (contractConfirm[k] && typeof contractConfirm[k] === 'string') {
+            if (contractConfirm[k] && typeof contractConfirm[k] === 'string' && contractConfirm[k].includes('T')) {
               contractConfirm[k] = new Date(contractConfirm[k]).toISOString();
             }
           }
         }
-        res = await api.auditPass(d.id, {
+        const payload = {
           expected_version: d.version,
           comment,
           deadline_hours: 72,
           contract_confirm: contractConfirm,
-        });
+        };
+        if (af.new_materials && af.new_materials.length > 0) {
+          payload.materials = af.new_materials;
+        }
+        res = await api.auditPass(d.id, payload);
       } else {
         res = await api.auditReject(d.id, {
           expected_version: d.version,
@@ -306,6 +358,7 @@ export default function App() {
         });
       }
       setDetail(res.data);
+      setAuditForm({ comment: '', contract_confirm: null, new_materials: [] });
       show(pass ? '审核通过，已提交复核' : '已退回补正', 'success');
       refreshAll();
     } catch (e) {
@@ -613,6 +666,7 @@ export default function App() {
           detailTab={detailTab()}
           role={role()}
           actionLoading={actionLoading()}
+          auditForm={auditForm()}
           onClose={closeDetail}
           setDetailTab={setDetailTab}
           updateFormField={updateFormField}
@@ -628,6 +682,11 @@ export default function App() {
           canReview={canReview}
           setForm={setForm}
           onRefresh={refreshDetailIfOpen}
+          updateAuditForm={updateAuditForm}
+          updateAuditConfirmField={updateAuditConfirmField}
+          addAuditMaterial={addAuditMaterial}
+          removeAuditMaterial={removeAuditMaterial}
+          updateAuditMaterial={updateAuditMaterial}
         />
       )}
 
@@ -714,7 +773,7 @@ function DetailModal(props) {
 
           {props.detailTab === 'info' && <InfoTab detail={d()} editing={props.editing} form={props.form} updateFormField={props.updateFormField} setForm={props.setForm} />}
           {props.detailTab === 'materials' && <MaterialsTab detail={d()} editing={props.editing} form={props.form} setForm={props.setForm} />}
-          {props.detailTab === 'comments' && <CommentsTab detail={d()} />}
+          {props.detailTab === 'comments' && <CommentsTab detail={d()} auditForm={props.auditForm} updateAuditForm={props.updateAuditForm} updateAuditConfirmField={props.updateAuditConfirmField} addAuditMaterial={props.addAuditMaterial} removeAuditMaterial={props.removeAuditMaterial} updateAuditMaterial={props.updateAuditMaterial} />}
           {props.detailTab === 'audit' && <AuditTab detail={d()} />}
         </div>
 
@@ -843,10 +902,14 @@ function InfoTab(props) {
 
       <div class="section">
         <div class="section-title">合同确认</div>
-        {!d().contract_confirm && !editing() && <div class="info-tip">尚未填写合同确认信息（审核阶段填写）</div>}
+        {!d().contract_confirm && !editing() && <div class="info-tip">尚未填写合同确认信息（审核阶段由审核主管填写）</div>}
         <div class="grid-3">
           {field('contract_confirm', 'confirmed_price', '确认电价(元/kWh)', 'number')}
           {field('contract_confirm', 'confirmed_term_months', '确认期限(月)', 'number')}
+          {field('contract_confirm', 'settlement_method', '确认结算方式')}
+          <div style={{ gridColumn: '1 / -1' }}>
+            {field('contract_confirm', 'breach_clause', '违约条款')}
+          </div>
           <div>
             <div class="field-label">签署日期</div>
             <div class="field-value">
@@ -1003,6 +1066,37 @@ function MaterialsTab(props) {
 
 function CommentsTab(props) {
   const d = () => props.detail;
+  const af = () => props.auditForm;
+  const isAuditing = () => d().status === 'pending_audit' || d().status === 'review_rejected';
+  const hasConfirm = () => d().contract_confirm || af().contract_confirm;
+  const hasConfirmMaterial = () => (d().materials || []).some((m) => m.type === 'contract_confirm') || (af().new_materials || []).length > 0;
+
+  const pq = () => d().price_quotation;
+
+  const getConfirmField = (field) => {
+    if (af().contract_confirm && af().contract_confirm[field] !== undefined) {
+      return af().contract_confirm[field];
+    }
+    if (d().contract_confirm && d().contract_confirm[field] !== undefined) {
+      return d().contract_confirm[field];
+    }
+    return '';
+  };
+
+  const confirmField = (field, label, type = 'text', placeholder = '') => (
+    <div>
+      <div class="field-label">{label}</div>
+      <div class="field-value">
+        <input
+          type={type}
+          value={String(getConfirmField(field))}
+          placeholder={placeholder}
+          onInput={(e) => props.updateAuditConfirmField(field, type === 'number' ? Number(e.target.value) : e.target.value)}
+        />
+      </div>
+    </div>
+  );
+
   return (
     <div>
       {d().auditor_comment && (
@@ -1017,23 +1111,154 @@ function CommentsTab(props) {
           <div class="field-value" style={{ whiteSpace: 'pre-wrap' }}>{d().reviewer_comment}</div>
         </div>
       )}
-      {d().status === 'pending_audit' || d().status === 'review_rejected' ? (
+
+      {isAuditing() && (
         <div class="section">
           <div class="section-title">填写审核意见</div>
           <textarea
-            id="audit-comment"
             class="comment-box"
             placeholder={
               d().status === 'review_rejected'
                 ? '请根据复核驳回意见填写调整说明或重新审核意见...'
                 : '通过需填写意见，退回需填写详细补正要求（至少5个字符）...'
             }
+            value={af().comment}
+            onInput={(e) => props.updateAuditForm('comment', e.target.value)}
           />
           <div class="info-tip" style={{ marginTop: 6 }}>
             通过审核将把合同提交至复核负责人；退回将打回登记员补正。
           </div>
         </div>
-      ) : null}
+      )}
+
+      {isAuditing() && (
+        <div class="section">
+          <div class="section-title">合同确认信息（审核通过必填）</div>
+          {!hasConfirm() && !pq() && (
+            <div class="info-tip">报价测算信息尚未填写，无法预填确认信息</div>
+          )}
+          {pq() && !hasConfirm() && (
+            <div class="info-tip">
+              报价测算电价 <strong>{pq().quoted_price}元/kWh</strong>，期限 <strong>{pq().contract_term_months}月</strong>，
+              结算方式「{pq().settlement_method}」— 确认信息需与报价一致才能提交复核。
+            </div>
+          )}
+          <div class="grid-3">
+            {confirmField('confirmed_price', '确认电价(元/kWh)', 'number', pq() ? String(pq().quoted_price) : '')}
+            {confirmField('confirmed_term_months', '确认期限(月)', 'number', pq() ? String(pq().contract_term_months) : '')}
+            {confirmField('settlement_method', '确认结算方式', 'text', pq() ? pq().settlement_method : '')}
+            {confirmField('breach_clause', '违约条款', 'text', '如：逾期付款按日万分之五...')}
+            <div>
+              <div class="field-label">签署日期</div>
+              <div class="field-value">
+                <input
+                  type="datetime-local"
+                  value={String(getConfirmField('signing_date') || '').slice(0, 16)}
+                  onInput={(e) => props.updateAuditConfirmField('signing_date', e.target.value)}
+                />
+              </div>
+            </div>
+            <div>
+              <div class="field-label">生效日期</div>
+              <div class="field-value">
+                <input
+                  type="datetime-local"
+                  value={String(getConfirmField('effective_date') || '').slice(0, 16)}
+                  onInput={(e) => props.updateAuditConfirmField('effective_date', e.target.value)}
+                />
+              </div>
+            </div>
+            <div>
+              <div class="field-label">到期日期</div>
+              <div class="field-value">
+                <input
+                  type="datetime-local"
+                  value={String(getConfirmField('expiry_date') || '').slice(0, 16)}
+                  onInput={(e) => props.updateAuditConfirmField('expiry_date', e.target.value)}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isAuditing() && (
+        <div class="section">
+          <div class="section-title">合同确认材料（审核通过必须补充）</div>
+          {!hasConfirmMaterial() && (
+            <div class="info-tip">
+              ⚠ 当前缺少合同确认材料，审核通过提交复核前必须补充至少一份合同确认材料
+            </div>
+          )}
+          <button class="btn btn-sm btn-primary" onClick={props.addAuditMaterial} style={{ marginBottom: 10 }}>
+            + 补充合同确认材料
+          </button>
+          <For each={af().new_materials || []}>
+            {(m, idx) => (
+              <div class="material-item">
+                <div>
+                  <span class="material-type-tag">{MATERIAL_TYPE_NAMES[m.type] || m.type}</span>
+                  <input
+                    value={m.name}
+                    onInput={(e) => props.updateAuditMaterial(idx(), 'name', e.target.value)}
+                    style={{ padding: '2px 6px', fontSize: 13, border: '1px solid #d1d5db', borderRadius: 4, marginRight: 8 }}
+                  />
+                  <input
+                    value={m.note || ''}
+                    onInput={(e) => props.updateAuditMaterial(idx(), 'note', e.target.value)}
+                    placeholder="备注..."
+                    style={{ padding: '2px 6px', fontSize: 12, border: '1px solid #d1d5db', borderRadius: 4, width: 120 }}
+                  />
+                </div>
+                <button class="btn btn-sm btn-danger" onClick={() => props.removeAuditMaterial(idx())}>
+                  删除
+                </button>
+              </div>
+            )}
+          </For>
+        </div>
+      )}
+
+      {isAuditing() && pq() && hasConfirm() && (
+        <div class="section">
+          <div class="section-title">一致性校验预检</div>
+          {(() => {
+            const cc = af().contract_confirm || d().contract_confirm || {};
+            const q = pq();
+            const checks = [];
+            if (cc.confirmed_price && q.quoted_price) {
+              const priceOk = Math.abs(cc.confirmed_price - q.quoted_price) < 0.001;
+              checks.push({ label: '电价一致', ok: priceOk, detail: `${cc.confirmed_price} vs ${q.quoted_price}` });
+            }
+            if (cc.confirmed_term_months && q.contract_term_months) {
+              const termOk = cc.confirmed_term_months === q.contract_term_months;
+              checks.push({ label: '期限一致', ok: termOk, detail: `${cc.confirmed_term_months}月 vs ${q.contract_term_months}月` });
+            }
+            if (cc.settlement_method && q.settlement_method) {
+              const ccKey = cc.settlement_method.split('，')[0].split(',')[0].trim();
+              const pqKey = q.settlement_method.split('，')[0].split(',')[0].trim();
+              checks.push({ label: '结算方式一致', ok: ccKey === pqKey, detail: `${ccKey} vs ${pqKey}` });
+            }
+            if (checks.length === 0) return null;
+            return (
+              <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                {checks.map((c) => (
+                  <div style={{
+                    padding: '6px 12px',
+                    borderRadius: 6,
+                    border: `1px solid ${c.ok ? '#16a34a' : '#dc2626'}`,
+                    background: c.ok ? '#f0fdf4' : '#fef2f2',
+                    fontSize: 12,
+                  }}>
+                    {c.ok ? '✅' : '❌'} {c.label}：{c.detail}
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
+        </div>
+      )}
+
       {d().status === 'pending_review' && (
         <div class="section">
           <div class="section-title">填写复核意见</div>

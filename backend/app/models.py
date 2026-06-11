@@ -5,7 +5,7 @@ from enum import Enum
 from typing import Optional, List
 from uuid import uuid4
 
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, ConfigDict, Field, validator
 
 
 class Role(str, Enum):
@@ -89,8 +89,10 @@ class PriceQuotation(BaseModel):
 
 
 class ContractConfirmation(BaseModel):
-    confirmed_price: float
-    confirmed_term_months: int
+    confirmed_price: float = Field(description="确认电价(元/kWh)")
+    confirmed_term_months: int = Field(description="确认合同期限(月)")
+    settlement_method: Optional[str] = Field(default=None, description="确认结算方式")
+    breach_clause: Optional[str] = Field(default=None, description="违约条款")
     signing_date: Optional[datetime] = None
     effective_date: Optional[datetime] = None
     expiry_date: Optional[datetime] = None
@@ -118,6 +120,8 @@ class ExpiryInfo(BaseModel):
 
 
 class SalesContract(BaseModel):
+    model_config = ConfigDict(validate_assignment=True)
+
     id: str = Field(default_factory=lambda: "SC" + uuid4().hex[:8].upper())
     contract_no: str = Field(default_factory=lambda: "HT" + datetime.now().strftime("%Y%m%d") + uuid4().hex[:4].upper())
     title: str
