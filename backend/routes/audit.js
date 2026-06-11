@@ -2,6 +2,23 @@ const express = require('express');
 const router = express.Router();
 const store = require('../data/store');
 
+const ERROR_CODE_MAP = {
+  INVALID_QR: '无效的生产工单码',
+  NOT_FOUND: '工单不存在',
+  WRONG_ROLE: '非当前处理人',
+  WRONG_STATUS: '状态错误',
+  INVALID_STATUS: '状态错误',
+  ALREADY_COMPLETED: '工单已归档',
+  CONFLICT: '并发冲突，工单被他人占用',
+  MATERIALS_REQUIRED: '证据缺失，上传材料不足',
+  CHECK_ITEMS_REQUIRED: '核验项不足',
+  OPINION_REQUIRED: '处理意见过短',
+  PERMISSION_DENIED: '无权限操作',
+  INVALID_RESULT: '无效的处理结果',
+  NO_SELECTED: '未选择工单',
+  ERROR: '系统错误'
+};
+
 function formatAuditLog(log) {
   const formatted = { ...log };
   formatted.createdAt = log.timestamp;
@@ -11,8 +28,9 @@ function formatAuditLog(log) {
   formatted.success = log.result === 'success' || log.result === 'pass';
   
   if (!formatted.success) {
-    formatted.failureReason = log.details?.reason || log.errorCode || '操作失败';
-    formatted.failureCode = log.errorCode || log.action;
+    const errorCode = log.errorCode || log.action;
+    formatted.failureCode = errorCode;
+    formatted.failureReason = log.details?.reason || ERROR_CODE_MAP[errorCode] || errorCode;
   }
   
   return formatted;
@@ -118,7 +136,7 @@ router.get('/failures', (req, res) => {
   logs.forEach(log => {
     const code = log.errorCode || log.action;
     if (!codeMap[code]) {
-      codeMap[code] = { code, name: log.details?.reason || code, count: 0 };
+      codeMap[code] = { code, name: ERROR_CODE_MAP[code] || log.details?.reason || code, count: 0 };
     }
     codeMap[code].count++;
   });

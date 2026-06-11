@@ -272,12 +272,12 @@ router.post('/batch/audit', (req, res) => {
     return res.status(400).json({ success: false, message: '无效的处理结果', code: 'INVALID_RESULT' });
   }
 
-  if (actualResult === 'pass' && (!checkItems || !Array.isArray(checkItems) || checkItems.length < 2)) {
+  if (!checkItems || !Array.isArray(checkItems) || checkItems.length < 2) {
     return res.status(400).json({
       success: false,
       message: '请完成核验项检查',
       code: 'CHECK_ITEMS_REQUIRED',
-      detail: '批量核验通过至少需要完成两项核验'
+      detail: '批量核验至少需要完成两项核验（通过/驳回均需记录核验项）'
     });
   }
 

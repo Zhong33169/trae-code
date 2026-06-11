@@ -47,10 +47,10 @@
       <div v-if="batchMode" style="margin-bottom: 16px; padding: 12px; background: #fffbe6; border: 1px solid #ffe58f; border-radius: 6px; display: flex; justify-content: space-between; align-items: center;">
         <span>已选择 <strong>{{ selectedIds.length }}</strong> 项</span>
         <div style="display: flex; gap: 8px;">
-          <button class="btn btn-primary" @click="handleBatchPass" :disabled="selectedIds.length === 0">
+          <button class="btn btn-primary" @click="openBatchModal('pass')" :disabled="selectedIds.length === 0">
             批量通过
           </button>
-          <button class="btn btn-danger" @click="showBatchReject = true" :disabled="selectedIds.length === 0">
+          <button class="btn btn-danger" @click="openBatchModal('reject')" :disabled="selectedIds.length === 0">
             批量驳回
           </button>
           <button class="btn" @click="cancelBatch">取消</button>
@@ -134,21 +134,39 @@
       </div>
     </div>
     
-    <div v-if="showBatchReject" class="modal-overlay" @click.self="showBatchReject = false">
+    <div v-if="showBatchModal" class="modal-overlay" @click.self="closeBatchModal">
       <div class="modal-content">
-        <h3>批量驳回</h3>
+        <h3>{{ batchAction === 'pass' ? '批量通过' : '批量驳回' }}</h3>
+        
+        <div v-if="isAuditor" class="form-item">
+          <label class="form-label">核验项 (至少2项)</label>
+          <div style="display: flex; flex-direction: column; gap: 8px;">
+            <label v-for="(item, idx) in batchCheckItems" :key="idx" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+              <input type="checkbox" v-model="item.passed" />
+              <span>{{ item.name }}</span>
+            </label>
+          </div>
+        </div>
+        
         <div class="form-item">
-          <label class="form-label">驳回原因</label>
+          <label class="form-label">{{ isAuditor ? '核验' : '复核' }}意见 (至少5个字符)</label>
           <textarea 
-            v-model="batchRejectReason" 
+            v-model="batchOpinion" 
             class="form-textarea" 
             rows="4"
-            placeholder="请输入驳回原因..."
+            :placeholder="'请输入' + (isAuditor ? '核验' : '复核') + '意见...'"
           ></textarea>
         </div>
+        
         <div style="display: flex; justify-content: flex-end; gap: 8px;">
-          <button class="btn" @click="showBatchReject = false">取消</button>
-          <button class="btn btn-danger" @click="handleBatchReject">确认驳回</button>
+          <button class="btn" @click="closeBatchModal">取消</button>
+          <button 
+            :class="['btn', batchAction === 'pass' ? 'btn-primary' : 'btn-danger']" 
+            @click="handleBatchSubmit"
+            :disabled="submitting"
+          >
+            {{ submitting ? '处理中...' : '确认' + (batchAction === 'pass' ? '通过' : '驳回') }}
+          </button>
         </div>
       </div>
     </div>
@@ -165,12 +183,23 @@ const total = ref(0)
 const page = ref(1)
 const pageSize = ref(10)
 const loading = ref(false)
+const submitting = ref(false)
 const viewMyQueue = ref(false)
 const selectAll = ref(false)
 const selectedIds = ref([])
 const batchMode = ref(false)
-const showBatchReject = ref(false)
-const batchRejectReason = ref('')
+const showBatchModal = ref(false)
+const batchAction = ref('pass')
+const batchOpinion = ref('')
+
+const batchCheckItems = ref([
+  { name: '材料完整性检查', passed: false },
+  { name: '规格参数检查', passed: false },
+  { name: '工艺标准检查', passed: false },
+  { name: '质检报告检查', passed: false }
+])
+
+const isAuditor = computed(() => auth.userRole.value === 'auditor')
 
 const filters = ref({
   status: '',
@@ -255,54 +284,61 @@ const cancelBatch = () => {
   loadData()
 }
 
-const handleBatchPass = async () => {
+const openBatchModal = (action) => {
   if (selectedIds.value.length === 0) return
+  batchAction.value = action
+  batchOpinion.value = ''
+  batchCheckItems.value.forEach(item => item.passed = false)
+  showBatchModal.value = true
+}
+
+const closeBatchModal = () => {
+  showBatchModal.value = false
+  batchOpinion.value = ''
+  batchCheckItems.value.forEach(item => item.passed = false)
+}
+
+const handleBatchSubmit = async () => {
+  if (isAuditor.value) {
+    const passedCount = batchCheckItems.value.filter(i => i.passed).length
+    if (passedCount < 2) {
+      alert('请至少勾选2项核验')
+      return
+    }
+  }
   
+  if (!batchOpinion.value || batchOpinion.value.length < 5) {
+    alert('处理意见至少5个字符')
+    return
+  }
+  
+  submitting.value = true
   try {
-    const endpoint = auth.userRole.value === 'auditor' 
-      ? '/workorders/batch/audit' 
+    const endpoint = isAuditor.value
+      ? '/workorders/batch/audit'
       : '/workorders/batch/review'
     
-    const res = await api.post(endpoint, {
+    const payload = {
       ids: selectedIds.value,
-      action: 'pass',
-      comment: '批量通过'
-    })
+      action: batchAction.value,
+      comment: batchOpinion.value
+    }
+    
+    if (isAuditor.value) {
+      payload.checkItems = batchCheckItems.value
+    }
+    
+    const res = await api.post(endpoint, payload)
     
     if (res.success) {
-      alert(`批量处理完成：成功 ${res.data.success} 条，失败 ${res.data.failed} 条`)
+      alert(`批量处理完成：成功 ${res.data.success || res.data.successCount} 条，失败 ${res.data.failed || res.data.failCount} 条`)
+      closeBatchModal()
       loadData()
     }
   } catch (e) {
     alert('批量处理失败：' + e.message)
-  }
-}
-
-const handleBatchReject = async () => {
-  if (!batchRejectReason.value || batchRejectReason.value.length < 3) {
-    alert('请输入驳回原因（至少3个字符）')
-    return
-  }
-  
-  try {
-    const endpoint = auth.userRole.value === 'auditor' 
-      ? '/workorders/batch/audit' 
-      : '/workorders/batch/review'
-    
-    const res = await api.post(endpoint, {
-      ids: selectedIds.value,
-      action: 'reject',
-      comment: batchRejectReason.value
-    })
-    
-    if (res.success) {
-      alert(`批量驳回完成：成功 ${res.data.success} 条，失败 ${res.data.failed} 条`)
-      showBatchReject.value = false
-      batchRejectReason.value = ''
-      loadData()
-    }
-  } catch (e) {
-    alert('批量驳回失败：' + e.message)
+  } finally {
+    submitting.value = false
   }
 }
 

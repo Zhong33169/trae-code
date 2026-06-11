@@ -442,19 +442,31 @@ const confirmReject = async () => {
     return
   }
   
+  if (auth.userRole.value === 'auditor') {
+    const passedCount = auditForm.value.checkItems.filter(i => i.passed).length
+    if (passedCount < 2) {
+      alert('请至少勾选2项核验')
+      return
+    }
+  }
+  
   submitting.value = true
   try {
     let endpoint = '/workorders/' + route.params.id
+    let payload = {
+      action: 'reject',
+      comment: rejectReason.value,
+      version: order.value?.version
+    }
+    
     if (auth.userRole.value === 'auditor') {
       endpoint += '/audit'
+      payload.checkItems = auditForm.value.checkItems
     } else {
       endpoint += '/review'
     }
     
-    const res = await api.post(endpoint, {
-      action: 'reject',
-      comment: rejectReason.value
-    })
+    const res = await api.post(endpoint, payload)
     
     if (res.success) {
       alert('已驳回')
