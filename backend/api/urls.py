@@ -192,7 +192,7 @@ def update_order(request, order_id: int, payload: MaterialChangeOrderUpdate):
     def do_update():
         _validate_role(operator, Role.REGISTRAR, '物料变更登记员')
         _validate_assignment_registrar(order, operator)
-        _validate_status(order, [ChangeOrderStatus.DRAFT, ChangeOrderStatus.SUPPLEMENT_REQUIRED], '更新单据')
+        _validate_status(order, [ChangeOrderStatus.DRAFT, ChangeOrderStatus.SUPPLEMENT_REQUIRED, ChangeOrderStatus.RETURNED], '更新单据')
         
         changes = {}
         for k, v in payload.dict(exclude_unset=True).items():
@@ -257,7 +257,7 @@ def supervisor_approve(request, order_id: int, payload: ProcessSchema):
     def do_approve():
         _validate_role(operator, Role.SUPERVISOR, '物料变更审核主管')
         _validate_assignment_supervisor(order, operator)
-        _validate_status(order, [ChangeOrderStatus.PENDING_REVIEW], '审核通过')
+        _validate_status(order, [ChangeOrderStatus.PENDING_REVIEW, ChangeOrderStatus.OVERDUE], '审核通过')
         
         rejected_attachments = order.attachments.filter(status=AttachmentStatus.REJECTED)
         if rejected_attachments.exists():
@@ -283,6 +283,7 @@ def supervisor_approve(request, order_id: int, payload: ProcessSchema):
         reviewer = reviewers.first()
         order.status = ChangeOrderStatus.PENDING_FINAL
         order.reviewer = reviewer
+        order.is_overdue = False
         if payload.audit_remark:
             order.audit_remark = payload.audit_remark
         order.save()
@@ -305,13 +306,14 @@ def supervisor_return(request, order_id: int, payload: ReturnSchema):
     def do_return():
         _validate_role(operator, Role.SUPERVISOR, '物料变更审核主管')
         _validate_assignment_supervisor(order, operator)
-        _validate_status(order, [ChangeOrderStatus.PENDING_REVIEW], '审核退回')
+        _validate_status(order, [ChangeOrderStatus.PENDING_REVIEW, ChangeOrderStatus.OVERDUE], '审核退回')
         
         if not payload.reason.strip():
             raise HttpError(400, '退回原因不能为空')
         
         order.status = ChangeOrderStatus.SUPPLEMENT_REQUIRED
         order.return_reason = payload.reason
+        order.is_overdue = False
         if payload.audit_remark:
             order.audit_remark = payload.audit_remark
         order.save()
@@ -334,7 +336,7 @@ def supplement_order(request, order_id: int, payload: SupplementSchema):
     def do_supplement():
         _validate_role(operator, Role.REGISTRAR, '物料变更登记员')
         _validate_assignment_registrar(order, operator)
-        _validate_status(order, [ChangeOrderStatus.SUPPLEMENT_REQUIRED], '补正后重提')
+        _validate_status(order, [ChangeOrderStatus.SUPPLEMENT_REQUIRED, ChangeOrderStatus.RETURNED], '补正后重提')
         
         rejected_attachments = order.attachments.filter(status=AttachmentStatus.REJECTED)
         if rejected_attachments.exists():
@@ -354,8 +356,11 @@ def supplement_order(request, order_id: int, payload: SupplementSchema):
             if supervisors.exists():
                 order.supervisor = supervisors.first()
         
+        prev_status = order.status
         order.status = ChangeOrderStatus.PENDING_REVIEW
         order.supplement_note = payload.supplement_note
+        if prev_status == ChangeOrderStatus.RETURNED:
+            order.return_reason = ''
         if payload.audit_remark:
             order.audit_remark = payload.audit_remark
         order.save()
@@ -452,7 +457,7 @@ def upload_attachment(request, order_id: int, file: UploadedFile = File(...), us
     def do_upload():
         _validate_role(operator, Role.REGISTRAR, '物料变更登记员')
         _validate_assignment_registrar(order, operator)
-        _validate_status(order, [ChangeOrderStatus.DRAFT, ChangeOrderStatus.SUPPLEMENT_REQUIRED], '上传附件')
+        _validate_status(order, [ChangeOrderStatus.DRAFT, ChangeOrderStatus.SUPPLEMENT_REQUIRED, ChangeOrderStatus.RETURNED], '上传附件')
         
         ext = os.path.splitext(file.name)[1] if '.' in file.name else ''
         unique_name = f'{uuid.uuid4().hex}{ext}'
@@ -489,15 +494,15 @@ def list_attachments(request, order_id: int):
 
 
 @api.delete('/attachments/{attachment_id}', tags=['附件'])
-def delete_attachment(request, attachment_id: int, operator_id: int):
+def delete_attachment(request, attachment_id: int, payload: DeleteAttachmentSchema):
     att = _get_attachment(attachment_id)
     order = att.order
-    operator = _get_user(operator_id)
+    operator = _get_user(payload.operator_id)
     
     def do_delete():
         _validate_role(operator, Role.REGISTRAR, '物料变更登记员')
         _validate_assignment_registrar(order, operator)
-        _validate_status(order, [ChangeOrderStatus.DRAFT, ChangeOrderStatus.SUPPLEMENT_REQUIRED], '删除附件')
+        _validate_status(order, [ChangeOrderStatus.DRAFT, ChangeOrderStatus.SUPPLEMENT_REQUIRED, ChangeOrderStatus.RETURNED], '删除附件')
         
         if att.uploaded_by_id != operator.id:
             raise HttpError(403, '只能删除您自己上传的附件')
@@ -520,15 +525,15 @@ def delete_attachment(request, attachment_id: int, operator_id: int):
 
 
 @api.post('/attachments/{attachment_id}/reject', response=AttachmentSchema, tags=['附件'])
-def reject_attachment(request, attachment_id: int, payload: RejectAttachmentSchema, user_id: int = 0):
+def reject_attachment(request, attachment_id: int, payload: RejectAttachmentSchema):
     att = _get_attachment(attachment_id)
     order = att.order
-    operator = _get_user(user_id)
+    operator = _get_user(payload.operator_id)
     
     def do_reject():
         _validate_role(operator, Role.SUPERVISOR, '物料变更审核主管')
         _validate_assignment_supervisor(order, operator)
-        _validate_status(order, [ChangeOrderStatus.PENDING_REVIEW], '驳回附件')
+        _validate_status(order, [ChangeOrderStatus.PENDING_REVIEW, ChangeOrderStatus.OVERDUE], '驳回附件')
         
         if not payload.reason.strip():
             raise HttpError(400, '驳回原因不能为空')

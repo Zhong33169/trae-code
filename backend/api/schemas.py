@@ -183,6 +183,7 @@ class SupplementSchema(Schema):
 
 class RejectAttachmentSchema(Schema):
     reason: str
+    operator_id: int
 
 
 class DeleteAttachmentSchema(Schema):

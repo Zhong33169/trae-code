@@ -7,8 +7,8 @@
     currentUser, currentRole, STATUS_LABELS, STATUS_COLORS, 
     ATTACHMENT_STATUS_LABELS, ATTACHMENT_STATUS_COLORS, ROLE_LABELS
   } from '$lib/store';
-  import ProgressFlow from './ProgressFlow.svelte';
-  import AuditTimeline from './AuditTimeline.svelte';
+  import ProgressFlow from '../ProgressFlow.svelte';
+  import AuditTimeline from '../AuditTimeline.svelte';
 
   let order = null;
   let loading = true;
@@ -18,6 +18,7 @@
   let showSubmitModal = false;
   let showReturnModal = false;
   let showSupplementModal = false;
+  let resubmitReturnedMode = false;
   let showRejectAttachmentModal = false;
   let currentRejectAttachment = null;
   let isEditing = false;
@@ -246,7 +247,7 @@
     if (!$currentUser || !order) return false;
     return $currentRole === 'registrar' && 
            order.registrar_id === $currentUser.id &&
-           ['draft', 'supplement_required'].includes(order.status);
+           ['draft', 'supplement_required', 'returned'].includes(order.status);
   }
 
   function canUpload() {
@@ -273,11 +274,33 @@
            order.status === 'supplement_required';
   }
 
+  function canResubmitReturned() {
+    if (!$currentUser || !order) return false;
+    return $currentRole === 'registrar' && 
+           order.registrar_id === $currentUser.id &&
+           order.status === 'returned';
+  }
+
+  async function handleResubmitReturned() {
+    clearMsgs();
+    try {
+      order = await api.supplementOrder(order.id, {
+        supplement_note: formData.supplement_note,
+        audit_remark: formData.audit_remark
+      }, $currentUser.id);
+      showSupplementModal = false;
+      formData = { ...formData, supplement_note: '', audit_remark: '' };
+      success = '✅ 退回单已重新补正提交';
+    } catch (e) {
+      error = e.message;
+    }
+  }
+
   function canSupervisorApprove() {
     if (!$currentUser || !order) return false;
     return $currentRole === 'supervisor' && 
            order.supervisor_id === $currentUser.id &&
-           order.status === 'pending_review';
+           ['pending_review', 'overdue'].includes(order.status);
   }
 
   function canSupervisorReturn() {
@@ -288,7 +311,7 @@
     if (!$currentUser || !order) return false;
     return $currentRole === 'supervisor' && 
            order.supervisor_id === $currentUser.id &&
-           order.status === 'pending_review' &&
+           ['pending_review', 'overdue'].includes(order.status) &&
            att.status !== 'rejected';
   }
 
@@ -569,7 +592,17 @@
             <strong>⚠️ 登记员操作说明：</strong>请先补充缺失的附件（或删除被驳回附件后重新上传），确认齐全后重新提交。
           </div>
           <div class="actions-bar">
-            <button class="btn-primary" on:click={() => showSupplementModal = true}>✅ 补正并重新提交</button>
+            <button class="btn-primary" on:click={() => { resubmitReturnedMode = false; showSupplementModal = true; }}>✅ 补正并重新提交</button>
+          </div>
+        {/if}
+
+        <!-- 登记员 - 退回单重新补正 -->
+        {#if canResubmitReturned()}
+          <div class="alert alert-danger">
+            <strong>❌ 退回单操作说明：</strong>该单据已在复核阶段被退回，请查看退回原因，补正后重新提交审核。
+          </div>
+          <div class="actions-bar">
+            <button class="btn-primary" on:click={() => { resubmitReturnedMode = true; showSupplementModal = true; }}>🔄 退回单重新补正提交</button>
           </div>
         {/if}
 
@@ -616,7 +649,7 @@
         {/if}
 
         <!-- 无权操作 -->
-        {#if !canEdit() && !canSubmit() && !canReSubmitSupplement() && !canSupervisorApprove() && !canReviewerApprove()}
+        {#if !canEdit() && !canSubmit() && !canReSubmitSupplement() && !canResubmitReturned() && !canSupervisorApprove() && !canReviewerApprove()}
           <div class="empty-state">
             当前身份下无可用操作。请切换到正确的角色或用户，或联系相关人员处理。
           </div>
@@ -695,7 +728,7 @@
   <div class="modal-backdrop" on:click|self={() => showSupplementModal = false}>
     <div class="modal">
       <div class="modal-header">
-        ✅ 补正并重新提交
+        {resubmitReturnedMode ? '🔄 退回单重新补正提交' : '✅ 补正并重新提交'}
         <button class="link-btn" on:click={() => showSupplementModal = false}>✕</button>
       </div>
       <div class="modal-body">
@@ -710,7 +743,7 @@
       </div>
       <div class="modal-footer">
         <button on:click={() => showSupplementModal = false}>取消</button>
-        <button class="btn-primary" on:click={handleSupplement}>确认重新提交</button>
+        <button class="btn-primary" on:click={resubmitReturnedMode ? handleResubmitReturned : handleSupplement}>确认重新提交</button>
       </div>
     </div>
   </div>

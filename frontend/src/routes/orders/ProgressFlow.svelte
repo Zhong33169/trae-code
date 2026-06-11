@@ -13,29 +13,36 @@
 
   function getStepClass(step, index) {
     if (currentStatus === 'archived' && step.key === 'archived') return 'done';
-    
-    const statusOrder = ['draft', 'pending_review', 'supplement_required', 'pending_final', 'returned', 'overdue', 'archived'];
-    const currentIdx = statusOrder.indexOf(currentStatus === 'supplement_required' ? 'pending_review' : currentStatus);
-    const stepIdx = statusOrder.indexOf(step.key === 'archived' ? 'archived' : step.key);
-    
+
+    const statusOrder = ['draft', 'pending_review', 'pending_final', 'archived'];
+    const mappedStatus = (currentStatus === 'supplement_required' || currentStatus === 'overdue') ? 'pending_review' : currentStatus === 'returned' ? 'pending_final' : currentStatus;
+    const currentIdx = statusOrder.indexOf(mappedStatus);
+    const stepIdx = statusOrder.indexOf(step.key);
+
     if (step.key === 'archived') {
       return currentStatus === 'archived' ? 'done' : '';
     }
-    
+
+    if (currentStatus === 'supplement_required' && step.key === 'pending_review') return 'rejected';
+    if (currentStatus === 'overdue' && step.key === 'pending_review') return 'overdue-active';
+    if (currentStatus === 'returned' && (step.key === 'pending_review' || step.key === 'pending_final')) return 'rejected';
+
     if (stepIdx < currentIdx) return 'done';
-    if (step.key === (currentStatus === 'supplement_required' ? 'pending_review' : currentStatus)) return 'active';
+    if (stepIdx === currentIdx) return 'active';
     return '';
   }
 </script>
 
 <div class="progress-flow">
   {#each steps as step, i}
-    <div class="flow-step {getStepClass(step, i)} {currentStatus === 'returned' && (step.key === 'pending_review' || step.key === 'pending_final') ? 'rejected' : ''}">
+    <div class="flow-step {getStepClass(step, i)}">
       <div class="flow-step-circle">
         {#if getStepClass(step, i) === 'done'}
           ✓
-        {:else if currentStatus === 'returned' && (step.key === 'pending_review' || step.key === 'pending_final')}
+        {:else if getStepClass(step, i) === 'rejected'}
           ✕
+        {:else if getStepClass(step, i) === 'overdue-active'}
+          ⏰
         {:else}
           {i + 1}
         {/if}
@@ -61,3 +68,20 @@
     ⏰ 当前状态：已超时 — 处理超过时限，请尽快跟进。
   </div>
 {/if}
+
+<style>
+  :global(.flow-step.active .flow-step-circle) {
+    animation: pulse 2s ease-in-out infinite;
+  }
+  :global(.flow-step.overdue-active .flow-step-circle) {
+    background: #ea580c;
+    color: #fff;
+  }
+  :global(.flow-step.overdue-active::after) {
+    background: var(--color-gray-200);
+  }
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.4); }
+    50% { box-shadow: 0 0 0 8px rgba(37, 99, 235, 0); }
+  }
+</style>

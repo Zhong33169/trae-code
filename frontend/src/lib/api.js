@@ -78,11 +78,14 @@ export const api = {
     return apiFetch(`/orders/${orderId}/attachments`, { method: 'POST', body: form });
   },
   listAttachments: (orderId) => apiFetch(`/orders/${orderId}/attachments`),
-  deleteAttachment: (id, operatorId) => apiFetch(`/attachments/${id}?operator_id=${operatorId}`, { method: 'DELETE' }),
-  rejectAttachment: (id, reason, userId) => 
-    apiFetch(`/attachments/${id}/reject?user_id=${userId}`, { 
-      method: 'POST', 
-      body: JSON.stringify({ reason }) 
+  deleteAttachment: (id, operatorId) => apiFetch(`/attachments/${id}`, {
+    method: 'DELETE',
+    body: JSON.stringify({ operator_id: operatorId })
+  }),
+  rejectAttachment: (id, reason, userId) =>
+    apiFetch(`/attachments/${id}/reject`, {
+      method: 'POST',
+      body: JSON.stringify({ reason, operator_id: userId })
     }),
   
   listAuditLogs: (orderId) => apiFetch(`/orders/${orderId}/audit-logs`),
