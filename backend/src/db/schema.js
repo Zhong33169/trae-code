@@ -112,8 +112,26 @@ export async function initSchema() {
       name TEXT NOT NULL,
       url TEXT NOT NULL,
       uploaded_by INTEGER NOT NULL,
-      uploaded_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+      batch_item_id INTEGER,
+      source TEXT CHECK(source IN ('queue','batch_detail','plan_detail')),
+      note TEXT,
+      uploaded_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+      FOREIGN KEY (batch_item_id) REFERENCES batch_items(id)
     );
+    PRAGMA table_info(plan_evidences);
+  `);
+
+  try {
+    w.exec(`ALTER TABLE plan_evidences ADD COLUMN batch_item_id INTEGER`);
+  } catch (_) {}
+  try {
+    w.exec(`ALTER TABLE plan_evidences ADD COLUMN source TEXT CHECK(source IN ('queue','batch_detail','plan_detail'))`);
+  } catch (_) {}
+  try {
+    w.exec(`ALTER TABLE plan_evidences ADD COLUMN note TEXT`);
+  } catch (_) {}
+
+  w.exec(`
     CREATE TABLE IF NOT EXISTS plan_transitions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       plan_id INTEGER NOT NULL,

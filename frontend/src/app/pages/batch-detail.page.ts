@@ -70,9 +70,9 @@ import { ApiService } from '../api.service';
               <tr class="text-left">
                 <th class="px-5 py-3">结果</th>
                 <th class="px-5 py-3">计划单</th>
-                <th class="px-5 py-3">操作时状态</th>
                 <th class="px-5 py-3">版本</th>
                 <th class="px-5 py-3">缺失证据</th>
+                <th class="px-5 py-3">已补传</th>
                 <th class="px-5 py-3">重试</th>
                 <th class="px-5 py-3">错误信息</th>
                 <th class="px-5 py-3">办理</th>
@@ -92,9 +92,6 @@ import { ApiService } from '../api.service';
                   <div class="text-xs font-mono text-slate-400">{{ it.plan_no }}</div>
                   <div class="font-medium">{{ it.title }}</div>
                 </td>
-                <td class="px-5 py-3">
-                  <span class="text-xs px-2 py-0.5 rounded" [ngClass]="statusBadge(it.current_status)">{{ it.current_status }}</span>
-                </td>
                 <td class="px-5 py-3 text-xs text-slate-500">v{{ it.plan_version || '-' }}</td>
                 <td class="px-5 py-3">
                   <div *ngIf="it.status === 'FAILED' && it.missing_labels?.length" class="flex flex-wrap gap-1">
@@ -105,6 +102,21 @@ import { ApiService } from '../api.service';
                   </div>
                   <div *ngIf="it.status === 'FAILED' && !it.missing_labels?.length" class="text-xs text-slate-400">非证据原因</div>
                   <div *ngIf="it.status === 'SUCCESS'" class="text-xs text-slate-400">-</div>
+                </td>
+                <td class="px-5 py-3">
+                  <div *ngIf="it.status === 'FAILED'">
+                    <div class="text-xs font-medium">
+                      <span *ngIf="it.upload_count > 0">📎 {{ it.upload_count }} 份</span>
+                      <span *ngIf="it.upload_count === 0" class="text-slate-400">未补传</span>
+                    </div>
+                    <div *ngIf="it.latest_upload_at" class="text-[10px] text-slate-400 mt-0.5">
+                      最后 {{ it.latest_upload_at }}
+                    </div>
+                    <div *ngIf="it.can_retry" class="mt-1">
+                      <span class="text-[10px] px-1.5 py-0.5 rounded bg-green-100 text-green-700">可重试</span>
+                    </div>
+                  </div>
+                  <div *ngIf="it.status !== 'FAILED'" class="text-xs text-slate-400">-</div>
                 </td>
                 <td class="px-5 py-3 text-xs">{{ it.retry_count || 0 }}</td>
                 <td class="px-5 py-3 max-w-xs">
@@ -125,14 +137,21 @@ import { ApiService } from '../api.service';
 
       <div *ngIf="showItemUpload" class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" (click)="showItemUpload = false">
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6" (click)="$event.stopPropagation()">
-          <h3 class="text-lg font-bold mb-2">📎 补传证据</h3>
+          <h3 class="text-lg font-bold mb-2">📎 补传证据（批次项 #{{ uploadItem?.item_id }}）</h3>
           <div class="text-sm text-slate-500 mb-3">{{ uploadItem?.plan_no }} - {{ uploadItem?.title }} (v{{ uploadItem?.plan_version }})</div>
+          <div class="mb-3 p-3 rounded-lg bg-blue-50 border border-blue-200 text-xs text-blue-700">
+            ⚠️ 本证据将与批次项 #{{ uploadItem?.item_id }} 关联，仅失败项允许补传
+          </div>
           <div *ngFor="let ev of uploadItem?.uploadable_evidence || []" class="mb-3 p-3 rounded-lg border border-slate-200">
             <div class="font-medium text-sm mb-2">{{ ev.label }} ({{ ev.type }})</div>
             <div class="grid grid-cols-2 gap-2">
               <input [(ngModel)]="uploadForm[ev.type].name" placeholder="文件名" class="px-3 py-1.5 border border-slate-200 rounded text-sm">
               <input [(ngModel)]="uploadForm[ev.type].url" placeholder="文件路径" class="px-3 py-1.5 border border-slate-200 rounded text-sm">
             </div>
+          </div>
+          <div class="mb-4">
+            <label class="text-xs text-slate-600">补传说明</label>
+            <textarea [(ngModel)]="uploadNote" rows="2" placeholder="说明补传原因或修正内容（可选）" class="w-full mt-1 px-3 py-2 border border-slate-200 rounded text-sm"></textarea>
           </div>
           <div class="mt-4 flex justify-end gap-3">
             <button (click)="showItemUpload = false" class="px-4 py-2 border border-slate-200 rounded-lg text-sm">取消</button>
@@ -150,6 +169,7 @@ export class BatchDetailPage implements OnInit {
   showItemUpload = false;
   uploadItem: any = null;
   uploadForm: any = {};
+  uploadNote = '';
   constructor(private route: ActivatedRoute, private api: ApiService) {}
 
   ngOnInit() {
@@ -199,6 +219,7 @@ export class BatchDetailPage implements OnInit {
   openItemUpload(it: any) {
     this.uploadItem = it;
     this.uploadForm = {};
+    this.uploadNote = '';
     for (const ev of (it.uploadable_evidence || [])) {
       this.uploadForm[ev.type] = { name: '', url: '' };
     }
@@ -207,26 +228,38 @@ export class BatchDetailPage implements OnInit {
 
   async doItemUpload() {
     let uploaded = 0;
+    let failedMsg: string | null = null;
     for (const ev of (this.uploadItem?.uploadable_evidence || [])) {
       const form = this.uploadForm[ev.type];
       if (form.name && form.url) {
         try {
-          const res = await this.api.uploadEvidence(this.uploadItem.plan_id, {
+          const body: any = {
             evidence_type: ev.type,
             name: form.name,
             url: form.url,
             version: this.uploadItem.plan_version,
-            batch_item_id: this.uploadItem.item_id,
             source: 'batch_detail'
-          });
+          };
+          if (this.uploadItem?.item_id != null) {
+            body.batch_item_id = this.uploadItem.item_id;
+          }
+          if (this.uploadNote) {
+            body.note = this.uploadNote;
+          }
+          const res = await this.api.uploadEvidence(this.uploadItem.plan_id, body);
           if (res.code === 0) uploaded++;
-        } catch {}
+        } catch (e: any) {
+          failedMsg = e.error?.message || e.message || '上传失败';
+          break;
+        }
       }
     }
     this.showItemUpload = false;
     if (uploaded > 0) {
       (window as any).showToast?.('success', '补传成功', `已上传 ${uploaded} 份证据，刷新批次详情`);
       this.batch = await this.api.batchDetail(this.batch.id);
+    } else if (failedMsg) {
+      (window as any).showToast?.('error', '补传失败', failedMsg);
     } else {
       (window as any).showToast?.('warning', '未上传', '请填写文件名和路径');
     }

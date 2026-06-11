@@ -346,11 +346,55 @@ export default async function planRoutes(fastify) {
     const plan = d.prepare('SELECT * FROM launch_plans WHERE id=?').get(planId);
     if (!plan) return reply.code(404).send({ code: 404, message: '不存在' });
 
-    const { evidence_type, name, url, version, batch_item_id, source } = request.body || {};
+    const { evidence_type, name, url, version, batch_item_id, source, note } = request.body || {};
     if (!['REGISTRATION', 'VERIFICATION', 'ARCHIVAL'].includes(evidence_type)) {
       return reply.code(400).send({ code: 400, message: '证据类型非法' });
     }
     if (!name || !url) return reply.code(400).send({ code: 400, message: '名称/地址必填' });
+
+    if (source !== undefined && !['queue', 'batch_detail', 'plan_detail'].includes(source)) {
+      return reply.code(400).send({ code: 400, message: `source 非法，必须是 queue/batch_detail/plan_detail` });
+    }
+
+    let validatedBatchItem = null;
+    if (batch_item_id !== undefined && batch_item_id !== null) {
+      if (source !== 'batch_detail') {
+        return reply.code(400).send({
+          code: 400,
+          message: `传了 batch_item_id 时 source 必须为 batch_detail`
+        });
+      }
+      const bit = d.prepare(`
+        SELECT bi.*, lp.plan_no, b.batch_no FROM batch_items bi
+        JOIN launch_plans lp ON bi.plan_id = lp.id
+        JOIN batches b ON bi.batch_id = b.id
+        WHERE bi.id=?
+      `).get(batch_item_id);
+      if (!bit) {
+        return reply.code(400).send({
+          code: 'INVALID_BATCH_ITEM',
+          message: `批次项 #${batch_item_id} 不存在`
+        });
+      }
+      if (bit.plan_id !== planId) {
+        return reply.code(400).send({
+          code: 'BATCH_ITEM_PLAN_MISMATCH',
+          message: `批次项 #${batch_item_id} 不属于当前计划单 ${bit.plan_no}，不可上传到 ${plan.plan_no}`
+        });
+      }
+      if (bit.status !== 'FAILED') {
+        return reply.code(400).send({
+          code: 'BATCH_ITEM_NOT_FAILED',
+          message: `批次项 #${batch_item_id} 状态为 ${bit.status}，仅 FAILED 项可关联补传`
+        });
+      }
+      validatedBatchItem = bit;
+    } else if (source === 'batch_detail') {
+      return reply.code(400).send({
+        code: 400,
+        message: `source=batch_detail 时必须传 batch_item_id`
+      });
+    }
 
     if (version !== undefined && Number(version) !== plan.version) {
       return reply.code(409).send({
@@ -381,24 +425,34 @@ export default async function planRoutes(fastify) {
     }
 
     const info = d.prepare(`
-      INSERT INTO plan_evidences (plan_id, evidence_type, name, url, uploaded_by)
-      VALUES (?, ?, ?, ?, ?)
-    `).run(planId, evidence_type, name, url, request.user.id);
+      INSERT INTO plan_evidences (plan_id, evidence_type, name, url, uploaded_by, batch_item_id, source, note)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(planId, evidence_type, name, url, request.user.id,
+          validatedBatchItem ? validatedBatchItem.id : null,
+          source || null,
+          note || null);
 
     d.prepare(`UPDATE launch_plans SET version=version+1, updated_at=datetime('now','localtime') WHERE id=?`)
       .run(planId);
 
-    audit(request.user.id, 'UPLOAD_EVIDENCE', 'PLAN', planId,
-      {
-        plan_no: plan.plan_no,
-        evidence_id: info.lastInsertRowid,
-        evidence_type,
-        evidence_name: name,
-        evidence_url: url,
-        evidence_label: EVIDENCE_TYPE[evidence_type],
-        batch_item_id: batch_item_id || null,
-        source: source || 'plan_detail'
-      }, request.ip);
+    const auditDetail = {
+      plan_no: plan.plan_no,
+      evidence_id: info.lastInsertRowid,
+      evidence_type,
+      evidence_name: name,
+      evidence_url: url,
+      evidence_label: EVIDENCE_LABEL[evidence_type],
+      source: source || 'plan_detail'
+    };
+    if (validatedBatchItem) {
+      auditDetail.batch_item_id = validatedBatchItem.id;
+      auditDetail.batch_id = validatedBatchItem.batch_id;
+      auditDetail.batch_no = validatedBatchItem.batch_no;
+    } else if (batch_item_id) {
+      auditDetail.batch_item_id = batch_item_id;
+    }
+    if (note) auditDetail.note = note;
+    audit(request.user.id, 'UPLOAD_EVIDENCE', 'PLAN', planId, auditDetail, request.ip);
 
     return { code: 0, data: getPlanWithDetail(planId) };
   });

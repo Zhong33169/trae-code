@@ -337,6 +337,10 @@ import { ApiService } from '../api.service';
               <input [(ngModel)]="quickUploadForm[ev.type].url" placeholder="文件路径" class="px-3 py-1.5 border border-slate-200 rounded text-sm">
             </div>
           </div>
+          <div class="mb-4">
+            <label class="text-xs text-slate-600">备注说明</label>
+            <textarea [(ngModel)]="quickUploadNote" rows="2" placeholder="可填写补传原因（可选）" class="w-full mt-1 px-3 py-2 border border-slate-200 rounded text-sm"></textarea>
+          </div>
           <div class="mt-4 flex justify-end gap-3">
             <button (click)="showQuickUpload = false" class="px-4 py-2 border border-slate-200 rounded-lg text-sm">取消</button>
             <button (click)="doQuickUpload()" class="px-4 py-2 bg-primary text-white rounded-lg text-sm">上传</button>
@@ -379,6 +383,7 @@ export class QueuePage implements OnInit, OnDestroy {
   quickUploadPlan: any = null;
   quickUploadTypes: any[] = [];
   quickUploadForm: any = {};
+  quickUploadNote = '';
 
   timer: any;
 
@@ -527,6 +532,7 @@ export class QueuePage implements OnInit, OnDestroy {
     const LABELS: any = { REGISTRATION: '登记证据', VERIFICATION: '过程核验证据', ARCHIVAL: '复核归档证据' };
     this.quickUploadTypes = (p.uploadable_evidence || []).map((t: string) => ({ type: t, label: LABELS[t] || t }));
     this.quickUploadForm = {};
+    this.quickUploadNote = '';
     for (const ev of this.quickUploadTypes) {
       this.quickUploadForm[ev.type] = { name: '', url: '' };
     }
@@ -535,6 +541,7 @@ export class QueuePage implements OnInit, OnDestroy {
 
   async doQuickUpload() {
     let uploaded = 0;
+    let failedMsg: string | null = null;
     for (const ev of this.quickUploadTypes) {
       const form = this.quickUploadForm[ev.type];
       if (form.name && form.url) {
@@ -544,16 +551,22 @@ export class QueuePage implements OnInit, OnDestroy {
             name: form.name,
             url: form.url,
             version: this.quickUploadPlan.version,
-            source: 'queue'
+            source: 'queue',
+            note: this.quickUploadNote
           });
           if (res.code === 0) uploaded++;
-        } catch {}
+        } catch (e: any) {
+          failedMsg = e.error?.message || e.message || '上传失败';
+          break;
+        }
       }
     }
     this.showQuickUpload = false;
     if (uploaded > 0) {
       (window as any).showToast?.('success', '补传成功', `已上传 ${uploaded} 份证据`);
       this.reload();
+    } else if (failedMsg) {
+      (window as any).showToast?.('error', '补传失败', failedMsg);
     } else {
       (window as any).showToast?.('warning', '未上传', '请填写文件名和路径');
     }

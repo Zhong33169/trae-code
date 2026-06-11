@@ -306,6 +306,19 @@ export default async function batchRoutes(fastify) {
         }
       }
       item.uploadable_evidence = uploadable;
+
+      const uploads = d.prepare(`
+        SELECT pe.id, pe.evidence_type, pe.name, pe.url, pe.source, pe.note, pe.uploaded_at,
+               u.username AS uploader_name, u.role AS uploader_role
+        FROM plan_evidences pe
+        JOIN users u ON pe.uploaded_by = u.id
+        WHERE pe.batch_item_id=? ORDER BY pe.id DESC
+      `).all(item.item_id);
+      item.uploads = uploads;
+      item.upload_count = uploads.length;
+      item.latest_upload_at = uploads[0]?.uploaded_at || null;
+      item.can_retry = item.status === 'FAILED' && item.upload_count > 0 &&
+        item.next_allowed_actions.some(a => a.allowed);
     }
 
     batch.items = items;
