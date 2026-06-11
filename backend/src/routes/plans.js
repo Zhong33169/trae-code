@@ -1,5 +1,5 @@
 import { db } from '../db/schema.js';
-import { ROLES, STATUS, STATUS_LABEL } from '../db/seed.js';
+import { ROLES, STATUS, STATUS_LABEL, EVIDENCE_TYPE } from '../db/seed.js';
 import {
   checkTransition, checkEvidences, getPlanWithDetail, audit,
   TRANSITION_RULES, requiredEvidences, ERROR_CODES
@@ -148,14 +148,20 @@ export default async function planRoutes(fastify) {
     const availableActions = [];
     const rules = TRANSITION_RULES[plan.status] || {};
     for (const [action, rule] of Object.entries(rules)) {
-      const canDo = rule.roles.includes(request.user.role);
-      const missing = requiredEvidences(plan, action);
+      const roleMatch = rule.roles.includes(request.user.role);
+      const reqTypes = requiredEvidences(plan, action);
+      const eCheck = checkEvidences(plan.id, reqTypes);
       availableActions.push({
         action,
         label: actionLabel(action),
-        allowed: canDo,
-        require_evidence: missing,
-        reason: canDo ? null : `仅角色 ${rule.roles.join(',')} 可执行此操作`
+        role_match: roleMatch,
+        allowed: roleMatch && eCheck.ok,
+        require_evidence: reqTypes,
+        missing_evidences: eCheck.missing_types || [],
+        missing_labels: eCheck.missing_labels || [],
+        reason: !roleMatch
+          ? `仅角色 ${rule.roles.join(',')} 可执行此操作`
+          : (!eCheck.ok ? `缺少证据：${eCheck.missing_labels?.join('、')}` : null)
       });
     }
 
@@ -347,9 +353,16 @@ export default async function planRoutes(fastify) {
       .run(planId);
 
     audit(request.user.id, 'UPLOAD_EVIDENCE', 'PLAN', planId,
-      { plan_no: plan.plan_no, evidence_type, name }, request.ip);
+      {
+        plan_no: plan.plan_no,
+        evidence_id: info.lastInsertRowid,
+        evidence_type,
+        evidence_name: name,
+        evidence_url: url,
+        evidence_label: EVIDENCE_TYPE[evidence_type]
+      }, request.ip);
 
-    return { code: 0, data: { id: info.lastInsertRowid } };
+    return { code: 0, data: getPlanWithDetail(planId) };
   });
 
   fastify.get('/api/plans/:id/audit', {

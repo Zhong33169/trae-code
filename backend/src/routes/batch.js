@@ -133,7 +133,8 @@ export default async function batchRoutes(fastify) {
 
     const { comment } = request.body || {};
     const failedItems = d.prepare(`
-      SELECT bi.*, lp.* FROM batch_items bi
+      SELECT bi.id AS item_id, bi.plan_id, bi.status AS item_status, bi.error_code, bi.error_message, bi.retry_count,
+        lp.* FROM batch_items bi
       JOIN launch_plans lp ON bi.plan_id = lp.id
       WHERE bi.batch_id=? AND bi.status='FAILED'
     `).all(batchId);
@@ -153,28 +154,51 @@ export default async function batchRoutes(fastify) {
         d.prepare(`
           UPDATE batch_items SET status='SUCCESS', error_code=NULL, error_message=NULL,
             retry_count=?, last_attempt_at=datetime('now','localtime') WHERE id=?
-        `).run(newRetry, item.id);
+        `).run(newRetry, item.item_id);
         results.push({
           plan_id: plan.id, plan_no: plan.plan_no,
           result: 'SUCCESS', prev_status: plan.status, next_status: result.nextStatus
         });
+        audit(request.user.id, `BATCH_RETRY_${batch.action.toUpperCase()}`, 'PLAN', plan.id,
+          {
+            batch_no: batch.batch_no,
+            batch_id: batchId,
+            plan_no: plan.plan_no,
+            retry_no: newRetry,
+            prev: plan.status,
+            next: result.nextStatus
+          }, request.ip);
       } else {
         retryFailed++;
         d.prepare(`
           UPDATE batch_items SET error_code=?, error_message=?,
             retry_count=?, last_attempt_at=datetime('now','localtime') WHERE id=?
-        `).run(result.code, result.message, newRetry, item.id);
+        `).run(result.code, result.message, newRetry, item.item_id);
         results.push({
           plan_id: plan.id, plan_no: plan.plan_no,
           result: 'FAILED', error_code: result.code, error_message: result.message
         });
+        audit(request.user.id, `BATCH_RETRY_FAIL`, 'PLAN', plan.id,
+          {
+            batch_no: batch.batch_no,
+            batch_id: batchId,
+            plan_no: plan.plan_no,
+            retry_no: newRetry,
+            error_code: result.code,
+            error_message: result.message
+          }, request.ip);
       }
     }
 
+    const succCnt = d.prepare(`
+      SELECT COUNT(*) AS c FROM batch_items WHERE batch_id=? AND status='SUCCESS'
+    `).get(batchId).c;
+    const failCnt = d.prepare(`
+      SELECT COUNT(*) AS c FROM batch_items WHERE batch_id=? AND status='FAILED'
+    `).get(batchId).c;
     d.prepare(`
-      UPDATE batches SET success_count=success_count+?, failed_count=failed_count+?-?
-      WHERE id=?
-    `).run(retrySuccess, retryFailed, retrySuccess, batchId);
+      UPDATE batches SET success_count=?, failed_count=? WHERE id=?
+    `).run(succCnt, failCnt, batchId);
 
     const newBatch = d.prepare('SELECT * FROM batches WHERE id=?').get(batchId);
 

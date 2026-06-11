@@ -59,11 +59,24 @@ export function checkTransition(plan, action, userRole) {
   return { ok: true, nextStatus: rule.to };
 }
 
+export const EVIDENCE_LABEL = {
+  REGISTRATION: '登记证据',
+  VERIFICATION: '过程核验证据',
+  ARCHIVAL: '复核归档证据'
+};
+
 export function requiredEvidences(_plan, action) {
   const req = [];
-  if (action === 'submit' || action === 'resubmit') req.push('REGISTRATION');
-  if (action === 'verify_pass') req.push('VERIFICATION');
-  if (action === 'confirm_pass') req.push('ARCHIVAL');
+  if (action === 'submit' || action === 'resubmit') {
+    req.push('REGISTRATION');
+  } else if (action === 'verify_pass') {
+    req.push('REGISTRATION');
+    req.push('VERIFICATION');
+  } else if (action === 'confirm_pass') {
+    req.push('REGISTRATION');
+    req.push('VERIFICATION');
+    req.push('ARCHIVAL');
+  }
   return req;
 }
 
@@ -76,18 +89,19 @@ export function checkEvidences(planId, requiredTypes) {
       WHERE plan_id=? AND evidence_type=?
     `).get(planId, t).c;
     if (exists === 0) {
-      const nameMap = { REGISTRATION: '登记证据', VERIFICATION: '过程核验证据', ARCHIVAL: '复核归档证据' };
-      missing.push(nameMap[t]);
+      missing.push({ type: t, label: EVIDENCE_LABEL[t] });
     }
   }
   if (missing.length > 0) {
     return {
       ok: false,
       code: ERROR_CODES.MISSING_EVIDENCE,
-      message: `缺少必要证据：${missing.join('、')}。请先上传对应证据后再执行操作。`
+      missing_types: missing.map(m => m.type),
+      missing_labels: missing.map(m => m.label),
+      message: `缺少必要证据：${missing.map(m => m.label).join('、')}。请先上传对应证据后再执行操作。`
     };
   }
-  return { ok: true };
+  return { ok: true, missing_types: [], missing_labels: [] };
 }
 
 export function getPlanWithDetail(planId) {

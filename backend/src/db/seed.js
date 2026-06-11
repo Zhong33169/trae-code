@@ -102,7 +102,7 @@ export function seedData() {
       risk: 'HIGH', desc: '调整3个事业部共120个账号的角色归属',
       status: STATUS.PENDING_REVIEW, ver: 1, by: 'csm_wang',
       evidences: [
-        { t: 'REGISTRATION', n: '变更申请单.pdf', url: '/ev/001_申请单.pdf' }
+        { t: 'REGISTRATION', n: '变更申请单.pdf', url: '/ev/001_申请单.pdf', by: 'csm_wang' }
       ],
       transitions: [
         { f: STATUS.DRAFT, t: STATUS.PENDING_REVIEW, by: 'csm_wang', c: '已完成变更登记，提交核验' }
@@ -114,8 +114,9 @@ export function seedData() {
       risk: 'MEDIUM', desc: '工作流引擎v2.1.0升级至v2.3.0',
       status: STATUS.PENDING_CONFIRM, ver: 2, by: 'csm_li',
       evidences: [
-        { t: 'REGISTRATION', n: '升级申请表.docx', url: '/ev/002_升级表.docx' },
-        { t: 'VERIFICATION', n: '测试环境核验报告.pdf', url: '/ev/002_核验报告.pdf' }
+        { t: 'REGISTRATION', n: '升级申请表.docx', url: '/ev/002_升级表.docx', by: 'csm_li' },
+        { t: 'VERIFICATION', n: '测试环境核验报告.pdf', url: '/ev/002_核验报告.pdf', by: 'delivery_zhang' },
+        { t: 'ARCHIVAL', n: '上线前复核清单.xlsx', url: '/ev/002_复核清单.xlsx', by: 'director_zhao' }
       ],
       transitions: [
         { f: STATUS.DRAFT, t: STATUS.PENDING_REVIEW, by: 'csm_li', c: '提交升级申请' },
@@ -131,13 +132,15 @@ export function seedData() {
       transitions: []
     },
     {
-      no: 'LP-2026-0004', title: '客户D - SSO集成（缺证据）',
+      no: 'LP-2026-0004', title: '客户D - SSO集成（缺核验证据）',
       customer: '恒远制造业', type: '集成对接', date: '2026-06-11',
-      risk: 'HIGH', desc: '对接企业微信SSO单点登录，【缺少登记证据】',
+      risk: 'HIGH', desc: '对接企业微信SSO单点登录，【已登记但未核验】',
       status: STATUS.PENDING_REVIEW, ver: 1, by: 'csm_li',
-      evidences: [],
+      evidences: [
+        { t: 'REGISTRATION', n: 'SSO对接需求书.pdf', url: '/ev/004_需求书.pdf', by: 'csm_li' }
+      ],
       transitions: [
-        { f: STATUS.DRAFT, t: STATUS.PENDING_REVIEW, by: 'csm_li', c: '提交SSO对接申请（忘附证据）' }
+        { f: STATUS.DRAFT, t: STATUS.PENDING_REVIEW, by: 'csm_li', c: '提交SSO对接申请（待交付核验）' }
       ]
     },
     {
@@ -146,9 +149,9 @@ export function seedData() {
       risk: 'MEDIUM', desc: '5个数据字典共120项修改',
       status: STATUS.COMPLETED, ver: 3, by: 'csm_wang',
       evidences: [
-        { t: 'REGISTRATION', n: '字典变更申请.pdf', url: '/ev/005_申请.pdf' },
-        { t: 'VERIFICATION', n: '变更核验记录.xlsx', url: '/ev/005_核验.xlsx' },
-        { t: 'ARCHIVAL', n: '复核归档单.pdf', url: '/ev/005_归档.pdf' }
+        { t: 'REGISTRATION', n: '字典变更申请.pdf', url: '/ev/005_申请.pdf', by: 'csm_wang' },
+        { t: 'VERIFICATION', n: '变更核验记录.xlsx', url: '/ev/005_核验.xlsx', by: 'delivery_chen' },
+        { t: 'ARCHIVAL', n: '复核归档单.pdf', url: '/ev/005_归档.pdf', by: 'director_zhao' }
       ],
       transitions: [
         { f: STATUS.DRAFT, t: STATUS.PENDING_REVIEW, by: 'csm_wang', c: '提交申请' },
@@ -161,9 +164,9 @@ export function seedData() {
       customer: '阳光教育平台', type: '参数调整', date: '2026-06-07',
       risk: 'LOW', desc: 'API调用限额从1万/日调至5万/日',
       status: STATUS.REJECTED, ver: 2, by: 'csm_li',
-      reject_reason: '缺少业务量增长佐证材料，请补充',
+      reject_reason: '缺少业务量增长佐证材料，请补充登记证据后重新提交',
       evidences: [
-        { t: 'REGISTRATION', n: '配额调整申请.pdf', url: '/ev/006_申请.pdf' }
+        { t: 'REGISTRATION', n: '配额调整申请.pdf', url: '/ev/006_申请.pdf', by: 'csm_li' }
       ],
       transitions: [
         { f: STATUS.DRAFT, t: STATUS.PENDING_REVIEW, by: 'csm_li', c: '提交' },
@@ -176,8 +179,9 @@ export function seedData() {
       risk: 'MEDIUM', desc: '28个门店租户的主题色和支付配置统一变更',
       status: STATUS.PENDING_REVIEW, ver: 1, by: 'csm_wang',
       evidences: [
-        { t: 'REGISTRATION', n: '租户配置清单.xlsx', url: '/ev/007_清单.xlsx' },
-        { t: 'REGISTRATION', n: '配置变更审批单.pdf', url: '/ev/007_审批单.pdf' }
+        { t: 'REGISTRATION', n: '租户配置清单.xlsx', url: '/ev/007_清单.xlsx', by: 'csm_wang' },
+        { t: 'REGISTRATION', n: '配置变更审批单.pdf', url: '/ev/007_审批单.pdf', by: 'csm_wang' },
+        { t: 'VERIFICATION', n: '灰度环境核验截图.zip', url: '/ev/007_截图.zip', by: 'delivery_chen' }
       ],
       transitions: [
         { f: STATUS.DRAFT, t: STATUS.PENDING_REVIEW, by: 'csm_wang', c: '提交批量配置变更' }
@@ -189,7 +193,7 @@ export function seedData() {
       risk: 'HIGH', desc: '短信通道从供应商A切换至供应商B',
       status: STATUS.PENDING_REVIEW, ver: 1, by: 'csm_li',
       evidences: [
-        { t: 'REGISTRATION', n: '网关切换方案.pdf', url: '/ev/008_方案.pdf' }
+        { t: 'REGISTRATION', n: '网关切换方案.pdf', url: '/ev/008_方案.pdf', by: 'csm_li' }
       ],
       transitions: [
         { f: STATUS.DRAFT, t: STATUS.PENDING_REVIEW, by: 'csm_li', c: '提交切换方案' }
@@ -201,8 +205,8 @@ export function seedData() {
       risk: 'LOW', desc: '案例对象新增8个自定义字段',
       status: STATUS.PENDING_CONFIRM, ver: 1, by: 'csm_wang',
       evidences: [
-        { t: 'REGISTRATION', n: '字段需求表.xlsx', url: '/ev/009_需求.xlsx' },
-        { t: 'VERIFICATION', n: '字段核验截图.zip', url: '/ev/009_截图.zip' }
+        { t: 'REGISTRATION', n: '字段需求表.xlsx', url: '/ev/009_需求.xlsx', by: 'csm_wang' },
+        { t: 'VERIFICATION', n: '字段核验截图.zip', url: '/ev/009_截图.zip', by: 'delivery_chen' }
       ],
       transitions: [
         { f: STATUS.DRAFT, t: STATUS.PENDING_REVIEW, by: 'csm_wang', c: '提交' },
@@ -215,8 +219,8 @@ export function seedData() {
       risk: 'MEDIUM', desc: '采购审批流新增财务总监会签节点',
       status: STATUS.PENDING_CONFIRM, ver: 1, by: 'csm_li',
       evidences: [
-        { t: 'REGISTRATION', n: '流程调整申请.pdf', url: '/ev/010_申请.pdf' },
-        { t: 'VERIFICATION', n: '模拟走测报告.pdf', url: '/ev/010_走测.pdf' }
+        { t: 'REGISTRATION', n: '流程调整申请.pdf', url: '/ev/010_申请.pdf', by: 'csm_li' },
+        { t: 'VERIFICATION', n: '模拟走测报告.pdf', url: '/ev/010_走测.pdf', by: 'delivery_zhang' }
       ],
       transitions: [
         { f: STATUS.DRAFT, t: STATUS.PENDING_REVIEW, by: 'csm_li', c: '提交' },
@@ -238,7 +242,7 @@ export function seedData() {
     }
 
     for (const e of p.evidences) {
-      insertEvidence.run(planId, e.t, e.n, e.url, userIds[p.by]);
+      insertEvidence.run(planId, e.t, e.n, e.url, userIds[e.by]);
     }
 
     for (const tr of p.transitions) {

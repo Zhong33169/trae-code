@@ -160,18 +160,19 @@ import { ApiService } from '../api.service';
               <div *ngFor="let a of available_actions" class="border border-slate-200 rounded-lg p-3">
                 <div class="flex items-center justify-between mb-2">
                   <span class="font-semibold text-sm">{{ a.label }}</span>
-                  <span *ngIf="!a.allowed" class="text-xs text-danger">权限不匹配</span>
-                  <span *ngIf="a.allowed && a.require_evidence?.length" class="text-xs text-warning">需先上传证据</span>
+                  <span *ngIf="!a.role_match" class="text-xs text-danger">角色不匹配</span>
+                  <span *ngIf="a.role_match && a.missing_evidences?.length" class="text-xs text-warning">证据不足</span>
+                  <span *ngIf="a.allowed" class="text-xs text-success">可执行</span>
                 </div>
                 <div *ngIf="a.reason" class="text-xs text-slate-500 mb-2">{{ a.reason }}</div>
-                <div *ngIf="a.require_evidence?.length" class="text-xs text-warning mb-2">
-                  📎 需上传证据：{{ evNames(a.require_evidence).join('、') }}
+                <div *ngIf="a.missing_evidences?.length" class="text-xs text-warning mb-2">
+                  📎 缺少证据：{{ a.missing_labels?.join('、') }}
                 </div>
                 <textarea *ngIf="a.action === 'reject'" [(ngModel)]="comments[a.action]"
                   rows="2" placeholder="驳回原因（必填）"
                   class="w-full mb-2 px-2 py-1 border border-slate-200 rounded text-xs"></textarea>
                 <button (click)="doAction(a)"
-                  [disabled]="!a.allowed || a.require_evidence?.length"
+                  [disabled]="!a.allowed"
                   class="w-full py-2 rounded-md text-sm font-medium transition disabled:opacity-40 disabled:cursor-not-allowed"
                   [ngClass]="btnClass(a.action)">
                   {{ a.label }}
