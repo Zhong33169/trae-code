@@ -1,0 +1,318 @@
+package db
+
+import (
+	"database/sql"
+	"fmt"
+	"log"
+	"time"
+
+	_ "modernc.org/sqlite"
+)
+
+var DB *sql.DB
+
+func Init(dataSource string) error {
+	var err error
+	DB, err = sql.Open("sqlite", dataSource)
+	if err != nil {
+		return err
+	}
+
+	DB.SetMaxOpenConns(1)
+
+	if err = createTables(); err != nil {
+		return err
+	}
+
+	if err = seedData(); err != nil {
+		return err
+	}
+
+	log.Println("Database initialized successfully")
+	return nil
+}
+
+func createTables() error {
+	schema := `
+	CREATE TABLE IF NOT EXISTS users (
+		id TEXT PRIMARY KEY,
+		username TEXT UNIQUE NOT NULL,
+		role TEXT NOT NULL,
+		name TEXT NOT NULL
+	);
+
+	CREATE TABLE IF NOT EXISTS selections (
+		id TEXT PRIMARY KEY,
+		product_name TEXT NOT NULL,
+		product_category TEXT NOT NULL,
+		brand TEXT NOT NULL,
+		supplier TEXT NOT NULL,
+		estimated_price REAL NOT NULL DEFAULT 0,
+		commission_rate REAL NOT NULL DEFAULT 0,
+		planned_live_date TEXT,
+		description TEXT,
+		status TEXT NOT NULL,
+		created_by TEXT NOT NULL,
+		created_by_name TEXT NOT NULL,
+		created_at TEXT NOT NULL,
+		updated_at TEXT NOT NULL,
+		deadline TEXT,
+		reject_reason TEXT,
+		audit_note TEXT,
+		process_result TEXT
+	);
+
+	CREATE TABLE IF NOT EXISTS attachments (
+		id TEXT PRIMARY KEY,
+		selection_id TEXT NOT NULL,
+		name TEXT NOT NULL,
+		type TEXT NOT NULL,
+		url TEXT NOT NULL,
+		uploaded_by TEXT NOT NULL,
+		uploaded_at TEXT NOT NULL,
+		rejected INTEGER NOT NULL DEFAULT 0,
+		reject_reason TEXT,
+		rejected_by TEXT,
+		rejected_at TEXT,
+		FOREIGN KEY (selection_id) REFERENCES selections(id)
+	);
+
+	CREATE TABLE IF NOT EXISTS audit_logs (
+		id TEXT PRIMARY KEY,
+		selection_id TEXT NOT NULL,
+		user_id TEXT NOT NULL,
+		user_name TEXT NOT NULL,
+		action TEXT NOT NULL,
+		detail TEXT,
+		created_at TEXT NOT NULL
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_selections_status ON selections(status);
+	CREATE INDEX IF NOT EXISTS idx_selections_created_by ON selections(created_by);
+	CREATE INDEX IF NOT EXISTS idx_attachments_selection ON attachments(selection_id);
+	CREATE INDEX IF NOT EXISTS idx_audit_selection ON audit_logs(selection_id);
+	`
+	_, err := DB.Exec(schema)
+	return err
+}
+
+func seedData() error {
+	var count int
+	err := DB.QueryRow("SELECT COUNT(*) FROM users").Scan(&count)
+	if err != nil {
+		return err
+	}
+	if count > 0 {
+		return nil
+	}
+
+	tx, err := DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	_, err = tx.Exec(`
+		INSERT INTO users (id, username, role, name) VALUES
+		('u_registrar_1', 'registrar1', 'registrar', '直播选品登记员-小李'),
+		('u_supervisor_1', 'supervisor1', 'supervisor', '直播选品审核主管-王主管'),
+		('u_reviewer_1', 'reviewer1', 'reviewer', '复核负责人-张总');
+	`)
+	if err != nil {
+		return err
+	}
+
+	now := time.Now()
+	yesterday := now.Add(-24 * time.Hour)
+	twoDaysAgo := now.Add(-48 * time.Hour)
+	tomorrow := now.Add(24 * time.Hour)
+	pastDeadline := now.Add(-2 * time.Hour)
+
+	selections := []struct {
+		ID, ProductName, Category, Brand, Supplier string
+		Price, Commission                          float64
+		PlannedDate                                *time.Time
+		Description                                string
+		Status                                     string
+		CreatedBy, CreatedByName                   string
+		CreatedAt, UpdatedAt                       time.Time
+		Deadline                                   *time.Time
+		RejectReason, ProcessResult                string
+	}{
+		{
+			ID: "sel_normal", ProductName: "高端护肤精华液", Category: "美妆护肤",
+			Brand: "雅诗兰黛", Supplier: "雅诗兰黛官方旗舰店",
+			Price: 680.0, Commission: 0.25,
+			PlannedDate: &tomorrow, Description: "大牌精华，直播主推款，供货稳定",
+			Status: "pending",
+			CreatedBy: "u_registrar_1", CreatedByName: "直播选品登记员-小李",
+			CreatedAt: yesterday, UpdatedAt: yesterday,
+			Deadline: &tomorrow,
+		},
+		{
+			ID: "sel_missing", ProductName: "网红零食大礼包", Category: "食品生鲜",
+			Brand: "三只松鼠", Supplier: "三只松鼠渠道商",
+			Price: 128.0, Commission: 0.30,
+			Description: "零食组合装，需要补充质检报告和授权书",
+			Status: "missing_attachment",
+			CreatedBy: "u_registrar_1", CreatedByName: "直播选品登记员-小李",
+			CreatedAt: twoDaysAgo, UpdatedAt: yesterday,
+			Deadline: &tomorrow,
+		},
+		{
+			ID: "sel_timeout", ProductName: "夏季防晒衣", Category: "服饰鞋包",
+			Brand: "优衣库", Supplier: "优衣库经销商",
+			Price: 199.0, Commission: 0.15,
+			Description: "防晒服选品，已超时未处理",
+			Status: "timeout",
+			CreatedBy: "u_registrar_1", CreatedByName: "直播选品登记员-小李",
+			CreatedAt: twoDaysAgo, UpdatedAt: twoDaysAgo,
+			Deadline: &pastDeadline,
+			ProcessResult: "超时未处理，自动标记异常",
+		},
+		{
+			ID: "sel_rejected", ProductName: "杂牌蓝牙耳机", Category: "数码家电",
+			Brand: "XX牌", Supplier: "深圳某电子厂",
+			Price: 89.0, Commission: 0.40,
+			Description: "低价耳机，品质存疑",
+			Status: "rejected",
+			CreatedBy: "u_registrar_1", CreatedByName: "直播选品登记员-小李",
+			CreatedAt: twoDaysAgo, UpdatedAt: yesterday,
+			Deadline: &tomorrow,
+			RejectReason: "品牌授权存疑，质检报告不完整，无法保证售后",
+		},
+		{
+			ID: "sel_approved", ProductName: "家用空气炸锅", Category: "家居生活",
+			Brand: "九阳", Supplier: "九阳官方旗舰店",
+			Price: 399.0, Commission: 0.18,
+			Description: "热门厨房小家电，品牌授权齐全",
+			Status: "approved",
+			CreatedBy: "u_registrar_1", CreatedByName: "直播选品登记员-小李",
+			CreatedAt: twoDaysAgo, UpdatedAt: yesterday,
+			ProcessResult: "审核通过，可安排排期",
+		},
+		{
+			ID: "sel_draft", ProductName: "儿童益智玩具套装", Category: "母婴玩具",
+			Brand: "费雪", Supplier: "费雪中国总代理",
+			Price: 258.0, Commission: 0.22,
+			Description: "草稿，待补充信息",
+			Status: "draft",
+			CreatedBy: "u_registrar_1", CreatedByName: "直播选品登记员-小李",
+			CreatedAt: now, UpdatedAt: now,
+		},
+	}
+
+	selStmt, err := tx.Prepare(`INSERT INTO selections (
+		id, product_name, product_category, brand, supplier,
+		estimated_price, commission_rate, planned_live_date, description,
+		status, created_by, created_by_name, created_at, updated_at,
+		deadline, reject_reason, process_result
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+	if err != nil {
+		return err
+	}
+	defer selStmt.Close()
+
+	for _, s := range selections {
+		var plannedStr, deadlineStr sql.NullString
+		if s.PlannedDate != nil {
+			plannedStr = sql.NullString{String: s.PlannedDate.Format(time.RFC3339), Valid: true}
+		}
+		if s.Deadline != nil {
+			deadlineStr = sql.NullString{String: s.Deadline.Format(time.RFC3339), Valid: true}
+		}
+		_, err = selStmt.Exec(
+			s.ID, s.ProductName, s.Category, s.Brand, s.Supplier,
+			s.Price, s.Commission, plannedStr, s.Description,
+			s.Status, s.CreatedBy, s.CreatedByName,
+			s.CreatedAt.Format(time.RFC3339), s.UpdatedAt.Format(time.RFC3339),
+			deadlineStr, s.RejectReason, s.ProcessResult,
+		)
+		if err != nil {
+			return fmt.Errorf("insert selection %s: %w", s.ID, err)
+		}
+	}
+
+	attachStmt, err := tx.Prepare(`INSERT INTO attachments (
+		id, selection_id, name, type, url, uploaded_by, uploaded_at,
+		rejected, reject_reason, rejected_by, rejected_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+	if err != nil {
+		return err
+	}
+	defer attachStmt.Close()
+
+	yesterdayStr := yesterday.Format(time.RFC3339)
+	rejectedAt := yesterday.Add(2 * time.Hour)
+	rejectedAtStr := rejectedAt.Format(time.RFC3339)
+
+	attachments := []struct {
+		ID, SelID, Name, Type, URL, Uploader, UploadedAt string
+		Rejected                                         int
+		RejectReason, RejectedBy, RejectedAt             string
+	}{
+		{"att_normal_1", "sel_normal", "品牌授权书.pdf", "授权文件", "https://example.com/att/normal_auth.pdf", "u_registrar_1", yesterdayStr, 0, "", "", ""},
+		{"att_normal_2", "sel_normal", "质检报告.pdf", "质检文件", "https://example.com/att/normal_qc.pdf", "u_registrar_1", yesterdayStr, 0, "", "", ""},
+		{"att_missing_1", "sel_missing", "产品图片.zip", "图片资料", "https://example.com/att/missing_img.zip", "u_registrar_1", yesterdayStr, 0, "", "", ""},
+		{"att_rejected_1", "sel_rejected", "品牌授权书.pdf", "授权文件", "https://example.com/att/rej_auth.pdf", "u_registrar_1", twoDaysAgo.Format(time.RFC3339), 1, "授权方印章模糊，无法验证真伪", "u_supervisor_1", rejectedAtStr},
+		{"att_rejected_2", "sel_rejected", "质检报告.pdf", "质检文件", "https://example.com/att/rej_qc.pdf", "u_registrar_1", twoDaysAgo.Format(time.RFC3339), 1, "检测项不完整，缺少关键安全指标", "u_supervisor_1", rejectedAtStr},
+		{"att_approved_1", "sel_approved", "品牌授权书.pdf", "授权文件", "https://example.com/att/app_auth.pdf", "u_registrar_1", twoDaysAgo.Format(time.RFC3339), 0, "", "", ""},
+		{"att_approved_2", "sel_approved", "质检报告.pdf", "质检文件", "https://example.com/att/app_qc.pdf", "u_registrar_1", twoDaysAgo.Format(time.RFC3339), 0, "", "", ""},
+		{"att_timeout_1", "sel_timeout", "产品图片.png", "图片资料", "https://example.com/att/timeout_img.png", "u_registrar_1", twoDaysAgo.Format(time.RFC3339), 0, "", "", ""},
+	}
+
+	for _, a := range attachments {
+		var rr, rb, rat sql.NullString
+		if a.Rejected == 1 {
+			rr = sql.NullString{String: a.RejectReason, Valid: true}
+			rb = sql.NullString{String: a.RejectedBy, Valid: true}
+			rat = sql.NullString{String: a.RejectedAt, Valid: true}
+		}
+		_, err = attachStmt.Exec(a.ID, a.SelID, a.Name, a.Type, a.URL, a.Uploader, a.UploadedAt, a.Rejected, rr, rb, rat)
+		if err != nil {
+			return fmt.Errorf("insert attachment %s: %w", a.ID, err)
+		}
+	}
+
+	auditStmt, err := tx.Prepare(`INSERT INTO audit_logs (
+		id, selection_id, user_id, user_name, action, detail, created_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+	if err != nil {
+		return err
+	}
+	defer auditStmt.Close()
+
+	audits := []struct {
+		ID, SelID, UID, UName, Action, Detail, CreatedAt string
+	}{
+		{"audit_1", "sel_normal", "u_registrar_1", "直播选品登记员-小李", "创建选品单", "填写完整选品信息并上传2份附件", yesterdayStr},
+		{"audit_2", "sel_normal", "u_registrar_1", "直播选品登记员-小李", "提交审核", "提交至审核主管处理", yesterday.Add(time.Hour).Format(time.RFC3339)},
+		{"audit_3", "sel_missing", "u_registrar_1", "直播选品登记员-小李", "创建选品单", "创建零食礼包选品，仅上传图片", twoDaysAgo.Format(time.RFC3339)},
+		{"audit_4", "sel_missing", "u_registrar_1", "直播选品登记员-小李", "提交审核", "提交审核", twoDaysAgo.Add(2 * time.Hour).Format(time.RFC3339)},
+		{"audit_5", "sel_missing", "u_supervisor_1", "直播选品审核主管-王主管", "标记缺材料", "缺少品牌授权书和质检报告，要求补正", yesterdayStr},
+		{"audit_6", "sel_rejected", "u_registrar_1", "直播选品登记员-小李", "创建选品单", "创建杂牌耳机选品", twoDaysAgo.Format(time.RFC3339)},
+		{"audit_7", "sel_rejected", "u_registrar_1", "直播选品登记员-小李", "提交审核", "提交审核", twoDaysAgo.Add(time.Hour).Format(time.RFC3339)},
+		{"audit_8", "sel_rejected", "u_supervisor_1", "直播选品审核主管-王主管", "驳回附件", "附件1:授权方印章模糊;附件2:质检项缺失", rejectedAtStr},
+		{"audit_9", "sel_rejected", "u_supervisor_1", "直播选品审核主管-王主管", "退回选品单", "品牌授权存疑，质检报告不完整，无法保证售后", rejectedAt.Add(15 * time.Minute).Format(time.RFC3339)},
+		{"audit_10", "sel_approved", "u_registrar_1", "直播选品登记员-小李", "创建选品单", "创建空气炸锅选品", twoDaysAgo.Format(time.RFC3339)},
+		{"audit_11", "sel_approved", "u_registrar_1", "直播选品登记员-小李", "提交审核", "提交审核", twoDaysAgo.Add(time.Hour).Format(time.RFC3339)},
+		{"audit_12", "sel_approved", "u_supervisor_1", "直播选品审核主管-王主管", "审核通过", "材料齐全，品牌授权有效，质检通过", yesterdayStr},
+		{"audit_13", "sel_timeout", "u_registrar_1", "直播选品登记员-小李", "创建选品单", "创建防晒衣选品", twoDaysAgo.Format(time.RFC3339)},
+		{"audit_14", "sel_timeout", "u_registrar_1", "直播选品登记员-小李", "提交审核", "提交审核", twoDaysAgo.Add(time.Hour).Format(time.RFC3339)},
+	}
+
+	for _, a := range audits {
+		_, err = auditStmt.Exec(a.ID, a.SelID, a.UID, a.UName, a.Action, a.Detail, a.CreatedAt)
+		if err != nil {
+			return fmt.Errorf("insert audit %s: %w", a.ID, err)
+		}
+	}
+
+	return tx.Commit()
+}
+
+func Close() {
+	if DB != nil {
+		DB.Close()
+	}
+}
