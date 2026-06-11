@@ -47,8 +47,8 @@ def list_tickets(
 
 @router.get('/{ticket_id}', response=TicketDetailSchema)
 def get_ticket(request, ticket_id: int):
-    require_auth(request)
-    return ticket_service.get_ticket_detail(ticket_id)
+    user = require_auth(request)
+    return ticket_service.get_ticket_detail(ticket_id, user)
 
 
 @router.post('', response=TicketDetailSchema)

@@ -7,6 +7,9 @@ import {
   TrendingUp,
   ArrowRight,
   Plus,
+  User,
+  Handshake,
+  RefreshCw,
 } from 'lucide-react';
 import { useAppStore } from '@/store/appStore';
 import { RiskBadge, StageBadge } from '@/components/Badges';
@@ -23,10 +26,13 @@ export default function Dashboard() {
 
   const stats = dashboardStats || {
     total_pending: 0,
-    stage_counts: {},
-    risk_counts: {},
+    stage_counts: {} as Record<string, number>,
+    risk_counts: {} as Record<string, number>,
     overdue_count: 0,
     my_todo_count: 0,
+    my_handling_count: 0,
+    my_pending_takeover_count: 0,
+    my_returned_fix_count: 0,
   };
 
   const stageLabels: Record<string, string> = {
@@ -72,6 +78,33 @@ export default function Dashboard() {
 
   const canCreate = user?.role === 'registrar';
 
+  const myTodoCards = [
+    {
+      label: '当前处理',
+      value: stats.my_handling_count || 0,
+      icon: User,
+      color: 'text-blue-500',
+      bgColor: 'bg-blue-50',
+      desc: '正在处理的需求单',
+    },
+    {
+      label: '待我接手',
+      value: stats.my_pending_takeover_count || 0,
+      icon: Handshake,
+      color: 'text-amber-500',
+      bgColor: 'bg-amber-50',
+      desc: '他人转交待确认接手',
+    },
+    {
+      label: '待我补正',
+      value: stats.my_returned_fix_count || 0,
+      icon: RefreshCw,
+      color: 'text-orange-500',
+      bgColor: 'bg-orange-50',
+      desc: '已退回需补正后重提',
+    },
+  ];
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -112,6 +145,32 @@ export default function Dashboard() {
             </div>
           </div>
         ))}
+      </div>
+
+      <div>
+        <h3 className="text-sm font-semibold text-slate-700 mb-3">我的待办分类</h3>
+        <div className="grid grid-cols-3 gap-4">
+          {myTodoCards.map((card, index) => (
+            <div
+              key={index}
+              className="bg-white rounded-xl p-4 border border-slate-100 hover:shadow-md transition-shadow cursor-pointer"
+              onClick={() => navigate('/tickets?tab=my_todo')}
+            >
+              <div className="flex items-center gap-3">
+                <div className={cn('w-10 h-10 rounded-lg flex items-center justify-center', card.bgColor)}>
+                  <card.icon className={cn('w-5 h-5', card.color)} />
+                </div>
+                <div className="flex-1">
+                  <p className="text-sm text-slate-500">{card.label}</p>
+                  <p className="text-2xl font-bold text-slate-800 mt-1">
+                    {loading.dashboard ? '...' : card.value}
+                  </p>
+                </div>
+              </div>
+              <p className="text-xs text-slate-400 mt-3">{card.desc}</p>
+            </div>
+          ))}
+        </div>
       </div>
 
       <div className="grid grid-cols-3 gap-6">

@@ -240,9 +240,9 @@ def create_sample_tickets():
             'handler': auditor1,
             'deadline': now + timedelta(hours=8),
             'logs': [
-                ('create', '', 'confirm', '', 'pending', registrar1, '创建风控模型升级需求'),
-                ('submit', 'confirm', 'confirm', 'pending', 'pending', registrar1, '提交审核，分配审核主管王审核办理'),
-                ('validate_fail', 'confirm', 'confirm', 'pending', 'pending', auditor2, '校验失败（尝试approve）：当前处理人为「王审核」，您无权办理此需求交付单'),
+                ('create', '', 'confirm', '', 'pending', registrar1, None, '创建风控模型升级需求'),
+                ('submit', 'confirm', 'confirm', 'pending', 'pending', registrar1, None, '提交审核，分配审核主管王审核办理'),
+                ('validate_fail', 'confirm', 'confirm', 'pending', 'pending', auditor2, None, '校验失败（尝试approve）：当前处理人为「王审核」，您无权办理此需求交付单'),
             ],
             'evidences_per_log': [
                 [('模型升级方案', 'doc', 'https://example.com/risk-model.docx'),
@@ -252,6 +252,77 @@ def create_sample_tickets():
                  ('影响评估报告', 'doc', 'https://example.com/impact-assessment.pdf'),
                  ('技术方案评审链接', 'link', 'https://example.com/tech-review')],
                 [],
+            ],
+        },
+        {
+            'title': '中风险-供应商管理系统（待接手：王审核转交给赵审核）',
+            'description': '供应商管理系统开发，包含供应商准入、评级、考核等模块。王审核因工作调整，将此单转交给赵审核处理。',
+            'risk_level': 'medium',
+            'stage': 'confirm',
+            'status': 'pending',
+            'creator': registrar1,
+            'handler': auditor2,
+            'deadline': now + timedelta(days=2),
+            'logs': [
+                ('create', '', 'confirm', '', 'pending', registrar1, None, '创建供应商管理系统需求'),
+                ('submit', 'confirm', 'confirm', 'pending', 'pending', registrar1, None, '提交审核，分配王审核办理'),
+                ('transfer', 'confirm', 'confirm', 'pending', 'pending', auditor1, auditor2, '工作调整，转交给赵审核继续处理，请尽快接手'),
+            ],
+            'evidences_per_log': [
+                [('需求文档V1.0', 'doc', 'https://example.com/supplier-req.docx')],
+                [('需求文档V1.0', 'doc', 'https://example.com/supplier-req.docx'),
+                 ('业务流程图', 'doc', 'https://example.com/biz-flow.pdf')],
+                [('工作调整说明', 'doc', 'https://example.com/work-adjust.docx')],
+            ],
+        },
+        {
+            'title': '高风险-金融报表系统（已接手：赵审核从王审核处接手）',
+            'description': '金融监管报表系统开发，涉及合规要求高，数据准确性要求严格。原由王审核负责，后转交赵审核，赵审核已确认接手并开始处理。',
+            'risk_level': 'high',
+            'stage': 'schedule',
+            'status': 'pending',
+            'creator': registrar2,
+            'handler': auditor2,
+            'deadline': now + timedelta(days=2),
+            'logs': [
+                ('create', '', 'confirm', '', 'pending', registrar2, None, '创建金融报表系统需求'),
+                ('submit', 'confirm', 'confirm', 'pending', 'pending', registrar2, None, '提交审核'),
+                ('transfer', 'confirm', 'confirm', 'pending', 'pending', auditor1, auditor2, '项目交接，转交给赵审核'),
+                ('takeover', 'confirm', 'confirm', 'pending', 'pending', auditor2, None, '确认接手，已了解需求背景和进度'),
+                ('approve', 'confirm', 'schedule', 'pending', 'pending', auditor2, None, '需求确认通过，评审通过，进入排期评估阶段'),
+            ],
+            'evidences_per_log': [
+                [('需求规格书', 'doc', 'https://example.com/finance-spec.docx'),
+                 ('监管要求文档', 'doc', 'https://example.com/regulation.pdf'),
+                 ('参考样例链接', 'link', 'https://example.com/ref')],
+                [('需求规格书', 'doc', 'https://example.com/finance-spec.docx'),
+                 ('监管要求文档', 'doc', 'https://example.com/regulation.pdf'),
+                 ('参考样例链接', 'link', 'https://example.com/ref')],
+                [('交接清单', 'doc', 'https://example.com/handover-list.xlsx')],
+                [],
+                [('需求评审纪要', 'doc', 'https://example.com/review-minutes.docx'),
+                 ('技术方案', 'link', 'https://example.com/tech-design'),
+                 ('排期初稿', 'doc', 'https://example.com/schedule-draft.xlsx')],
+            ],
+        },
+        {
+            'title': '低风险-员工考勤小程序（回收退回：已退回给登记员待补正）',
+            'description': '员工考勤打卡小程序开发，功能简单。审核时发现需求描述不够清晰，缺少关键功能清单，已退回给登记员补正。',
+            'risk_level': 'low',
+            'stage': 'confirm',
+            'status': 'returned',
+            'creator': registrar1,
+            'handler': registrar1,
+            'deadline': now + timedelta(days=3),
+            'logs': [
+                ('create', '', 'confirm', '', 'pending', registrar1, None, '创建员工考勤小程序需求'),
+                ('submit', 'confirm', 'confirm', 'pending', 'pending', registrar1, None, '提交审核'),
+                ('reject', 'confirm', 'confirm', 'pending', 'returned', auditor1, None, '退回补正：需求描述过于简单，缺少功能清单、打卡规则说明和异常处理逻辑，请补充后重新提交'),
+            ],
+            'evidences_per_log': [
+                [('需求简述', 'doc', 'https://example.com/attendance-req.txt')],
+                [('需求简述', 'doc', 'https://example.com/attendance-req.txt')],
+                [('退回意见说明', 'doc', 'https://example.com/reject-note.docx')],
             ],
         },
     ]
@@ -275,7 +346,11 @@ def create_sample_tickets():
         )
 
         for i, log_info in enumerate(sample['logs']):
-            action, from_stage, to_stage, from_status, to_status, operator, comment = log_info
+            if len(log_info) == 8:
+                action, from_stage, to_stage, from_status, to_status, operator, target_handler, comment = log_info
+            else:
+                action, from_stage, to_stage, from_status, to_status, operator, comment = log_info
+                target_handler = None
             log = TicketLog.objects.create(
                 ticket=ticket,
                 action=action,
@@ -284,6 +359,7 @@ def create_sample_tickets():
                 from_status=from_status,
                 to_status=to_status,
                 operator=operator,
+                target_handler=target_handler,
                 comment=comment,
             )
 

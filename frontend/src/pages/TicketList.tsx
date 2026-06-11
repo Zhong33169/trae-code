@@ -257,15 +257,29 @@ export default function TicketList() {
                   </span>
                 </td>
                 <td className="px-5 py-4">
-                  <span className={cn(
-                    'text-sm',
-                    ticket.current_handler_id === user?.id ? 'font-semibold text-blue-600' : 'text-slate-600'
-                  )}>
-                    {ticket.current_handler_name || '-'}
-                    {ticket.current_handler_id === user?.id && (
-                      <span className="ml-1 text-xs text-blue-500">(我)</span>
+                  <div className="space-y-1">
+                    <span className={cn(
+                      'text-sm',
+                      ticket.current_handler_id === user?.id ? 'font-semibold text-blue-600' : 'text-slate-600'
+                    )}>
+                      {ticket.current_handler_name || '-'}
+                      {ticket.current_handler_id === user?.id && (
+                        <span className="ml-1 text-xs text-blue-500">(我)</span>
+                      )}
+                    </span>
+                    {ticket.handler_status !== 'other' && (
+                      <span className={cn(
+                        'inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium',
+                        ticket.handler_status === 'handling' && 'bg-blue-100 text-blue-700',
+                        ticket.handler_status === 'pending_takeover' && 'bg-amber-100 text-amber-700',
+                        ticket.handler_status === 'returned_fix' && 'bg-orange-100 text-orange-700'
+                      )}>
+                        {ticket.handler_status === 'handling' && '当前处理'}
+                        {ticket.handler_status === 'pending_takeover' && '待我接手'}
+                        {ticket.handler_status === 'returned_fix' && '待我补正'}
+                      </span>
                     )}
-                  </span>
+                  </div>
                 </td>
                 <td className="px-5 py-4">
                   <span className="text-sm text-slate-500">

@@ -29,11 +29,11 @@ ROLE_STAGE_ACTIONS = {
         'acceptance': {'returned': ['revise']},
     },
     'auditor': {
-        'confirm': {'pending': ['approve', 'reject']},
-        'schedule': {'pending': ['approve', 'reject']},
+        'confirm': {'pending': ['approve', 'reject', 'transfer']},
+        'schedule': {'pending': ['approve', 'reject', 'transfer']},
     },
     'reviewer': {
-        'acceptance': {'pending': ['archive', 'reject']},
+        'acceptance': {'pending': ['archive', 'reject', 'transfer']},
     },
 }
 
@@ -148,3 +148,45 @@ def write_validate_fail_log(ticket: Ticket, user: User, action: str, comment: st
         operator=user,
         comment=f'校验失败（尝试{action}）：{comment}',
     )
+
+
+def is_pending_takeover(ticket: Ticket, user: User = None) -> bool:
+    if user is not None and ticket.current_handler_id != user.id:
+        return False
+    last_transfer = TicketLog.objects.filter(
+        ticket=ticket,
+        action='transfer',
+    ).order_by('-created_at').first()
+    if not last_transfer:
+        return False
+    last_takeover = TicketLog.objects.filter(
+        ticket=ticket,
+        action='takeover',
+        created_at__gt=last_transfer.created_at,
+    ).order_by('-created_at').first()
+    return last_takeover is None
+
+
+def validate_transfer(ticket: Ticket, user: User, target_user: User) -> dict:
+    target_role = HANDLER_ROLE_MAP.get(ticket.stage)
+    if target_user.role != target_role:
+        role_label = {'auditor': '审核主管', 'reviewer': '复核负责人'}.get(target_role, target_role)
+        raise ValidationError(
+            f'当前阶段只能转交给{role_label}角色的用户',
+            'transfer_role_mismatch'
+        )
+    if target_user.id == user.id:
+        raise ValidationError(
+            '不能转交给自己',
+            'transfer_to_self'
+        )
+    return {'valid': True}
+
+
+def validate_takeover(ticket: Ticket, user: User) -> dict:
+    if not is_pending_takeover(ticket, user):
+        raise ValidationError(
+            '该需求交付单不在待接手状态',
+            'not_pending_takeover'
+        )
+    return {'valid': True}

@@ -113,6 +113,8 @@ class TicketLog(models.Model):
         ('revise', '补正'),
         ('archive', '归档'),
         ('validate_fail', '校验失败'),
+        ('transfer', '转交'),
+        ('takeover', '接手'),
     ]
 
     ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE, related_name='logs')
@@ -122,6 +124,7 @@ class TicketLog(models.Model):
     from_status = models.CharField(max_length=20, blank=True)
     to_status = models.CharField(max_length=20, blank=True)
     operator = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='operated_logs')
+    target_handler = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='received_logs')
     comment = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -141,6 +144,8 @@ class TicketLog(models.Model):
             'to_status': self.to_status,
             'operator_id': self.operator_id,
             'operator_name': self.operator.name if self.operator else '系统',
+            'target_handler_id': self.target_handler_id,
+            'target_handler_name': self.target_handler.name if self.target_handler else '',
             'comment': self.comment,
             'created_at': self.created_at.isoformat() if self.created_at else '',
         }

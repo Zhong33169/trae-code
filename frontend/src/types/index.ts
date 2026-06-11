@@ -32,6 +32,8 @@ export interface TicketLog {
   to_status: string;
   operator_id: number | null;
   operator_name: string;
+  target_handler_id: number | null;
+  target_handler_name: string;
   comment: string;
   created_at: string;
   evidences: Evidence[];
@@ -53,6 +55,7 @@ export interface Ticket {
   creator_name: string;
   current_handler_id: number | null;
   current_handler_name: string;
+  handler_status: 'handling' | 'pending_takeover' | 'returned_fix' | 'other';
   created_at: string;
   updated_at: string;
   deadline: string;
@@ -61,6 +64,7 @@ export interface Ticket {
 export interface TicketDetail extends Ticket {
   logs: TicketLog[];
   evidences: Evidence[];
+  available_transfer_users: User[];
 }
 
 export interface TicketListResponse {
@@ -76,6 +80,9 @@ export interface DashboardStats {
   risk_counts: Record<string, number>;
   overdue_count: number;
   my_todo_count: number;
+  my_handling_count: number;
+  my_pending_takeover_count: number;
+  my_returned_fix_count: number;
 }
 
 export interface EvidenceCreate {
@@ -96,6 +103,7 @@ export interface TicketActionData {
   action: string;
   comment: string;
   version: number;
+  target_user_id?: number;
   evidences: EvidenceCreate[];
 }
 

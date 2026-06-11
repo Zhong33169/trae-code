@@ -2,9 +2,12 @@ from app.models import User, Ticket, TicketLog, Evidence
 from app.services.validation_service import (
     ValidationError,
     validate_ticket_action,
+    validate_transfer,
+    validate_takeover,
     write_validate_fail_log,
     get_stage_deadline,
     find_user_by_role,
+    is_pending_takeover,
     STAGE_TRANSITIONS,
     RISK_EVIDENCE_REQUIREMENTS,
 )
@@ -240,6 +243,101 @@ def archive_ticket(ticket: Ticket, user: User, data: dict) -> Ticket:
         return ticket
 
 
+def transfer_ticket(ticket: Ticket, user: User, data: dict) -> Ticket:
+    with transaction.atomic():
+        version = data.get('version', ticket.version)
+        evidences = data.get('evidences', [])
+        target_user_id = data.get('target_user_id')
+
+        try:
+            validate_ticket_action(ticket, user, 'transfer', version, evidences)
+            if not target_user_id:
+                raise ValidationError('请指定转交目标用户', 'target_user_missing')
+            target_user = User.objects.get(id=target_user_id)
+            validate_transfer(ticket, user, target_user)
+        except ValidationError as e:
+            write_validate_fail_log(ticket, user, 'transfer', e.message)
+            raise
+
+        old_handler_name = ticket.current_handler.name if ticket.current_handler else '无'
+        old_handler = ticket.current_handler
+
+        ticket.current_handler = target_user
+        ticket.version += 1
+        ticket.save()
+
+        log = TicketLog.objects.create(
+            ticket=ticket,
+            action='transfer',
+            from_stage=ticket.stage,
+            to_stage=ticket.stage,
+            from_status=ticket.status,
+            to_status=ticket.status,
+            operator=user,
+            target_handler=target_user,
+            comment=data.get('comment', f'转交给 {target_user.name}'),
+        )
+
+        for ev in evidences:
+            Evidence.objects.create(
+                ticket=ticket,
+                log=log,
+                name=ev.get('name', ''),
+                type=ev.get('type', 'doc'),
+                url=ev.get('url', ''),
+            )
+
+        return ticket
+
+
+def takeover_ticket(ticket: Ticket, user: User, data: dict) -> Ticket:
+    with transaction.atomic():
+        version = data.get('version', ticket.version)
+        evidences = data.get('evidences', [])
+
+        try:
+            if ticket.current_handler_id != user.id:
+                handler_name = ticket.current_handler.name if ticket.current_handler else '未知'
+                raise ValidationError(
+                    f'当前处理人为「{handler_name}」，您无权接手此需求交付单',
+                    'handler_mismatch'
+                )
+            if version != ticket.version:
+                raise ValidationError(
+                    f'版本号不匹配（提交v{version}，当前v{ticket.version}），请刷新页面后重试',
+                    'version_conflict'
+                )
+            validate_takeover(ticket, user)
+        except ValidationError as e:
+            write_validate_fail_log(ticket, user, 'takeover', e.message)
+            raise
+
+        ticket.version += 1
+        ticket.save()
+
+        log = TicketLog.objects.create(
+            ticket=ticket,
+            action='takeover',
+            from_stage=ticket.stage,
+            to_stage=ticket.stage,
+            from_status=ticket.status,
+            to_status=ticket.status,
+            operator=user,
+            comment=data.get('comment', '确认接手'),
+        )
+
+        for ev in evidences:
+            Evidence.objects.create(
+                ticket=ticket,
+                log=log,
+                name=ev.get('name', ''),
+                type=ev.get('type', 'doc'),
+                url=ev.get('url', ''),
+            )
+
+        return ticket
+
+
 def execute_action(ticket: Ticket, user: User, action: str, data: dict) -> Ticket:
     actions = {
         'submit': submit_ticket,
@@ -247,6 +345,8 @@ def execute_action(ticket: Ticket, user: User, action: str, data: dict) -> Ticke
         'reject': reject_ticket,
         'revise': revise_ticket,
         'archive': archive_ticket,
+        'transfer': transfer_ticket,
+        'takeover': takeover_ticket,
     }
 
     handler = actions.get(action)
@@ -254,6 +354,16 @@ def execute_action(ticket: Ticket, user: User, action: str, data: dict) -> Ticke
         raise ValidationError(f'不支持的操作: {action}')
 
     return handler(ticket, user, data)
+
+
+def _get_handler_status(ticket: Ticket, user: User) -> str:
+    if user.role == 'registrar' and ticket.status == 'returned' and ticket.creator_id == user.id:
+        return 'returned_fix'
+    if ticket.current_handler_id == user.id:
+        if is_pending_takeover(ticket, user):
+            return 'pending_takeover'
+        return 'handling'
+    return 'other'
 
 
 def get_ticket_list(filters: dict, page: int = 1, page_size: int = 20, user: User = None) -> dict:
@@ -286,17 +396,31 @@ def get_ticket_list(filters: dict, page: int = 1, page_size: int = 20, user: Use
     start = (page - 1) * page_size
     items = queryset[start:start + page_size]
 
+    result_items = []
+    for t in items:
+        item = t.to_dict()
+        if user:
+            item['handler_status'] = _get_handler_status(t, user)
+        else:
+            item['handler_status'] = 'other'
+        result_items.append(item)
+
     return {
         'total': total,
-        'items': [t.to_dict() for t in items],
+        'items': result_items,
         'page': page,
         'page_size': page_size,
     }
 
 
-def get_ticket_detail(ticket_id: int) -> dict:
+def get_ticket_detail(ticket_id: int, user: User = None) -> dict:
     ticket = Ticket.objects.get(id=ticket_id)
     data = ticket.to_dict()
+
+    if user:
+        data['handler_status'] = _get_handler_status(ticket, user)
+    else:
+        data['handler_status'] = 'other'
 
     logs = TicketLog.objects.filter(ticket=ticket).order_by('created_at')
     log_list = []
@@ -311,6 +435,16 @@ def get_ticket_detail(ticket_id: int) -> dict:
     all_evidences = Evidence.objects.filter(ticket=ticket)
     data['evidences'] = [e.to_dict() for e in all_evidences]
 
+    if user and ticket.current_handler_id == user.id and ticket.status in ['pending', 'overdue']:
+        target_role = 'auditor' if ticket.stage in ['confirm', 'schedule'] else 'reviewer'
+        available_users = User.objects.filter(role=target_role).exclude(id=user.id)
+        data['available_transfer_users'] = [
+            {'id': u.id, 'username': u.username, 'name': u.name, 'role': u.role, 'role_label': u.get_role_display()}
+            for u in available_users
+        ]
+    else:
+        data['available_transfer_users'] = []
+
     return data
 
 
@@ -318,7 +452,7 @@ def get_dashboard_stats(user: User) -> dict:
     queryset = Ticket.objects.all()
 
     if user.role == 'registrar':
-        queryset = queryset.filter(creator=user)
+        queryset = queryset.filter(Q(creator=user) | Q(current_handler=user))
 
     total_pending = queryset.filter(status__in=['pending', 'processing']).count()
 
@@ -332,12 +466,28 @@ def get_dashboard_stats(user: User) -> dict:
 
     my_todo = Ticket.objects.filter(current_handler=user, status__in=['pending', 'returned', 'overdue']).count()
 
+    my_handling = 0
+    my_pending_takeover = 0
+    my_returned_fix = 0
+    my_tickets = Ticket.objects.filter(current_handler=user, status__in=['pending', 'overdue'])
+    for t in my_tickets:
+        if is_pending_takeover(t, user):
+            my_pending_takeover += 1
+        else:
+            my_handling += 1
+
+    if user.role == 'registrar':
+        my_returned_fix = Ticket.objects.filter(creator=user, status='returned').count()
+
     return {
         'total_pending': total_pending,
         'stage_counts': stage_dict,
         'risk_counts': risk_dict,
         'overdue_count': overdue_count,
         'my_todo_count': my_todo,
+        'my_handling_count': my_handling,
+        'my_pending_takeover_count': my_pending_takeover,
+        'my_returned_fix_count': my_returned_fix,
     }
 
 

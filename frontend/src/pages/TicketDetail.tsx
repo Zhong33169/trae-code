@@ -11,11 +11,14 @@ import {
   CheckCircle2,
   XCircle,
   RefreshCw,
+  Handshake,
+  ArrowRight,
+  X,
 } from 'lucide-react';
 import { useAppStore } from '@/store/appStore';
 import { RiskBadge, StatusBadge, StageBadge } from '@/components/Badges';
 import { cn } from '@/lib/utils';
-import type { EvidenceCreate } from '@/types';
+import type { EvidenceCreate, User as UserType } from '@/types';
 
 const stages = [
   { key: 'confirm', label: '需求确认' },
@@ -34,6 +37,8 @@ export default function TicketDetail() {
   const [evUrl, setEvUrl] = useState('');
   const [evType, setEvType] = useState('doc');
   const [actionError, setActionError] = useState('');
+  const [showTransferModal, setShowTransferModal] = useState(false);
+  const [selectedTargetUserId, setSelectedTargetUserId] = useState<number | null>(null);
 
   useEffect(() => {
     if (id) {
@@ -64,6 +69,11 @@ export default function TicketDetail() {
 
     const actions: { key: string; label: string; type: 'primary' | 'danger' | 'default' }[] = [];
 
+    if (ticket.handler_status === 'pending_takeover') {
+      actions.push({ key: 'takeover', label: '确认接手', type: 'primary' });
+      return actions;
+    }
+
     if (user.role === 'registrar') {
       if (ticket.stage === 'confirm' && ticket.status === 'pending') {
         actions.push({ key: 'submit', label: '提交审核', type: 'primary' });
@@ -87,6 +97,10 @@ export default function TicketDetail() {
       }
     }
 
+    if (ticket.handler_status === 'handling' && ticket.status === 'pending' && user.role !== 'registrar') {
+      actions.push({ key: 'transfer', label: '转交他人', type: 'default' });
+    }
+
     return actions;
   };
 
@@ -94,6 +108,12 @@ export default function TicketDetail() {
 
   const handleAction = async (action: string) => {
     if (!ticket) return;
+
+    if (action === 'transfer') {
+      setShowTransferModal(true);
+      return;
+    }
+
     setActionError('');
 
     try {
@@ -103,6 +123,27 @@ export default function TicketDetail() {
         version: ticket.version,
         evidences,
       });
+      setComment('');
+      setEvidences([]);
+    } catch (err: any) {
+      setActionError(err.message);
+    }
+  };
+
+  const handleTransfer = async () => {
+    if (!ticket || !selectedTargetUserId) return;
+    setActionError('');
+
+    try {
+      await executeAction(ticket.id, {
+        action: 'transfer',
+        comment,
+        version: ticket.version,
+        target_user_id: selectedTargetUserId,
+        evidences,
+      });
+      setShowTransferModal(false);
+      setSelectedTargetUserId(null);
       setComment('');
       setEvidences([]);
     } catch (err: any) {
@@ -147,6 +188,10 @@ export default function TicketDetail() {
         return <RefreshCw className="w-4 h-4 text-amber-500" />;
       case 'validate_fail':
         return <AlertCircle className="w-4 h-4 text-orange-500" />;
+      case 'transfer':
+        return <ArrowRight className="w-4 h-4 text-indigo-500" />;
+      case 'takeover':
+        return <Handshake className="w-4 h-4 text-blue-500" />;
       default:
         return <MessageSquare className="w-4 h-4" />;
     }
@@ -164,6 +209,10 @@ export default function TicketDetail() {
         return 'bg-blue-50 border-blue-200';
       case 'validate_fail':
         return 'bg-orange-50 border-orange-200';
+      case 'transfer':
+        return 'bg-indigo-50 border-indigo-200';
+      case 'takeover':
+        return 'bg-cyan-50 border-cyan-200';
       default:
         return 'bg-slate-50 border-slate-200';
     }
@@ -303,6 +352,12 @@ export default function TicketDetail() {
                         {log.comment}
                       </p>
                     )}
+                    {log.action === 'transfer' && log.target_handler_name && (
+                      <div className="mt-2 flex items-center gap-2 text-xs text-indigo-600">
+                        <span className="font-medium">转交目标：</span>
+                        <span>{log.target_handler_name}</span>
+                      </div>
+                    )}
                     {log.evidences && log.evidences.length > 0 && (
                       <div className="mt-3 pt-3 border-t border-slate-200/50">
                         <p className="text-xs text-slate-500 mb-2">证据材料：</p>
@@ -373,6 +428,51 @@ export default function TicketDetail() {
               </div>
             </div>
           </div>
+
+          {ticket.handler_status !== 'other' && (
+            <div className={cn(
+              'rounded-xl border p-4',
+              ticket.handler_status === 'handling' && 'bg-blue-50 border-blue-200',
+              ticket.handler_status === 'pending_takeover' && 'bg-amber-50 border-amber-200',
+              ticket.handler_status === 'returned_fix' && 'bg-orange-50 border-orange-200'
+            )}>
+              <div className="flex items-start gap-3">
+                <div className="mt-0.5">
+                  {ticket.handler_status === 'handling' && (
+                    <User className="w-5 h-5 text-blue-500" />
+                  )}
+                  {ticket.handler_status === 'pending_takeover' && (
+                    <Handshake className="w-5 h-5 text-amber-500" />
+                  )}
+                  {ticket.handler_status === 'returned_fix' && (
+                    <RefreshCw className="w-5 h-5 text-orange-500" />
+                  )}
+                </div>
+                <div>
+                  <p className={cn(
+                    'text-sm font-semibold',
+                    ticket.handler_status === 'handling' && 'text-blue-800',
+                    ticket.handler_status === 'pending_takeover' && 'text-amber-800',
+                    ticket.handler_status === 'returned_fix' && 'text-orange-800'
+                  )}>
+                    {ticket.handler_status === 'handling' && '当前由您处理'}
+                    {ticket.handler_status === 'pending_takeover' && '待您接手'}
+                    {ticket.handler_status === 'returned_fix' && '已退回待补正'}
+                  </p>
+                  <p className={cn(
+                    'text-xs mt-1',
+                    ticket.handler_status === 'handling' && 'text-blue-600',
+                    ticket.handler_status === 'pending_takeover' && 'text-amber-600',
+                    ticket.handler_status === 'returned_fix' && 'text-orange-600'
+                  )}>
+                    {ticket.handler_status === 'handling' && '请及时办理，避免逾期'}
+                    {ticket.handler_status === 'pending_takeover' && '此需求单已转交您，请确认接手后再办理'}
+                    {ticket.handler_status === 'returned_fix' && '此需求单已被退回，请补正后重新提交'}
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="bg-white rounded-xl border border-slate-100 p-5">
             <h3 className="text-sm font-semibold text-slate-800 mb-4">人员信息</h3>
@@ -549,6 +649,150 @@ export default function TicketDetail() {
           )}
         </div>
       </div>
+
+      {showTransferModal && ticket && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl w-full max-w-md mx-4 shadow-xl">
+            <div className="flex items-center justify-between p-5 border-b border-slate-100">
+              <h3 className="text-base font-semibold text-slate-800">转交需求交付单</h3>
+              <button
+                onClick={() => setShowTransferModal(false)}
+                className="p-1 hover:bg-slate-100 rounded transition-colors"
+              >
+                <X className="w-4 h-4 text-slate-500" />
+              </button>
+            </div>
+            <div className="p-5 space-y-4">
+              {actionError && (
+                <div className="p-2.5 bg-red-50 text-red-600 text-xs rounded-lg flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                  {actionError}
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-2">
+                  转交原因
+                </label>
+                <textarea
+                  value={comment}
+                  onChange={(e) => setComment(e.target.value)}
+                  placeholder="请输入转交原因..."
+                  rows={3}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-2">
+                  转交对象
+                </label>
+                <div className="space-y-2">
+                  {ticket.available_transfer_users?.map((u) => (
+                    <div
+                      key={u.id}
+                      onClick={() => setSelectedTargetUserId(u.id)}
+                      className={cn(
+                        'flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors',
+                        selectedTargetUserId === u.id
+                          ? 'border-blue-500 bg-blue-50'
+                          : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                      )}
+                    >
+                      <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center">
+                        <User className="w-4 h-4 text-slate-500" />
+                      </div>
+                      <div className="flex-1">
+                        <p className="text-sm font-medium text-slate-800">{u.name}</p>
+                        <p className="text-xs text-slate-500">{u.role_label}</p>
+                      </div>
+                      {selectedTargetUserId === u.id && (
+                        <CheckCircle2 className="w-5 h-5 text-blue-500" />
+                      )}
+                    </div>
+                  ))}
+                  {ticket.available_transfer_users?.length === 0 && (
+                    <p className="text-sm text-slate-400 text-center py-4">
+                      暂无同角色的其他用户可转交
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-medium text-slate-600 mb-2 block">
+                  证据材料（可选）
+                </label>
+                {evidences.length > 0 && (
+                  <div className="space-y-1.5 mb-2">
+                    {evidences.map((ev, idx) => (
+                      <div key={idx} className="flex items-center gap-2 px-2 py-1.5 bg-slate-50 rounded text-xs">
+                        <Paperclip className="w-3 h-3 text-slate-400" />
+                        <span className="text-slate-700 truncate flex-1">{ev.name}</span>
+                        <button
+                          onClick={() => removeEvidence(idx)}
+                          className="text-slate-400 hover:text-red-500"
+                        >
+                          <XCircle className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={evName}
+                    onChange={(e) => setEvName(e.target.value)}
+                    placeholder="证据名称"
+                    className="flex-1 px-2 py-1.5 border border-slate-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  />
+                  <select
+                    value={evType}
+                    onChange={(e) => setEvType(e.target.value)}
+                    className="px-2 py-1.5 border border-slate-200 rounded text-xs bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  >
+                    <option value="doc">文档</option>
+                    <option value="link">链接</option>
+                    <option value="image">图片</option>
+                    <option value="other">其他</option>
+                  </select>
+                </div>
+                <div className="flex gap-2 mt-1.5">
+                  <input
+                    type="text"
+                    value={evUrl}
+                    onChange={(e) => setEvUrl(e.target.value)}
+                    placeholder="证据链接/地址"
+                    className="flex-1 px-2 py-1.5 border border-slate-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  />
+                  <button
+                    onClick={addEvidence}
+                    className="px-3 py-1.5 bg-slate-100 text-slate-600 text-xs rounded hover:bg-slate-200 transition-colors"
+                  >
+                    添加
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div className="flex gap-3 p-5 border-t border-slate-100">
+              <button
+                onClick={() => setShowTransferModal(false)}
+                className="flex-1 py-2 rounded-lg text-sm font-medium bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleTransfer}
+                disabled={!selectedTargetUserId || loading.action}
+                className="flex-1 py-2 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                确认转交
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

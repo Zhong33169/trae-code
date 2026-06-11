@@ -47,6 +47,8 @@ class TicketLogSchema(Schema):
     to_status: str
     operator_id: Optional[int]
     operator_name: str
+    target_handler_id: Optional[int]
+    target_handler_name: str
     comment: str
     created_at: str
     evidences: List[EvidenceSchema] = []
@@ -68,6 +70,7 @@ class TicketSchema(Schema):
     creator_name: str
     current_handler_id: Optional[int]
     current_handler_name: str
+    handler_status: str
     created_at: str
     updated_at: str
     deadline: str
@@ -76,6 +79,7 @@ class TicketSchema(Schema):
 class TicketDetailSchema(TicketSchema):
     logs: List[TicketLogSchema] = []
     evidences: List[EvidenceSchema] = []
+    available_transfer_users: List[UserSchema] = []
 
 
 class TicketCreateSchema(Schema):
@@ -90,6 +94,7 @@ class TicketActionSchema(Schema):
     action: str
     comment: str = ''
     version: int
+    target_user_id: Optional[int] = None
     evidences: List[EvidenceCreateSchema] = []
 
 
@@ -106,6 +111,9 @@ class DashboardStatsSchema(Schema):
     risk_counts: dict
     overdue_count: int
     my_todo_count: int
+    my_handling_count: int
+    my_pending_takeover_count: int
+    my_returned_fix_count: int
 
 
 class LogListResponse(Schema):
