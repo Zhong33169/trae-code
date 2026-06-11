@@ -1,5 +1,5 @@
-import { Outlet, useLoaderData, Form, redirect, ActionFunctionArgs, json, useMatches } from "@remix-run/react";
-import { LoaderFunctionArgs } from "@remix-run/node";
+import { Outlet, useLoaderData, Form, Link } from "@remix-run/react";
+import { json, LoaderFunctionArgs, ActionFunctionArgs } from "@remix-run/node";
 import { Layout, Menu, Button, Avatar, Dropdown, Badge } from "antd";
 import {
   FileTextOutlined,
@@ -10,11 +10,10 @@ import {
   UserOutlined,
   BellOutlined,
 } from "@ant-design/icons";
-import { Link } from "@remix-run/react";
 import { useState } from "react";
-import { requireAuth, logout, getSession, commitSession } from "~/utils/auth.server";
+import { requireAuth, logout } from "~/utils/auth.server";
 import { apiGet } from "~/utils/api.server";
-import { Statistics } from "~/types";
+import type { Statistics } from "~/types";
 
 const { Header, Sider, Content } = Layout;
 
@@ -41,7 +40,7 @@ export default function LayoutComponent() {
 
   const todoCount = statistics?.myPending || 0;
   const currentPath = typeof window !== 'undefined' ? window.location.pathname : '/';
-  const activeKey = currentPath === '/' ? 'dashboard' : 
+  const activeKey = currentPath === '/' ? 'dashboard' :
                     currentPath.startsWith('/records/new') ? 'create' :
                     currentPath.startsWith('/records') ? 'records' :
                     currentPath.startsWith('/logs') ? 'logs' : 'dashboard';

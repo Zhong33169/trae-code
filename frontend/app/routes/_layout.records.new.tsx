@@ -15,11 +15,10 @@ import {
   Modal,
   Tag,
 } from "antd";
-import { ArrowLeftOutlined, PlusOutlined, UploadOutlined } from "@ant-design/icons";
+import { ArrowLeftOutlined, PlusOutlined } from "@ant-design/icons";
 import { requireAuth } from "~/utils/auth.server";
 import { apiPost } from "~/utils/api.server";
 import dayjs from "dayjs";
-import type { UploadProps } from "antd";
 
 const { TextArea } = Input;
 
@@ -77,23 +76,6 @@ export default function NewRecord() {
   }
 
   const [evidences, setEvidences] = useState<any[]>([]);
-
-  const uploadProps: UploadProps = {
-    fileList: evidences.map((e, idx) => ({
-      uid: `-${idx}`,
-      name: e.name,
-      status: "done",
-      url: e.fileUrl,
-      type: e.type,
-    })),
-    beforeUpload: () => false,
-    onRemove: (file) => {
-      const idx = evidences.findIndex((_, i) => `-${i}` === file.uid);
-      if (idx > -1) {
-        setEvidences(evidences.filter((_, i) => i !== idx));
-      }
-    },
-  };
 
   const handleAddEvidence = () => {
     const typeOptions = [

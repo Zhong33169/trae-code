@@ -1,6 +1,5 @@
-import { Layout, Menu, Button, Avatar, Dropdown, Space, Badge, Statistic } from "antd";
-import { Outlet, Link, useRouteError, isRouteErrorResponse, useNavigate, Form } from "@remix-run/react";
-import { useLoaderData, useMatches, redirect, ActionFunctionArgs, json } from "@remix-run/node";
+import { Layout, Menu, Button, Avatar, Dropdown, Badge } from "antd";
+import { Outlet, Link, Form, useLoaderData } from "@remix-run/react";
 import {
   FileTextOutlined,
   PlusOutlined,
@@ -10,44 +9,32 @@ import {
   UserOutlined,
   BellOutlined,
 } from "@ant-design/icons";
-import { requireAuth, logout, getSession, commitSession } from "~/utils/auth.server";
-import { apiGet } from "~/utils/api.server";
-import { Statistics } from "~/types";
 import { useState } from "react";
 
 const { Header, Sider, Content } = Layout;
 
-export const loader = async ({ request }: any) => {
-  const { token, user } = await requireAuth(request);
-  const statsResponse = await apiGet<Statistics>(token, "/api/records/statistics");
-  return json({ user, statistics: statsResponse.data });
-};
-
-export const action = async ({ request }: ActionFunctionArgs) => {
-  const formData = await request.formData();
-  const intent = formData.get("intent");
-
-  if (intent === "logout") {
-    return logout(request);
-  }
-
-  return null;
-};
-
 export default function AppLayout({ children }: { children: React.ReactNode }) {
-  const matches = useMatches();
-  const rootMatch = matches.find(m => m.id === "root");
-  const layoutMatch = matches.find(m => m.id === "routes/_layout");
-  const loaderData = (layoutMatch?.data as any) || (rootMatch?.data as any);
-  const user = loaderData?.user;
+  let user: any = null;
+  let statistics: any = { myPending: 0, todoCounts: {} };
+
+  try {
+    const data = useLoaderData<any>();
+    user = data?.user || null;
+    statistics = data?.statistics || statistics;
+  } catch (e) {}
+
   const [collapsed, setCollapsed] = useState(false);
 
   if (!user) {
     return <>{children}</>;
   }
 
-  const statistics = loaderData?.statistics || { myPending: 0, todoCounts: {} };
-  const todoCount = statistics.myPending || 0;
+  const todoCount = statistics?.myPending || 0;
+  const currentPath = typeof window !== 'undefined' ? window.location.pathname : '/';
+  const activeKey = currentPath === '/' ? 'dashboard' :
+                    currentPath.startsWith('/records/new') ? 'create' :
+                    currentPath.startsWith('/records') ? 'records' :
+                    currentPath.startsWith('/logs') ? 'logs' : 'dashboard';
 
   const menuItems = [
     {
@@ -59,7 +46,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       key: "records",
       icon: <FileTextOutlined />,
       label: <Link to="/records">旁站记录单</Link>,
-      badge: todoCount > 0 ? todoCount : undefined,
     },
     {
       key: "create",
@@ -85,7 +71,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       key: "logout",
       icon: <LogoutOutlined />,
       label: (
-        <Form method="post">
+        <Form method="post" action="/records">
           <input type="hidden" name="intent" value="logout" />
           <button
             type="submit"
@@ -146,7 +132,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         >
           <Menu
             mode="inline"
-            selectedKeys={[location.pathname.split("/")[1] || "dashboard"]}
+            selectedKeys={[activeKey]}
             style={{ height: "100%", borderRight: 0 }}
             items={menuItems}
           />

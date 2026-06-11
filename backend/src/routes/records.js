@@ -317,13 +317,17 @@ router.post('/:id/operate', authMiddleware(), allRoles, async (ctx) => {
 
   let nextHandlerId = null;
   const nextRole = getRoleForStatus(newStatus);
+
   if (nextRole === ROLES.SUPERVISOR) {
-    nextHandlerId = handlerId || (record.current_handler_id && 
-      getRoleForStatus(previousStatus) === ROLES.SUPERVISOR ? record.current_handler_id : null);
+    nextHandlerId = handlerId || null;
   } else if (nextRole === ROLES.REVIEWER) {
     nextHandlerId = handlerId || null;
   } else if (nextRole === ROLES.REGISTRAR) {
     nextHandlerId = record.created_by;
+  }
+
+  if ([OPERATION_TYPES.REVIEW, OPERATION_TYPES.FINAL_REVIEW].includes(operation)) {
+    nextHandlerId = user.id;
   }
 
   db.exec('BEGIN TRANSACTION');

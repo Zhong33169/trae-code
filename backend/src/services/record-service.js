@@ -75,6 +75,8 @@ const updateRecordStatus = (recordId, newStatus, version, currentHandlerId = nul
   if (currentHandlerId !== null) {
     setSql += ', current_handler_id = ?';
     params.push(currentHandlerId);
+  } else {
+    setSql += ', current_handler_id = NULL';
   }
   params.push(recordId, version);
   return db.prepare(`

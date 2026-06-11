@@ -2,7 +2,7 @@ const initSqlJs = require('sql.js');
 const path = require('path');
 const fs = require('fs');
 
-const dbPath = process.env.DB_PATH || './data/supervision.db';
+const dbPath = path.resolve(process.env.DB_PATH || './data/supervision.db');
 const dbDir = path.dirname(dbPath);
 
 if (!fs.existsSync(dbDir)) {
@@ -10,13 +10,15 @@ if (!fs.existsSync(dbDir)) {
 }
 
 let _db = null;
+let _rawDb = null;
+let _lastInsertRowId = 0;
+let _saveTimer = null;
 
 class SqlJsStatement {
   constructor(stmt, db) {
     this._stmt = stmt;
     this._db = db;
     this._pluck = false;
-    this._asObject = true;
   }
 
   pluck(enable = true) {
@@ -29,8 +31,9 @@ class SqlJsStatement {
     this._stmt.bind(flatParams);
     this._stmt.step();
     const changes = this._db.getRowsModified();
+    _lastInsertRowId = this._db.exec('SELECT last_insert_rowid()')[0]?.values[0]?.[0] || 0;
     this._stmt.reset();
-    return { changes, lastInsertRowid: this._db.exec('SELECT last_insert_rowid() AS id')[0]?.values[0]?.[0] };
+    return { changes, lastInsertRowid: _lastInsertRowId };
   }
 
   get(...params) {
@@ -73,11 +76,19 @@ class SqlJsStatement {
     this._stmt.reset();
     return results;
   }
+
+  finalize() {
+    if (this._stmt) {
+      try { this._stmt.free(); } catch (e) {}
+      this._stmt = null;
+    }
+  }
 }
 
 class SqlJsDb {
   constructor(db) {
     this._db = db;
+    this._stmtCache = new Map();
   }
 
   exec(sql) {
@@ -85,8 +96,14 @@ class SqlJsDb {
   }
 
   prepare(sql) {
+    let cached = this._stmtCache.get(sql);
+    if (cached) {
+      return cached;
+    }
     const stmt = this._db.prepare(sql);
-    return new SqlJsStatement(stmt, this._db);
+    const wrapper = new SqlJsStatement(stmt, this._db);
+    this._stmtCache.set(sql, wrapper);
+    return wrapper;
   }
 
   getRowsModified() {
@@ -98,11 +115,30 @@ class SqlJsDb {
   }
 
   close() {
+    for (const [, stmt] of this._stmtCache) {
+      stmt.finalize();
+    }
+    this._stmtCache.clear();
     this._db.close();
   }
 
   export() {
     return this._db.export();
+  }
+}
+
+function saveDatabase() {
+  if (!_db || !_rawDb) return false;
+  try {
+    const data = _rawDb.export();
+    const buffer = Buffer.from(data);
+    const tmpPath = dbPath + '.tmp';
+    fs.writeFileSync(tmpPath, buffer);
+    fs.renameSync(tmpPath, dbPath);
+    return true;
+  } catch (e) {
+    console.error('保存数据库失败:', e.message);
+    return false;
   }
 }
 
@@ -116,7 +152,7 @@ async function initializeDatabase() {
   });
 
   let dbInstance;
-  if (fs.existsSync(dbPath)) {
+  if (fs.existsSync(dbPath) && fs.statSync(dbPath).size > 0) {
     const fileBuffer = fs.readFileSync(dbPath);
     dbInstance = new SQL.Database(fileBuffer);
   } else {
@@ -125,27 +161,22 @@ async function initializeDatabase() {
 
   dbInstance.run('PRAGMA foreign_keys = ON');
 
+  _rawDb = dbInstance;
   _db = new SqlJsDb(dbInstance);
 
-  setInterval(() => {
-    try {
-      const data = dbInstance.export();
-      const buffer = Buffer.from(data);
-      const tmpPath = dbPath + '.tmp';
-      fs.writeFileSync(tmpPath, buffer);
-      fs.renameSync(tmpPath, dbPath);
-    } catch (e) {
-      console.error('保存数据库失败:', e.message);
-    }
-  }, 2000);
+  if (_saveTimer) clearInterval(_saveTimer);
+  _saveTimer = setInterval(() => {
+    saveDatabase();
+  }, 3000);
 
-  process.on('exit', () => {
-    try {
-      const data = dbInstance.export();
-      const buffer = Buffer.from(data);
-      fs.writeFileSync(dbPath, buffer);
-    } catch (e) {}
-  });
+  const originalExit = process.emit;
+  process.emit = function(event, ...args) {
+    if (event === 'exit' || event === 'SIGINT' || event === 'SIGTERM') {
+      saveDatabase();
+    }
+    return originalExit.apply(process, [event, ...args]);
+  };
+  process.on('exit', () => { saveDatabase(); });
 
   return _db;
 }
@@ -157,26 +188,13 @@ function getDb() {
   return _db;
 }
 
-function saveDatabase() {
-  if (!_db) return;
-  try {
-    const data = _db.export();
-    const buffer = Buffer.from(data);
-    const tmpPath = dbPath + '.tmp';
-    fs.writeFileSync(tmpPath, buffer);
-    fs.renameSync(tmpPath, dbPath);
-    return true;
-  } catch (e) {
-    console.error('保存数据库失败:', e.message);
-    return false;
-  }
-}
-
 const lazyDb = new Proxy({}, {
   get(target, prop) {
-    if (prop in target) {
-      return target[prop];
-    }
+    if (prop === 'initializeDatabase') return initializeDatabase;
+    if (prop === 'getDb') return getDb;
+    if (prop === 'saveDatabase') return saveDatabase;
+    if (prop === '__esModule') return false;
+    if (prop === 'default') return lazyDb;
     const db = getDb();
     if (typeof db[prop] === 'function') {
       return db[prop].bind(db);

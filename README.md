@@ -374,11 +374,14 @@ npm run seed-data
 ### 1. 端口被占用
 修改 `.env` 文件中的端口配置，确保前后端端口一致。
 
-### 2. better-sqlite3 安装失败
-better-sqlite3 需要编译原生模块，请确保系统已安装 Python 和 C++ 编译工具：
-- Windows: `npm install --global windows-build-tools`
-- macOS: `xcode-select --install`
-- Linux: `sudo apt-get install build-essential python3`
+### 2. 数据库文件损坏
+删除 `backend/data/supervision.db` 后重新初始化：
+```bash
+cd backend
+rm -f data/supervision.db
+node scripts/init-db.js
+node scripts/seed-data.js
+```
 
 ### 3. 前端无法连接后端
 - 确认后端服务已启动
