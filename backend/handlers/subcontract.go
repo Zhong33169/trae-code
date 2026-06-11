@@ -559,10 +559,28 @@ func BatchProcess(c echo.Context) error {
 
 	for _, fid := range req.FormIDs {
 		expectedVersion := 0
+		hasVersion := false
 		if req.FormVersions != nil {
 			if v, ok := req.FormVersions[fid]; ok {
 				expectedVersion = v
+				hasVersion = true
 			}
+		}
+		if !hasVersion || expectedVersion <= 0 {
+			form, _ := getFormByID(fid)
+			code := fid
+			if form != nil {
+				code = form.Code
+			}
+			results = append(results, BatchItemResult{
+				FormID:  fid,
+				Code:    code,
+				Success: false,
+				Message: "缺少选中时的版本号，请刷新列表后重新勾选",
+				Reason:  "missing_version",
+			})
+			failCount++
+			continue
 		}
 		form, errResp := processFormCore(fid, req.Action, userID, userRole, expectedVersion, req.Reason)
 		item := BatchItemResult{

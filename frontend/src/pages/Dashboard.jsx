@@ -51,6 +51,16 @@ export default function Dashboard() {
       ])
       setForms(formsData)
       setProjects(projectsData)
+      setSelectedForms((prev) => {
+        if (prev.size === 0) return prev
+        const next = new Map(prev)
+        for (const f of formsData) {
+          if (next.has(f.id)) {
+            next.set(f.id, f.version)
+          }
+        }
+        return next
+      })
       if (keepSelection && selectedId) {
         try {
           const detail = await api.getForm(selectedId)
@@ -108,7 +118,18 @@ export default function Dashboard() {
   const handleBatchProcess = async (action, reason = '') => {
     try {
       const form_versions = {}
-      for (const [id, v] of selectedForms) form_versions[id] = v
+      const missing = []
+      for (const [id, v] of selectedForms) {
+        if (v && v > 0) {
+          form_versions[id] = v
+        } else {
+          missing.push(id)
+        }
+      }
+      if (missing.length > 0) {
+        showNotification(`有 ${missing.length} 项缺少版本信息，请刷新列表后重新勾选`, 'error')
+        return
+      }
       const result = await api.batchProcess({
         form_ids: Array.from(selectedForms.keys()),
         form_versions,
