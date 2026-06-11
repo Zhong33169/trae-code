@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Search, Filter, Plus, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Search, Filter, Plus, ChevronLeft, ChevronRight, User, Handshake, RefreshCw } from 'lucide-react';
 import { useAppStore } from '@/store/appStore';
 import { RiskBadge, StatusBadge, StageBadge } from '@/components/Badges';
 import { cn } from '@/lib/utils';
@@ -269,11 +269,14 @@ export default function TicketList() {
                     </span>
                     {ticket.handler_status !== 'other' && (
                       <span className={cn(
-                        'inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium',
+                        'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium',
                         ticket.handler_status === 'handling' && 'bg-blue-100 text-blue-700',
                         ticket.handler_status === 'pending_takeover' && 'bg-amber-100 text-amber-700',
                         ticket.handler_status === 'returned_fix' && 'bg-orange-100 text-orange-700'
                       )}>
+                        {ticket.handler_status === 'handling' && <User className="w-3 h-3" />}
+                        {ticket.handler_status === 'pending_takeover' && <Handshake className="w-3 h-3" />}
+                        {ticket.handler_status === 'returned_fix' && <RefreshCw className="w-3 h-3" />}
                         {ticket.handler_status === 'handling' && '当前处理'}
                         {ticket.handler_status === 'pending_takeover' && '待我接手'}
                         {ticket.handler_status === 'returned_fix' && '待我补正'}

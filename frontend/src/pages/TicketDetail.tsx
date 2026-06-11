@@ -358,7 +358,34 @@ export default function TicketDetail() {
                         {log.comment}
                       </p>
                     )}
-                    {log.action === 'transfer' && log.target_handler_name && (
+                    {log.action === 'validate_fail' && log.comment?.includes('尝试transfer') && (
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-700">
+                          转交失败
+                        </span>
+                        {log.comment?.includes('请填写转交原因') && (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-700">
+                            原因缺失
+                          </span>
+                        )}
+                        {log.comment?.includes('角色不符') && (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-700">
+                            角色不符
+                          </span>
+                        )}
+                        {log.comment?.includes('目标用户不存在') && (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-rose-100 text-rose-700">
+                            用户不存在
+                          </span>
+                        )}
+                        {log.comment?.includes('版本号不匹配') && (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-orange-100 text-orange-700">
+                            版本冲突
+                          </span>
+                        )}
+                      </div>
+                    )}
+                    {(log.action === 'transfer' || (log.action === 'validate_fail' && log.comment?.includes('尝试transfer'))) && log.target_handler_name && (
                       <div className="mt-2 flex items-center gap-2 text-xs text-indigo-600">
                         <span className="font-medium">转交目标：</span>
                         <span>{log.target_handler_name}</span>

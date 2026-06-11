@@ -326,8 +326,8 @@ def create_sample_tickets():
             ],
         },
         {
-            'title': '中风险-项目管理平台（转交失败留痕：无原因、角色不符、目标不存在）',
-            'description': '项目管理平台开发，包含进度跟踪、任务分配、甘特图等模块。样例演示转交时的各种校验失败场景。',
+            'title': '中风险-项目管理平台（转交失败留痕：无原因、角色不符、目标不存在、版本冲突）',
+            'description': '项目管理平台开发，包含进度跟踪、任务分配、甘特图等模块。样例演示转交时的各种校验失败场景：无原因转交、角色不符、目标用户不存在、版本冲突。',
             'risk_level': 'medium',
             'stage': 'schedule',
             'status': 'pending',
@@ -336,10 +336,10 @@ def create_sample_tickets():
             'deadline': now + timedelta(days=4),
             'logs': [
                 ('create', '', 'confirm', '', 'pending', registrar2, None, '创建项目管理平台需求'),
-                ('submit', 'confirm', 'confirm', 'pending', 'pending', registrar2, None, '提交审核'),
+                ('submit', 'confirm', 'confirm', 'pending', 'pending', registrar2, None, '提交审核，附带需求文档V1.0和业务流程图'),
                 ('approve', 'confirm', 'schedule', 'pending', 'pending', auditor1, None, '需求确认通过，进入排期评估阶段'),
                 ('validate_fail', 'schedule', 'schedule', 'pending', 'pending', auditor1, None, '校验失败（尝试transfer）：请填写转交原因'),
-                ('validate_fail', 'schedule', 'schedule', 'pending', 'pending', auditor1, None, '校验失败（尝试transfer）：当前阶段只能转交给审核主管角色的用户'),
+                ('validate_fail', 'schedule', 'schedule', 'pending', 'pending', auditor1, reviewer1, '校验失败（尝试transfer）：当前阶段只能转交给审核主管角色的用户'),
                 ('validate_fail', 'schedule', 'schedule', 'pending', 'pending', auditor1, None, '校验失败（尝试transfer）：目标用户不存在'),
                 ('validate_fail', 'schedule', 'schedule', 'pending', 'pending', auditor1, None, '校验失败（尝试transfer）：版本号不匹配（提交v4，当前v5），请刷新页面后重试'),
             ],
