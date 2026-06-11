@@ -188,14 +188,20 @@ func ConfirmHandover(w http.ResponseWriter, r *http.Request) {
 	var toShift string
 	var oldStatus string
 	var handoverRemark string
+	var fromUserName, toUserName string
 	err := db.DB.QueryRow(`
 		SELECT h.application_id, h.to_user_id, h.from_user_id, h.from_shift, h.to_shift,
 			h.status, h.handover_remark,
-			a.application_no, a.applicant_name, a.status
-		FROM handovers h JOIN applications a ON h.application_id = a.id
+			a.application_no, a.applicant_name, a.status,
+			fu.real_name, tu.real_name
+		FROM handovers h 
+		JOIN applications a ON h.application_id = a.id
+		JOIN users fu ON h.from_user_id = fu.id
+		JOIN users tu ON h.to_user_id = tu.id
 		WHERE h.id=?`, id).
 		Scan(&appID, &toUserID, &fromUserID, &fromShift, &toShift,
-			&oldStatus, &handoverRemark, &appNo, &applicantName, &oldStatus)
+			&oldStatus, &handoverRemark, &appNo, &applicantName, &oldStatus,
+			&fromUserName, &toUserName)
 	if err == sql.ErrNoRows {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNotFound)
@@ -246,14 +252,15 @@ func ConfirmHandover(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		opDetail := "已接收交接，来自班次【" + fromShift + "】，交接说明：" + handoverRemark
+		opDetail := "【交接确认-接收】交出人：" + fromUserName + "（" + fromShift + "）→ 接收人：" + toUserName + "（" + toShift + "），交接说明：" + handoverRemark
 		if req.Remark != "" {
 			opDetail += "，接收备注：" + req.Remark
 		}
+		opDetail += "，处理人已变更为：" + user.RealName
 		writeOpLog(tx, appID, appNo, user,
 			"接收交接", opDetail, "", "", r.RemoteAddr)
 	} else {
-		opDetail := "拒绝接收交接，原因：" + req.Remark + "（来自班次【" + fromShift + "】）"
+		opDetail := "【交接确认-拒绝】交出人：" + fromUserName + "（" + fromShift + "）→ 接收人：" + toUserName + "（" + toShift + "），交接说明：" + handoverRemark + "，拒绝原因：" + req.Remark + "，原处理人保持不变"
 		writeOpLog(tx, appID, appNo, user,
 			"拒绝交接", opDetail, "", "", r.RemoteAddr)
 	}
@@ -301,6 +308,7 @@ func ListHandovers(w http.ResponseWriter, r *http.Request) {
 	whereSQL := "WHERE " + joinStrings(where, " AND ")
 	sql := `
 	SELECT h.id, h.application_id, a.application_no, a.applicant_name,
+		a.status, a.current_handler_id, ch.real_name, ch.role,
 		h.from_user_id, fu.real_name, fu.role, h.from_shift,
 		h.to_user_id, tu.real_name, tu.role, h.to_shift,
 		h.status, h.handover_remark, h.accept_remark,
@@ -309,6 +317,7 @@ func ListHandovers(w http.ResponseWriter, r *http.Request) {
 	JOIN applications a ON h.application_id = a.id
 	JOIN users fu ON h.from_user_id = fu.id
 	JOIN users tu ON h.to_user_id = tu.id
+	JOIN users ch ON a.current_handler_id = ch.id
 	` + whereSQL + `
 	ORDER BY h.id DESC
 	LIMIT 100
@@ -326,10 +335,11 @@ func ListHandovers(w http.ResponseWriter, r *http.Request) {
 	list := []models.Handover{}
 	for rows.Next() {
 		var h models.Handover
-		var fromRole, toRole string
+		var fromRole, toRole, currentHandlerRole, appStatus string
 		var confirmedAt *time.Time
 		err := rows.Scan(
 			&h.ID, &h.ApplicationID, &h.ApplicationNo, &h.ApplicantName,
+			&appStatus, &h.CurrentHandlerID, &h.CurrentHandlerName, &currentHandlerRole,
 			&h.FromUserID, &h.FromUserName, &fromRole, &h.FromShift,
 			&h.ToUserID, &h.ToUserName, &toRole, &h.ToShift,
 			&h.Status, &h.HandoverRemark, &h.AcceptRemark,
@@ -338,6 +348,9 @@ func ListHandovers(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			continue
 		}
+		h.AppStatus = appStatus
+		h.AppStatusDisplay = models.ApplicationStatus(appStatus).DisplayName()
+		h.CurrentHandlerRole = models.Role(currentHandlerRole).DisplayName()
 		h.StatusDisplay = h.Status.DisplayName()
 		h.FromUserRole = models.Role(fromRole).DisplayName()
 		h.ToUserRole = models.Role(toRole).DisplayName()

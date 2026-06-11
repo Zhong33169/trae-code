@@ -119,6 +119,11 @@ type Handover struct {
 	ApplicationID    int64          `json:"applicationId"`
 	ApplicationNo    string         `json:"applicationNo"`
 	ApplicantName    string         `json:"applicantName"`
+	AppStatus        string         `json:"appStatus"`
+	AppStatusDisplay string         `json:"appStatusDisplay"`
+	CurrentHandlerID int64          `json:"currentHandlerId"`
+	CurrentHandlerName string        `json:"currentHandlerName"`
+	CurrentHandlerRole string        `json:"currentHandlerRole"`
 	FromUserID       int64          `json:"fromUserId"`
 	FromUserName     string         `json:"fromUserName"`
 	FromUserRole     string         `json:"fromUserRole"`

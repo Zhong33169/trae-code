@@ -1,6 +1,6 @@
 import { LitElement, html } from 'lit';
 import {
-  request, showToast, statusClass, formatDate,
+  request, showToast, statusClass, formatDate, handoverStatusClass,
   canEditApplication, canSubmitApplication, canAuditApplication,
   canReviewApplication, canHandoverApplication, roleDisplayName,
 } from '../utils.js';
@@ -59,7 +59,7 @@ class ApplicationDetailPage extends LitElement {
         request('/applications/' + this.appId),
         request('/logs/' + this.appId),
         request('/users'),
-        request('/handovers?scope=mine'),
+        request('/handovers'),
       ]);
       if (appData.code === 0) {
         this.app = appData.data;
@@ -329,15 +329,26 @@ class ApplicationDetailPage extends LitElement {
           ${this.handovers.length > 0 ? html`
             <div class="section-title">班组交接记录（${this.handovers.length} 次）</div>
             ${this.handovers.map(h => html`
-              <div class="handover-flow">
+              <div class="handover-flow" style="border:1px solid ${
+                  h.status === 'ACCEPTED' ? '#b7eb8f' :
+                  h.status === 'REJECTED' ? '#ffa39e' : '#91d5ff'
+                }; background:${
+                  h.status === 'ACCEPTED' ? '#f6ffed' :
+                  h.status === 'REJECTED' ? '#fff1f0' : '#e6f7ff'
+                };">
                 <div class="handover-person">
                   <div class="name">${h.fromUserName}</div>
                   <div class="role">${h.fromUserRole}</div>
                   <div class="shift">${h.fromShift}</div>
                 </div>
                 <div class="handover-arrow">
-                  <span>→</span>
-                  <span class="label">${h.statusDisplay}</span>
+                  <span style="color:${
+                    h.status === 'ACCEPTED' ? '#52c41a' :
+                    h.status === 'REJECTED' ? '#f5222d' : '#1890ff'
+                  };">→</span>
+                  <span class="label">
+                    <span class="tag ${handoverStatusClass(h.status)}" style="margin:0;">${h.statusDisplay}</span>
+                  </span>
                 </div>
                 <div class="handover-person">
                   <div class="name">${h.toUserName}</div>
@@ -346,10 +357,29 @@ class ApplicationDetailPage extends LitElement {
                 </div>
                 <div style="flex:1;padding-left:16px;font-size:12px;color:#666;">
                   <div><strong>交接说明：</strong>${h.handoverRemark}</div>
+                  ${h.acceptRemark ? html`
+                    <div style="margin-top:4px;">
+                      <strong>${h.status === 'ACCEPTED' ? '接收' : '拒绝'}备注：</strong>${h.acceptRemark}
+                    </div>
+                  ` : ''}
+                  ${h.status === 'ACCEPTED' ? html`
+                    <div style="margin-top:4px;color:#52c41a;font-weight:500;">
+                      ✅ 确认接收后，当前处理人已变更为：${h.toUserName}（${h.toUserRole} · ${h.toShift}）
+                    </div>
+                  ` : ''}
+                  ${h.status === 'REJECTED' ? html`
+                    <div style="margin-top:4px;color:#f5222d;font-weight:500;">
+                      ❌ 已拒绝接收，处理人保持为原交出人
+                    </div>
+                  ` : ''}
+                  ${h.status === 'PENDING' ? html`
+                    <div style="margin-top:4px;color:#1890ff;font-weight:500;">
+                      ⏳ 等待 ${h.toUserName} 确认接收...
+                    </div>
+                  ` : ''}
                   <div style="color:#999;margin-top:4px;">
                     发起：${formatDate(h.createdAt)}
                     ${h.confirmedAt ? ' · 确认：' + formatDate(h.confirmedAt) : ''}
-                    ${h.acceptRemark ? ' · 备注：' + h.acceptRemark : ''}
                   </div>
                 </div>
               </div>

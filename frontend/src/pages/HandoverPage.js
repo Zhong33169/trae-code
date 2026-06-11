@@ -1,6 +1,6 @@
 import { LitElement, html } from 'lit';
 import {
-  request, showToast, handoverStatusClass, formatDate,
+  request, showToast, handoverStatusClass, formatDate, statusClass,
 } from '../utils.js';
 
 class HandoverPage extends LitElement {
@@ -166,17 +166,19 @@ class HandoverPage extends LitElement {
                 <th>交出方</th>
                 <th>交接方向</th>
                 <th>接收方</th>
-                <th style="width:120px;">状态</th>
+                <th style="width:100px;">交接状态</th>
+                <th style="width:100px;">申请状态</th>
+                <th>当前处理人</th>
                 <th>交接说明</th>
-                <th style="width:160px;">发起时间</th>
-                <th style="width:200px;">操作</th>
+                <th style="width:150px;">发起/确认时间</th>
+                <th style="width:160px;">操作</th>
               </tr>
             </thead>
             <tbody>
               ${this.loading
-                ? html`<tr><td colspan="9" class="empty">加载中...</td></tr>`
+                ? html`<tr><td colspan="11" class="empty">加载中...</td></tr>`
                 : this.list.length === 0
-                  ? html`<tr><td colspan="9" class="empty">暂无交接记录，可在申请详情页发起交接</td></tr>`
+                  ? html`<tr><td colspan="11" class="empty">暂无交接记录，可在申请详情页发起交接</td></tr>`
                   : this.list.map((h) => html`
                     <tr>
                       <td style="font-family:monospace;color:#1890ff;">#${h.id}</td>
@@ -196,7 +198,14 @@ class HandoverPage extends LitElement {
                       <td>
                         <span class="tag ${handoverStatusClass(h.status)}">${h.statusDisplay}</span>
                       </td>
-                      <td style="max-width:280px;vertical-align:top;">
+                      <td>
+                        <span class="tag ${statusClass(h.appStatus)}">${h.appStatusDisplay}</span>
+                      </td>
+                      <td>
+                        <div><strong>${h.currentHandlerName}</strong></div>
+                        <div style="color:#999;font-size:11px;">${h.currentHandlerRole}</div>
+                      </td>
+                      <td style="max-width:260px;vertical-align:top;">
                         <div style="color:#555;line-height:1.5;">${h.handoverRemark}</div>
                         ${h.acceptRemark ? html`
                           <div style="margin-top:4px;color:#888;font-size:11px;padding-top:4px;border-top:1px dashed #eee;">
