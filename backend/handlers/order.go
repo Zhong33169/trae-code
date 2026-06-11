@@ -173,16 +173,14 @@ func GetOrder(c *gin.Context) {
 }
 
 type OrderDetail struct {
-	Order           models.Order           `json:"order"`
+	Order            models.Order             `json:"order"`
 	OperationRecords []models.OperationRecord `json:"operation_records"`
 }
 
 func getOrderDetailByID(id string) *OrderDetail {
-	order := getOrderByID(func() int {
-		var i int
-		fmt.Sscanf(id, "%d", &i)
-		return i
-	}())
+	var i int
+	fmt.Sscanf(id, "%d", &i)
+	order := getOrderByID(i)
 	if order == nil {
 		return nil
 	}
@@ -251,6 +249,18 @@ func getOrderByID(id int) *models.Order {
 	return &o
 }
 
+func findUserIDByRole(role string, excludeIDs ...int) int {
+	var id int
+	if len(excludeIDs) > 0 {
+		database.DB.QueryRow(`SELECT id FROM users WHERE role = ? AND id NOT IN (?) LIMIT 1`,
+			role, excludeIDs[0]).Scan(&id)
+	}
+	if id == 0 {
+		database.DB.QueryRow("SELECT id FROM users WHERE role = ? LIMIT 1", role).Scan(&id)
+	}
+	return id
+}
+
 func ProcessOrder(c *gin.Context) {
 	id := c.Param("id")
 	var req models.ProcessOrderRequest
@@ -296,30 +306,29 @@ func ProcessOrder(c *gin.Context) {
 		return
 	}
 
-	if req.Version != currentOrder.Version {
+	auditConflict := func(detail string) {
 		database.DB.Exec(
 			`INSERT INTO operation_records (order_id, handler_id, handler_name, handler_role, action, opinion, result)
 			 VALUES (?, ?, ?, ?, 'advance', ?, 'conflict')`,
-			currentOrder.ID, user.ID, user.DisplayName, user.Role, "版本冲突：提交版本与当前版本不一致")
+			currentOrder.ID, user.ID, user.DisplayName, user.Role, detail)
+	}
+
+	if req.Version != currentOrder.Version {
+		auditConflict(fmt.Sprintf("版本冲突：提交版本 v%d ≠ 当前版本 v%d", req.Version, currentOrder.Version))
 		c.JSON(http.StatusConflict, gin.H{"error": "版本冲突，请刷新后重试", "current_version": currentOrder.Version})
 		return
 	}
 
 	if currentOrder.CurrentHandlerID != req.HandlerID {
-		database.DB.Exec(
-			`INSERT INTO operation_records (order_id, handler_id, handler_name, handler_role, action, opinion, result)
-			 VALUES (?, ?, ?, ?, 'advance', ?, 'conflict')`,
-			currentOrder.ID, user.ID, user.DisplayName, user.Role, fmt.Sprintf("当前处理人不匹配，应为用户%d", currentOrder.CurrentHandlerID))
+		auditConflict(fmt.Sprintf("当前处理人不匹配，应为用户 %d (%s)", currentOrder.CurrentHandlerID, currentOrder.CurrentHandlerName))
 		c.JSON(http.StatusForbidden, gin.H{"error": "您不是当前处理人"})
 		return
 	}
 
 	expectedRole := models.ExpectedRoleForStatus[currentOrder.Status]
 	if expectedRole != "" && user.Role != expectedRole {
-		database.DB.Exec(
-			`INSERT INTO operation_records (order_id, handler_id, handler_name, handler_role, action, opinion, result)
-			 VALUES (?, ?, ?, ?, 'advance', ?, 'conflict')`,
-			currentOrder.ID, user.ID, user.DisplayName, user.Role, fmt.Sprintf("角色不匹配，当前状态%s需要%s", currentOrder.Status, expectedRole))
+		auditConflict(fmt.Sprintf("角色不匹配：当前状态「%s」需要角色「%s」，操作者为「%s」",
+			currentOrder.Status, expectedRole, user.Role))
 		c.JSON(http.StatusForbidden, gin.H{"error": fmt.Sprintf("当前状态「%s」需要角色「%s」处理", models.StatusLabels[currentOrder.Status], models.RoleLabels[expectedRole])})
 		return
 	}
@@ -336,70 +345,108 @@ func ProcessOrder(c *gin.Context) {
 		return
 	}
 
+	resultLabel := req.Result
+	if resultLabel == "" {
+		switch req.Action {
+		case "advance":
+			resultLabel = "passed"
+		case "return":
+			resultLabel = "returned"
+		case "approve":
+			resultLabel = "passed"
+		case "reject":
+			resultLabel = "rejected"
+		case "correct":
+			resultLabel = "corrected"
+		case "force_fix":
+			resultLabel = "force_fixed"
+		}
+	}
+
+	writeFailedRecord := func(r string, reason string) {
+		database.DB.Exec(
+			`INSERT INTO operation_records (order_id, handler_id, handler_name, handler_role, action, opinion, result)
+			 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			currentOrder.ID, user.ID, user.DisplayName, user.Role, req.Action, reason, r)
+	}
+
+	mustHaveEvidence := []string{}
 	if req.Action == "advance" || req.Action == "approve" {
-		if currentOrder.RiskLevel == "high" || currentOrder.RiskLevel == "medium" {
-			if !currentOrder.EvidenceTemperature {
-				database.DB.Exec(
-					`INSERT INTO operation_records (order_id, handler_id, handler_name, handler_role, action, opinion, result)
-					 VALUES (?, ?, ?, ?, 'advance', ?, 'returned')`,
-					currentOrder.ID, user.ID, user.DisplayName, user.Role, "缺少温度证据，高/中风险入库单必须提供温度记录")
-				c.JSON(http.StatusBadRequest, gin.H{"error": "高/中风险入库单必须提供温度记录证据"})
-				return
-			}
+		mustHaveEvidence = append(mustHaveEvidence, models.RiskEvidenceRequirement[currentOrder.RiskLevel]...)
+	}
+
+	hasEvidence := map[string]bool{
+		"temperature": currentOrder.EvidenceTemperature,
+		"quality":     currentOrder.EvidenceQuality,
+		"quantity":    currentOrder.EvidenceQuantity,
+	}
+	if req.EvidenceTemperature != nil {
+		hasEvidence["temperature"] = *req.EvidenceTemperature
+	}
+	if req.EvidenceQuality != nil {
+		hasEvidence["quality"] = *req.EvidenceQuality
+	}
+	if req.EvidenceQuantity != nil {
+		hasEvidence["quantity"] = *req.EvidenceQuantity
+	}
+
+	evidenceName := map[string]string{
+		"temperature": "温度记录",
+		"quality":     "质量检测报告",
+		"quantity":    "数量核实凭证",
+	}
+
+	for _, e := range mustHaveEvidence {
+		if !hasEvidence[e] {
+			reason := fmt.Sprintf("缺少%s，当前风险等级（%s）推进必须提供%s",
+				evidenceName[e], models.RiskLevelLabels[currentOrder.RiskLevel], evidenceName[e])
+			writeFailedRecord("returned", reason)
+			c.JSON(http.StatusBadRequest, gin.H{"error": reason})
+			return
 		}
-		if currentOrder.RiskLevel == "high" {
-			if !currentOrder.EvidenceQuality || !currentOrder.EvidenceQuantity {
-				database.DB.Exec(
-					`INSERT INTO operation_records (order_id, handler_id, handler_name, handler_role, action, opinion, result)
-					 VALUES (?, ?, ?, ?, 'advance', ?, 'returned')`,
-					currentOrder.ID, user.ID, user.DisplayName, user.Role, "高风险入库单必须提供全部证据（温度、质量、数量）")
-				c.JSON(http.StatusBadRequest, gin.H{"error": "高风险入库单必须提供全部证据（温度、质量、数量）"})
-				return
-			}
-		}
+	}
+
+	if req.Action == "return" || req.Action == "reject" {
+		newStatus = map[string]string{
+			"return": "returned",
+			"reject": "rejected",
+		}[req.Action]
 	}
 
 	var nextHandlerID int
 	switch newStatus {
 	case "verifying":
-		var supervisorID int
-		database.DB.QueryRow("SELECT id FROM users WHERE role = 'temp_supervisor' LIMIT 1").Scan(&supervisorID)
-		nextHandlerID = supervisorID
+		nextHandlerID = findUserIDByRole("temp_supervisor")
+	case "reviewing":
+		nextHandlerID = findUserIDByRole("warehouse_manager")
 	case "archived":
-		var managerID int
-		database.DB.QueryRow("SELECT id FROM users WHERE role = 'warehouse_manager' LIMIT 1").Scan(&managerID)
-		nextHandlerID = managerID
+		nextHandlerID = findUserIDByRole("warehouse_manager")
+	case "rejected":
+		nextHandlerID = findUserIDByRole("warehouse_manager")
 	case "registered":
-		var keeperID int
-		database.DB.QueryRow("SELECT id FROM users WHERE role = 'warehouse_keeper' AND id != ? LIMIT 1", currentOrder.CurrentHandlerID).Scan(&keeperID)
-		if keeperID == 0 {
-			database.DB.QueryRow("SELECT id FROM users WHERE role = 'warehouse_keeper' LIMIT 1").Scan(&keeperID)
+		nextHandlerID = findUserIDByRole("warehouse_keeper", currentOrder.CurrentHandlerID)
+		if nextHandlerID == 0 {
+			nextHandlerID = findUserIDByRole("warehouse_keeper")
 		}
-		nextHandlerID = keeperID
 	case "returned":
 		nextHandlerID = currentOrder.CreatedBy
+	case "conflict":
+		nextHandlerID = findUserIDByRole("warehouse_manager")
 	default:
 		nextHandlerID = currentOrder.CurrentHandlerID
 	}
 
-	resultLabel := req.Result
-	if req.Action == "advance" {
-		resultLabel = "passed"
-	} else if req.Action == "return" {
-		resultLabel = "returned"
-		newStatus = "returned"
-		nextHandlerID = currentOrder.CreatedBy
-	} else if req.Action == "correct" {
-		resultLabel = "corrected"
-	} else if req.Action == "force_fix" {
-		resultLabel = "force_fixed"
-	}
-
-	_, err = database.DB.Exec(
+	res, err := database.DB.Exec(
 		`UPDATE orders SET status = ?, current_handler_id = ?, version = version + 1, updated_at = datetime('now','localtime') WHERE id = ? AND version = ?`,
 		newStatus, nextHandlerID, currentOrder.ID, currentOrder.Version)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "更新入库单状态失败"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "更新入库单状态失败: " + err.Error()})
+		return
+	}
+	affected, _ := res.RowsAffected()
+	if affected == 0 {
+		auditConflict("并发更新冲突：版本校验失败，状态已被他人修改")
+		c.JSON(http.StatusConflict, gin.H{"error": "并发冲突，请刷新后重试"})
 		return
 	}
 
@@ -432,7 +479,7 @@ func boolToInt(b bool) int {
 func MarkOverdue(c *gin.Context) {
 	result, err := database.DB.Exec(
 		`UPDATE orders SET status = 'overdue', updated_at = datetime('now','localtime')
-		 WHERE status IN ('registered', 'verifying')
+		 WHERE status IN ('registered', 'verifying', 'reviewing')
 		 AND datetime(updated_at, '+7 days') < datetime('now','localtime')`)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -450,7 +497,7 @@ func GetStats(c *gin.Context) {
 
 	database.DB.QueryRow("SELECT COUNT(*) FROM orders").Scan(&stats.Total)
 
-	statuses := []string{"registered", "verifying", "archived", "returned", "overdue", "conflict"}
+	statuses := []string{"registered", "verifying", "reviewing", "archived", "rejected", "returned", "overdue", "conflict"}
 	for _, s := range statuses {
 		var count int
 		database.DB.QueryRow("SELECT COUNT(*) FROM orders WHERE status = ?", s).Scan(&count)
@@ -466,6 +513,8 @@ func GetStats(c *gin.Context) {
 
 	database.DB.QueryRow("SELECT COUNT(*) FROM orders WHERE risk_level = 'high' AND status NOT IN ('archived')").Scan(&stats.HighRiskPend)
 	database.DB.QueryRow("SELECT COUNT(*) FROM orders WHERE status = 'overdue'").Scan(&stats.Overdue)
+	database.DB.QueryRow("SELECT COUNT(*) FROM orders WHERE status = 'reviewing'").Scan(&stats.ReviewingCount)
+	database.DB.QueryRow("SELECT COUNT(*) FROM orders WHERE status = 'rejected'").Scan(&stats.RejectedCount)
 
 	c.JSON(http.StatusOK, gin.H{"data": stats})
 }

@@ -53,12 +53,44 @@ export async function markOverdue() {
 }
 
 export const STATUS_MAP = {
-  registered: { label: '登记', color: '#3b82f6', bg: '#eff6ff' },
-  verifying:  { label: '核验', color: '#f59e0b', bg: '#fffbeb' },
-  archived:   { label: '归档', color: '#10b981', bg: '#ecfdf5' },
+  registered: { label: '登记',     color: '#3b82f6', bg: '#eff6ff' },
+  verifying:  { label: '核验',     color: '#f59e0b', bg: '#fffbeb' },
+  reviewing:  { label: '待复核',   color: '#6366f1', bg: '#eef2ff' },
+  archived:   { label: '归档',     color: '#10b981', bg: '#ecfdf5' },
+  rejected:   { label: '驳回',     color: '#b91c1c', bg: '#fef2f2' },
   returned:   { label: '退回补正', color: '#ef4444', bg: '#fef2f2' },
-  overdue:    { label: '逾期', color: '#dc2626', bg: '#fef2f2' },
-  conflict:   { label: '冲突', color: '#7c3aed', bg: '#f5f3ff' }
+  overdue:    { label: '逾期',     color: '#dc2626', bg: '#fef2f2' },
+  conflict:   { label: '冲突',     color: '#7c3aed', bg: '#f5f3ff' }
+};
+
+export const STATUS_ACTIONS = {
+  registered: [
+    { action: 'advance', label: '推进至核验',   icon: '➡️' },
+    { action: 'return',  label: '退回补正',     icon: '↩️' }
+  ],
+  verifying: [
+    { action: 'advance', label: '推进至经理复核', icon: '➡️' },
+    { action: 'return',  label: '退回补正',       icon: '↩️' }
+  ],
+  reviewing: [
+    { action: 'approve', label: '复核通过归档', icon: '✅' },
+    { action: 'reject',  label: '经理驳回',     icon: '❌' },
+    { action: 'return',  label: '退回补正',     icon: '↩️' }
+  ],
+  rejected: [
+    { action: 'correct',   label: '经理特批回核验', icon: '🔄' },
+    { action: 'force_fix', label: '强制回登记重走', icon: '🔧' }
+  ],
+  returned: [
+    { action: 'correct', label: '补正提交', icon: '🔄' }
+  ],
+  overdue: [
+    { action: 'advance', label: '推进至核验', icon: '➡️' }
+  ],
+  conflict: [
+    { action: 'force_fix', label: '强制修复（回登记）', icon: '🔧' }
+  ],
+  archived: []
 };
 
 export const RISK_MAP = {

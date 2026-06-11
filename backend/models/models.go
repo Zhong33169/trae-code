@@ -61,34 +61,38 @@ type CreateOrderRequest struct {
 }
 
 type ProcessOrderRequest struct {
-	HandlerID            int    `json:"handler_id" binding:"required"`
-	Action               string `json:"action" binding:"required"`
-	Opinion              string `json:"opinion" binding:"required"`
-	Result               string `json:"result" binding:"required"`
-	Version              int    `json:"version" binding:"required"`
-	EvidenceTemperature  *bool  `json:"evidence_temperature"`
-	EvidenceQuality      *bool  `json:"evidence_quality"`
-	EvidenceQuantity     *bool  `json:"evidence_quantity"`
+	HandlerID           int    `json:"handler_id" binding:"required"`
+	Action              string `json:"action" binding:"required"`
+	Opinion             string `json:"opinion" binding:"required"`
+	Result              string `json:"result"`
+	Version             int    `json:"version" binding:"required"`
+	EvidenceTemperature *bool  `json:"evidence_temperature"`
+	EvidenceQuality     *bool  `json:"evidence_quality"`
+	EvidenceQuantity    *bool  `json:"evidence_quantity"`
 }
 
 type Stats struct {
-	Total        int            `json:"total"`
-	ByStatus     map[string]int `json:"by_status"`
-	ByRiskLevel  map[string]int `json:"by_risk_level"`
-	HighRiskPend int            `json:"high_risk_pending"`
-	Overdue      int            `json:"overdue"`
+	Total          int            `json:"total"`
+	ByStatus       map[string]int `json:"by_status"`
+	ByRiskLevel    map[string]int `json:"by_risk_level"`
+	HighRiskPend   int            `json:"high_risk_pending"`
+	Overdue        int            `json:"overdue"`
+	ReviewingCount int            `json:"reviewing_count"`
+	RejectedCount  int            `json:"rejected_count"`
 }
 
 var RoleLabels = map[string]string{
-	"warehouse_keeper":   "仓管员",
-	"temp_supervisor":    "温控主管",
-	"warehouse_manager":  "仓储经理",
+	"warehouse_keeper":  "仓管员",
+	"temp_supervisor":   "温控主管",
+	"warehouse_manager": "仓储经理",
 }
 
 var StatusLabels = map[string]string{
 	"registered": "登记",
 	"verifying":  "核验",
+	"reviewing":  "待复核",
 	"archived":   "归档",
+	"rejected":   "驳回",
 	"returned":   "退回补正",
 	"overdue":    "逾期",
 	"conflict":   "冲突",
@@ -101,22 +105,24 @@ var RiskLevelLabels = map[string]string{
 }
 
 var ActionLabels = map[string]string{
-	"submit":     "提交登记",
-	"advance":    "推进处理",
-	"return":     "退回补正",
-	"approve":    "复核通过",
-	"reject":     "驳回",
-	"correct":    "补正提交",
-	"force_fix":  "强制修复冲突",
+	"submit":      "提交登记",
+	"advance":     "推进处理",
+	"return":      "退回补正",
+	"approve":     "复核通过",
+	"reject":      "驳回",
+	"correct":     "补正提交",
+	"force_fix":   "强制修复冲突",
+	"to_verify":   "推进核验",
+	"to_review":   "提交复核",
 }
 
 var ResultLabels = map[string]string{
-	"passed":       "通过",
-	"returned":     "退回",
-	"rejected":     "驳回",
-	"corrected":    "已补正",
-	"conflict":     "冲突",
-	"force_fixed":  "已强制修复",
+	"passed":      "通过",
+	"returned":    "退回",
+	"rejected":    "驳回",
+	"corrected":   "已补正",
+	"conflict":    "冲突",
+	"force_fixed": "已强制修复",
 }
 
 var RiskPriority = map[string]int{
@@ -127,12 +133,21 @@ var RiskPriority = map[string]int{
 
 var StatusFlow = map[string]map[string]string{
 	"registered": {
-		"advance":  "verifying",
-		"return":   "returned",
+		"advance": "verifying",
+		"return":  "returned",
 	},
 	"verifying": {
-		"advance":  "archived",
-		"return":   "returned",
+		"advance": "reviewing",
+		"return":  "returned",
+	},
+	"reviewing": {
+		"approve": "archived",
+		"reject":  "rejected",
+		"return":  "returned",
+	},
+	"rejected": {
+		"force_fix": "registered",
+		"correct":   "verifying",
 	},
 	"returned": {
 		"correct": "registered",
@@ -149,8 +164,25 @@ var StatusFlow = map[string]map[string]string{
 var ExpectedRoleForStatus = map[string]string{
 	"registered": "warehouse_keeper",
 	"verifying":  "temp_supervisor",
+	"reviewing":  "warehouse_manager",
 	"archived":   "warehouse_manager",
+	"rejected":   "warehouse_manager",
 	"returned":   "warehouse_keeper",
 	"overdue":    "temp_supervisor",
 	"conflict":   "warehouse_manager",
+}
+
+var EvidenceRequiredForStatus = map[string]map[string][]string{
+	"verifying": {
+		"advance": {"temperature"},
+	},
+	"reviewing": {
+		"approve": {"temperature"},
+	},
+}
+
+var RiskEvidenceRequirement = map[string][]string{
+	"high":   {"temperature", "quality", "quantity"},
+	"medium": {"temperature"},
+	"low":    {},
 }

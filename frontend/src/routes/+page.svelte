@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { fetchStats, fetchOrders, STATUS_MAP, RISK_MAP, ROLE_MAP } from '$lib/api';
 
-  let stats = { total: 0, by_status: {}, by_risk_level: {}, high_risk_pending: 0, overdue: 0 };
+  let stats = { total: 0, by_status: {}, by_risk_level: {}, high_risk_pending: 0, overdue: 0, reviewing_count: 0, rejected_count: 0 };
   let recentOrders = [];
   let loading = true;
 
@@ -39,6 +39,14 @@
       <div class="stat-card stat-high">
         <div class="stat-value">{stats.high_risk_pending}</div>
         <div class="stat-label">高风险待处理</div>
+      </div>
+      <div class="stat-card stat-reviewing">
+        <div class="stat-value">{stats.reviewing_count || 0}</div>
+        <div class="stat-label">待经理复核</div>
+      </div>
+      <div class="stat-card stat-rejected">
+        <div class="stat-value">{stats.rejected_count || 0}</div>
+        <div class="stat-label">经理驳回</div>
       </div>
       <div class="stat-card stat-overdue">
         <div class="stat-value">{stats.overdue}</div>
@@ -149,7 +157,7 @@
 
   .stats-grid {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(6, 1fr);
     gap: 16px;
     margin-bottom: 24px;
   }
@@ -165,6 +173,8 @@
 
   .stat-total { border-top-color: #3b82f6; }
   .stat-high { border-top-color: #dc2626; }
+  .stat-reviewing { border-top-color: #6366f1; }
+  .stat-rejected { border-top-color: #b91c1c; }
   .stat-overdue { border-top-color: #f59e0b; }
   .stat-archived { border-top-color: #10b981; }
 
@@ -176,6 +186,8 @@
 
   .stat-total .stat-value { color: #3b82f6; }
   .stat-high .stat-value { color: #dc2626; }
+  .stat-reviewing .stat-value { color: #6366f1; }
+  .stat-rejected .stat-value { color: #b91c1c; }
   .stat-overdue .stat-value { color: #f59e0b; }
   .stat-archived .stat-value { color: #10b981; }
 
@@ -322,7 +334,12 @@
     white-space: nowrap;
   }
 
-  @media (max-width: 768px) {
+  @media (max-width: 1024px) {
+    .stats-grid {
+      grid-template-columns: repeat(3, 1fr);
+    }
+  }
+  @media (max-width: 640px) {
     .stats-grid {
       grid-template-columns: repeat(2, 1fr);
     }
