@@ -341,7 +341,9 @@
 
   function getReturnModalTitle() {
     if (!order) return '';
-    return order.status === 'pending_review' ? '审核退回 - 需补正附件' : '复核退回';
+    if (order.status === 'pending_review' || order.status === 'overdue') return '审核退回 - 需补正附件';
+    if (order.status === 'pending_final') return '复核退回';
+    return '退回';
   }
 </script>
 
@@ -715,7 +717,7 @@
       </div>
       <div class="modal-footer">
         <button on:click={() => showReturnModal = false}>取消</button>
-        <button class="btn-danger" on:click={order && order.status === 'pending_review' ? handleSupervisorReturn : handleReviewerReturn}>
+        <button class="btn-danger" on:click={order && (order.status === 'pending_review' || order.status === 'overdue') ? handleSupervisorReturn : handleReviewerReturn}>
           确认退回
         </button>
       </div>

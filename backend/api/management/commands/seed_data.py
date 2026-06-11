@@ -18,6 +18,7 @@ class Command(BaseCommand):
         self._create_normal_order()
         self._create_missing_material_order()
         self._create_overdue_order()
+        self._create_pure_overdue_order()
         self._create_returned_order()
         
         self.stdout.write(self.style.SUCCESS('Database seeded successfully!'))
@@ -178,7 +179,7 @@ class Command(BaseCommand):
         self.stdout.write('  ⚠️  MCO-2026-0002 缺材料单 - 需补正附件 (6 audit logs, 1 attachment rejected)')
 
     def _create_overdue_order(self):
-        """⏰ 超时单：超过处理时限未审核，系统标记超时"""
+        """⏰ 超时单：超时后被主管退回补正，完整展示超时→退回→补正链路"""
         registrar = User.objects.get(username='registrar01')
         supervisor = User.objects.get(username='supervisor02')
         
@@ -186,22 +187,29 @@ class Command(BaseCommand):
         
         order = MaterialChangeOrder.objects.create(
             order_no='MCO-2026-0003',
-            title='芯片型号替换（超时单）',
+            title='芯片型号替换（超时退回单）',
             material_code='IC-003-STM32F103',
             material_name='MCU STM32F103C8T6',
             change_type='型号替换',
             description='原芯片停产，替换为STM32F103CBT6，需审核资料是否齐全。',
-            status=ChangeOrderStatus.OVERDUE,
+            status=ChangeOrderStatus.SUPPLEMENT_REQUIRED,
             registrar=registrar,
             supervisor=supervisor,
-            is_overdue=True,
+            return_reason='超时后退回：缺少1.新旧芯片引脚兼容性测试报告；2.量产替代验证数据。请补充以上资料后重新提交。',
+            audit_remark='本单超时15天未处理，现已退回补正。请登记员尽快补齐资料，避免影响生产计划。',
+            is_overdue=False,
             deadline=base_time + timedelta(days=5),
             submitted_at=base_time + timedelta(days=3),
             created_at=base_time
         )
         
         att1 = self._create_attachment(order, registrar, '芯片停产通知.pdf', AttachmentStatus.APPROVED)
-        att2 = self._create_attachment(order, registrar, '替代型号对比表.pdf', AttachmentStatus.UPLOADED)
+        att2 = self._create_attachment(
+            order, registrar, '替代型号对比表.pdf',
+            AttachmentStatus.REJECTED,
+            reject_reason='对比表仅列出参数差异，缺少实际焊接测试数据和电气性能验证报告，请补充完整测试数据。',
+            rejected_by=supervisor
+        )
         
         self._audit(order, AuditAction.CREATED, registrar,
             reason='登记员创建物料变更单：原芯片停产，替换为STM32F103CBT6')
@@ -213,12 +221,18 @@ class Command(BaseCommand):
             reason=f'提交给 {supervisor.name} 审核办理，时限 5 天')
         self._audit(order, AuditAction.MARKED_OVERDUE, supervisor,
             reason=f'处理超时：超过5天审核时限未处理，原状态：待审核主管办理。请尽快跟进。',
-            detail={'previous_status': ChangeOrderStatus.PENDING_REVIEW, 'days_overdue': 12})
+            detail={'previous_status': ChangeOrderStatus.PENDING_REVIEW, 'days_overdue': 15})
         self._audit(order, AuditAction.OPERATION_FAILED, supervisor,
-            reason='系统自动提醒：本单已超时12天未处理，影响生产计划安排',
-            detail={'action': 'timeout_warning', 'overdue_days': 12})
+            reason='系统自动提醒：本单已超时15天未处理，影响生产计划安排',
+            detail={'action': 'timeout_warning', 'overdue_days': 15})
+        self._audit(order, AuditAction.ATTACHMENT_REJECTED, supervisor,
+            reason='附件「替代型号对比表.pdf」被驳回：对比表仅列出参数差异，缺少实际焊接测试数据和电气性能验证报告，请补充完整测试数据。',
+            detail={'attachment': '替代型号对比表.pdf', 'reject_reason': '缺少焊接测试和电气性能验证数据'})
+        self._audit(order, AuditAction.REJECTED_SUPERVISOR, supervisor,
+            reason='超时后退回：缺少1.新旧芯片引脚兼容性测试报告；2.量产替代验证数据。请补充以上资料后重新提交。',
+            detail={'audit_remark': '本单超时15天未处理，现已退回补正。请登记员尽快补齐资料，避免影响生产计划。', 'is_overdue_cleared': True})
         
-        self.stdout.write('  ⏰  MCO-2026-0003 超时单 - 已超时 (6 audit logs)')
+        self.stdout.write('  ⏰  MCO-2026-0003 超时退回单 - 需补正 (8 audit logs, 1 attachment rejected, overdue→returned flow)')
 
     def _create_returned_order(self):
         """❌ 退回单：复核阶段被退回，缺少可靠性测试数据"""
@@ -281,3 +295,46 @@ class Command(BaseCommand):
             detail={'audit_remark': '升级方向正确但验证数据不充分，成本影响未评估。'})
         
         self.stdout.write('  ❌  MCO-2026-0004 退回单 - 已退回 (12 audit logs, with failure record)')
+
+    def _create_pure_overdue_order(self):
+        """⏰ 纯超时单：当前仍为超时状态，可用于演示主管退回链路"""
+        registrar = User.objects.get(username='registrar02')
+        supervisor = User.objects.get(username='supervisor01')
+        
+        base_time = timezone.now() - timedelta(days=15)
+        
+        order = MaterialChangeOrder.objects.create(
+            order_no='MCO-2026-0005',
+            title='二极管规格升级（纯超时单）',
+            material_code='DIO-005-1N4007',
+            material_name='整流二极管 1N4007',
+            change_type='规格升级',
+            description='将普通二极管升级为快恢复二极管，提升开关性能。',
+            status=ChangeOrderStatus.OVERDUE,
+            registrar=registrar,
+            supervisor=supervisor,
+            is_overdue=True,
+            deadline=base_time + timedelta(days=5),
+            submitted_at=base_time + timedelta(days=2),
+            created_at=base_time
+        )
+        
+        att1 = self._create_attachment(order, registrar, '变更申请单.pdf', AttachmentStatus.UPLOADED)
+        att2 = self._create_attachment(order, registrar, '器件规格书.pdf', AttachmentStatus.UPLOADED)
+        
+        self._audit(order, AuditAction.CREATED, registrar,
+            reason='登记员创建物料变更单：将普通二极管升级为快恢复二极管')
+        self._audit(order, AuditAction.ATTACHMENT_UPLOADED, registrar,
+            reason='上传附件「变更申请单.pdf」')
+        self._audit(order, AuditAction.ATTACHMENT_UPLOADED, registrar,
+            reason='上传附件「器件规格书.pdf」')
+        self._audit(order, AuditAction.SUBMITTED, registrar,
+            reason=f'提交给 {supervisor.name} 审核办理，时限 5 天')
+        self._audit(order, AuditAction.MARKED_OVERDUE, supervisor,
+            reason=f'处理超时：超过5天审核时限未处理，原状态：待审核主管办理。请尽快跟进。',
+            detail={'previous_status': ChangeOrderStatus.PENDING_REVIEW, 'days_overdue': 8})
+        self._audit(order, AuditAction.OPERATION_FAILED, supervisor,
+            reason='系统自动提醒：本单已超时8天未处理，影响试产计划',
+            detail={'action': 'timeout_warning', 'overdue_days': 8})
+        
+        self.stdout.write('  ⏰  MCO-2026-0005 纯超时单 - 已超时 (6 audit logs, 可演示主管退回链路)')
