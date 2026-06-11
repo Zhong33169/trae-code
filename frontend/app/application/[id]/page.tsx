@@ -67,7 +67,10 @@ export default function ApplicationDetailPage() {
     loadData();
   }, [loadData]);
 
-  const handleOperationSuccess = () => {
+  const handleOperationSuccess = (updatedData?: AccountApplication) => {
+    if (updatedData) {
+      setApplication(updatedData);
+    }
     setRefreshKey((k) => k + 1);
   };
 

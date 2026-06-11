@@ -5,7 +5,7 @@ import UserSelector from './UserSelector';
 
 interface OperationFormProps {
   application: AccountApplication;
-  onSuccess: () => void;
+  onSuccess: (updatedData?: AccountApplication) => void;
 }
 
 type ActionType = 'advance_stage' | 'sign_complete' | 'sign_receive' | 'return_back' | 'mark_abnormal';
@@ -118,10 +118,27 @@ export default function OperationForm({ application, onSuccess }: OperationFormP
       });
 
       if (res.code === 0) {
-        setMessage({ type: 'success', text: res.message || '操作成功' });
+        const newVersion = res.data?.version || application.version + 1;
+        const statusChanged = res.data?.status !== application.status;
+        const stageChanged = res.data?.stage !== application.stage;
+        const riskChanged = res.data?.risk_level !== application.risk_level;
+        
+        let successMsg = res.message || '操作成功';
+        if (res.data) {
+          const changes: string[] = [];
+          if (statusChanged) changes.push(`状态: ${application.status} → ${res.data.status}`);
+          if (stageChanged) changes.push(`阶段: ${application.stage} → ${res.data.stage}`);
+          if (riskChanged) changes.push(`风险: ${application.risk_level} → ${res.data.risk_level}`);
+          if (changes.length > 0) {
+            successMsg += ` [${changes.join(', ')}]`;
+          }
+          successMsg += ` [版本 v${application.version} → v${newVersion}]`;
+        }
+        
+        setMessage({ type: 'success', text: successMsg });
         setTimeout(() => {
-          onSuccess();
-        }, 1000);
+          onSuccess(res.data);
+        }, 1500);
       } else {
         setMessage({ type: 'error', text: res.message || '操作失败' });
       }

@@ -267,6 +267,39 @@ def seed_sample_data():
                     (None, None, "待签收", "异常回传", "资料审核", "开户预约", "运营主管发现资料不全，退回客户经理补充"),
                 ],
             },
+            {
+                "name": "冯十一",
+                "id_card": "110101198805055678",
+                "phone": "13800138009",
+                "account_type": "个人人民币结算账户",
+                "risk_level": "low",
+                "risk_reason": "资料齐全，身份核实无误，风险已排除",
+                "stage": "账户启用",
+                "status": "待签收",
+                "handler_id": users["zhang"],
+                "deadline": today + timedelta(days=7),
+                "is_overdue": 0,
+                "is_evidence_missing": 0,
+                "is_returned": 0,
+                "returned_reason": None,
+                "version": 4,
+                "evidences": [
+                    ("身份证明", "居民身份证原件", 1, 1),
+                    ("住址证明", "水电缴费单", 1, 1),
+                    ("职业证明", "劳动合同", 1, 1),
+                    ("补充说明", "关于交易背景的补充说明", 1, 1),
+                ],
+                "description": "【高风险降级留痕】初始高风险→中风险→低风险，完整降级追溯",
+                "operations": [
+                    ("开户预约", "资料审核", "待签收", "待签收", None, None, "客户经理王经理完成预约"),
+                    (None, None, "待签收", "签收完成", None, None, "运营主管李主管签收审核"),
+                    (None, None, "待签收", "签收完成", None, None, "支行行长张行长签收，最终审批中"),
+                ],
+                "risk_logs": [
+                    (users["li"], "运营主管", "high", "medium", "经核实交易对手为正规企业，交易背景真实，风险降级"),
+                    (users["zhang"], "支行行长", "medium", "low", "补充职业证明和住址证明，身份完全核实，风险排除"),
+                ],
+            },
         ]
 
         print("\n正在加载样例数据...\n")
@@ -351,13 +384,14 @@ def seed_sample_data():
         print(f"✓ 成功加载 {len(samples)} 条样例开户申请")
         print("=" * 60)
         print("\n样例数据概览:")
-        print(f"  正常通过: 2条 (张三、赵六流程中，吴九已完成)")
+        print(f"  正常通过: 3条 (张三、赵六流程中，吴九已完成，冯十一待归档)")
         print(f"  缺证据: 2条 (王五-经营资料、郑十-工商资料)")
         print(f"  逾期: 2条 (王五超期2天、周八超期1天)")
         print(f"  退回补正: 3条 (王五、周八、郑十)")
         print(f"  状态冲突: 1条 (周八-账户启用被退回，需重走流程)")
         print(f"  高风险识别: 2条 (李四、孙七)")
-        print(f"  风险等级变更留痕: 2条 (李四、孙七均有升级记录)")
+        print(f"  风险等级变更留痕: 3条 (李四、孙七升级，冯十一降级)")
+        print(f"  高风险降级追溯: 1条 (冯十一: 高→中→低完整降级链路)")
 
     except Exception as e:
         print(f"\n✗ 错误: {e}")
