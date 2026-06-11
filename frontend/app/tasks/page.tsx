@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, Suspense } from 'react';
+import React, { useState, useEffect, useCallback, Suspense, useMemo } from 'react';
 import {
   Card,
   Row,
@@ -19,6 +19,9 @@ import {
   message,
   Spin,
   Typography,
+  Divider,
+  List,
+  Alert,
 } from 'antd';
 import {
   FileTextOutlined,
@@ -33,6 +36,8 @@ import {
   SendOutlined,
   CheckOutlined,
   CloseOutlined,
+  SafetyOutlined,
+  SelectOutlined,
 } from '@ant-design/icons';
 import { useRouter, useSearchParams } from 'next/navigation';
 import api from '@/lib/api';
@@ -44,9 +49,13 @@ import {
   TaskNode,
   TaskStatus,
   CreateTaskRequest,
+  BatchAdvanceRequest,
+  BatchAdvanceResult,
+  BatchItemResult,
   NODE_LABELS,
   STATUS_LABELS,
   PRIORITY_LABELS,
+  ROLE_LABELS,
   ApiResponse,
   getResponsibleName,
   getStatusColor,
@@ -58,6 +67,14 @@ import dayjs from 'dayjs';
 
 const { Title } = Typography;
 const { RangePicker } = DatePicker;
+const { TextArea } = Input;
+
+interface BatchActionOption {
+  action: 'submit' | 'approve' | 'reject';
+  label: string;
+  node: TaskNode;
+  role: string;
+}
 
 function TasksPage() {
   const router = useRouter();
@@ -76,6 +93,18 @@ function TasksPage() {
   const [createForm] = Form.useForm<CreateTaskRequest>();
   const [createLoading, setCreateLoading] = useState(false);
   const [canCreate, setCanCreate] = useState(false);
+
+  const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
+  const [selectedRows, setSelectedRows] = useState<TaskListItem[]>([]);
+  const [batchModalVisible, setBatchModalVisible] = useState(false);
+  const [batchForm] = Form.useForm<{
+    action: 'submit' | 'approve' | 'reject';
+    remark?: string;
+    abnormal_reason?: string;
+  }>();
+  const [batchLoading, setBatchLoading] = useState(false);
+  const [batchResult, setBatchResult] = useState<BatchAdvanceResult | null>(null);
+  const [batchSelectedAction, setBatchSelectedAction] = useState<'submit' | 'approve' | 'reject' | null>(null);
 
   const role = getUserRole();
 
@@ -100,6 +129,8 @@ function TasksPage() {
         setTimeoutCount(data.timeout_count);
         setComputedPending(data.list.filter((t) => t.status === 'pending' || t.status === 'processing').length);
         setComputedCompleted(data.list.filter((t) => t.status === 'completed' || t.status === 'archived').length);
+        setSelectedRowKeys([]);
+        setSelectedRows([]);
       }
     } catch (error) {
       console.error('Failed to fetch tasks:', error);
@@ -166,6 +197,151 @@ function TasksPage() {
         }
       },
     });
+  };
+
+  const availableBatchActions = useMemo<BatchActionOption[]>(() => {
+    if (selectedRows.length === 0) return [];
+
+    const actions: BatchActionOption[] = [];
+    const nodes = new Set<TaskNode>(selectedRows.map((r) => r.current_node));
+    const role = getUserRole();
+
+    if (role === 'registrar') {
+      if (nodes.has('order_sampling')) {
+        actions.push({
+          action: 'submit',
+          label: '提交审核',
+          node: 'order_sampling',
+          role: 'registrar',
+        });
+      }
+      const hasRejected = selectedRows.some((r) => r.status === 'rejected');
+      if (hasRejected) {
+        actions.push({
+          action: 'submit',
+          label: '补正提交',
+          node: 'order_sampling',
+          role: 'registrar',
+        });
+      }
+    }
+
+    if (role === 'auditor') {
+      if (nodes.has('order_sampling')) {
+        actions.push({
+          action: 'approve',
+          label: '审核通过',
+          node: 'order_sampling',
+          role: 'auditor',
+        });
+        actions.push({
+          action: 'reject',
+          label: '打回补正',
+          node: 'order_sampling',
+          role: 'auditor',
+        });
+      }
+      if (nodes.has('sample_confirmation')) {
+        actions.push({
+          action: 'approve',
+          label: '确认通过',
+          node: 'sample_confirmation',
+          role: 'auditor',
+        });
+        actions.push({
+          action: 'reject',
+          label: '打回补正',
+          node: 'sample_confirmation',
+          role: 'auditor',
+        });
+      }
+      if (nodes.has('production_scheduling')) {
+        actions.push({
+          action: 'submit',
+          label: '提交复核',
+          node: 'production_scheduling',
+          role: 'auditor',
+        });
+      }
+    }
+
+    if (role === 'reviewer' && nodes.has('production_scheduling')) {
+      actions.push({
+        action: 'approve',
+        label: '复核归档',
+        node: 'production_scheduling',
+        role: 'reviewer',
+      });
+      actions.push({
+        action: 'reject',
+        label: '打回',
+        node: 'production_scheduling',
+        role: 'reviewer',
+      });
+    }
+
+    const uniqueActions: BatchActionOption[] = [];
+    const seen = new Set<string>();
+    for (const a of actions) {
+      const key = `${a.action}-${a.label}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        uniqueActions.push(a);
+      }
+    }
+    return uniqueActions;
+  }, [selectedRows]);
+
+  const handleBatchActionClick = (action: 'submit' | 'approve' | 'reject', label: string) => {
+    setBatchSelectedAction(action);
+    batchForm.setFieldsValue({ action, remark: '', abnormal_reason: '' });
+    setBatchResult(null);
+    setBatchModalVisible(true);
+  };
+
+  const handleBatchAdvance = async (values: {
+    action: 'submit' | 'approve' | 'reject';
+    remark?: string;
+    abnormal_reason?: string;
+  }) => {
+    try {
+      setBatchLoading(true);
+      const request: BatchAdvanceRequest = {
+        task_ids: selectedRowKeys.map((k) => k.toString()),
+        action: values.action,
+        remark: values.remark,
+        abnormal_reason: values.abnormal_reason,
+      };
+      const response = await api.post<ApiResponse<BatchAdvanceResult>>('/tasks/batch-advance', request);
+      const result = response.data.data;
+      setBatchResult(result || null);
+
+      if (result) {
+        if (result.fail_count === 0) {
+          message.success(`批量操作成功，共处理 ${result.success_count} 个任务`);
+          setBatchModalVisible(false);
+          fetchTasks();
+        } else if (result.success_count === 0) {
+          message.error(`批量操作全部失败，共 ${result.fail_count} 个`);
+        } else {
+          message.warning(`批量操作部分成功：成功 ${result.success_count} 个，失败 ${result.fail_count} 个`);
+        }
+      }
+    } catch (error) {
+      console.error('Batch advance failed:', error);
+    } finally {
+      setBatchLoading(false);
+    }
+  };
+
+  const handleBatchModalClose = () => {
+    if (batchResult && batchResult.success_count > 0) {
+      fetchTasks();
+    }
+    setBatchModalVisible(false);
+    setBatchResult(null);
+    setBatchSelectedAction(null);
+    batchForm.resetFields();
   };
 
   const getActionButtons = (task: TaskListItem) => {
@@ -377,17 +553,30 @@ function TasksPage() {
     },
   ];
 
+  const rowSelection: TableProps<TaskListItem>['rowSelection'] = {
+    selectedRowKeys,
+    onChange: (keys, rows) => {
+      setSelectedRowKeys(keys);
+      setSelectedRows(rows);
+    },
+    getCheckboxProps: (record) => ({
+      disabled: record.current_node === 'archived',
+    }),
+  };
+
   return (
     <div>
       <div className="flex justify-between items-center mb-6">
         <Title level={3} className="!mb-0">
           打样任务列表
         </Title>
-        {canCreate && (
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateModalVisible(true)}>
-            新建任务
-          </Button>
-        )}
+        <Space>
+          {canCreate && (
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateModalVisible(true)}>
+              新建任务
+            </Button>
+          )}
+        </Space>
       </div>
 
       <Row gutter={[16, 16]} className="mb-6">
@@ -523,12 +712,52 @@ function TasksPage() {
         </Form>
       </Card>
 
+      {selectedRowKeys.length > 0 && (
+        <Card className="mb-4">
+          <Space wrap>
+            <span className="text-gray-600">
+              <SelectOutlined className="mr-1" />
+              已选择 <strong className="text-blue-600">{selectedRowKeys.length}</strong> 项
+            </span>
+            <Divider type="vertical" />
+            {availableBatchActions.length > 0 ? (
+              <Space wrap>
+                <span className="text-gray-500">批量操作：</span>
+                {availableBatchActions.map((opt) => (
+                  <Button
+                    key={`${opt.action}-${opt.node}`}
+                    type={opt.action === 'reject' ? 'default' : 'primary'}
+                    danger={opt.action === 'reject'}
+                    icon={
+                      opt.action === 'approve' ? <CheckOutlined /> :
+                      opt.action === 'reject' ? <CloseOutlined /> : <SendOutlined />
+                    }
+                    onClick={() => handleBatchActionClick(opt.action, opt.label)}
+                  >
+                    {opt.label}
+                    <Tag color={getNodeColor(opt.node)} className="ml-1">{NODE_LABELS[opt.node]}</Tag>
+                  </Button>
+                ))}
+              </Space>
+            ) : (
+              <span className="text-gray-400">
+                当前角色无可执行的批量操作
+              </span>
+            )}
+            <Button size="small" onClick={() => setSelectedRowKeys([])}>
+              取消选择
+            </Button>
+          </Space>
+        </Card>
+      )}
+
       <Card>
         <Spin spinning={loading}>
           <Table<TaskListItem>
             rowKey="id"
             columns={columns}
             dataSource={tasks}
+            rowSelection={rowSelection}
             pagination={{
               current: page,
               pageSize,
@@ -644,6 +873,110 @@ function TasksPage() {
             </Space>
           </Form.Item>
         </Form>
+      </Modal>
+
+      <Modal
+        title={
+          <Space>
+            <SafetyOutlined />
+            批量推进
+          </Space>
+        }
+        open={batchModalVisible}
+        onCancel={handleBatchModalClose}
+        footer={null}
+        destroyOnClose
+        width={650}
+        maskClosable={false}
+      >
+        {!batchResult ? (
+          <Form
+            form={batchForm}
+            layout="vertical"
+            onFinish={handleBatchAdvance}
+          >
+            <Alert
+              type="info"
+              showIcon
+              message={`已选择 ${selectedRowKeys.length} 个任务进行批量操作`}
+              className="mb-4"
+            />
+            <Form.Item
+              name="action"
+              label="操作类型"
+              rules={[{ required: true, message: '请选择操作类型' }]}
+            >
+              <Select disabled={!!batchSelectedAction}>
+                {availableBatchActions.map((opt) => (
+                  <Select.Option key={`${opt.action}-${opt.node}`} value={opt.action}>
+                    <Space>
+                      <span>{opt.label}</span>
+                      <Tag color={getNodeColor(opt.node)}>{NODE_LABELS[opt.node]}</Tag>
+                      <Tag color="blue">{ROLE_LABELS[opt.role as keyof typeof ROLE_LABELS]}</Tag>
+                    </Space>
+                  </Select.Option>
+                ))}
+              </Select>
+            </Form.Item>
+            <Form.Item name="remark" label="备注说明">
+              <TextArea rows={2} placeholder="请输入备注说明（可选）" />
+            </Form.Item>
+            <Form.Item name="abnormal_reason" label="异常原因">
+              <TextArea rows={3} placeholder="如有异常，请填写异常原因（可选）" />
+            </Form.Item>
+            <Form.Item className="mb-0 text-right">
+              <Space>
+                <Button onClick={handleBatchModalClose}>
+                  取消
+                </Button>
+                <Button type="primary" htmlType="submit" loading={batchLoading}>
+                  确认批量操作
+                </Button>
+              </Space>
+            </Form.Item>
+          </Form>
+        ) : (
+          <div>
+            <Alert
+              type={batchResult.fail_count === 0 ? 'success' : batchResult.success_count === 0 ? 'error' : 'warning'}
+              showIcon
+              message={`批量操作完成：成功 ${batchResult.success_count} 个，失败 ${batchResult.fail_count} 个`}
+              className="mb-4"
+            />
+            <Divider orientation="left">处理明细</Divider>
+            <List
+              size="small"
+              dataSource={batchResult.results}
+              renderItem={(item: BatchItemResult) => (
+                <List.Item>
+                  <Space className="w-full" wrap>
+                    {item.success ? (
+                      <CheckCircleOutlined className="text-green-500" />
+                    ) : (
+                      <CloseOutlined className="text-red-500" />
+                    )}
+                    <span className="font-mono font-medium">{item.task_no}</span>
+                    {item.success && item.action && (
+                      <Tag color="green">
+                        {item.from_node && NODE_LABELS[item.from_node as TaskNode]}
+                        <span className="mx-1">→</span>
+                        {item.to_node && NODE_LABELS[item.to_node as TaskNode]}
+                      </Tag>
+                    )}
+                    {!item.success && item.error && (
+                      <span className="text-red-500 text-sm">{item.error}</span>
+                    )}
+                  </Space>
+                </List.Item>
+              )}
+            />
+            <div className="mt-4 text-right">
+              <Button type="primary" onClick={handleBatchModalClose}>
+                {batchResult.fail_count === 0 ? '完成' : '关闭'}
+              </Button>
+            </div>
+          </div>
+        )}
       </Modal>
     </div>
   );

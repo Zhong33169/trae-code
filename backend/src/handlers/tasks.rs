@@ -5,7 +5,8 @@ use std::collections::HashMap;
 use crate::db::{generate_task_no, new_uuid, now_str};
 use crate::middleware::auth::get_current_user;
 use crate::models::{
-    ApiResponse, AdvanceTaskRequest, BatchAdvanceRequest, CreateTaskRequest,
+    ApiResponse, AdvanceTaskRequest, BatchAdvanceRequest, BatchAdvanceResult,
+    BatchItemResult, CreateTaskRequest,
     JwtClaims, NodeRecord, NodeRecordDetail, NodeType, OperationLog,
     OperationLogDetail, SamplingTask, TaskDetailResponse, TaskListItem,
     TaskListQuery, TaskListResponse, TaskStatus, UpdateTaskRequest,
@@ -1093,9 +1094,9 @@ async fn batch_advance_task(
     }
 
     let ip = get_client_ip(&req);
-    let mut success_count = 0;
-    let mut fail_count = 0;
-    let mut errors: Vec<serde_json::Value> = Vec::new();
+    let mut success_count: i64 = 0;
+    let mut fail_count: i64 = 0;
+    let mut results: Vec<BatchItemResult> = Vec::new();
 
     for task_id in &form.task_ids {
         let task: Option<SamplingTask> = match sqlx::query_as::<_, SamplingTask>(
@@ -1108,10 +1109,15 @@ async fn batch_advance_task(
             Ok(t) => t,
             Err(e) => {
                 fail_count += 1;
-                errors.push(serde_json::json!({
-                    "task_id": task_id,
-                    "error": format!("查询失败: {}", e)
-                }));
+                results.push(BatchItemResult {
+                    task_id: task_id.clone(),
+                    task_no: task_id.clone(),
+                    success: false,
+                    error: Some(format!("查询失败: {}", e)),
+                    action: None,
+                    from_node: None,
+                    to_node: None,
+                });
                 continue;
             }
         };
@@ -1120,23 +1126,34 @@ async fn batch_advance_task(
             Some(t) => t,
             None => {
                 fail_count += 1;
-                errors.push(serde_json::json!({
-                    "task_id": task_id,
-                    "error": "任务不存在"
-                }));
+                results.push(BatchItemResult {
+                    task_id: task_id.clone(),
+                    task_no: task_id.clone(),
+                    success: false,
+                    error: Some("任务不存在".to_string()),
+                    action: None,
+                    from_node: None,
+                    to_node: None,
+                });
                 continue;
             }
         };
+
+        let from_node = task.current_node.clone();
 
         let mut tx = match pool.get_ref().begin().await {
             Ok(t) => t,
             Err(_) => {
                 fail_count += 1;
-                errors.push(serde_json::json!({
-                    "task_id": task_id,
-                    "task_no": task.task_no,
-                    "error": "数据库操作失败"
-                }));
+                results.push(BatchItemResult {
+                    task_id: task.id.clone(),
+                    task_no: task.task_no.clone(),
+                    success: false,
+                    error: Some("数据库操作失败".to_string()),
+                    action: None,
+                    from_node: Some(from_node),
+                    to_node: None,
+                });
                 continue;
             }
         };
@@ -1147,42 +1164,58 @@ async fn batch_advance_task(
             &claims,
             &form.action,
             form.remark.as_deref(),
-            None,
+            form.abnormal_reason.as_deref(),
             &ip,
         ).await;
 
         match result {
-            Ok((action_name, _, _, _)) => {
+            Ok((action_name, from_status, to_status, to_node)) => {
                 if tx.commit().await.is_ok() {
                     success_count += 1;
                     log::info!("Batch advance task: {} - {} by {}", task.task_no, action_name, claims.username);
+                    results.push(BatchItemResult {
+                        task_id: task.id.clone(),
+                        task_no: task.task_no.clone(),
+                        success: true,
+                        error: None,
+                        action: Some(action_name),
+                        from_node: Some(from_node),
+                        to_node: Some(to_node),
+                    });
                 } else {
                     fail_count += 1;
-                    errors.push(serde_json::json!({
-                        "task_id": task_id,
-                        "task_no": task.task_no,
-                        "error": "提交失败"
-                    }));
+                    results.push(BatchItemResult {
+                        task_id: task.id.clone(),
+                        task_no: task.task_no.clone(),
+                        success: false,
+                        error: Some("提交失败".to_string()),
+                        action: None,
+                        from_node: Some(from_node),
+                        to_node: None,
+                    });
                 }
             }
             Err(e) => {
                 let _ = tx.rollback().await;
                 fail_count += 1;
-                errors.push(serde_json::json!({
-                    "task_id": task_id,
-                    "task_no": task.task_no,
-                    "error": e
-                }));
+                results.push(BatchItemResult {
+                    task_id: task.id.clone(),
+                    task_no: task.task_no.clone(),
+                    success: false,
+                    error: Some(e),
+                    action: None,
+                    from_node: Some(from_node),
+                    to_node: None,
+                });
             }
         }
     }
 
-    HttpResponse::Ok().json(ApiResponse::success(serde_json::json!({
-        "message": format!("批量操作完成，成功 {} 个，失败 {} 个", success_count, fail_count),
-        "success_count": success_count,
-        "fail_count": fail_count,
-        "errors": errors
-    })))
+    HttpResponse::Ok().json(ApiResponse::success(BatchAdvanceResult {
+        success_count,
+        fail_count,
+        results,
+    }))
 }
 
 pub fn init_routes(cfg: &mut web::ServiceConfig) {

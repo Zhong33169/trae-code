@@ -149,6 +149,29 @@ export interface AdvanceTaskRequest {
   abnormal_reason?: string;
 }
 
+export interface BatchAdvanceRequest {
+  task_ids: string[];
+  action: 'submit' | 'approve' | 'reject';
+  remark?: string;
+  abnormal_reason?: string;
+}
+
+export interface BatchItemResult {
+  task_id: string;
+  task_no: string;
+  success: boolean;
+  error?: string;
+  action?: string;
+  from_node?: string;
+  to_node?: string;
+}
+
+export interface BatchAdvanceResult {
+  success_count: number;
+  fail_count: number;
+  results: BatchItemResult[];
+}
+
 export const NODE_LABELS: Record<TaskNode, string> = {
   order_sampling: '订单打样',
   sample_confirmation: '样衣确认',

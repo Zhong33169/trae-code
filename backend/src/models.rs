@@ -407,6 +407,25 @@ pub struct BatchAdvanceRequest {
     pub task_ids: Vec<String>,
     pub action: String,
     pub remark: Option<String>,
+    pub abnormal_reason: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct BatchItemResult {
+    pub task_id: String,
+    pub task_no: String,
+    pub success: bool,
+    pub error: Option<String>,
+    pub action: Option<String>,
+    pub from_node: Option<String>,
+    pub to_node: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct BatchAdvanceResult {
+    pub success_count: i64,
+    pub fail_count: i64,
+    pub results: Vec<BatchItemResult>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

@@ -2,7 +2,7 @@ import axios, { AxiosInstance, InternalAxiosRequestConfig, AxiosResponse } from 
 import { message } from 'antd';
 import { ApiResponse } from '@/types';
 
-const API_BASE = 'http://localhost:8002/api';
+const API_BASE = 'http://localhost:8004/api';
 const TOKEN_KEY = 'token';
 const USER_KEY = 'user';
 
