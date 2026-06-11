@@ -81,16 +81,20 @@ export const ATTACHMENT_STATUS_COLORS = {
 
 export const AUDIT_ACTION_LABELS = {
   created: '创建',
+  updated: '更新内容',
   submitted: '提交审核',
   approved_supervisor: '审核主管通过',
   rejected_supervisor: '审核主管退回',
   supplemented: '补正附件',
   approved_final: '复核通过归档',
   rejected_final: '复核退回',
+  attachment_uploaded: '上传附件',
+  attachment_deleted: '删除附件',
   attachment_rejected: '附件驳回',
   attachment_approved: '附件通过',
   remark_added: '添加审计备注',
-  marked_overdue: '标记超时'
+  marked_overdue: '标记超时',
+  operation_failed: '操作失败'
 };
 
 export const ROLE_LABELS = {

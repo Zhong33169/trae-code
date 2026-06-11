@@ -1,11 +1,11 @@
 <script>
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
   import { api } from '$lib/api';
   import { 
     currentUser, currentRole, STATUS_LABELS, STATUS_COLORS, 
-    ATTACHMENT_STATUS_LABELS, ATTACHMENT_STATUS_COLORS, ROLE_LABELS, users
+    ATTACHMENT_STATUS_LABELS, ATTACHMENT_STATUS_COLORS, ROLE_LABELS
   } from '$lib/store';
   import ProgressFlow from './ProgressFlow.svelte';
   import AuditTimeline from './AuditTimeline.svelte';
@@ -20,6 +20,15 @@
   let showSupplementModal = false;
   let showRejectAttachmentModal = false;
   let currentRejectAttachment = null;
+  let isEditing = false;
+
+  let editForm = {
+    title: '',
+    material_code: '',
+    material_name: '',
+    change_type: '',
+    description: ''
+  };
 
   let formData = {
     reason: '',
@@ -66,6 +75,33 @@
   function clearMsgs() {
     error = '';
     success = '';
+    uploadError = '';
+  }
+
+  function startEdit() {
+    editForm = {
+      title: order.title,
+      material_code: order.material_code,
+      material_name: order.material_name,
+      change_type: order.change_type,
+      description: order.description
+    };
+    isEditing = true;
+  }
+
+  function cancelEdit() {
+    isEditing = false;
+  }
+
+  async function saveEdit() {
+    clearMsgs();
+    try {
+      order = await api.updateOrder(order.id, editForm, $currentUser.id);
+      isEditing = false;
+      success = '单据信息已更新';
+    } catch (e) {
+      error = e.message;
+    }
   }
 
   async function handleSubmit() {
@@ -75,10 +111,10 @@
       order = await api.submitOrder(order.id, {
         supervisor_id: parseInt(formData.supervisor_id),
         deadline_days: parseInt(formData.deadline_days)
-      });
+      }, $currentUser.id);
       showSubmitModal = false;
       formData = { ...formData, supervisor_id: '', deadline_days: 7 };
-      success = '已提交审核主管办理';
+      success = '✅ 已提交审核主管办理';
     } catch (e) {
       error = e.message;
     }
@@ -90,9 +126,9 @@
       order = await api.supervisorApprove(order.id, {
         reason: formData.reason,
         audit_remark: formData.audit_remark
-      });
+      }, $currentUser.id);
       formData = { ...formData, reason: '', audit_remark: '' };
-      success = '审核通过，已提交复核负责人';
+      success = '✅ 审核通过，已提交复核负责人';
     } catch (e) {
       error = e.message;
     }
@@ -105,10 +141,10 @@
       order = await api.supervisorReturn(order.id, {
         reason: formData.reason,
         audit_remark: formData.audit_remark
-      });
+      }, $currentUser.id);
       showReturnModal = false;
       formData = { ...formData, reason: '', audit_remark: '' };
-      success = '已退回登记员补正附件';
+      success = '❌ 已退回登记员补正附件';
     } catch (e) {
       error = e.message;
     }
@@ -120,10 +156,10 @@
       order = await api.supplementOrder(order.id, {
         supplement_note: formData.supplement_note,
         audit_remark: formData.audit_remark
-      });
+      }, $currentUser.id);
       showSupplementModal = false;
       formData = { ...formData, supplement_note: '', audit_remark: '' };
-      success = '已补正并重新提交审核';
+      success = '✅ 已补正并重新提交审核';
     } catch (e) {
       error = e.message;
     }
@@ -135,9 +171,9 @@
       order = await api.reviewerApprove(order.id, {
         reason: formData.reason,
         audit_remark: formData.audit_remark
-      });
+      }, $currentUser.id);
       formData = { ...formData, reason: '', audit_remark: '' };
-      success = '已复核通过并归档';
+      success = '🎉 已复核通过并归档，流程结束';
     } catch (e) {
       error = e.message;
     }
@@ -150,10 +186,10 @@
       order = await api.reviewerReturn(order.id, {
         reason: formData.reason,
         audit_remark: formData.audit_remark
-      });
+      }, $currentUser.id);
       showReturnModal = false;
       formData = { ...formData, reason: '', audit_remark: '' };
-      success = '复核已退回';
+      success = '❌ 复核已退回';
     } catch (e) {
       error = e.message;
     }
@@ -161,13 +197,12 @@
 
   async function handleUpload(e) {
     clearMsgs();
-    uploadError = '';
     const file = e.target.files[0];
     if (!file) return;
     try {
       await api.uploadAttachment(order.id, file, $currentUser.id);
       await loadOrder();
-      success = `附件「${file.name}」上传成功`;
+      success = `📎 附件「${file.name}」上传成功`;
     } catch (e) {
       uploadError = e.message;
     }
@@ -178,7 +213,7 @@
     if (!confirm(`确定删除附件「${att.file_name}」吗？`)) return;
     clearMsgs();
     try {
-      await api.deleteAttachment(att.id);
+      await api.deleteAttachment(att.id, $currentUser.id);
       await loadOrder();
       success = '附件已删除';
     } catch (e) {
@@ -201,13 +236,12 @@
       currentRejectAttachment = null;
       formData.reject_reason = '';
       await loadOrder();
-      success = '附件已驳回';
+      success = '❌ 附件已驳回';
     } catch (e) {
       error = e.message;
     }
   }
 
-  // 权限判断
   function canEdit() {
     if (!$currentUser || !order) return false;
     return $currentRole === 'registrar' && 
@@ -269,7 +303,6 @@
     return canReviewerApprove();
   }
 
-  // 状态说明
   function getProgressNote() {
     if (!order) return '';
     const s = order.status;
@@ -281,6 +314,11 @@
     if (s === 'archived') return '🎉 单据已完成复核归档，流程结束。';
     if (s === 'overdue') return '⏰ 单据处理超时，系统已标记为异常，请尽快跟进。';
     return '';
+  }
+
+  function getReturnModalTitle() {
+    if (!order) return '';
+    return order.status === 'pending_review' ? '审核退回 - 需补正附件' : '复核退回';
   }
 </script>
 
@@ -299,86 +337,128 @@
       <div class="alert alert-success">{success}</div>
     {/if}
 
+    <!-- 流程进度条组件 -->
     <ProgressFlow currentStatus={order.status} isReturned={order.status === 'returned' || order.status === 'supplement_required'} />
 
     <div class="alert alert-info">
       {getProgressNote()}
     </div>
 
-    <!-- 基本信息 -->
+    <!-- 基本信息 - 可编辑 -->
     <div class="card">
       <div class="card-title">
-        <span>基本信息</span>
-        <span class="badge" style="background:{STATUS_COLORS[order.status]}">
-          {#if order.is_overdue}⚠️ {/if}{STATUS_LABELS[order.status]}
-        </span>
+        <span>📋 基本信息 {#if isEditing}（编辑中）{/if}</span>
+        <div class="actions-bar">
+          {#if canEdit() && !isEditing}
+            <button class="btn-sm" on:click={startEdit}>✏️ 编辑</button>
+          {/if}
+          <span class="badge" style="background:{STATUS_COLORS[order.status]}">
+            {#if order.is_overdue}⚠️ {/if}{STATUS_LABELS[order.status]}
+          </span>
+        </div>
       </div>
-      <div class="detail-grid">
-        <div class="detail-item">
-          <div class="label">变更单号</div>
-          <div class="value"><strong>{order.order_no}</strong></div>
-        </div>
-        <div class="detail-item">
-          <div class="label">标题</div>
-          <div class="value">{order.title}</div>
-        </div>
-        <div class="detail-item">
-          <div class="label">物料编码</div>
-          <div class="value">{order.material_code}</div>
-        </div>
-        <div class="detail-item">
-          <div class="label">物料名称</div>
-          <div class="value">{order.material_name}</div>
-        </div>
-        <div class="detail-item">
-          <div class="label">变更类型</div>
-          <div class="value">{order.change_type}</div>
-        </div>
-        <div class="detail-item">
-          <div class="label">登记人</div>
-          <div class="value">{order.registrar}（物料变更登记员）</div>
-        </div>
-        <div class="detail-item">
-          <div class="label">审核主管</div>
-          <div class="value">{order.supervisor ? order.supervisor + '（物料变更审核主管）' : '-'}</div>
-        </div>
-        <div class="detail-item">
-          <div class="label">复核负责人</div>
-          <div class="value">{order.reviewer ? order.reviewer + '（电子元器件工厂复核负责人）' : '-'}</div>
-        </div>
-        <div class="detail-item">
-          <div class="label">创建时间</div>
-          <div class="value">{formatDate(order.created_at)}</div>
-        </div>
-        <div class="detail-item">
-          <div class="label">提交时间</div>
-          <div class="value">{formatDate(order.submitted_at)}</div>
-        </div>
-        <div class="detail-item">
-          <div class="label">截止时间</div>
-          <div class="value" style="color:{order.deadline && new Date(order.deadline) < new Date() ? '#dc2626' : ''}">
-            {formatDate(order.deadline)}
+
+      {#if isEditing}
+        <div class="form-row">
+          <div class="form-item">
+            <label>变更单号</label>
+            <input type="text" value={order.order_no} disabled />
+          </div>
+          <div class="form-item">
+            <label>变更类型</label>
+            <input type="text" bind:value={editForm.change_type} />
           </div>
         </div>
-        <div class="detail-item">
-          <div class="label">归档时间</div>
-          <div class="value">{formatDate(order.archived_at)}</div>
+        <div class="form-item">
+          <label>标题</label>
+          <input type="text" bind:value={editForm.title} />
         </div>
-      </div>
-      {#if order.description}
-        <div style="margin-top:16px;">
+        <div class="form-row">
+          <div class="form-item">
+            <label>物料编码</label>
+            <input type="text" bind:value={editForm.material_code} />
+          </div>
+          <div class="form-item">
+            <label>物料名称</label>
+            <input type="text" bind:value={editForm.material_name} />
+          </div>
+        </div>
+        <div class="form-item">
+          <label>变更说明</label>
+          <textarea bind:value={editForm.description} rows="4"></textarea>
+        </div>
+        <div class="actions-bar">
+          <button class="btn-primary" on:click={saveEdit}>💾 保存</button>
+          <button on:click={cancelEdit}>取消</button>
+        </div>
+      {:else}
+        <div class="detail-grid">
           <div class="detail-item">
-            <div class="label">变更说明</div>
-            <div class="value">{order.description}</div>
+            <div class="label">变更单号</div>
+            <div class="value"><strong>{order.order_no}</strong></div>
+          </div>
+          <div class="detail-item">
+            <div class="label">标题</div>
+            <div class="value">{order.title}</div>
+          </div>
+          <div class="detail-item">
+            <div class="label">物料编码</div>
+            <div class="value">{order.material_code}</div>
+          </div>
+          <div class="detail-item">
+            <div class="label">物料名称</div>
+            <div class="value">{order.material_name}</div>
+          </div>
+          <div class="detail-item">
+            <div class="label">变更类型</div>
+            <div class="value">{order.change_type}</div>
+          </div>
+          <div class="detail-item">
+            <div class="label">登记人</div>
+            <div class="value">{order.registrar}（物料变更登记员）</div>
+          </div>
+          <div class="detail-item">
+            <div class="label">审核主管</div>
+            <div class="value">{order.supervisor ? order.supervisor + '（物料变更审核主管）' : '-'}</div>
+          </div>
+          <div class="detail-item">
+            <div class="label">复核负责人</div>
+            <div class="value">{order.reviewer ? order.reviewer + '（电子元器件工厂复核负责人）' : '-'}</div>
+          </div>
+          <div class="detail-item">
+            <div class="label">创建时间</div>
+            <div class="value">{formatDate(order.created_at)}</div>
+          </div>
+          <div class="detail-item">
+            <div class="label">提交时间</div>
+            <div class="value">{formatDate(order.submitted_at)}</div>
+          </div>
+          <div class="detail-item">
+            <div class="label">截止时间</div>
+            <div class="value" style="color:{order.deadline && new Date(order.deadline) < new Date() ? '#dc2626' : ''}">
+              {formatDate(order.deadline)}
+            </div>
+          </div>
+          <div class="detail-item">
+            <div class="label">归档时间</div>
+            <div class="value">{formatDate(order.archived_at)}</div>
           </div>
         </div>
+        {#if order.description}
+          <div style="margin-top:16px;">
+            <div class="detail-item">
+              <div class="label">变更说明</div>
+              <div class="value">{order.description}</div>
+            </div>
+          </div>
+        {/if}
       {/if}
     </div>
 
     <!-- 退回原因 / 补正说明 / 审计备注 -->
     {#if order.return_reason || order.supplement_note || order.audit_remark}
       <div class="card">
-        <div class="card-title">原因与备注</div>
+        <div class="card-title">📌 原因与备注</div>
         {#if order.return_reason}
           <div class="info-block">
             <div class="info-block-title" style="color:#dc2626">❌ 退回原因</div>
@@ -473,29 +553,30 @@
       {#if !$currentUser}
         <div class="empty-state">请先在右上角选择角色和用户</div>
       {:else}
-        <!-- 登记员操作 -->
+        <!-- 登记员 - 提交审核 -->
         {#if canSubmit()}
           <div class="alert alert-info">
-            <strong>说明：</strong>您是登记人，确认附件齐全后可提交给审核主管办理。
+            <strong>📝 登记员操作说明：</strong>您是本单登记人，请确认附件齐全后提交给审核主管办理。
           </div>
           <div class="actions-bar">
-            <button class="btn-primary" on:click={() => showSubmitModal = true}>提交审核</button>
+            <button class="btn-primary" on:click={() => showSubmitModal = true}>📨 提交审核</button>
           </div>
         {/if}
 
+        <!-- 登记员 - 补正重提 -->
         {#if canReSubmitSupplement()}
           <div class="alert alert-warning">
-            <strong>说明：</strong>您是登记人，请先补充缺失的附件（或删除被驳回附件后重新上传），确认齐全后重新提交。
+            <strong>⚠️ 登记员操作说明：</strong>请先补充缺失的附件（或删除被驳回附件后重新上传），确认齐全后重新提交。
           </div>
           <div class="actions-bar">
-            <button class="btn-primary" on:click={() => showSupplementModal = true}>补正并重新提交</button>
+            <button class="btn-primary" on:click={() => showSupplementModal = true}>✅ 补正并重新提交</button>
           </div>
         {/if}
 
         <!-- 审核主管操作 -->
         {#if canSupervisorApprove()}
           <div class="alert alert-info">
-            <strong>说明：</strong>您是本单审核主管，请核验附件完整性与变更合理性。可驳回单个附件，或整体通过/退回。
+            <strong>🔍 审核主管操作说明：</strong>您是本单审核主管，请核验附件完整性与变更合理性。可驳回单个附件，或整体通过/退回。
           </div>
           <div class="form-row">
             <div class="form-item">
@@ -516,7 +597,7 @@
         <!-- 复核负责人操作 -->
         {#if canReviewerApprove()}
           <div class="alert alert-info">
-            <strong>说明：</strong>您是本单复核负责人，请做最终复核。通过后将直接归档，流程结束。
+            <strong>✅ 复核负责人操作说明：</strong>您是本单复核负责人，请做最终复核。通过后将直接归档，流程结束。
           </div>
           <div class="form-row">
             <div class="form-item">
@@ -543,7 +624,7 @@
       {/if}
     </div>
 
-    <!-- 审计日志 -->
+    <!-- 审计日志组件 -->
     <div class="card">
       <AuditTimeline logs={order.audit_logs} />
     </div>
@@ -554,7 +635,8 @@
 {#if showSubmitModal}
   <div class="modal-backdrop" on:click|self={() => showSubmitModal = false}>
     <div class="modal">
-      <div class="modal-header">提交审核主管办理
+      <div class="modal-header">
+        📨 提交审核主管办理
         <button class="link-btn" on:click={() => showSubmitModal = false}>✕</button>
       </div>
       <div class="modal-body">
@@ -584,7 +666,8 @@
 {#if showReturnModal}
   <div class="modal-backdrop" on:click|self={() => showReturnModal = false}>
     <div class="modal">
-      <div class="modal-header">{order && order.status === 'pending_review' ? '退回补正附件' : '复核退回'}
+      <div class="modal-header">
+        ❌ {getReturnModalTitle()}
         <button class="link-btn" on:click={() => showReturnModal = false}>✕</button>
       </div>
       <div class="modal-body">
@@ -611,7 +694,8 @@
 {#if showSupplementModal}
   <div class="modal-backdrop" on:click|self={() => showSupplementModal = false}>
     <div class="modal">
-      <div class="modal-header">补正并重新提交
+      <div class="modal-header">
+        ✅ 补正并重新提交
         <button class="link-btn" on:click={() => showSupplementModal = false}>✕</button>
       </div>
       <div class="modal-body">
@@ -636,7 +720,8 @@
 {#if showRejectAttachmentModal}
   <div class="modal-backdrop" on:click|self={() => showRejectAttachmentModal = false}>
     <div class="modal">
-      <div class="modal-header">驳回附件：{currentRejectAttachment && currentRejectAttachment.file_name}
+      <div class="modal-header">
+        ❌ 驳回附件：{currentRejectAttachment && currentRejectAttachment.file_name}
         <button class="link-btn" on:click={() => showRejectAttachmentModal = false}>✕</button>
       </div>
       <div class="modal-body">

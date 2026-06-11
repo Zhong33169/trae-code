@@ -85,16 +85,20 @@ class Attachment(models.Model):
 
 class AuditAction(models.TextChoices):
     CREATED = 'created', '创建'
+    UPDATED = 'updated', '更新内容'
     SUBMITTED = 'submitted', '提交审核'
     APPROVED_SUPERVISOR = 'approved_supervisor', '审核主管通过'
     REJECTED_SUPERVISOR = 'rejected_supervisor', '审核主管退回'
     SUPPLEMENTED = 'supplemented', '补正附件'
     APPROVED_FINAL = 'approved_final', '复核通过归档'
     REJECTED_FINAL = 'rejected_final', '复核退回'
+    ATTACHMENT_UPLOADED = 'attachment_uploaded', '上传附件'
+    ATTACHMENT_DELETED = 'attachment_deleted', '删除附件'
     ATTACHMENT_REJECTED = 'attachment_rejected', '附件驳回'
     ATTACHMENT_APPROVED = 'attachment_approved', '附件通过'
     REMARK_ADDED = 'remark_added', '添加审计备注'
     MARKED_OVERDUE = 'marked_overdue', '标记超时'
+    OPERATION_FAILED = 'operation_failed', '操作失败'
 
 
 class AuditLog(models.Model):

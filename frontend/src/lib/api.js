@@ -40,13 +40,34 @@ export const api = {
   },
   getOrder: (id) => apiFetch(`/orders/${id}`),
   createOrder: (data) => apiFetch('/orders', { method: 'POST', body: JSON.stringify(data) }),
-  updateOrder: (id, data) => apiFetch(`/orders/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  submitOrder: (id, data) => apiFetch(`/orders/${id}/submit`, { method: 'POST', body: JSON.stringify(data) }),
-  supervisorApprove: (id, data) => apiFetch(`/orders/${id}/supervisor/approve`, { method: 'POST', body: JSON.stringify(data) }),
-  supervisorReturn: (id, data) => apiFetch(`/orders/${id}/supervisor/return`, { method: 'POST', body: JSON.stringify(data) }),
-  supplementOrder: (id, data) => apiFetch(`/orders/${id}/supplement`, { method: 'POST', body: JSON.stringify(data) }),
-  reviewerApprove: (id, data) => apiFetch(`/orders/${id}/reviewer/approve`, { method: 'POST', body: JSON.stringify(data) }),
-  reviewerReturn: (id, data) => apiFetch(`/orders/${id}/reviewer/return`, { method: 'POST', body: JSON.stringify(data) }),
+  updateOrder: (id, data, operatorId) => apiFetch(`/orders/${id}`, { 
+    method: 'PUT', 
+    body: JSON.stringify({ ...data, operator_id: operatorId }) 
+  }),
+  submitOrder: (id, data, operatorId) => apiFetch(`/orders/${id}/submit`, { 
+    method: 'POST', 
+    body: JSON.stringify({ ...data, operator_id: operatorId }) 
+  }),
+  supervisorApprove: (id, data, operatorId) => apiFetch(`/orders/${id}/supervisor/approve`, { 
+    method: 'POST', 
+    body: JSON.stringify({ ...data, operator_id: operatorId }) 
+  }),
+  supervisorReturn: (id, data, operatorId) => apiFetch(`/orders/${id}/supervisor/return`, { 
+    method: 'POST', 
+    body: JSON.stringify({ ...data, operator_id: operatorId }) 
+  }),
+  supplementOrder: (id, data, operatorId) => apiFetch(`/orders/${id}/supplement`, { 
+    method: 'POST', 
+    body: JSON.stringify({ ...data, operator_id: operatorId }) 
+  }),
+  reviewerApprove: (id, data, operatorId) => apiFetch(`/orders/${id}/reviewer/approve`, { 
+    method: 'POST', 
+    body: JSON.stringify({ ...data, operator_id: operatorId }) 
+  }),
+  reviewerReturn: (id, data, operatorId) => apiFetch(`/orders/${id}/reviewer/return`, { 
+    method: 'POST', 
+    body: JSON.stringify({ ...data, operator_id: operatorId }) 
+  }),
   markOverdue: (id, userId) => apiFetch(`/orders/${id}/mark-overdue?user_id=${userId}`, { method: 'POST' }),
   
   uploadAttachment: (orderId, file, userId) => {
@@ -57,7 +78,7 @@ export const api = {
     return apiFetch(`/orders/${orderId}/attachments`, { method: 'POST', body: form });
   },
   listAttachments: (orderId) => apiFetch(`/orders/${orderId}/attachments`),
-  deleteAttachment: (id) => apiFetch(`/attachments/${id}`, { method: 'DELETE' }),
+  deleteAttachment: (id, operatorId) => apiFetch(`/attachments/${id}?operator_id=${operatorId}`, { method: 'DELETE' }),
   rejectAttachment: (id, reason, userId) => 
     apiFetch(`/attachments/${id}/reject?user_id=${userId}`, { 
       method: 'POST', 

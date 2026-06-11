@@ -154,27 +154,36 @@ class MaterialChangeOrderUpdate(Schema):
     material_name: Optional[str] = None
     change_type: Optional[str] = None
     description: Optional[str] = None
+    operator_id: int
 
 
 class SubmitForReviewSchema(Schema):
     supervisor_id: int
     deadline_days: int = 7
+    operator_id: int
 
 
 class ProcessSchema(Schema):
     reason: str = ''
     audit_remark: str = ''
+    operator_id: int
 
 
 class ReturnSchema(Schema):
     reason: str
     audit_remark: str = ''
+    operator_id: int
 
 
 class SupplementSchema(Schema):
     supplement_note: str = ''
     audit_remark: str = ''
+    operator_id: int
 
 
 class RejectAttachmentSchema(Schema):
     reason: str
+
+
+class DeleteAttachmentSchema(Schema):
+    operator_id: int

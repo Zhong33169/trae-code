@@ -9,10 +9,10 @@ from api.models import (
 
 
 class Command(BaseCommand):
-    help = 'Seed database with sample data for normal, missing-material, overdue, and returned orders'
+    help = 'Seed database with sample data including complete audit trails for all 4 order types'
 
     def handle(self, *args, **options):
-        self.stdout.write('Seeding database...')
+        self.stdout.write('Seeding database with complete audit trails...')
         
         self._create_users()
         self._create_normal_order()
@@ -21,6 +21,10 @@ class Command(BaseCommand):
         self._create_returned_order()
         
         self.stdout.write(self.style.SUCCESS('Database seeded successfully!'))
+        self.stdout.write('Sample orders:')
+        for order in MaterialChangeOrder.objects.all():
+            self.stdout.write(f'  {order.order_no}: {order.title} [{order.get_status_display()}] '
+                            f'- {order.audit_logs.count()} audit logs')
 
     def _create_users(self):
         users_data = [
@@ -36,12 +40,9 @@ class Command(BaseCommand):
                 username=data['username'],
                 defaults={'name': data['name'], 'role': data['role']}
             )
-        self.stdout.write('  Users created.')
+        self.stdout.write('  ✅ 5 users created')
 
-    def _create_attachment(self, order, user, file_name, status=AttachmentStatus.UPLOADED, reject_reason=None):
-        media_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), '..', 'media')
-        os.makedirs(media_dir, exist_ok=True)
-        
+    def _create_attachment(self, order, user, file_name, status=AttachmentStatus.UPLOADED, reject_reason=None, rejected_by=None):
         fake_path = f'/media/sample_{order.order_no}_{file_name}.pdf'
         
         att = Attachment.objects.create(
@@ -53,24 +54,27 @@ class Command(BaseCommand):
             uploaded_by=user,
             status=status,
             reject_reason=reject_reason,
-            rejected_by=User.objects.filter(role=Role.SUPERVISOR).first() if status == AttachmentStatus.REJECTED else None,
-            rejected_at=timezone.now() if status == AttachmentStatus.REJECTED else None
+            rejected_by=rejected_by,
+            rejected_at=timezone.now() - timedelta(days=1) if status == AttachmentStatus.REJECTED else None
         )
         return att
 
-    def _create_audit(self, order, action, operator, reason=''):
+    def _audit(self, order, action, operator, reason='', detail=None):
         AuditLog.objects.create(
             order=order,
             action=action,
             operator=operator,
             reason=reason,
-            detail={}
+            detail=detail or {}
         )
 
     def _create_normal_order(self):
+        """✅ 正常单：完整走完登记→审核→复核→归档全流程"""
         registrar = User.objects.get(username='registrar01')
         supervisor = User.objects.get(username='supervisor01')
         reviewer = User.objects.get(username='reviewer01')
+        
+        base_time = timezone.now() - timedelta(days=10)
         
         order = MaterialChangeOrder.objects.create(
             order_no='MCO-2026-0001',
@@ -85,26 +89,49 @@ class Command(BaseCommand):
             reviewer=reviewer,
             audit_remark='变更合理，资料齐全，同意归档。',
             is_overdue=False,
-            deadline=timezone.now() + timedelta(days=7),
-            submitted_at=timezone.now() - timedelta(days=5),
-            archived_at=timezone.now() - timedelta(days=1),
-            created_at=timezone.now() - timedelta(days=10)
+            deadline=base_time + timedelta(days=7),
+            submitted_at=base_time + timedelta(days=3),
+            archived_at=base_time + timedelta(days=8),
+            created_at=base_time
         )
         
-        self._create_attachment(order, registrar, '变更申请单.pdf', AttachmentStatus.APPROVED)
-        self._create_attachment(order, registrar, '供应商技术通知.pdf', AttachmentStatus.APPROVED)
-        self._create_attachment(order, registrar, 'BOM变更对比表.pdf', AttachmentStatus.APPROVED)
+        att1 = self._create_attachment(order, registrar, '变更申请单.pdf', AttachmentStatus.APPROVED)
+        att2 = self._create_attachment(order, registrar, '供应商技术通知.pdf', AttachmentStatus.APPROVED)
+        att3 = self._create_attachment(order, registrar, 'BOM变更对比表.pdf', AttachmentStatus.APPROVED)
         
-        self._create_audit(order, AuditAction.CREATED, registrar)
-        self._create_audit(order, AuditAction.SUBMITTED, registrar)
-        self._create_audit(order, AuditAction.APPROVED_SUPERVISOR, supervisor, reason='附件齐全，变更合理')
-        self._create_audit(order, AuditAction.APPROVED_FINAL, reviewer, reason='复核通过，予以归档')
+        self._audit(order, AuditAction.CREATED, registrar, 
+            reason='登记员创建物料变更单：电阻阻值容差由±5%调整为±1%',
+            detail={'order_no': order.order_no, 'material_code': order.material_code})
+        self._audit(order, AuditAction.ATTACHMENT_UPLOADED, registrar,
+            reason='上传附件「变更申请单.pdf」')
+        self._audit(order, AuditAction.ATTACHMENT_UPLOADED, registrar,
+            reason='上传附件「供应商技术通知.pdf」')
+        self._audit(order, AuditAction.ATTACHMENT_UPLOADED, registrar,
+            reason='上传附件「BOM变更对比表.pdf」')
+        self._audit(order, AuditAction.SUBMITTED, registrar,
+            reason=f'提交给 {supervisor.name} 审核办理，时限 7 天',
+            detail={'supervisor': supervisor.name, 'deadline_days': 7})
+        self._audit(order, AuditAction.ATTACHMENT_APPROVED, supervisor,
+            reason='附件「变更申请单.pdf」核验通过，内容完整签字齐全')
+        self._audit(order, AuditAction.ATTACHMENT_APPROVED, supervisor,
+            reason='附件「供应商技术通知.pdf」核验通过，官方盖章有效')
+        self._audit(order, AuditAction.ATTACHMENT_APPROVED, supervisor,
+            reason='附件「BOM变更对比表.pdf」核验通过，变更项清晰准确')
+        self._audit(order, AuditAction.APPROVED_SUPERVISOR, supervisor,
+            reason='3个附件全部核验通过，变更原因合理，参数变更影响可控，已提交给陈复核复核',
+            detail={'reviewer': reviewer.name, 'approved_count': 3, 'audit_remark': '附件齐全'})
+        self._audit(order, AuditAction.APPROVED_FINAL, reviewer,
+            reason='复核通过：变更流程合规、技术资料齐全、质量风险可控，予以正式归档',
+            detail={'audit_remark': '变更合理，资料齐全，同意归档。'})
         
-        self.stdout.write('  Normal order (MCO-2026-0001) created - 已归档.')
+        self.stdout.write('  ✅ MCO-2026-0001 正常单 - 已归档 (10 audit logs)')
 
     def _create_missing_material_order(self):
+        """⚠️ 缺材料单：审核主管退回，含被驳回附件"""
         registrar = User.objects.get(username='registrar02')
         supervisor = User.objects.get(username='supervisor01')
+        
+        base_time = timezone.now() - timedelta(days=5)
         
         order = MaterialChangeOrder.objects.create(
             order_no='MCO-2026-0002',
@@ -118,35 +145,44 @@ class Command(BaseCommand):
             supervisor=supervisor,
             return_reason='缺少：1.封装尺寸图纸；2.SMT贴片可行性评估报告；3.焊盘设计对比表。请补充后重新提交。',
             audit_remark='核心技术资料缺失，退回补正。',
+            supplement_note=None,
             is_overdue=False,
-            deadline=timezone.now() + timedelta(days=3),
-            submitted_at=timezone.now() - timedelta(days=2),
-            created_at=timezone.now() - timedelta(days=5)
+            deadline=base_time + timedelta(days=7),
+            submitted_at=base_time + timedelta(days=2),
+            created_at=base_time
         )
         
         att1 = self._create_attachment(order, registrar, '变更申请单.pdf', AttachmentStatus.APPROVED)
         att2 = self._create_attachment(
             order, registrar, '初步方案说明.pdf',
             AttachmentStatus.REJECTED,
-            reject_reason='此文档仅为初步说明，缺少正式的技术评估数据和签字确认，请重新提交正式版本。'
+            reject_reason='此文档仅为初步说明，缺少正式的技术评估数据和签字确认，请重新提交正式版本。',
+            rejected_by=supervisor
         )
         
-        self._create_audit(order, AuditAction.CREATED, registrar)
-        self._create_audit(order, AuditAction.SUBMITTED, registrar)
-        self._create_audit(
-            order, AuditAction.ATTACHMENT_REJECTED, supervisor,
-            reason='此文档仅为初步说明，缺少正式的技术评估数据和签字确认，请重新提交正式版本。'
-        )
-        self._create_audit(
-            order, AuditAction.REJECTED_SUPERVISOR, supervisor,
-            reason='缺少：1.封装尺寸图纸；2.SMT贴片可行性评估报告；3.焊盘设计对比表。请补充后重新提交。'
-        )
+        self._audit(order, AuditAction.CREATED, registrar,
+            reason='登记员创建物料变更单：电容封装由0603变更为0402')
+        self._audit(order, AuditAction.ATTACHMENT_UPLOADED, registrar,
+            reason='上传附件「变更申请单.pdf」')
+        self._audit(order, AuditAction.ATTACHMENT_UPLOADED, registrar,
+            reason='上传附件「初步方案说明.pdf」')
+        self._audit(order, AuditAction.SUBMITTED, registrar,
+            reason=f'提交给 {supervisor.name} 审核办理，时限 7 天')
+        self._audit(order, AuditAction.ATTACHMENT_REJECTED, supervisor,
+            reason='附件「初步方案说明.pdf」被驳回：此文档仅为初步说明，缺少正式的技术评估数据和签字确认，请重新提交正式版本。',
+            detail={'attachment': '初步方案说明.pdf', 'reject_reason': '缺少正式技术评估数据和签字'})
+        self._audit(order, AuditAction.REJECTED_SUPERVISOR, supervisor,
+            reason='缺少：1.封装尺寸图纸；2.SMT贴片可行性评估报告；3.焊盘设计对比表。请补充后重新提交。',
+            detail={'audit_remark': '核心技术资料缺失，退回补正。'})
         
-        self.stdout.write('  Missing material order (MCO-2026-0002) created - 需补正附件（含被驳回附件）.')
+        self.stdout.write('  ⚠️  MCO-2026-0002 缺材料单 - 需补正附件 (6 audit logs, 1 attachment rejected)')
 
     def _create_overdue_order(self):
+        """⏰ 超时单：超过处理时限未审核，系统标记超时"""
         registrar = User.objects.get(username='registrar01')
         supervisor = User.objects.get(username='supervisor02')
+        
+        base_time = timezone.now() - timedelta(days=20)
         
         order = MaterialChangeOrder.objects.create(
             order_no='MCO-2026-0003',
@@ -159,24 +195,38 @@ class Command(BaseCommand):
             registrar=registrar,
             supervisor=supervisor,
             is_overdue=True,
-            deadline=timezone.now() - timedelta(days=5),
-            submitted_at=timezone.now() - timedelta(days=15),
-            created_at=timezone.now() - timedelta(days=20)
+            deadline=base_time + timedelta(days=5),
+            submitted_at=base_time + timedelta(days=3),
+            created_at=base_time
         )
         
-        self._create_attachment(order, registrar, '芯片停产通知.pdf', AttachmentStatus.APPROVED)
-        self._create_attachment(order, registrar, '替代型号对比表.pdf', AttachmentStatus.UPLOADED)
+        att1 = self._create_attachment(order, registrar, '芯片停产通知.pdf', AttachmentStatus.APPROVED)
+        att2 = self._create_attachment(order, registrar, '替代型号对比表.pdf', AttachmentStatus.UPLOADED)
         
-        self._create_audit(order, AuditAction.CREATED, registrar)
-        self._create_audit(order, AuditAction.SUBMITTED, registrar)
-        self._create_audit(order, AuditAction.MARKED_OVERDUE, supervisor, reason='超过7天审核时限，系统自动标记')
+        self._audit(order, AuditAction.CREATED, registrar,
+            reason='登记员创建物料变更单：原芯片停产，替换为STM32F103CBT6')
+        self._audit(order, AuditAction.ATTACHMENT_UPLOADED, registrar,
+            reason='上传附件「芯片停产通知.pdf」')
+        self._audit(order, AuditAction.ATTACHMENT_UPLOADED, registrar,
+            reason='上传附件「替代型号对比表.pdf」')
+        self._audit(order, AuditAction.SUBMITTED, registrar,
+            reason=f'提交给 {supervisor.name} 审核办理，时限 5 天')
+        self._audit(order, AuditAction.MARKED_OVERDUE, supervisor,
+            reason=f'处理超时：超过5天审核时限未处理，原状态：待审核主管办理。请尽快跟进。',
+            detail={'previous_status': ChangeOrderStatus.PENDING_REVIEW, 'days_overdue': 12})
+        self._audit(order, AuditAction.OPERATION_FAILED, supervisor,
+            reason='系统自动提醒：本单已超时12天未处理，影响生产计划安排',
+            detail={'action': 'timeout_warning', 'overdue_days': 12})
         
-        self.stdout.write('  Overdue order (MCO-2026-0003) created - 已超时.')
+        self.stdout.write('  ⏰  MCO-2026-0003 超时单 - 已超时 (6 audit logs)')
 
     def _create_returned_order(self):
+        """❌ 退回单：复核阶段被退回，缺少可靠性测试数据"""
         registrar = User.objects.get(username='registrar02')
         supervisor = User.objects.get(username='supervisor01')
         reviewer = User.objects.get(username='reviewer01')
+        
+        base_time = timezone.now() - timedelta(days=12)
         
         order = MaterialChangeOrder.objects.create(
             order_no='MCO-2026-0004',
@@ -192,21 +242,42 @@ class Command(BaseCommand):
             return_reason='复核退回：缺少可靠性测试报告（高温高湿、热循环测试数据），且未说明成本影响评估。请补充可靠性试验报告及成本分析后重新走流程。',
             audit_remark='升级方向正确但验证数据不充分，成本影响未评估。',
             is_overdue=False,
-            deadline=timezone.now() - timedelta(days=2),
-            submitted_at=timezone.now() - timedelta(days=8),
-            created_at=timezone.now() - timedelta(days=12)
+            deadline=base_time + timedelta(days=7),
+            submitted_at=base_time + timedelta(days=2),
+            created_at=base_time
         )
         
-        self._create_attachment(order, registrar, '变更申请单.pdf', AttachmentStatus.APPROVED)
-        self._create_attachment(order, registrar, '板材规格书.pdf', AttachmentStatus.APPROVED)
-        self._create_attachment(order, registrar, '供应商资质.pdf', AttachmentStatus.APPROVED)
+        att1 = self._create_attachment(order, registrar, '变更申请单.pdf', AttachmentStatus.APPROVED)
+        att2 = self._create_attachment(order, registrar, '板材规格书.pdf', AttachmentStatus.APPROVED)
+        att3 = self._create_attachment(order, registrar, '供应商资质.pdf', AttachmentStatus.APPROVED)
         
-        self._create_audit(order, AuditAction.CREATED, registrar)
-        self._create_audit(order, AuditAction.SUBMITTED, registrar)
-        self._create_audit(order, AuditAction.APPROVED_SUPERVISOR, supervisor, reason='资料基本齐全，提交复核')
-        self._create_audit(
-            order, AuditAction.REJECTED_FINAL, reviewer,
-            reason='复核退回：缺少可靠性测试报告（高温高湿、热循环测试数据），且未说明成本影响评估。请补充可靠性试验报告及成本分析后重新走流程。'
-        )
+        self._audit(order, AuditAction.CREATED, registrar,
+            reason='登记员创建物料变更单：PCB板材由TG130升级为TG150')
+        self._audit(order, AuditAction.UPDATED, registrar,
+            reason='更新了变更说明，补充了耐高温性能提升的具体参数',
+            detail={'changes': {'description': {'old': '旧描述', 'new': '新描述'}}})
+        self._audit(order, AuditAction.ATTACHMENT_UPLOADED, registrar,
+            reason='上传附件「变更申请单.pdf」')
+        self._audit(order, AuditAction.ATTACHMENT_UPLOADED, registrar,
+            reason='上传附件「板材规格书.pdf」')
+        self._audit(order, AuditAction.ATTACHMENT_UPLOADED, registrar,
+            reason='上传附件「供应商资质.pdf」')
+        self._audit(order, AuditAction.SUBMITTED, registrar,
+            reason=f'提交给 {supervisor.name} 审核办理，时限 7 天')
+        self._audit(order, AuditAction.ATTACHMENT_APPROVED, supervisor,
+            reason='附件「变更申请单.pdf」核验通过')
+        self._audit(order, AuditAction.ATTACHMENT_APPROVED, supervisor,
+            reason='附件「板材规格书.pdf」核验通过')
+        self._audit(order, AuditAction.ATTACHMENT_APPROVED, supervisor,
+            reason='附件「供应商资质.pdf」核验通过')
+        self._audit(order, AuditAction.APPROVED_SUPERVISOR, supervisor,
+            reason='资料基本齐全，板材升级方向正确，已提交给陈复核做最终复核',
+            detail={'reviewer': reviewer.name, 'approved_count': 3})
+        self._audit(order, AuditAction.OPERATION_FAILED, reviewer,
+            reason='预审发现潜在问题：缺少可靠性测试数据和成本评估，准备退回',
+            detail={'action': 'pre_review_check', 'issues': ['缺少可靠性测试报告', '缺少成本评估']})
+        self._audit(order, AuditAction.REJECTED_FINAL, reviewer,
+            reason='复核退回：缺少可靠性测试报告（高温高湿、热循环测试数据），且未说明成本影响评估。请补充可靠性试验报告及成本分析后重新走流程。',
+            detail={'audit_remark': '升级方向正确但验证数据不充分，成本影响未评估。'})
         
-        self.stdout.write('  Returned order (MCO-2026-0004) created - 已退回（复核阶段）.')
+        self.stdout.write('  ❌  MCO-2026-0004 退回单 - 已退回 (12 audit logs, with failure record)')
