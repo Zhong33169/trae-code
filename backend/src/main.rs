@@ -14,7 +14,7 @@ mod handlers {
     pub mod statistics;
 }
 
-use db::{init_pool, run_migrations, init_default_users};
+use db::{init_pool, run_migrations, init_default_users, seed_demo_data};
 use middleware::auth::AuthMiddleware;
 
 #[actix_web::main]
@@ -49,6 +49,10 @@ async fn main() -> std::io::Result<()> {
     if let Err(e) = init_default_users(&pool).await {
         log::error!("Failed to initialize default users: {}", e);
         return Err(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()));
+    }
+
+    if let Err(e) = seed_demo_data(&pool).await {
+        log::warn!("Failed to seed demo data: {}", e);
     }
 
     let bind_addr = format!("{}:{}", server_host, server_port);

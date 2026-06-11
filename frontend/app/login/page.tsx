@@ -93,7 +93,7 @@ export default function LoginPage() {
 
           <div className="mt-6 text-center">
             <Text type="secondary" className="text-xs">
-              测试账号：registrar / auditor / reviewer，密码均为 123456
+              测试账号：registrar1 / auditor1 / reviewer1，密码均为 123456
             </Text>
           </div>
         </Card>

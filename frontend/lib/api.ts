@@ -44,23 +44,25 @@ api.interceptors.request.use(
 api.interceptors.response.use(
   (response: AxiosResponse<ApiResponse>) => {
     const res = response.data;
-    if (res.code !== 0 && res.code !== 200) {
-      message.error(res.message || '请求失败');
-      return Promise.reject(new Error(res.message || '请求失败'));
+    if (res.code === 200) {
+      return response;
     }
-    return response;
+    message.error(res.message || '请求失败');
+    return Promise.reject(new Error(res.message || '请求失败'));
   },
   (error) => {
     if (error.response) {
       const status = error.response.status;
       const res = error.response.data as ApiResponse;
-      
+
       if (status === 401) {
         removeToken();
         message.error('登录已过期，请重新登录');
         if (typeof window !== 'undefined') {
           window.location.href = '/login';
         }
+      } else if (status >= 400 && status < 500) {
+        message.error(res?.message || error.message || '请求失败');
       } else {
         message.error(res?.message || error.message || '服务器错误');
       }

@@ -1,4 +1,4 @@
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Duration, Utc, NaiveDateTime};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use std::fmt;
@@ -131,9 +131,9 @@ impl TryFrom<&str> for TaskStatus {
 
 pub fn calculate_timeout(started_at: &str, completed_at: Option<&str>) -> (bool, i64) {
     let parse_dt = |s: &str| -> Option<DateTime<Utc>> {
-        DateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S")
+        NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S")
             .ok()
-            .map(|dt| dt.with_timezone(&Utc))
+            .map(|dt| DateTime::<Utc>::from_naive_utc_and_offset(dt, Utc))
     };
 
     let start = match parse_dt(started_at) {

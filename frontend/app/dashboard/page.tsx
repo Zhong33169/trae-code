@@ -12,24 +12,21 @@ import {
 import { useRouter } from 'next/navigation';
 import api from '@/lib/api';
 import { isRegistrar } from '@/lib/auth';
-import { ApiResponse } from '@/types';
+import { ApiResponse, SummaryStatistics } from '@/types';
 
 const { Title } = Typography;
 
-interface DashboardStats {
-  total: number;
-  pending: number;
-  timeout: number;
-  completed: number;
-}
-
 export default function DashboardPage() {
   const router = useRouter();
-  const [stats, setStats] = useState<DashboardStats>({
-    total: 0,
-    pending: 0,
-    timeout: 0,
-    completed: 0,
+  const [stats, setStats] = useState<SummaryStatistics>({
+    total_tasks: 0,
+    pending_tasks: 0,
+    processing_tasks: 0,
+    completed_tasks: 0,
+    timeout_tasks: 0,
+    today_new_tasks: 0,
+    today_completed_tasks: 0,
+    avg_processing_hours: 0,
   });
   const [loading, setLoading] = useState(true);
   const [canCreate, setCanCreate] = useState(false);
@@ -42,8 +39,10 @@ export default function DashboardPage() {
   const fetchStats = async () => {
     try {
       setLoading(true);
-      const response = await api.get<ApiResponse<DashboardStats>>('/tasks/stats');
-      setStats(response.data.data);
+      const response = await api.get<ApiResponse<SummaryStatistics>>('/statistics/summary');
+      if (response.data.data) {
+        setStats(response.data.data);
+      }
     } catch (error) {
       console.error('Failed to fetch stats:', error);
     } finally {
@@ -85,7 +84,7 @@ export default function DashboardPage() {
           <Card hoverable onClick={handleViewTasks} className="cursor-pointer">
             <Statistic
               title="任务总数"
-              value={stats.total}
+              value={stats.total_tasks}
               prefix={<FileTextOutlined className="text-blue-500" />}
               valueStyle={{ color: '#1677ff' }}
             />
@@ -95,7 +94,7 @@ export default function DashboardPage() {
           <Card hoverable onClick={handleViewTasks} className="cursor-pointer">
             <Statistic
               title="待处理"
-              value={stats.pending}
+              value={stats.pending_tasks + stats.processing_tasks}
               prefix={<ClockCircleOutlined className="text-orange-500" />}
               valueStyle={{ color: '#fa8c16' }}
             />
@@ -105,7 +104,7 @@ export default function DashboardPage() {
           <Card hoverable onClick={handleViewTasks} className="cursor-pointer">
             <Statistic
               title="已超时"
-              value={stats.timeout}
+              value={stats.timeout_tasks}
               prefix={<WarningOutlined className="text-red-500" />}
               valueStyle={{ color: '#ff4d4f' }}
             />
@@ -115,9 +114,41 @@ export default function DashboardPage() {
           <Card hoverable onClick={handleViewTasks} className="cursor-pointer">
             <Statistic
               title="已完成"
-              value={stats.completed}
+              value={stats.completed_tasks}
               prefix={<CheckCircleOutlined className="text-green-500" />}
               valueStyle={{ color: '#52c41a' }}
+            />
+          </Card>
+        </Col>
+      </Row>
+
+      <Row gutter={[16, 16]} className="mt-6">
+        <Col xs={24} sm={8}>
+          <Card>
+            <Statistic
+              title="今日新增"
+              value={stats.today_new_tasks}
+              valueStyle={{ color: '#1677ff' }}
+            />
+          </Card>
+        </Col>
+        <Col xs={24} sm={8}>
+          <Card>
+            <Statistic
+              title="今日完成"
+              value={stats.today_completed_tasks}
+              valueStyle={{ color: '#52c41a' }}
+            />
+          </Card>
+        </Col>
+        <Col xs={24} sm={8}>
+          <Card>
+            <Statistic
+              title="平均处理时长"
+              value={stats.avg_processing_hours}
+              precision={1}
+              suffix="小时"
+              valueStyle={{ color: '#722ed1' }}
             />
           </Card>
         </Col>

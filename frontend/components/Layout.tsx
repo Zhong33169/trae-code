@@ -12,7 +12,7 @@ import {
   MenuUnfoldOutlined,
 } from '@ant-design/icons';
 import { useRouter, usePathname } from 'next/navigation';
-import { getUser, logout, isAuthenticated, getUserRole } from '@/lib/auth';
+import { getUser, logout, isAuthenticated } from '@/lib/auth';
 import { UserRole, ROLE_LABELS } from '@/types';
 
 const { Header, Sider, Content } = Layout;
@@ -25,7 +25,7 @@ const AppLayout: React.FC<LayoutProps> = ({ children }) => {
   const router = useRouter();
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
-  const [user, setUser] = useState<{ name: string; role: UserRole } | null>(null);
+  const [user, setUser] = useState<{ real_name: string; role: string; role_name?: string } | null>(null);
 
   useEffect(() => {
     if (!isAuthenticated()) {
@@ -34,7 +34,7 @@ const AppLayout: React.FC<LayoutProps> = ({ children }) => {
     }
     const userData = getUser();
     if (userData) {
-      setUser({ name: userData.name, role: userData.role });
+      setUser({ real_name: userData.real_name, role: userData.role, role_name: userData.role_name });
     }
   }, [router]);
 
@@ -50,15 +50,12 @@ const AppLayout: React.FC<LayoutProps> = ({ children }) => {
         icon: <UnorderedListOutlined />,
         label: '打样任务',
       },
-    ];
-
-    if (user?.role === 'auditor' || user?.role === 'reviewer') {
-      items.push({
+      {
         key: '/statistics',
         icon: <BarChartOutlined />,
         label: '统计报表',
-      });
-    }
+      },
+    ];
 
     return items;
   };
@@ -76,7 +73,7 @@ const AppLayout: React.FC<LayoutProps> = ({ children }) => {
       key: 'role',
       label: (
         <span className="text-gray-500">
-          角色：{user ? ROLE_LABELS[user.role] : ''}
+          角色：{user ? ROLE_LABELS[user.role as UserRole] || user.role : ''}
         </span>
       ),
       disabled: true,
@@ -121,7 +118,7 @@ const AppLayout: React.FC<LayoutProps> = ({ children }) => {
           <Dropdown menu={{ items: userMenuItems }} placement="bottomRight">
             <div className="flex items-center gap-2 cursor-pointer hover:bg-gray-100 px-3 py-1 rounded">
               <Avatar size="small" icon={<UserOutlined />} />
-              <span>{user?.name}</span>
+              <span>{user?.real_name}</span>
             </div>
           </Dropdown>
         </Header>

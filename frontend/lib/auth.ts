@@ -49,7 +49,7 @@ export const login = async (username: string, password: string): Promise<LoginRe
     username,
     password,
   });
-  const data = response.data.data;
+  const data = response.data.data!;
   setToken(data.token);
   setUser(data.user);
   return data;
@@ -68,7 +68,7 @@ export const isAuthenticated = (): boolean => {
 
 export const getUserRole = (): UserRole | null => {
   const user = getUser();
-  return user?.role || null;
+  return (user?.role as UserRole) || null;
 };
 
 export const isRegistrar = (): boolean => {
@@ -83,43 +83,36 @@ export const isReviewer = (): boolean => {
   return getUserRole() === 'reviewer';
 };
 
-export const canHandleTask = (currentNode: string, status: string): boolean => {
+export const formatDuration = (hours: number): string => {
+  const absHours = Math.abs(hours);
+  if (absHours >= 1) {
+    return `${Math.floor(absHours)}小时`;
+  }
+  return '不足1小时';
+};
+
+export const formatTimeoutDisplay = (timeoutHours: number): string => {
+  if (timeoutHours > 0) {
+    return `已超时${timeoutHours}小时`;
+  }
+  return '';
+};
+
+export const canHandleTask = (current_node: string, status: string): boolean => {
   const role = getUserRole();
   if (!role) return false;
 
   if (role === 'registrar') {
-    return (currentNode === 'order_sampling' && status === 'pending') ||
-           (status === 'rejected');
+    return current_node === 'order_sampling' && status !== 'archived';
   }
 
   if (role === 'auditor') {
-    return (currentNode === 'sample_confirmation' && status === 'pending') ||
-           (currentNode === 'mass_production' && status === 'pending');
+    return current_node === 'sample_confirmation' || current_node === 'production_scheduling';
   }
 
   if (role === 'reviewer') {
-    return currentNode === 'archived' && status === 'pending';
+    return current_node === 'production_scheduling';
   }
 
   return false;
-};
-
-export const formatDuration = (seconds: number): string => {
-  const absSeconds = Math.abs(seconds);
-  const hours = Math.floor(absSeconds / 3600);
-  const minutes = Math.floor((absSeconds % 3600) / 60);
-  const secs = absSeconds % 60;
-
-  if (hours > 0) {
-    return `${hours}小时${minutes}分钟`;
-  } else if (minutes > 0) {
-    return `${minutes}分钟${secs}秒`;
-  } else {
-    return `${secs}秒`;
-  }
-};
-
-export const formatTimeoutDuration = (seconds: number): string => {
-  if (seconds <= 0) return '';
-  return `已超时 ${formatDuration(seconds)}`;
 };

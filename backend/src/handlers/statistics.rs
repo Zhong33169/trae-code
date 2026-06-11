@@ -1,5 +1,5 @@
 use actix_web::{web, HttpResponse, Responder, HttpRequest, get};
-use chrono::{Duration, Utc};
+use chrono::{Duration, Utc, NaiveDateTime};
 use sqlx::SqlitePool;
 
 use crate::middleware::auth::get_current_user;
@@ -191,8 +191,8 @@ async fn get_summary(
             task.archived_at.as_ref(),
         ) {
             if let (Ok(s), Ok(e)) = (
-                chrono::DateTime::parse_from_str(start, "%Y-%m-%d %H:%M:%S"),
-                chrono::DateTime::parse_from_str(end, "%Y-%m-%d %H:%M:%S"),
+                NaiveDateTime::parse_from_str(start, "%Y-%m-%d %H:%M:%S"),
+                NaiveDateTime::parse_from_str(end, "%Y-%m-%d %H:%M:%S"),
             ) {
                 let duration = e - s;
                 total_processing_hours += duration.num_hours() as f64;

@@ -32,20 +32,22 @@ import {
   isRegistrar,
   isAuditor,
   isReviewer,
-  canHandleTask,
-  formatTimeoutDuration,
+  getUserRole,
 } from '@/lib/auth';
 import TaskFlowSteps from '@/components/TaskFlowSteps';
 import OperationTimeline from '@/components/OperationTimeline';
 import {
-  Task,
-  TaskNodeRecord,
-  TaskActionParams,
+  TaskDetail,
+  NodeRecordDetail,
   NODE_LABELS,
   STATUS_LABELS,
   ApiResponse,
   NODE_ORDER,
+  getResponsibleName,
+  getStatusColor,
+  getNodeColor,
 } from '@/types';
+import { formatTimeoutDisplay } from '@/lib/auth';
 import dayjs from 'dayjs';
 
 const { Title, Text } = Typography;
@@ -56,9 +58,9 @@ interface ActionModalProps {
   title: string;
   action: string;
   onCancel: () => void;
-  onConfirm: (params: { remark?: string; exceptionReason?: string }) => void;
+  onConfirm: (params: { remark?: string; abnormal_reason?: string }) => void;
   loading: boolean;
-  showExceptionReason?: boolean;
+  showAbnormalReason?: boolean;
 }
 
 const ActionModal: React.FC<ActionModalProps> = ({
@@ -67,7 +69,7 @@ const ActionModal: React.FC<ActionModalProps> = ({
   onCancel,
   onConfirm,
   loading,
-  showExceptionReason = false,
+  showAbnormalReason = false,
 }) => {
   const [form] = Form.useForm();
 
@@ -90,8 +92,8 @@ const ActionModal: React.FC<ActionModalProps> = ({
         <Form.Item name="remark" label="备注">
           <TextArea rows={3} placeholder="请输入备注（可选）" />
         </Form.Item>
-        {showExceptionReason && (
-          <Form.Item name="exceptionReason" label="异常原因">
+        {showAbnormalReason && (
+          <Form.Item name="abnormal_reason" label="异常原因">
             <TextArea rows={3} placeholder="请输入异常原因（可选）" />
           </Form.Item>
         )}
@@ -114,19 +116,21 @@ export default function TaskDetailPage() {
   const taskId = params.id as string;
 
   const [loading, setLoading] = useState(true);
-  const [task, setTask] = useState<Task | null>(null);
+  const [task, setTask] = useState<TaskDetail | null>(null);
   const [actionModal, setActionModal] = useState<{
     open: boolean;
     title: string;
     action: string;
-    showExceptionReason: boolean;
+    showAbnormalReason: boolean;
   }>({
     open: false,
     title: '',
     action: '',
-    showExceptionReason: false,
+    showAbnormalReason: false,
   });
   const [actionLoading, setActionLoading] = useState(false);
+
+  const role = getUserRole();
 
   useEffect(() => {
     if (taskId) {
@@ -137,8 +141,10 @@ export default function TaskDetailPage() {
   const fetchTaskDetail = async () => {
     try {
       setLoading(true);
-      const response = await api.get<ApiResponse<Task>>(`/tasks/${taskId}`);
-      setTask(response.data.data);
+      const response = await api.get<ApiResponse<TaskDetail>>(`/tasks/${taskId}`);
+      if (response.data.data) {
+        setTask(response.data.data);
+      }
     } catch (error) {
       console.error('Failed to fetch task detail:', error);
     } finally {
@@ -150,31 +156,28 @@ export default function TaskDetailPage() {
     router.push('/tasks');
   };
 
-  const handleAction = async (action: string, title: string, showExceptionReason = false) => {
+  const handleAction = (action: string, title: string, showAbnormalReason = false) => {
     setActionModal({
       open: true,
       title,
       action,
-      showExceptionReason,
+      showAbnormalReason,
     });
   };
 
   const handleActionConfirm = async (values: {
     remark?: string;
-    exceptionReason?: string;
+    abnormal_reason?: string;
   }) => {
     if (!task) return;
 
     try {
       setActionLoading(true);
-      const actionParams: TaskActionParams = {
-        taskId: task.id,
-        action: actionModal.action as TaskActionParams['action'],
+      await api.post<ApiResponse>(`/tasks/${task.id}/advance`, {
+        action: actionModal.action,
         remark: values.remark,
-        exceptionReason: values.exceptionReason,
-      };
-
-      await api.post<ApiResponse>(`/tasks/${task.id}/action`, actionParams);
+        abnormal_reason: values.abnormal_reason,
+      });
       message.success('操作成功');
       setActionModal({ ...actionModal, open: false });
       fetchTaskDetail();
@@ -187,23 +190,11 @@ export default function TaskDetailPage() {
 
   const getActionButtons = () => {
     if (!task) return null;
-    if (!canHandleTask(task.currentNode, task.status)) return null;
 
     const buttons: React.ReactNode[] = [];
 
-    if (isRegistrar()) {
-      if (task.status === 'rejected') {
-        buttons.push(
-          <Button
-            key="correct"
-            type="primary"
-            icon={<SendOutlined />}
-            onClick={() => handleAction('submit', '补正提交', true)}
-          >
-            补正提交
-          </Button>
-        );
-      } else if (task.currentNode === 'order_sampling' && task.status === 'pending') {
+    if (role === 'registrar') {
+      if (task.current_node === 'order_sampling' && (task.status === 'pending' || task.status === 'processing')) {
         buttons.push(
           <Button
             key="submit"
@@ -215,16 +206,50 @@ export default function TaskDetailPage() {
           </Button>
         );
       }
+      if (task.status === 'rejected') {
+        buttons.push(
+          <Button
+            key="correct"
+            type="primary"
+            icon={<SendOutlined />}
+            onClick={() => handleAction('submit', '补正提交', true)}
+          >
+            补正提交
+          </Button>
+        );
+      }
     }
 
-    if (isAuditor()) {
-      if (task.currentNode === 'sample_confirmation' && task.status === 'pending') {
+    if (role === 'auditor') {
+      if (task.current_node === 'order_sampling') {
         buttons.push(
           <Button
             key="approve"
             type="primary"
             icon={<CheckOutlined />}
-            onClick={() => handleAction('approve', '样衣确认通过', true)}
+            onClick={() => handleAction('approve', '审核通过', true)}
+          >
+            审核通过
+          </Button>
+        );
+        buttons.push(
+          <Button
+            key="reject"
+            danger
+            icon={<CloseOutlined />}
+            onClick={() => handleAction('reject', '打回补正', true)}
+          >
+            打回补正
+          </Button>
+        );
+      }
+      if (task.current_node === 'sample_confirmation') {
+        buttons.push(
+          <Button
+            key="approve"
+            type="primary"
+            icon={<CheckOutlined />}
+            onClick={() => handleAction('approve', '确认通过', true)}
           >
             确认通过
           </Button>
@@ -234,44 +259,45 @@ export default function TaskDetailPage() {
             key="reject"
             danger
             icon={<CloseOutlined />}
-            onClick={() => handleAction('reject', '样衣确认打回', true)}
-          >
-            打回补正
-          </Button>
-        );
-      } else if (task.currentNode === 'mass_production' && task.status === 'pending') {
-        buttons.push(
-          <Button
-            key="approve"
-            type="primary"
-            icon={<CheckOutlined />}
-            onClick={() => handleAction('approve', '大货排产核准', true)}
-          >
-            排产核准
-          </Button>
-        );
-        buttons.push(
-          <Button
-            key="reject"
-            danger
-            icon={<CloseOutlined />}
-            onClick={() => handleAction('reject', '大货排产打回', true)}
+            onClick={() => handleAction('reject', '打回补正', true)}
           >
             打回补正
           </Button>
         );
       }
+      if (task.current_node === 'production_scheduling') {
+        buttons.push(
+          <Button
+            key="submit"
+            type="primary"
+            icon={<SendOutlined />}
+            onClick={() => handleAction('submit', '提交复核', true)}
+          >
+            提交复核
+          </Button>
+        );
+      }
     }
 
-    if (isReviewer() && task.currentNode === 'archived' && task.status === 'pending') {
+    if (role === 'reviewer' && task.current_node === 'production_scheduling') {
       buttons.push(
         <Button
-          key="archive"
+          key="approve"
           type="primary"
           icon={<CheckOutlined />}
-          onClick={() => handleAction('archive', '复核归档', true)}
+          onClick={() => handleAction('approve', '复核归档', true)}
         >
           复核归档
+        </Button>
+      );
+      buttons.push(
+        <Button
+          key="reject"
+          danger
+          icon={<CloseOutlined />}
+          onClick={() => handleAction('reject', '打回', true)}
+        >
+          打回
         </Button>
       );
     }
@@ -282,54 +308,45 @@ export default function TaskDetailPage() {
   const nodeRecordColumns = [
     {
       title: '节点',
-      dataIndex: 'node',
-      key: 'node',
+      dataIndex: 'node_type',
+      key: 'node_type',
       width: 120,
-      render: (node: string) => NODE_LABELS[node as keyof typeof NODE_LABELS] || node,
+      render: (nodeType: string) => NODE_LABELS[nodeType as keyof typeof NODE_LABELS] || nodeType,
     },
     {
-      title: '状态',
-      dataIndex: 'status',
-      key: 'status',
+      title: '操作',
+      dataIndex: 'action',
+      key: 'action',
       width: 100,
-      render: (status: string, record: TaskNodeRecord) => (
-        <Space>
-          {record.isTimeout && <WarningOutlined className="text-red-500 animate-blink" />}
-          <Tag
-            color={
-              status === 'approved' || status === 'completed'
-                ? 'green'
-                : status === 'rejected'
-                ? 'red'
-                : status === 'timeout'
-                ? 'red'
-                : status === 'processing'
-                ? 'blue'
-                : 'default'
-            }
-          >
-            {STATUS_LABELS[status as keyof typeof STATUS_LABELS] || status}
-          </Tag>
-        </Space>
-      ),
+      render: (action: string) => {
+        const actionMap: Record<string, string> = {
+          create: '创建',
+          submit: '提交',
+          approve: '通过',
+          reject: '打回',
+          process: '处理中',
+        };
+        return actionMap[action] || action;
+      },
     },
     {
-      title: '责任人',
-      dataIndex: 'assigneeName',
-      key: 'assigneeName',
+      title: '操作人',
+      dataIndex: 'operator_name',
+      key: 'operator_name',
       width: 100,
+      render: (text: string) => text || '-',
     },
     {
       title: '开始时间',
-      dataIndex: 'startedAt',
-      key: 'startedAt',
+      dataIndex: 'started_at',
+      key: 'started_at',
       width: 160,
       render: (date: string) => (date ? dayjs(date).format('YYYY-MM-DD HH:mm') : '-'),
     },
     {
       title: '完成时间',
-      dataIndex: 'completedAt',
-      key: 'completedAt',
+      dataIndex: 'completed_at',
+      key: 'completed_at',
       width: 160,
       render: (date: string) => (date ? dayjs(date).format('YYYY-MM-DD HH:mm') : '-'),
     },
@@ -337,11 +354,11 @@ export default function TaskDetailPage() {
       title: '超时情况',
       key: 'timeout',
       width: 140,
-      render: (_value: string, record: TaskNodeRecord) => {
-        if (record.isTimeout && record.timeoutDuration !== undefined) {
+      render: (_: string, record: NodeRecordDetail) => {
+        if (record.is_timeout === 1 && record.timeout_hours > 0) {
           return (
             <span className="text-red-500 font-medium">
-              {formatTimeoutDuration(record.timeoutDuration)}
+              {formatTimeoutDisplay(record.timeout_hours)}
             </span>
           );
         }
@@ -350,8 +367,8 @@ export default function TaskDetailPage() {
     },
     {
       title: '异常原因',
-      dataIndex: 'exceptionReason',
-      key: 'exceptionReason',
+      dataIndex: 'abnormal_reason',
+      key: 'abnormal_reason',
       ellipsis: true,
       render: (text: string) => text || '-',
     },
@@ -383,9 +400,11 @@ export default function TaskDetailPage() {
     );
   }
 
-  const sortedNodeRecords = [...task.nodeRecords].sort(
-    (a, b) => NODE_ORDER.indexOf(a.node) - NODE_ORDER.indexOf(b.node)
+  const sortedNodeRecords = [...task.node_records].sort(
+    (a, b) => NODE_ORDER.indexOf(a.node_type as typeof NODE_ORDER[number]) - NODE_ORDER.indexOf(b.node_type as typeof NODE_ORDER[number])
   );
+
+  const actionButtons = getActionButtons();
 
   return (
     <div>
@@ -397,72 +416,62 @@ export default function TaskDetailPage() {
           <Title level={3} className="!mb-0">
             任务详情
           </Title>
-          {task.isTimeout && (
+          {task.is_timeout && (
             <Tag color="red" icon={<WarningOutlined className="animate-blink" />}>
               已超时
             </Tag>
           )}
         </Space>
-        <Space>{getActionButtons()}</Space>
+        <Space>{actionButtons}</Space>
       </div>
 
       <Card className="mb-6">
         <Descriptions bordered column={2} size="small">
           <Descriptions.Item label="任务编号">
-            <span className="font-mono">{task.taskNo}</span>
+            <span className="font-mono">{task.task_no}</span>
           </Descriptions.Item>
-          <Descriptions.Item label="款号">{task.styleNo}</Descriptions.Item>
-          <Descriptions.Item label="款名">{task.styleName}</Descriptions.Item>
+          <Descriptions.Item label="款号">{task.style_no}</Descriptions.Item>
+          <Descriptions.Item label="款名">{task.style_name}</Descriptions.Item>
           <Descriptions.Item label="当前节点">
-            <Tag
-              color={
-                task.currentNode === 'order_sampling'
-                  ? 'blue'
-                  : task.currentNode === 'sample_confirmation'
-                  ? 'cyan'
-                  : task.currentNode === 'mass_production'
-                  ? 'purple'
-                  : 'green'
-              }
-            >
-              {NODE_LABELS[task.currentNode]}
+            <Tag color={getNodeColor(task.current_node)}>
+              {NODE_LABELS[task.current_node]}
             </Tag>
           </Descriptions.Item>
           <Descriptions.Item label="状态">
-            <Tag
-              color={
-                task.status === 'approved' || task.status === 'completed'
-                  ? 'green'
-                  : task.status === 'rejected'
-                  ? 'red'
-                  : task.status === 'timeout'
-                  ? 'red'
-                  : task.status === 'processing'
-                  ? 'blue'
-                  : 'default'
-              }
-            >
+            <Tag color={getStatusColor(task.status)}>
               {STATUS_LABELS[task.status]}
             </Tag>
           </Descriptions.Item>
-          <Descriptions.Item label="当前责任人">{task.currentAssigneeName}</Descriptions.Item>
-          <Descriptions.Item label="创建人">{task.creatorName}</Descriptions.Item>
+          <Descriptions.Item label="责任人">{getResponsibleName(task)}</Descriptions.Item>
+          <Descriptions.Item label="创建人">{task.registrar_name || '-'}</Descriptions.Item>
           <Descriptions.Item label="创建时间">
-            {dayjs(task.createdAt).format('YYYY-MM-DD HH:mm:ss')}
+            {dayjs(task.created_at).format('YYYY-MM-DD HH:mm:ss')}
           </Descriptions.Item>
           <Descriptions.Item label="剩余时长" span={2}>
-            {task.isTimeout && task.timeoutDuration !== undefined ? (
+            {task.is_timeout && task.timeout_hours > 0 ? (
               <span className="text-red-500 font-medium">
-                {formatTimeoutDuration(task.timeoutDuration)}
+                {formatTimeoutDisplay(task.timeout_hours)}
               </span>
-            ) : task.remainingTime !== undefined && task.remainingTime > 0 ? (
-              <span className="text-green-600">
-                {Math.floor(task.remainingTime / 3600)}小时
-                {Math.floor((task.remainingTime % 3600) / 60)}分钟
-              </span>
+            ) : task.current_node !== 'archived' ? (
+              <span className="text-green-600">正常</span>
             ) : (
               <span className="text-gray-400">-</span>
             )}
+          </Descriptions.Item>
+        </Descriptions>
+      </Card>
+
+      <Card title="更多信息" className="mb-6">
+        <Descriptions bordered column={2} size="small">
+          <Descriptions.Item label="订单号">{task.order_no || '-'}</Descriptions.Item>
+          <Descriptions.Item label="客户名">{task.customer_name || '-'}</Descriptions.Item>
+          <Descriptions.Item label="面料">{task.fabric_type || '-'}</Descriptions.Item>
+          <Descriptions.Item label="颜色">{task.color || '-'}</Descriptions.Item>
+          <Descriptions.Item label="尺码">{task.size_spec || '-'}</Descriptions.Item>
+          <Descriptions.Item label="数量">{task.quantity ?? '-'}</Descriptions.Item>
+          <Descriptions.Item label="优先级">{task.priority || '-'}</Descriptions.Item>
+          <Descriptions.Item label="更新时间">
+            {dayjs(task.updated_at).format('YYYY-MM-DD HH:mm:ss')}
           </Descriptions.Item>
         </Descriptions>
       </Card>
@@ -472,12 +481,12 @@ export default function TaskDetailPage() {
       </Card>
 
       <Card title="节点处理记录" className="mb-6">
-        <Table<TaskNodeRecord>
+        <Table<NodeRecordDetail>
           rowKey="id"
           columns={nodeRecordColumns}
           dataSource={sortedNodeRecords}
           pagination={false}
-          rowClassName={(record) => (record.isTimeout ? 'row-timeout' : '')}
+          rowClassName={(record) => (record.is_timeout === 1 ? 'row-timeout' : '')}
           scroll={{ x: 1000 }}
         />
       </Card>
@@ -486,10 +495,10 @@ export default function TaskDetailPage() {
         <Col xs={24} md={12}>
           <Card title="操作区" extra={<FileTextOutlined />}>
             <div className="text-center py-8">
-              {getActionButtons() && getActionButtons()!.length > 0 ? (
+              {actionButtons && actionButtons.length > 0 ? (
                 <Space direction="vertical" size="middle">
                   <Text type="secondary">请选择要执行的操作</Text>
-                  <Space>{getActionButtons()}</Space>
+                  <Space>{actionButtons}</Space>
                 </Space>
               ) : (
                 <Text type="secondary">当前节点无需操作或无操作权限</Text>
@@ -511,14 +520,14 @@ export default function TaskDetailPage() {
 
       <Divider orientation="left">操作日志</Divider>
       <Card>
-        <OperationTimeline logs={task.operationLogs || []} />
+        <OperationTimeline logs={task.operation_logs || []} />
       </Card>
 
       <ActionModal
         open={actionModal.open}
         title={actionModal.title}
         action={actionModal.action}
-        showExceptionReason={actionModal.showExceptionReason}
+        showAbnormalReason={actionModal.showAbnormalReason}
         loading={actionLoading}
         onCancel={() => setActionModal({ ...actionModal, open: false })}
         onConfirm={handleActionConfirm}

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, Suspense } from 'react';
 import {
   Card,
   Row,
@@ -15,6 +15,7 @@ import {
   Input,
   Modal,
   Form,
+  InputNumber,
   message,
   Spin,
   Typography,
@@ -29,68 +30,77 @@ import {
   ReloadOutlined,
   EyeOutlined,
   ExclamationCircleFilled,
+  SendOutlined,
+  CheckOutlined,
+  CloseOutlined,
 } from '@ant-design/icons';
 import { useRouter, useSearchParams } from 'next/navigation';
 import api from '@/lib/api';
-import { isRegistrar, isAuditor, isReviewer, formatDuration, formatTimeoutDuration, canHandleTask } from '@/lib/auth';
+import { isRegistrar, isAuditor, isReviewer, getUserRole } from '@/lib/auth';
 import {
-  Task,
+  TaskListItem,
   TaskListResponse,
-  TaskQueryParams,
+  TaskListQuery,
   TaskNode,
   TaskStatus,
+  CreateTaskRequest,
   NODE_LABELS,
   STATUS_LABELS,
+  PRIORITY_LABELS,
   ApiResponse,
+  getResponsibleName,
+  getStatusColor,
+  getNodeColor,
 } from '@/types';
+import { formatTimeoutDisplay } from '@/lib/auth';
 import type { TableProps } from 'antd';
 import dayjs from 'dayjs';
 
 const { Title } = Typography;
 const { RangePicker } = DatePicker;
-const { Option } = Select;
-const { confirm } = Modal;
 
-interface CreateTaskForm {
-  styleNo: string;
-  styleName: string;
-  remark?: string;
-}
-
-export default function TasksPage() {
+function TasksPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [loading, setLoading] = useState(true);
-  const [tasks, setTasks] = useState<Task[]>([]);
+  const [tasks, setTasks] = useState<TaskListItem[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
-  const [stats, setStats] = useState({
-    total: 0,
-    pending: 0,
-    timeout: 0,
-    completed: 0,
-  });
+  const [timeoutCount, setTimeoutCount] = useState(0);
+  const [computedPending, setComputedPending] = useState(0);
+  const [computedCompleted, setComputedCompleted] = useState(0);
 
-  const [filters, setFilters] = useState<TaskQueryParams>({});
+  const [filters, setFilters] = useState<TaskListQuery>({});
   const [createModalVisible, setCreateModalVisible] = useState(false);
-  const [createForm] = Form.useForm<CreateTaskForm>();
+  const [createForm] = Form.useForm<CreateTaskRequest>();
   const [createLoading, setCreateLoading] = useState(false);
   const [canCreate, setCanCreate] = useState(false);
+
+  const role = getUserRole();
 
   const fetchTasks = useCallback(async () => {
     try {
       setLoading(true);
-      const params: TaskQueryParams = {
+      const params: Record<string, string | number | undefined> = {
         page,
-        pageSize,
-        ...filters,
+        page_size: pageSize,
+        status: filters.status,
+        current_node: filters.current_node,
+        keyword: filters.keyword || undefined,
+        is_timeout: filters.is_timeout || undefined,
+        start_date: filters.start_date || undefined,
+        end_date: filters.end_date || undefined,
       };
       const response = await api.get<ApiResponse<TaskListResponse>>('/tasks', { params });
       const data = response.data.data;
-      setTasks(data.items);
-      setTotal(data.total);
-      setStats(data.stats);
+      if (data) {
+        setTasks(data.list);
+        setTotal(data.total);
+        setTimeoutCount(data.timeout_count);
+        setComputedPending(data.list.filter((t) => t.status === 'pending' || t.status === 'processing').length);
+        setComputedCompleted(data.list.filter((t) => t.status === 'completed' || t.status === 'archived').length);
+      }
     } catch (error) {
       console.error('Failed to fetch tasks:', error);
     } finally {
@@ -120,10 +130,10 @@ export default function TasksPage() {
     setPage(1);
   };
 
-  const handleCreateTask = async (values: CreateTaskForm) => {
+  const handleCreateTask = async (values: CreateTaskRequest) => {
     try {
       setCreateLoading(true);
-      await api.post<ApiResponse<Task>>('/tasks', values);
+      await api.post<ApiResponse>('/tasks', values);
       message.success('任务创建成功');
       setCreateModalVisible(false);
       createForm.resetFields();
@@ -135,20 +145,20 @@ export default function TasksPage() {
     }
   };
 
-  const handleViewDetail = (id: number) => {
+  const handleViewDetail = (id: string) => {
     router.push(`/tasks/${id}`);
   };
 
-  const handleQuickAction = (task: Task, action: string) => {
-    confirm({
+  const handleQuickAction = (task: TaskListItem, action: string, actionLabel: string) => {
+    Modal.confirm({
       title: '操作确认',
       icon: <ExclamationCircleFilled />,
-      content: `确定要对任务【${task.taskNo}】执行"${action}"操作吗？`,
+      content: `确定要对任务【${task.task_no}】执行"${actionLabel}"操作吗？`,
       okText: '确定',
       cancelText: '取消',
       onOk: async () => {
         try {
-          await api.post<ApiResponse>(`/tasks/${task.id}/action`, { action });
+          await api.post<ApiResponse>(`/tasks/${task.id}/advance`, { action });
           message.success('操作成功');
           fetchTasks();
         } catch (error) {
@@ -158,126 +168,165 @@ export default function TasksPage() {
     });
   };
 
-  const getActionButtons = (task: Task) => {
+  const getActionButtons = (task: TaskListItem) => {
     const buttons: React.ReactNode[] = [
       <Button key="view" size="small" icon={<EyeOutlined />} onClick={() => handleViewDetail(task.id)}>
         详情
       </Button>,
     ];
 
-    if (canHandleTask(task.currentNode, task.status)) {
-      const role = isRegistrar() ? 'registrar' : isAuditor() ? 'auditor' : 'reviewer';
-      
-      if (role === 'registrar') {
-        if (task.status === 'rejected') {
-          buttons.push(
-            <Button
-              key="correct"
-              type="primary"
-              size="small"
-              onClick={() => handleQuickAction(task, '补正提交')}
-            >
-              补正提交
-            </Button>
-          );
-        } else if (task.currentNode === 'order_sampling' && task.status === 'pending') {
-          buttons.push(
-            <Button
-              key="submit"
-              type="primary"
-              size="small"
-              onClick={() => handleQuickAction(task, '提交审核')}
-            >
-              提交审核
-            </Button>
-          );
-        }
-      }
-
-      if (role === 'auditor') {
-        if (task.currentNode === 'sample_confirmation' && task.status === 'pending') {
-          buttons.push(
-            <Button
-              key="approve"
-              type="primary"
-              size="small"
-              onClick={() => handleViewDetail(task.id)}
-            >
-              样衣确认
-            </Button>
-          );
-        } else if (task.currentNode === 'mass_production' && task.status === 'pending') {
-          buttons.push(
-            <Button
-              key="approve"
-              type="primary"
-              size="small"
-              onClick={() => handleViewDetail(task.id)}
-            >
-              大货排产
-            </Button>
-          );
-        }
-      }
-
-      if (role === 'reviewer' && task.currentNode === 'archived' && task.status === 'pending') {
+    if (role === 'registrar') {
+      if (task.current_node === 'order_sampling' && (task.status === 'pending' || task.status === 'processing')) {
         buttons.push(
           <Button
-            key="archive"
+            key="submit"
             type="primary"
             size="small"
-            onClick={() => handleViewDetail(task.id)}
+            icon={<SendOutlined />}
+            onClick={() => handleQuickAction(task, 'submit', '提交审核')}
           >
-            复核归档
+            提交审核
+          </Button>
+        );
+      }
+      if (task.status === 'rejected') {
+        buttons.push(
+          <Button
+            key="correct"
+            type="primary"
+            size="small"
+            icon={<SendOutlined />}
+            onClick={() => handleQuickAction(task, 'submit', '补正提交')}
+          >
+            补正提交
           </Button>
         );
       }
     }
 
+    if (role === 'auditor') {
+      if (task.current_node === 'order_sampling') {
+        buttons.push(
+          <Button
+            key="approve"
+            type="primary"
+            size="small"
+            icon={<CheckOutlined />}
+            onClick={() => handleQuickAction(task, 'approve', '审核通过')}
+          >
+            审核通过
+          </Button>
+        );
+        buttons.push(
+          <Button
+            key="reject"
+            danger
+            size="small"
+            icon={<CloseOutlined />}
+            onClick={() => handleQuickAction(task, 'reject', '打回补正')}
+          >
+            打回补正
+          </Button>
+        );
+      }
+      if (task.current_node === 'sample_confirmation') {
+        buttons.push(
+          <Button
+            key="approve"
+            type="primary"
+            size="small"
+            icon={<CheckOutlined />}
+            onClick={() => handleQuickAction(task, 'approve', '确认通过')}
+          >
+            确认通过
+          </Button>
+        );
+        buttons.push(
+          <Button
+            key="reject"
+            danger
+            size="small"
+            icon={<CloseOutlined />}
+            onClick={() => handleQuickAction(task, 'reject', '打回补正')}
+          >
+            打回补正
+          </Button>
+        );
+      }
+      if (task.current_node === 'production_scheduling') {
+        buttons.push(
+          <Button
+            key="submit"
+            type="primary"
+            size="small"
+            icon={<SendOutlined />}
+            onClick={() => handleQuickAction(task, 'submit', '提交复核')}
+          >
+            提交复核
+          </Button>
+        );
+      }
+    }
+
+    if (role === 'reviewer' && task.current_node === 'production_scheduling') {
+      buttons.push(
+        <Button
+          key="approve"
+          type="primary"
+          size="small"
+          icon={<CheckOutlined />}
+          onClick={() => handleQuickAction(task, 'approve', '复核归档')}
+        >
+          复核归档
+        </Button>
+      );
+      buttons.push(
+        <Button
+          key="reject"
+          danger
+          size="small"
+          icon={<CloseOutlined />}
+          onClick={() => handleQuickAction(task, 'reject', '打回')}
+        >
+          打回
+        </Button>
+      );
+    }
+
     return buttons;
   };
 
-  const columns: TableProps<Task>['columns'] = [
+  const columns: TableProps<TaskListItem>['columns'] = [
     {
       title: '任务编号',
-      dataIndex: 'taskNo',
-      key: 'taskNo',
+      dataIndex: 'task_no',
+      key: 'task_no',
       width: 140,
       render: (text) => <span className="font-mono">{text}</span>,
     },
     {
       title: '款号',
-      dataIndex: 'styleNo',
-      key: 'styleNo',
+      dataIndex: 'style_no',
+      key: 'style_no',
       width: 120,
     },
     {
       title: '款名',
-      dataIndex: 'styleName',
-      key: 'styleName',
+      dataIndex: 'style_name',
+      key: 'style_name',
       ellipsis: true,
     },
     {
       title: '当前节点',
-      dataIndex: 'currentNode',
-      key: 'currentNode',
+      dataIndex: 'current_node',
+      key: 'current_node',
       width: 120,
       render: (node: TaskNode, record) => (
         <Space>
-          {record.isTimeout && (
+          {record.is_timeout && (
             <WarningOutlined className="text-red-500 animate-blink" />
           )}
-          <Tag
-            color={
-              node === 'order_sampling'
-                ? 'blue'
-                : node === 'sample_confirmation'
-                ? 'cyan'
-                : node === 'mass_production'
-                ? 'purple'
-                : 'green'
-            }
-          >
+          <Tag color={getNodeColor(node)}>
             {NODE_LABELS[node]}
           </Tag>
         </Space>
@@ -289,47 +338,31 @@ export default function TasksPage() {
       key: 'status',
       width: 100,
       render: (status: TaskStatus) => (
-        <Tag
-          color={
-            status === 'approved' || status === 'completed'
-              ? 'green'
-              : status === 'rejected'
-              ? 'red'
-              : status === 'timeout'
-              ? 'red'
-              : status === 'processing'
-              ? 'blue'
-              : 'default'
-          }
-        >
+        <Tag color={getStatusColor(status)}>
           {STATUS_LABELS[status]}
         </Tag>
       ),
     },
     {
       title: '责任人',
-      dataIndex: 'currentAssigneeName',
-      key: 'currentAssigneeName',
+      key: 'responsible',
       width: 100,
+      render: (_: unknown, record: TaskListItem) => getResponsibleName(record),
     },
     {
       title: '剩余时长',
-      key: 'remainingTime',
+      key: 'timeout_hours',
       width: 140,
-      render: (_, record) => {
-        if (record.isTimeout && record.timeoutDuration !== undefined) {
+      render: (_: unknown, record: TaskListItem) => {
+        if (record.is_timeout && record.timeout_hours > 0) {
           return (
             <span className="text-red-500 font-medium">
-              {formatTimeoutDuration(record.timeoutDuration)}
+              {formatTimeoutDisplay(record.timeout_hours)}
             </span>
           );
         }
-        if (record.remainingTime !== undefined && record.remainingTime > 0) {
-          return (
-            <span className="text-green-600">
-              {formatDuration(record.remainingTime)}
-            </span>
-          );
+        if (record.current_node !== 'archived') {
+          return <span className="text-green-600">正常</span>;
         }
         return <span className="text-gray-400">-</span>;
       },
@@ -337,9 +370,9 @@ export default function TasksPage() {
     {
       title: '操作',
       key: 'action',
-      width: 180,
-      render: (_, record) => (
-        <Space size="small">{getActionButtons(record)}</Space>
+      width: 200,
+      render: (_: unknown, record: TaskListItem) => (
+        <Space size="small" wrap>{getActionButtons(record)}</Space>
       ),
     },
   ];
@@ -362,7 +395,7 @@ export default function TasksPage() {
           <Card size="small">
             <Statistic
               title="任务总数"
-              value={stats.total}
+              value={total}
               prefix={<FileTextOutlined className="text-blue-500" />}
               valueStyle={{ color: '#1677ff', fontSize: 20 }}
             />
@@ -372,7 +405,7 @@ export default function TasksPage() {
           <Card size="small">
             <Statistic
               title="待处理"
-              value={stats.pending}
+              value={computedPending}
               prefix={<ClockCircleOutlined className="text-orange-500" />}
               valueStyle={{ color: '#fa8c16', fontSize: 20 }}
             />
@@ -382,7 +415,7 @@ export default function TasksPage() {
           <Card size="small">
             <Statistic
               title="已超时"
-              value={stats.timeout}
+              value={timeoutCount}
               prefix={<WarningOutlined className="text-red-500" />}
               valueStyle={{ color: '#ff4d4f', fontSize: 20 }}
             />
@@ -392,7 +425,7 @@ export default function TasksPage() {
           <Card size="small">
             <Statistic
               title="已完成"
-              value={stats.completed}
+              value={computedCompleted}
               prefix={<CheckCircleOutlined className="text-green-500" />}
               valueStyle={{ color: '#52c41a', fontSize: 20 }}
             />
@@ -407,13 +440,13 @@ export default function TasksPage() {
               placeholder="全部节点"
               allowClear
               style={{ width: 150 }}
-              value={filters.node}
-              onChange={(value) => setFilters({ ...filters, node: value })}
+              value={filters.current_node}
+              onChange={(value) => setFilters({ ...filters, current_node: value })}
             >
               {Object.entries(NODE_LABELS).map(([key, label]) => (
-                <Option key={key} value={key}>
+                <Select.Option key={key} value={key}>
                   {label}
-                </Option>
+                </Select.Option>
               ))}
             </Select>
           </Form.Item>
@@ -426,9 +459,9 @@ export default function TasksPage() {
               onChange={(value) => setFilters({ ...filters, status: value })}
             >
               {Object.entries(STATUS_LABELS).map(([key, label]) => (
-                <Option key={key} value={key}>
+                <Select.Option key={key} value={key}>
                   {label}
-                </Option>
+                </Select.Option>
               ))}
             </Select>
           </Form.Item>
@@ -437,32 +470,32 @@ export default function TasksPage() {
               placeholder="全部"
               allowClear
               style={{ width: 120 }}
-              value={filters.isTimeout}
-              onChange={(value) => setFilters({ ...filters, isTimeout: value })}
+              value={filters.is_timeout}
+              onChange={(value) => setFilters({ ...filters, is_timeout: value })}
             >
-              <Option value={true}>已超时</Option>
-              <Option value={false}>未超时</Option>
+              <Select.Option value="1">已超时</Select.Option>
+              <Select.Option value="0">未超时</Select.Option>
             </Select>
           </Form.Item>
           <Form.Item label="时间段">
             <RangePicker
               value={
-                filters.startDate && filters.endDate
-                  ? [dayjs(filters.startDate), dayjs(filters.endDate)]
+                filters.start_date && filters.end_date
+                  ? [dayjs(filters.start_date), dayjs(filters.end_date)]
                   : undefined
               }
               onChange={(dates) => {
                 if (dates && dates[0] && dates[1]) {
                   setFilters({
                     ...filters,
-                    startDate: dates[0].format('YYYY-MM-DD'),
-                    endDate: dates[1].format('YYYY-MM-DD'),
+                    start_date: dates[0].format('YYYY-MM-DD'),
+                    end_date: dates[1].format('YYYY-MM-DD'),
                   });
                 } else {
                   setFilters({
                     ...filters,
-                    startDate: undefined,
-                    endDate: undefined,
+                    start_date: undefined,
+                    end_date: undefined,
                   });
                 }
               }}
@@ -470,7 +503,7 @@ export default function TasksPage() {
           </Form.Item>
           <Form.Item label="关键词">
             <Input
-              placeholder="任务编号/款号/款名"
+              placeholder="任务编号/款号/款名/客户"
               allowClear
               style={{ width: 200 }}
               value={filters.keyword}
@@ -492,7 +525,7 @@ export default function TasksPage() {
 
       <Card>
         <Spin spinning={loading}>
-          <Table<Task>
+          <Table<TaskListItem>
             rowKey="id"
             columns={columns}
             dataSource={tasks}
@@ -502,14 +535,14 @@ export default function TasksPage() {
               total,
               showSizeChanger: true,
               showQuickJumper: true,
-              showTotal: (total) => `共 ${total} 条记录`,
+              showTotal: (t) => `共 ${t} 条记录`,
               onChange: (p, ps) => {
                 setPage(p);
                 setPageSize(ps);
               },
             }}
-            rowClassName={(record) => (record.isTimeout ? 'row-timeout' : '')}
-            scroll={{ x: 1000 }}
+            rowClassName={(record) => (record.is_timeout ? 'row-timeout' : '')}
+            scroll={{ x: 1100 }}
           />
         </Spin>
       </Card>
@@ -523,26 +556,75 @@ export default function TasksPage() {
         }}
         footer={null}
         destroyOnClose
+        width={600}
       >
-        <Form<CreateTaskForm>
+        <Form<CreateTaskRequest>
           form={createForm}
           layout="vertical"
           onFinish={handleCreateTask}
         >
-          <Form.Item
-            name="styleNo"
-            label="款号"
-            rules={[{ required: true, message: '请输入款号' }]}
-          >
-            <Input placeholder="请输入款号" />
-          </Form.Item>
-          <Form.Item
-            name="styleName"
-            label="款名"
-            rules={[{ required: true, message: '请输入款名' }]}
-          >
-            <Input placeholder="请输入款名" />
-          </Form.Item>
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item
+                name="style_no"
+                label="款号"
+                rules={[{ required: true, message: '请输入款号' }]}
+              >
+                <Input placeholder="请输入款号" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item
+                name="style_name"
+                label="款名"
+                rules={[{ required: true, message: '请输入款名' }]}
+              >
+                <Input placeholder="请输入款名" />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item name="customer_name" label="客户名">
+                <Input placeholder="请输入客户名" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="fabric_type" label="面料">
+                <Input placeholder="请输入面料类型" />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item name="color" label="颜色">
+                <Input placeholder="请输入颜色" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="size_spec" label="尺码">
+                <Input placeholder="请输入尺码规格" />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item name="quantity" label="数量">
+                <InputNumber placeholder="请输入数量" min={1} style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="priority" label="优先级">
+                <Select placeholder="请选择优先级" allowClear>
+                  {Object.entries(PRIORITY_LABELS).map(([key, label]) => (
+                    <Select.Option key={key} value={key}>
+                      {label}
+                    </Select.Option>
+                  ))}
+                </Select>
+              </Form.Item>
+            </Col>
+          </Row>
           <Form.Item name="remark" label="备注">
             <Input.TextArea rows={3} placeholder="请输入备注（可选）" />
           </Form.Item>
@@ -566,3 +648,13 @@ export default function TasksPage() {
     </div>
   );
 }
+
+function TasksPageWithSuspense() {
+  return (
+    <Suspense fallback={<div className="flex justify-center items-center h-64"><Spin size="large" /></div>}>
+      <TasksPage />
+    </Suspense>
+  );
+}
+
+export default TasksPageWithSuspense;

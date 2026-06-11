@@ -8,10 +8,12 @@ import {
   PercentageOutlined,
   BarChartOutlined,
   ReloadOutlined,
+  FileTextOutlined,
+  CheckCircleOutlined,
 } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
 import api from '@/lib/api';
-import { StatisticsData, ApiResponse, NODE_LABELS, STATUS_LABELS } from '@/types';
+import { SummaryStatistics, TrendData, ApiResponse, NODE_LABELS, STATUS_LABELS } from '@/types';
 import dayjs from 'dayjs';
 
 const { Title } = Typography;
@@ -19,23 +21,26 @@ const { RangePicker } = DatePicker;
 
 export default function StatisticsPage() {
   const [loading, setLoading] = useState(true);
-  const [data, setData] = useState<StatisticsData | null>(null);
-  const [dateRange, setDateRange] = useState<[string, string] | null>(null);
+  const [summary, setSummary] = useState<SummaryStatistics | null>(null);
+  const [trend, setTrend] = useState<TrendData[]>([]);
 
   useEffect(() => {
     fetchStatistics();
-  }, [dateRange]);
+  }, []);
 
   const fetchStatistics = async () => {
     try {
       setLoading(true);
-      const params: Record<string, string> = {};
-      if (dateRange) {
-        params.startDate = dateRange[0];
-        params.endDate = dateRange[1];
+      const [summaryRes, trendRes] = await Promise.all([
+        api.get<ApiResponse<SummaryStatistics>>('/statistics/summary'),
+        api.get<ApiResponse<TrendData[]>>('/statistics/trend'),
+      ]);
+      if (summaryRes.data.data) {
+        setSummary(summaryRes.data.data);
       }
-      const response = await api.get<ApiResponse<StatisticsData>>('/statistics', { params });
-      setData(response.data.data);
+      if (trendRes.data.data) {
+        setTrend(trendRes.data.data);
+      }
     } catch (error) {
       console.error('Failed to fetch statistics:', error);
     } finally {
@@ -43,20 +48,18 @@ export default function StatisticsPage() {
     }
   };
 
-  const handleDateChange = (dates: any) => {
-    if (dates && dates[0] && dates[1]) {
-      setDateRange([dates[0].format('YYYY-MM-DD'), dates[1].format('YYYY-MM-DD')]);
-    } else {
-      setDateRange(null);
-    }
-  };
-
-  const handleReset = () => {
-    setDateRange(null);
-  };
+  const timeoutRate = summary && summary.total_tasks > 0
+    ? (summary.timeout_tasks / summary.total_tasks * 100)
+    : 0;
 
   const getNodeBarChart = () => {
-    if (!data) return {};
+    if (!summary) return {};
+    const data = [
+      { name: '订单打样', value: summary.pending_tasks },
+      { name: '样衣确认+大货排产', value: summary.processing_tasks },
+      { name: '已完成', value: summary.completed_tasks },
+      { name: '已超时', value: summary.timeout_tasks },
+    ];
     return {
       tooltip: {
         trigger: 'axis',
@@ -65,17 +68,17 @@ export default function StatisticsPage() {
       grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
       xAxis: {
         type: 'category',
-        data: data.taskCountByNode.map((item) => NODE_LABELS[item.node as keyof typeof NODE_LABELS] || item.node),
+        data: data.map((item) => item.name),
       },
       yAxis: { type: 'value' },
       series: [
         {
           name: '任务数',
           type: 'bar',
-          data: data.taskCountByNode.map((item) => item.count),
+          data: data.map((item) => item.value),
           itemStyle: {
             color: (params: any) => {
-              const colors = ['#1677ff', '#13c2c2', '#722ed1', '#52c41a'];
+              const colors = ['#1677ff', '#fa8c16', '#52c41a', '#ff4d4f'];
               return colors[params.dataIndex % colors.length];
             },
           },
@@ -85,7 +88,13 @@ export default function StatisticsPage() {
   };
 
   const getStatusPieChart = () => {
-    if (!data) return {};
+    if (!summary) return {};
+    const data = [
+      { value: summary.pending_tasks, name: '待处理' },
+      { value: summary.processing_tasks, name: '处理中' },
+      { value: summary.completed_tasks, name: '已完成' },
+      { value: summary.timeout_tasks, name: '已超时' },
+    ].filter((item) => item.value > 0);
     return {
       tooltip: { trigger: 'item' },
       legend: { orient: 'vertical', left: 'left' },
@@ -101,46 +110,79 @@ export default function StatisticsPage() {
             label: { show: true, fontSize: 20, fontWeight: 'bold' },
           },
           labelLine: { show: false },
-          data: data.taskCountByStatus.map((item) => ({
-            value: item.count,
-            name: STATUS_LABELS[item.status as keyof typeof STATUS_LABELS] || item.status,
-          })),
-          color: ['#1677ff', '#52c41a', '#ff4d4f', '#fa8c16', '#8c8c8c', '#722ed1'],
+          data,
+          color: ['#1677ff', '#fa8c16', '#52c41a', '#ff4d4f'],
         },
       ],
     };
   };
 
   const getTrendLineChart = () => {
-    if (!data) return {};
+    if (!trend.length) return {};
     return {
       tooltip: { trigger: 'axis' },
-      legend: { data: ['任务数量'] },
+      legend: { data: ['新增任务', '完成任务', '超时任务'] },
       grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
       xAxis: {
         type: 'category',
         boundaryGap: false,
-        data: data.taskTrend.map((item) => item.date),
+        data: trend.map((item) => item.date),
       },
       yAxis: { type: 'value' },
       series: [
         {
-          name: '任务数量',
+          name: '新增任务',
           type: 'line',
           smooth: true,
-          data: data.taskTrend.map((item) => item.count),
+          data: trend.map((item) => item.new_tasks),
+          lineStyle: { color: '#1677ff', width: 2 },
+          itemStyle: { color: '#1677ff' },
           areaStyle: {
             color: {
               type: 'linear',
               x: 0, y: 0, x2: 0, y2: 1,
               colorStops: [
-                { offset: 0, color: 'rgba(22, 119, 255, 0.5)' },
+                { offset: 0, color: 'rgba(22, 119, 255, 0.3)' },
                 { offset: 1, color: 'rgba(22, 119, 255, 0.05)' },
               ],
             },
           },
-          lineStyle: { color: '#1677ff', width: 2 },
-          itemStyle: { color: '#1677ff' },
+        },
+        {
+          name: '完成任务',
+          type: 'line',
+          smooth: true,
+          data: trend.map((item) => item.completed_tasks),
+          lineStyle: { color: '#52c41a', width: 2 },
+          itemStyle: { color: '#52c41a' },
+          areaStyle: {
+            color: {
+              type: 'linear',
+              x: 0, y: 0, x2: 0, y2: 1,
+              colorStops: [
+                { offset: 0, color: 'rgba(82, 196, 26, 0.3)' },
+                { offset: 1, color: 'rgba(82, 196, 26, 0.05)' },
+              ],
+            },
+          },
+        },
+        {
+          name: '超时任务',
+          type: 'line',
+          smooth: true,
+          data: trend.map((item) => item.timeout_tasks),
+          lineStyle: { color: '#ff4d4f', width: 2 },
+          itemStyle: { color: '#ff4d4f' },
+          areaStyle: {
+            color: {
+              type: 'linear',
+              x: 0, y: 0, x2: 0, y2: 1,
+              colorStops: [
+                { offset: 0, color: 'rgba(255, 77, 79, 0.3)' },
+                { offset: 1, color: 'rgba(255, 77, 79, 0.05)' },
+              ],
+            },
+          },
         },
       ],
     };
@@ -161,38 +203,40 @@ export default function StatisticsPage() {
           统计报表
         </Title>
         <Space>
-          <RangePicker
-            value={
-              dateRange
-                ? [dayjs(dateRange[0]), dayjs(dateRange[1])]
-                : undefined
-            }
-            onChange={handleDateChange}
-          />
-          <Button icon={<ReloadOutlined />} onClick={handleReset}>
-            重置
+          <Button icon={<ReloadOutlined />} onClick={fetchStatistics}>
+            刷新
           </Button>
         </Space>
       </div>
 
       <Row gutter={[16, 16]} className="mb-6">
-        <Col xs={24} sm={12} lg={8}>
+        <Col xs={24} sm={12} lg={6}>
           <Card size="small">
             <Statistic
-              title="超时率"
-              value={data?.timeoutRate || 0}
-              precision={2}
-              suffix="%"
-              prefix={<PercentageOutlined className="text-red-500" />}
-              valueStyle={{ color: data && data.timeoutRate > 20 ? '#ff4d4f' : '#52c41a' }}
+              title="任务总数"
+              value={summary?.total_tasks || 0}
+              prefix={<FileTextOutlined className="text-blue-500" />}
+              valueStyle={{ color: '#1677ff' }}
             />
           </Card>
         </Col>
-        <Col xs={24} sm={12} lg={8}>
+        <Col xs={24} sm={12} lg={6}>
+          <Card size="small">
+            <Statistic
+              title="超时率"
+              value={timeoutRate}
+              precision={2}
+              suffix="%"
+              prefix={<PercentageOutlined className="text-red-500" />}
+              valueStyle={{ color: timeoutRate > 20 ? '#ff4d4f' : '#52c41a' }}
+            />
+          </Card>
+        </Col>
+        <Col xs={24} sm={12} lg={6}>
           <Card size="small">
             <Statistic
               title="平均处理时长"
-              value={data?.avgProcessingTime || 0}
+              value={summary?.avg_processing_hours || 0}
               precision={1}
               suffix="小时"
               prefix={<ClockCircleOutlined className="text-blue-500" />}
@@ -200,15 +244,53 @@ export default function StatisticsPage() {
             />
           </Card>
         </Col>
-        <Col xs={24} sm={12} lg={8}>
+        <Col xs={24} sm={12} lg={6}>
           <Card size="small">
             <Statistic
-              title="总任务数"
-              value={
-                data?.taskCountByNode.reduce((sum, item) => sum + item.count, 0) || 0
-              }
-              prefix={<BarChartOutlined className="text-purple-500" />}
-              valueStyle={{ color: '#722ed1' }}
+              title="今日新增/完成"
+              value={`${summary?.today_new_tasks || 0} / ${summary?.today_completed_tasks || 0}`}
+              prefix={<CheckCircleOutlined className="text-green-500" />}
+              valueStyle={{ color: '#52c41a' }}
+            />
+          </Card>
+        </Col>
+      </Row>
+
+      <Row gutter={[16, 16]} className="mb-6">
+        <Col xs={24} sm={12} lg={6}>
+          <Card size="small">
+            <Statistic
+              title="待处理"
+              value={summary?.pending_tasks || 0}
+              valueStyle={{ color: '#1677ff' }}
+            />
+          </Card>
+        </Col>
+        <Col xs={24} sm={12} lg={6}>
+          <Card size="small">
+            <Statistic
+              title="处理中"
+              value={summary?.processing_tasks || 0}
+              valueStyle={{ color: '#fa8c16' }}
+            />
+          </Card>
+        </Col>
+        <Col xs={24} sm={12} lg={6}>
+          <Card size="small">
+            <Statistic
+              title="已完成"
+              value={summary?.completed_tasks || 0}
+              valueStyle={{ color: '#52c41a' }}
+            />
+          </Card>
+        </Col>
+        <Col xs={24} sm={12} lg={6}>
+          <Card size="small">
+            <Statistic
+              title="已超时"
+              value={summary?.timeout_tasks || 0}
+              prefix={<WarningOutlined />}
+              valueStyle={{ color: '#ff4d4f' }}
             />
           </Card>
         </Col>
@@ -216,7 +298,7 @@ export default function StatisticsPage() {
 
       <Row gutter={[16, 16]} className="mb-6">
         <Col xs={24} lg={12}>
-          <Card title="各节点任务分布">
+          <Card title="节点任务分布">
             <ReactECharts option={getNodeBarChart()} style={{ height: 350 }} />
           </Card>
         </Col>
@@ -227,7 +309,7 @@ export default function StatisticsPage() {
         </Col>
       </Row>
 
-      <Card title="任务趋势">
+      <Card title="近7天任务趋势">
         <ReactECharts option={getTrendLineChart()} style={{ height: 350 }} />
       </Card>
     </div>
