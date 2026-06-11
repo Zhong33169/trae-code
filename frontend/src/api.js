@@ -93,6 +93,11 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
+  previewBatch: (payload) =>
+    request('/api/orders/batch/preview', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
   auditLogs: (params = {}) => {
     const q = new URLSearchParams();
     for (const [k, v] of Object.entries(params)) {

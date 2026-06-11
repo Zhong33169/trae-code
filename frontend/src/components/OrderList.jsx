@@ -161,14 +161,20 @@ export default function OrderList({ meta, user, navigate, showToast }) {
     reviewer: ['pending_review'],
   }[role] || [];
 
-  const batchAllowed = useMemo(() => {
+  const batchInfo = useMemo(() => {
     const statusCounts = {};
+    const statusLabels = {
+      draft: '草稿', pending_verification: '待核验', verification_rejected: '核验退回',
+      pending_review: '待复核', review_rejected: '复核退回', archived: '已归档', cancelled: '已取消',
+    };
     for (const id of selected) {
       const o = listResult.data.find(x => x.id === id);
       if (o) statusCounts[o.status] = (statusCounts[o.status] || 0) + 1;
     }
     const statuses = Object.keys(statusCounts);
     const actions = new Set();
+    let mixedSubmit = false;
+    let mixedHint = '';
     if (role === 'supervisor') {
       if (statuses.includes('pending_verification') || statuses.includes('review_rejected')) {
         actions.add('approve_verify');
@@ -182,11 +188,33 @@ export default function OrderList({ meta, user, navigate, showToast }) {
       }
     }
     if (role === 'registrar') {
-      if (statuses.every(s => s === 'draft' || s === 'verification_rejected')) {
+      const hasDraft = statuses.includes('draft');
+      const hasRejected = statuses.includes('verification_rejected');
+      if (hasDraft && hasRejected) {
+        mixedSubmit = true;
+        mixedHint = '草稿单与核验退回单需分开批量提交（初次提交 vs 补正重提交）';
+      } else if (hasDraft || hasRejected) {
         actions.add('submit');
       }
     }
-    return Array.from(actions);
+    const statusList = Object.entries(statusCounts).map(([s, c]) => ({
+      status: s,
+      label: statusLabels[s] || s,
+      count: c,
+    }));
+    const actionLabels = {
+      approve_verify: '批量核验通过', reject_verify: '批量核验退回',
+      approve_review: '批量复核归档', reject_review: '批量复核退回',
+      submit: hasRejected ? '批量补正后重提交' : '批量提交',
+    };
+    return {
+      actions: Array.from(actions),
+      statusList,
+      statusCounts,
+      mixedSubmit,
+      mixedHint,
+      actionLabels,
+    };
   }, [selected, listResult.data, role]);
 
   return (
@@ -272,23 +300,36 @@ export default function OrderList({ meta, user, navigate, showToast }) {
       {selected.size > 0 && (
         <div className="batch-bar">
           <div className="selected-info">
-            已选 {selected.size} 张单据
+            <span style={{ fontWeight: 600 }}>已选 {selected.size} 张单据</span>
+            {batchInfo.statusList.length > 0 && (
+              <span style={{ marginLeft: 12, fontSize: 12, color: 'var(--gray-600)' }}>
+                状态：
+                {batchInfo.statusList.map((s, i) => (
+                  <span key={s.status} style={{ marginRight: 6 }}>
+                    {s.label} {s.count}张{i < batchInfo.statusList.length - 1 ? '、' : ''}
+                  </span>
+                ))}
+              </span>
+            )}
+            {batchInfo.mixedSubmit && (
+              <span style={{ marginLeft: 12, fontSize: 12, color: 'var(--danger)', fontWeight: 600 }}>
+                ⚠ {batchInfo.mixedHint}
+              </span>
+            )}
           </div>
           <div className="batch-actions">
-            {batchAllowed.length === 0 ? (
-              <span style={{ color: 'var(--gray-500)', fontSize: 12 }}>所选单据状态不一致或当前角色无权批量处理</span>
+            {batchInfo.actions.length === 0 ? (
+              <span style={{ color: batchInfo.mixedSubmit ? 'var(--danger)' : 'var(--gray-500)', fontSize: 12 }}>
+                {batchInfo.mixedSubmit ? '状态混用，请分开选择' : '所选单据状态不一致或当前角色无权批量处理'}
+              </span>
             ) : (
-              batchAllowed.map(action => (
+              batchInfo.actions.map(action => (
                 <button
                   key={action}
                   className={action.startsWith('approve') ? 'btn-success' : action.startsWith('reject') ? 'btn-warning' : 'btn-primary'}
                   onClick={() => openBatch(action)}
                 >
-                  {action === 'approve_verify' && '批量核验通过'}
-                  {action === 'reject_verify' && '批量核验退回'}
-                  {action === 'approve_review' && '批量复核归档'}
-                  {action === 'reject_review' && '批量复核退回'}
-                  {action === 'submit' && '批量提交'}
+                  {batchInfo.actionLabels[action]}
                 </button>
               ))
             )}
@@ -437,7 +478,7 @@ export default function OrderList({ meta, user, navigate, showToast }) {
       {showBatch && (
         <BatchActionModal
           action={batchAction}
-          selectedCount={selected.size}
+          orderIds={Array.from(selected)}
           role={role}
           meta={meta}
           onClose={() => { setShowBatch(false); setBatchAction(null); }}

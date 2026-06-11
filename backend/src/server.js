@@ -188,10 +188,35 @@ app.post('/api/orders/:id/action', (req, res) => {
   ok(res, result.order);
 });
 
-app.post('/api/orders/batch', (req, res) => {
-  const { action, orderIds, opinion, lockTokens } = req.body || {};
+app.post('/api/orders/batch/preview', (req, res) => {
+  const { action, orderIds } = req.body || {};
   if (!action || !Array.isArray(orderIds) || orderIds.length === 0) {
     return fail(res, '缺少操作类型或订货单列表');
+  }
+  const result = store.previewBatch({
+    operator: req.user.id,
+    action,
+    orderIds,
+  });
+  ok(res, result);
+});
+
+app.post('/api/orders/batch', (req, res) => {
+  const { action, orderIds, opinion, lockTokens, materials } = req.body || {};
+  if (!action || !Array.isArray(orderIds) || orderIds.length === 0) {
+    return fail(res, '缺少操作类型或订货单列表');
+  }
+  if (!opinion || opinion.trim().length < 5) {
+    return fail(res, '批量处理意见至少5个字符');
+  }
+  const preview = store.previewBatch({ operator: req.user.id, action, orderIds });
+  if (preview.summary.mixedSubmitStatuses) {
+    const names = preview.summary.mixedSubmitStatusList.map(s => s.label).join('、');
+    return fail(res, `批量提交不允许混用不同状态单据：${names}`, 400, {
+      mixedSubmitStatuses: true,
+      mixedSubmitStatusList: preview.summary.mixedSubmitStatusList,
+      errorDetail: '草稿和退回补正单需分开批量提交，因为两者动作语义不同（初次提交 vs 补正后重提交）',
+    });
   }
   const result = store.batchProcess({
     operator: req.user.id,
@@ -199,6 +224,7 @@ app.post('/api/orders/batch', (req, res) => {
     orderIds,
     opinion,
     lockTokens,
+    materials,
   });
   ok(res, result);
 });

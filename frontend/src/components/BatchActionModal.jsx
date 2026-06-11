@@ -1,6 +1,7 @@
-import { useState } from 'preact/hooks';
+import { useState, useEffect } from 'preact/hooks';
+import { api } from '../api.js';
 
-export default function BatchActionModal({ action, selectedCount, role, meta, onClose, onConfirm, showToast }) {
+export default function BatchActionModal({ action, orderIds, role, meta, onClose, onConfirm, showToast }) {
   const actionLabelMap = {
     approve_verify: '批量核验通过',
     reject_verify: '批量核验退回',
@@ -11,7 +12,10 @@ export default function BatchActionModal({ action, selectedCount, role, meta, on
   const actionLabel = actionLabelMap[action] || action;
   const isApprove = action?.startsWith('approve');
   const isReject = action?.startsWith('reject');
+  const isSubmitLike = action === 'submit' || action === 'correct_submit';
 
+  const [preview, setPreview] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [opinion, setOpinion] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -23,10 +27,40 @@ export default function BatchActionModal({ action, selectedCount, role, meta, on
     submit: '批量提交：门店常规补货，参考本月销售预测及库存数据测算。',
   };
 
-  async function handleConfirm() {
-    if (!opinion.trim() || opinion.trim().length < 5) {
-      return showToast('批量处理意见至少5个字符', 'error');
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      setLoading(true);
+      try {
+        const res = await api.previewBatch({ action, orderIds });
+        if (!cancelled) setPreview(res);
+      } catch (e) {
+        if (!cancelled) showToast(`预检失败：${e.message}`, 'error');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
     }
+    load();
+    return () => { cancelled = true; };
+  }, [action, orderIds.join(',')]);
+
+  const mixedSubmit = preview?.summary?.mixedSubmitStatuses;
+  const canProcessCount = preview?.summary?.canProcess ?? 0;
+  const blockedCount = preview?.summary?.blocked ?? 0;
+  const overdueCount = preview?.summary?.overdue ?? 0;
+  const missingMatCount = preview?.summary?.missingMaterials ?? 0;
+  const permissionCount = preview?.summary?.permissionDenied ?? 0;
+
+  function canConfirm() {
+    if (loading || !preview) return false;
+    if (mixedSubmit) return false;
+    if (!opinion.trim() || opinion.trim().length < 5) return false;
+    if (canProcessCount === 0) return false;
+    return true;
+  }
+
+  async function handleConfirm() {
+    if (!canConfirm()) return;
     setSubmitting(true);
     try {
       await onConfirm({ action, opinion: opinion.trim() });
@@ -35,54 +69,192 @@ export default function BatchActionModal({ action, selectedCount, role, meta, on
     }
   }
 
+  function statusColor(status) {
+    const map = {
+      draft: 'gray', pending_verification: 'blue', verification_rejected: 'orange',
+      pending_review: 'purple', review_rejected: 'red', archived: 'green', cancelled: 'gray',
+    };
+    return map[status] || 'gray';
+  }
+
   return (
     <div className="modal-mask" onClick={(e) => { if (e.target === e.currentTarget) onClose?.(); }}>
-      <div className="modal">
+      <div className="modal" style={{ width: 880, maxWidth: '95vw' }}>
         <div className="modal-header">
           <h3>
-            {isApprove && '✅ '}{isReject && '⚠ '}
+            {isApprove && '✅ '}{isReject && '⚠ '}{isSubmitLike && '📋 '}
             {actionLabel}
           </h3>
           <button className="modal-close" onClick={onClose}>×</button>
         </div>
         <div className="modal-body">
-          <div className="alert info" style={{ marginBottom: 12 }}>
-            <strong>本次将处理 {selectedCount} 张单据。</strong>
-            <div style={{ marginTop: 4 }}>
-              系统将逐张检查权限、材料、状态和操作锁；不符合条件的单据会单独报告，不影响其他单据推进。
-            </div>
-          </div>
+          {loading ? (
+            <div className="alert info">正在逐单预检可推进性...</div>
+          ) : (
+            <>
+              {mixedSubmit && (
+                <div className="alert danger" style={{ marginBottom: 12 }}>
+                  <strong>❌ 状态混用，无法批量提交</strong>
+                  <div style={{ marginTop: 6 }}>
+                    当前选中单据包含：
+                    {preview.summary.mixedSubmitStatusList.map((s, i) => (
+                      <span key={s.value} style={{ marginRight: 8 }}>
+                        <span className={`tag ${statusColor(s.value)}`}>{s.label}</span>
+                        {i < preview.summary.mixedSubmitStatusList.length - 1 && ' + '}
+                      </span>
+                    ))}
+                  </div>
+                  <div style={{ marginTop: 4, fontSize: 12 }}>
+                    草稿单（初次提交）和核验退回单（补正后重提交）的动作语义不同，必须分开批量。请在列表中按状态筛选后再执行批量。
+                  </div>
+                </div>
+              )}
 
-          <div>
-            <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--gray-700)' }}>
-              💬 <span className="required" style={{ color: 'var(--danger)' }}>*</span> 批量处理意见
-            </label>
-            <textarea
-              style={{ width: '100%', minHeight: 100, marginTop: 6 }}
-              placeholder={sampleOpinion[action] || '请填写统一处理意见...'}
-              value={opinion}
-              onInput={(e) => setOpinion(e.target.value)}
-            />
-            <div className="help-text">💡 建议：{sampleOpinion[action]}</div>
-          </div>
+              <div className="batch-summary-row">
+                <div className="stat-chip primary">共 {orderIds.length} 张</div>
+                <div className="stat-chip success">可推进 {canProcessCount}</div>
+                <div className="stat-chip danger">被阻断 {blockedCount}</div>
+                {overdueCount > 0 && <div className="stat-chip warning">⏰ 逾期 {overdueCount}</div>}
+                {missingMatCount > 0 && <div className="stat-chip warning">📎 缺材料 {missingMatCount}</div>}
+                {permissionCount > 0 && <div className="stat-chip danger">🚫 无权 {permissionCount}</div>}
+              </div>
 
-          <div className="alert warning" style={{ marginTop: 14 }}>
-            <strong>⚠ 注意事项：</strong>
-            <ul style={{ margin: '6px 0 0 18px', padding: 0 }}>
-              <li>后端会逐张检查：角色权限、当前状态、材料完整性、操作锁</li>
-              <li>任一单据不满足条件时，仅该单据被跳过，其余单据继续处理</li>
-              <li>处理完成后会显示成功/失败明细，失败单据可在详情页单独处理</li>
-            </ul>
-          </div>
+              {preview && preview.summary.statusDistribution && (
+                <div style={{ fontSize: 12, color: 'var(--gray-600)', margin: '6px 0 12px' }}>
+                  状态分布：
+                  {Object.entries(preview.summary.statusDistribution).map(([s, c]) => (
+                    <span key={s} style={{ marginRight: 12 }}>
+                      <span className={`tag ${statusColor(s)}`} style={{ marginRight: 4 }}>
+                        {meta?.statusNames?.[s] || s}
+                      </span>
+                      {c}张
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              <div className="preview-table-wrap">
+                <table className="preview-table">
+                  <thead>
+                    <tr>
+                      <th style={{ width: 48 }}></th>
+                      <th>单号 / 标题</th>
+                      <th style={{ width: 90 }}>当前状态</th>
+                      <th style={{ width: 130 }}>将执行动作 → 目标</th>
+                      <th style={{ width: 120 }}>材料</th>
+                      <th style={{ width: 120 }}>时限</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {preview?.orders?.map(o => (
+                      <tr key={o.orderId} className={o.canProcess ? '' : 'blocked-row'}>
+                        <td style={{ textAlign: 'center' }}>
+                          {o.canProcess ? <span style={{ color: 'var(--success)' }}>✅</span> : <span style={{ color: 'var(--danger)' }}>❌</span>}
+                        </td>
+                        <td>
+                          <div style={{ fontWeight: 600 }}>{o.orderNo || '不存在'}</div>
+                          <div style={{ fontSize: 12, color: 'var(--gray-600)' }}>{o.title || '-'}</div>
+                          <div style={{ fontSize: 11, color: 'var(--gray-500)' }}>{o.store || ''}</div>
+                          {!o.canProcess && o.blockReasons && o.blockReasons.length > 0 && (
+                            <div className="block-reasons" style={{ marginTop: 4 }}>
+                              {o.blockReasons.map((r, i) => (
+                                <div key={i} style={{ fontSize: 11, color: 'var(--danger)' }}>• {r}</div>
+                              ))}
+                            </div>
+                          )}
+                        </td>
+                        <td>
+                          {o.status ? (
+                            <span className={`tag ${statusColor(o.status)}`}>{o.statusName}</span>
+                          ) : <span className="tag gray">-</span>}
+                        </td>
+                        <td>
+                          {o.canProcess ? (
+                            <>
+                              <div style={{ fontSize: 12, fontWeight: 600 }}>{o.effectiveActionName}</div>
+                              <div style={{ fontSize: 11, color: 'var(--gray-500)' }}>
+                                → <span className={`tag ${statusColor(o.nextStatus)}`} style={{ marginTop: 2 }}>{o.nextStatusName}</span>
+                              </div>
+                            </>
+                          ) : (
+                            <span style={{ fontSize: 12, color: 'var(--gray-500)' }}>不执行</span>
+                          )}
+                        </td>
+                        <td>
+                          {o.missingMaterials && o.missingMaterials.length > 0 ? (
+                            <>
+                              <div style={{ color: 'var(--warning)', fontSize: 12, fontWeight: 600 }}>
+                                ❌ 缺 {o.missingMaterials.length} 项
+                              </div>
+                              <div style={{ fontSize: 11, color: 'var(--gray-600)', lineHeight: 1.4 }}>
+                                {o.missingMaterials.join('、')}
+                              </div>
+                            </>
+                          ) : o.canProcess ? (
+                            <span style={{ color: 'var(--success)', fontSize: 12 }}>✅ 齐全</span>
+                          ) : (
+                            <span style={{ color: 'var(--gray-400)', fontSize: 12 }}>-</span>
+                          )}
+                        </td>
+                        <td>
+                          {o.overdue ? (
+                            <>
+                              <div style={{ color: 'var(--danger)', fontSize: 12, fontWeight: 600 }}>⏰ 已逾期</div>
+                              <div style={{ fontSize: 11, color: 'var(--gray-600)', lineHeight: 1.4 }}>
+                                {o.overdueReason?.slice(0, 40)}{o.overdueReason?.length > 40 ? '...' : ''}
+                              </div>
+                            </>
+                          ) : o.canProcess ? (
+                            <span style={{ color: 'var(--success)', fontSize: 12 }}>✅ 正常</span>
+                          ) : (
+                            <span style={{ color: 'var(--gray-400)', fontSize: 12 }}>-</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div style={{ marginTop: 14 }}>
+                <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--gray-700)' }}>
+                  💬 <span className="required" style={{ color: 'var(--danger)' }}>*</span> 批量处理意见（至少5字符）
+                </label>
+                <textarea
+                  style={{ width: '100%', minHeight: 80, marginTop: 6 }}
+                  placeholder={sampleOpinion[action] || '请填写统一处理意见...'}
+                  value={opinion}
+                  onInput={(e) => setOpinion(e.target.value)}
+                  disabled={!canConfirm() && !opinion}
+                />
+                <div className="help-text">💡 建议：{sampleOpinion[action]}</div>
+              </div>
+
+              <div className="alert info" style={{ marginTop: 12, fontSize: 12 }}>
+                <strong>📌 执行说明：</strong>
+                <ul style={{ margin: '6px 0 0 18px', padding: 0, lineHeight: 1.6 }}>
+                  <li>每张单据独立校验：角色权限、状态顺序、材料完整性、时限逾期、版本乐观锁、操作锁token</li>
+                  <li>标记 ❌ 的单据会被跳过，不影响 ✅ 单据推进；每条单据会单独写入审计日志</li>
+                  <li>草稿与核验退回单必须分开批量（动作语义不同：初次提交 vs 补正重提交）</li>
+                </ul>
+              </div>
+            </>
+          )}
         </div>
         <div className="modal-footer">
           <button onClick={onClose}>取消</button>
           <button
             className={isReject ? 'btn-warning' : 'btn-primary'}
-            disabled={submitting}
+            disabled={!canConfirm() || submitting}
             onClick={handleConfirm}
           >
-            {submitting ? '批量处理中...' : `确认${actionLabel}`}
+            {submitting
+              ? '批量处理中...'
+              : mixedSubmit
+                ? '状态混用，不可执行'
+                : canProcessCount === 0
+                  ? '无可推进单据'
+                  : `确认${actionLabel}（${canProcessCount}张）`}
           </button>
         </div>
       </div>

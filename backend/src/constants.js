@@ -457,6 +457,177 @@ function generateSeedOrders() {
     version: 4,
   });
 
+  orders.push({
+    id: uuidv4(),
+    orderNo: `DD${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}0007`,
+    title: '望京店冷饮急补（缺材料草稿-样例）',
+    store: '北京朝阳望京店',
+    category: '饮品类',
+    supplier: '伊利集团冷饮事业部',
+    totalAmount: 12800.00,
+    items: [
+      { name: '巧克力冰淇淋', spec: '6L/桶', qty: 10, unit: '桶', price: 880 },
+      { name: '草莓酸奶', spec: '1.5kg*6/箱', qty: 6, unit: '箱', price: 660 },
+    ],
+    status: ORDER_STATUS.DRAFT,
+    currentStage: STAGE_NAMES.REGISTRATION,
+    createdAt: new Date(now - 5 * 60 * 60 * 1000).toISOString(),
+    updatedAt: new Date(now - 4 * 60 * 60 * 1000).toISOString(),
+    stageEnteredAt: new Date(now - 5 * 60 * 60 * 1000).toISOString(),
+    createdBy: 'registrar_wang',
+    materials: {
+      [STAGE_NAMES.REGISTRATION]: {
+        items: ['订货清单'],
+        uploadedAt: new Date(now - 4.5 * 60 * 60 * 1000).toISOString(),
+      },
+    },
+    stageOpinions: {},
+    overdue: false,
+    overdueReason: null,
+    version: 1,
+  });
+
+  orders.push({
+    id: uuidv4(),
+    orderNo: `DD${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}0008`,
+    title: '陆家嘴店干货常规补货（材料齐全草稿-样例）',
+    store: '上海浦东陆家嘴店',
+    category: '干货类',
+    supplier: '益海嘉里餐饮供应链',
+    totalAmount: 28600.00,
+    items: [
+      { name: '金龙鱼大豆油', spec: '5L*4/箱', qty: 20, unit: '箱', price: 680 },
+      { name: '五常大米', spec: '25kg/袋', qty: 30, unit: '袋', price: 500 },
+    ],
+    status: ORDER_STATUS.DRAFT,
+    currentStage: STAGE_NAMES.REGISTRATION,
+    createdAt: new Date(now - 6 * 60 * 60 * 1000).toISOString(),
+    updatedAt: new Date(now - 5 * 60 * 60 * 1000).toISOString(),
+    stageEnteredAt: new Date(now - 6 * 60 * 60 * 1000).toISOString(),
+    createdBy: 'registrar_li',
+    materials: {
+      [STAGE_NAMES.REGISTRATION]: {
+        items: ['订货清单', '门店库存快照', '历史订货参考数据'],
+        uploadedAt: new Date(now - 5.5 * 60 * 60 * 1000).toISOString(),
+      },
+    },
+    stageOpinions: {},
+    overdue: false,
+    overdueReason: null,
+    version: 1,
+  });
+
+  orders.push({
+    id: uuidv4(),
+    orderNo: `DD${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}0009`,
+    title: '天河城店生鲜补货（核验退回待补正-样例）',
+    store: '广州天河城店',
+    category: '生鲜类',
+    supplier: '双汇发展生鲜事业部',
+    totalAmount: 33200.00,
+    items: [
+      { name: '冷鲜牛肉', spec: '20kg/箱', qty: 10, unit: '箱', price: 2200 },
+      { name: '冰鲜鸡腿', spec: '10kg/箱', qty: 12, unit: '箱', price: 930 },
+    ],
+    status: ORDER_STATUS.VERIFICATION_REJECTED,
+    currentStage: STAGE_NAMES.REGISTRATION,
+    createdAt: new Date(now - 36 * 60 * 60 * 1000).toISOString(),
+    updatedAt: new Date(now - 8 * 60 * 60 * 1000).toISOString(),
+    stageEnteredAt: new Date(now - 8 * 60 * 60 * 1000).toISOString(),
+    createdBy: 'registrar_chen',
+    materials: {
+      [STAGE_NAMES.REGISTRATION]: {
+        items: ['订货清单', '门店库存快照'],
+        uploadedAt: new Date(now - 35 * 60 * 60 * 1000).toISOString(),
+      },
+    },
+    stageOpinions: {
+      [STAGE_NAMES.REGISTRATION]: {
+        action: ACTIONS.SUBMIT,
+        operator: 'registrar_chen',
+        operatorName: '陈登记',
+        operatorRole: ROLES.REGISTRAR,
+        opinion: '端午后补货，按常规月度量提交',
+        materialsVerified: true,
+        timelineVerified: true,
+        createdAt: new Date(now - 32 * 60 * 60 * 1000).toISOString(),
+      },
+      [STAGE_NAMES.VERIFICATION]: {
+        action: ACTIONS.REJECT_VERIFY,
+        operator: 'supervisor_zhou',
+        operatorName: '周主管',
+        operatorRole: ROLES.SUPERVISOR,
+        opinion: '退回原因：1.缺少「历史订货参考数据」；2.冰鲜鸡腿价格高于上月8%，需附价格异常说明；3.牛肉订货量超出近三月均值40%，需补充营销依据',
+        materialsVerified: false,
+        timelineVerified: true,
+        rejectReasons: [
+          '缺少「历史订货参考数据」',
+          '冰鲜鸡腿价格异常（高于上月8%）需附说明',
+          '牛肉订货量超出近三月均值40%，需补充营销依据',
+        ],
+        createdAt: new Date(now - 8 * 60 * 60 * 1000).toISOString(),
+      },
+    },
+    overdue: false,
+    overdueReason: null,
+    version: 3,
+  });
+
+  orders.push({
+    id: uuidv4(),
+    orderNo: `DD${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}0010`,
+    title: '科技园店设备耗材（逾期已延期后待核验-样例）',
+    store: '深圳南山科技园店',
+    category: '设备类',
+    supplier: '正大食品餐饮渠道部',
+    totalAmount: 8600.00,
+    items: [
+      { name: '商用微波炉', spec: '2100W', qty: 2, unit: '台', price: 2600 },
+      { name: 'POS打印纸', spec: '80mm*50卷/箱', qty: 4, unit: '箱', price: 850 },
+    ],
+    status: ORDER_STATUS.PENDING_VERIFICATION,
+    currentStage: STAGE_NAMES.VERIFICATION,
+    createdAt: new Date(now - 60 * 60 * 60 * 1000).toISOString(),
+    updatedAt: new Date(now - 2 * 60 * 60 * 1000).toISOString(),
+    stageEnteredAt: new Date(now - (STAGE_TIMEOUT_HOURS[ORDER_STATUS.PENDING_VERIFICATION] / 2) * 60 * 60 * 1000).toISOString(),
+    createdBy: 'registrar_zhao',
+    materials: {
+      [STAGE_NAMES.REGISTRATION]: {
+        items: ['订货清单', '门店库存快照', '历史订货参考数据'],
+        uploadedAt: new Date(now - 58 * 60 * 60 * 1000).toISOString(),
+      },
+      [STAGE_NAMES.VERIFICATION]: {
+        items: ['库存核验报告', '价格核对记录', '供应商确认回执'],
+        uploadedAt: new Date(now - 55 * 60 * 60 * 1000).toISOString(),
+      },
+    },
+    stageOpinions: {
+      [STAGE_NAMES.REGISTRATION]: {
+        action: ACTIONS.SUBMIT,
+        operator: 'registrar_zhao',
+        operatorName: '赵登记',
+        operatorRole: ROLES.REGISTRAR,
+        opinion: '科技园店设备老化需更新，打印纸按季度常规量补货',
+        materialsVerified: true,
+        timelineVerified: true,
+        createdAt: new Date(now - 50 * 60 * 60 * 1000).toISOString(),
+      },
+      [STAGE_NAMES.VERIFICATION]: {
+        action: ACTIONS.OVERDUE_EXTEND,
+        operator: 'supervisor_wu',
+        operatorName: '吴主管',
+        operatorRole: ROLES.SUPERVISOR,
+        opinion: '核验人出差刚回，申请延期12小时处理，材料已提前预审无异常',
+        materialsVerified: true,
+        timelineVerified: false,
+        createdAt: new Date(now - 2 * 60 * 60 * 1000).toISOString(),
+      },
+    },
+    overdue: false,
+    overdueReason: null,
+    version: 3,
+  });
+
   return orders;
 }
 

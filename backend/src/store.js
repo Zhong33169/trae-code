@@ -572,84 +572,270 @@ class DataStore {
     return { order: JSON.parse(JSON.stringify(order)) };
   }
 
-  batchProcess({ operator, action, orderIds, opinion, lockTokens }) {
+  batchProcess({ operator, action, orderIds, opinion, lockTokens, materials }) {
     this.checkOverdueOrders();
     const user = this.getUserInfo(operator);
-    const results = { success: [], failed: [] };
+    const results = {
+      success: [],
+      failed: [],
+      skipped: [],
+      summary: {
+        total: orderIds.length,
+        attempted: 0,
+        successCount: 0,
+        failedCount: 0,
+      },
+    };
+
+    const SUBMIT_ACTIONS = [ACTIONS.SUBMIT, ACTIONS.CORRECT_SUBMIT];
+    const VERIFY_ACTIONS = [ACTIONS.APPROVE_VERIFY, ACTIONS.REJECT_VERIFY];
+    const REVIEW_ACTIONS = [ACTIONS.APPROVE_REVIEW, ACTIONS.REJECT_REVIEW];
+
+    const submitLikeStatuses = new Set([ORDER_STATUS.DRAFT, ORDER_STATUS.VERIFICATION_REJECTED]);
+    const verifyLikeStatuses = new Set([ORDER_STATUS.PENDING_VERIFICATION, ORDER_STATUS.REVIEW_REJECTED]);
+    const reviewLikeStatuses = new Set([ORDER_STATUS.PENDING_REVIEW]);
+
+    const mixedStatus = { found: false, statuses: new Set() };
 
     for (let i = 0; i < orderIds.length; i++) {
       const id = orderIds[i];
+      const order = this.orders.find(o => o.id === id);
+      if (!order) continue;
+
+      if (SUBMIT_ACTIONS.includes(action)) {
+        if (submitLikeStatuses.has(order.status)) mixedStatus.statuses.add(order.status);
+      } else if (VERIFY_ACTIONS.includes(action)) {
+        if (verifyLikeStatuses.has(order.status)) mixedStatus.statuses.add(order.status);
+      } else if (REVIEW_ACTIONS.includes(action)) {
+        if (reviewLikeStatuses.has(order.status)) mixedStatus.statuses.add(order.status);
+      }
+    }
+    if (SUBMIT_ACTIONS.includes(action) && mixedStatus.statuses.size > 1) {
+      mixedStatus.found = true;
+    }
+
+    for (let i = 0; i < orderIds.length; i++) {
+      results.summary.attempted++;
+      const id = orderIds[i];
       const token = lockTokens?.[i];
       const order = this.orders.find(o => o.id === id);
+      const now = new Date().toISOString();
+
+      const logAudit = ({ ok, reason, oldStatus, newStatus, detail }) => {
+        const payload = {
+          orderId: id,
+          orderNo: order?.orderNo || 'unknown',
+          action,
+          actionName: this.getActionName(action),
+          operator: user.id,
+          operatorRole: user.role,
+          details: detail || `${ok ? '批量处理成功' : '批量处理失败'}：${reason || ''}`,
+          createdAt: now,
+          batch: true,
+          success: ok,
+          failureReason: reason || null,
+          oldStatus: oldStatus || (order ? order.status : null),
+          newStatus: newStatus || (order ? order.status : null),
+          versionAfter: order ? order.version : null,
+        };
+        this._addAuditLog(payload);
+      };
+
       if (!order) {
-        results.failed.push({ orderId: id, reason: '订货单不存在' });
-        continue;
-      }
-      const allowed = this.getAllowedActions(order, user.role);
-      if (!allowed.includes(action)) {
+        const reason = '订货单不存在';
         results.failed.push({
           orderId: id,
-          orderNo: order.orderNo,
-          reason: `状态「${this.getStatusName(order.status)}」不允许此操作`,
+          orderNo: null,
+          reason,
+          failureType: 'not_found',
         });
-        continue;
-      }
-      if (!this.validateLock(id, token)) {
-        results.failed.push({
-          orderId: id,
-          orderNo: order.orderNo,
-          reason: '页面过期，请刷新后重试',
-        });
-        continue;
-      }
-      const nextStatus = NEXT_STATUS_MAP[action];
-      if (!nextStatus) {
-        results.failed.push({ orderId: id, orderNo: order.orderNo, reason: '无效操作' });
-        continue;
-      }
-      const currentStage = STATUS_TO_STAGE[order.status];
-      if (action === ACTIONS.APPROVE_VERIFY) {
-        const check = this.validateMaterialsComplete(STAGE_NAMES.VERIFICATION, order);
-        if (!check.complete) {
-          results.failed.push({
-            orderId: id,
-            orderNo: order.orderNo,
-            reason: `材料缺失：${check.missing.join('、')}`,
-          });
-          continue;
-        }
-      }
-      if (action === ACTIONS.APPROVE_REVIEW) {
-        const check = this.validateMaterialsComplete(STAGE_NAMES.REVIEW, order);
-        if (!check.complete) {
-          results.failed.push({
-            orderId: id,
-            orderNo: order.orderNo,
-            reason: `材料缺失：${check.missing.join('、')}`,
-          });
-          continue;
-        }
-      }
-      if (!opinion || opinion.trim().length < 5) {
-        results.failed.push({
-          orderId: id,
-          orderNo: order.orderNo,
-          reason: '处理意见至少5个字符',
-        });
+        logAudit({ ok: false, reason });
+        results.summary.failedCount++;
         continue;
       }
 
-      const now = new Date().toISOString();
+      const orderNo = order.orderNo;
+      const oldStatus = order.status;
+
+      const allowed = this.getAllowedActions(order, user.role);
+
+      const effectiveAction = (() => {
+        if (action === ACTIONS.SUBMIT || action === ACTIONS.CORRECT_SUBMIT) {
+          if (order.status === ORDER_STATUS.DRAFT) return ACTIONS.SUBMIT;
+          if (order.status === ORDER_STATUS.VERIFICATION_REJECTED) return ACTIONS.CORRECT_SUBMIT;
+        }
+        return action;
+      })();
+
+      if (!allowed.includes(effectiveAction)) {
+        const reason = `状态「${this.getStatusName(order.status)}」+角色「${this.getRoleName(user.role)}」不允许执行此操作；允许操作：${allowed.map(a => this.getActionName(a)).join('、') || '无'}`;
+        results.failed.push({
+          orderId: id,
+          orderNo,
+          reason,
+          failureType: 'permission',
+          status: order.status,
+          statusName: this.getStatusName(order.status),
+        });
+        logAudit({ ok: false, reason, oldStatus, newStatus: oldStatus });
+        results.summary.failedCount++;
+        continue;
+      }
+
+      if (order.overdue && effectiveAction !== ACTIONS.OVERDUE_EXTEND) {
+        const reason = `已超过时限（${order.overdueReason || '请刷新查看'}），不能直接推进，需先申请延期`;
+        results.failed.push({
+          orderId: id,
+          orderNo,
+          reason,
+          failureType: 'overdue',
+          overdue: true,
+          overdueReason: order.overdueReason,
+        });
+        logAudit({ ok: false, reason, oldStatus, newStatus: oldStatus });
+        results.summary.failedCount++;
+        continue;
+      }
+
+      if (!this.validateLock(id, token)) {
+        const reason = '操作锁已过期或被其他页面占用，请刷新列表后重新获取锁';
+        results.failed.push({
+          orderId: id,
+          orderNo,
+          reason,
+          failureType: 'lock',
+        });
+        logAudit({ ok: false, reason, oldStatus, newStatus: oldStatus });
+        results.summary.failedCount++;
+        continue;
+      }
+
+      const release = () => { this.releaseLock(id, token); };
+
+      if (SUBMIT_ACTIONS.includes(effectiveAction)) {
+        const check = this.validateMaterialsComplete(STAGE_NAMES.REGISTRATION, order);
+        if (!check.complete) {
+          release();
+          const reason = `登记阶段材料缺失：${check.missing.join('、')}`;
+          results.failed.push({
+            orderId: id,
+            orderNo,
+            reason,
+            failureType: 'materials',
+            missingMaterials: check.missing,
+            requiredMaterials: check.required,
+            stage: STAGE_NAMES.REGISTRATION,
+          });
+          logAudit({ ok: false, reason, oldStatus, newStatus: oldStatus, detail: `材料缺失：${check.missing.join('、')}` });
+          results.summary.failedCount++;
+          continue;
+        }
+      }
+
+      if (effectiveAction === ACTIONS.APPROVE_VERIFY) {
+        const check = this.validateMaterialsComplete(STAGE_NAMES.VERIFICATION, order);
+        if (!check.complete) {
+          release();
+          const reason = `核验阶段材料缺失：${check.missing.join('、')}`;
+          results.failed.push({
+            orderId: id,
+            orderNo,
+            reason,
+            failureType: 'materials',
+            missingMaterials: check.missing,
+            requiredMaterials: check.required,
+            stage: STAGE_NAMES.VERIFICATION,
+          });
+          logAudit({ ok: false, reason, oldStatus, newStatus: oldStatus, detail: reason });
+          results.summary.failedCount++;
+          continue;
+        }
+      }
+
+      if (effectiveAction === ACTIONS.APPROVE_REVIEW) {
+        const check = this.validateMaterialsComplete(STAGE_NAMES.REVIEW, order);
+        if (!check.complete) {
+          release();
+          const reason = `复核阶段材料缺失：${check.missing.join('、')}`;
+          results.failed.push({
+            orderId: id,
+            orderNo,
+            reason,
+            failureType: 'materials',
+            missingMaterials: check.missing,
+            requiredMaterials: check.required,
+            stage: STAGE_NAMES.REVIEW,
+          });
+          logAudit({ ok: false, reason, oldStatus, newStatus: oldStatus, detail: reason });
+          results.summary.failedCount++;
+          continue;
+        }
+      }
+
+      if (!opinion || opinion.trim().length < 5) {
+        release();
+        const reason = '批量处理意见至少5个字符';
+        results.failed.push({
+          orderId: id,
+          orderNo,
+          reason,
+          failureType: 'opinion',
+        });
+        logAudit({ ok: false, reason, oldStatus, newStatus: oldStatus });
+        results.summary.failedCount++;
+        continue;
+      }
+
+      if (SUBMIT_ACTIONS.includes(effectiveAction) && materials) {
+        order.materials[STAGE_NAMES.REGISTRATION] = { items: materials, uploadedAt: now };
+      }
+
+      const currentStage = STATUS_TO_STAGE[order.status];
+      const nextStatus = NEXT_STATUS_MAP[effectiveAction];
+
+      const regCheck = this.validateMaterialsComplete(STAGE_NAMES.REGISTRATION, order);
+      const verCheck = (currentStage === STAGE_NAMES.VERIFICATION || nextStatus === ORDER_STATUS.PENDING_REVIEW || nextStatus === ORDER_STATUS.ARCHIVED)
+        ? this.validateMaterialsComplete(STAGE_NAMES.VERIFICATION, order)
+        : { complete: true, missing: [] };
+      const revCheck = (nextStatus === ORDER_STATUS.ARCHIVED)
+        ? this.validateMaterialsComplete(STAGE_NAMES.REVIEW, order)
+        : { complete: true, missing: [] };
+
+      let rejectReasons = null;
+      if (effectiveAction === ACTIONS.REJECT_VERIFY || effectiveAction === ACTIONS.REJECT_REVIEW) {
+        const reCheck = effectiveAction === ACTIONS.REJECT_VERIFY ? regCheck : verCheck;
+        if (!reCheck.complete) {
+          rejectReasons = reCheck.missing.map(m => `缺少材料：${m}`);
+        }
+        if (opinion) {
+          const custom = opinion
+            .split(/[;；\n]/)
+            .map(s => s.trim())
+            .filter(s => s.length > 2);
+          if (custom.length > 0) {
+            rejectReasons = rejectReasons ? [...rejectReasons, ...custom] : custom;
+          }
+        }
+      }
+
       order.stageOpinions[currentStage] = {
-        action,
+        action: effectiveAction,
         operator: user.id,
         operatorName: user.name,
         operatorRole: user.role,
         opinion: `${opinion}（批量处理）`,
-        materialsVerified: true,
+        materialsVerified: effectiveAction.startsWith('approve')
+          ? (effectiveAction === ACTIONS.APPROVE_VERIFY ? verCheck.complete && regCheck.complete : revCheck.complete && verCheck.complete && regCheck.complete)
+          : effectiveAction.startsWith('reject') ? false : regCheck.complete,
         timelineVerified: !order.overdue,
+        rejectReasons,
         createdAt: now,
       };
+
+      if (effectiveAction === ACTIONS.APPROVE_REVIEW) {
+        order.archivedAt = now;
+      }
+
       order.status = nextStatus;
       order.currentStage = STATUS_TO_STAGE[nextStatus];
       order.stageEnteredAt = now;
@@ -657,25 +843,168 @@ class DataStore {
       order.overdue = false;
       order.overdueReason = null;
       order.version++;
-      this.releaseLock(id, token);
-      this._addAuditLog({
-        orderId: order.id,
-        orderNo: order.orderNo,
-        action,
-        actionName: this.getActionName(action),
-        operator: user.id,
-        operatorRole: user.role,
-        details: `批量处理：${opinion}`,
-        createdAt: now,
+      release();
+
+      logAudit({
+        ok: true,
+        reason: null,
+        oldStatus,
+        newStatus: nextStatus,
+        detail: `[${this.getStatusName(oldStatus)}] → [${this.getStatusName(nextStatus)}]：${opinion}（批量）`,
       });
+
+      const stages = [STAGE_NAMES.REGISTRATION, STAGE_NAMES.VERIFICATION, STAGE_NAMES.REVIEW];
+      const nextStageName = stages.includes(STATUS_TO_STAGE[nextStatus]) ? STATUS_TO_STAGE[nextStatus] : currentStage;
       results.success.push({
         orderId: id,
-        orderNo: order.orderNo,
+        orderNo,
+        oldStatus,
+        oldStatusName: this.getStatusName(oldStatus),
         newStatus: nextStatus,
+        newStatusName: this.getStatusName(nextStatus),
+        newStage: nextStageName,
+        versionAfter: order.version,
+        appliedAction: effectiveAction,
+        appliedActionName: this.getActionName(effectiveAction),
+        materialsVerified: order.stageOpinions[currentStage].materialsVerified,
+        timelineVerified: order.stageOpinions[currentStage].timelineVerified,
       });
+      results.summary.successCount++;
     }
 
     return results;
+  }
+
+  previewBatch({ operator, orderIds, action }) {
+    this.checkOverdueOrders();
+    const user = this.getUserInfo(operator);
+
+    const SUBMIT_ACTIONS = [ACTIONS.SUBMIT, ACTIONS.CORRECT_SUBMIT];
+
+    const result = {
+      orders: [],
+      summary: {
+        total: orderIds.length,
+        canProcess: 0,
+        blocked: 0,
+        overdue: 0,
+        missingMaterials: 0,
+        permissionDenied: 0,
+        lockNeeded: 0,
+        mixedSubmitStatuses: false,
+        statusDistribution: {},
+      },
+    };
+
+    const submitStatuses = new Set();
+
+    for (const id of orderIds) {
+      const order = this.orders.find(o => o.id === id);
+      if (!order) {
+        result.orders.push({
+          orderId: id,
+          orderNo: null,
+          status: null,
+          statusName: null,
+          canProcess: false,
+          blockReasons: ['订货单不存在'],
+        });
+        result.summary.blocked++;
+        continue;
+      }
+
+      const allowed = this.getAllowedActions(order, user.role);
+      let effectiveAction = action;
+      if (SUBMIT_ACTIONS.includes(action)) {
+        if (order.status === ORDER_STATUS.DRAFT) effectiveAction = ACTIONS.SUBMIT;
+        else if (order.status === ORDER_STATUS.VERIFICATION_REJECTED) effectiveAction = ACTIONS.CORRECT_SUBMIT;
+        submitStatuses.add(order.status);
+      }
+
+      const blockReasons = [];
+
+      if (!allowed.includes(effectiveAction)) {
+        blockReasons.push(`角色「${this.getRoleName(user.role)}」在状态「${this.getStatusName(order.status)}」下无权执行此操作`);
+        result.summary.permissionDenied++;
+      }
+
+      if (order.overdue) {
+        blockReasons.push(`已逾期：${order.overdueReason || '超过时限未处理'}`);
+        result.summary.overdue++;
+      }
+
+      const stageMaterialMap = {
+        [ACTIONS.SUBMIT]: STAGE_NAMES.REGISTRATION,
+        [ACTIONS.CORRECT_SUBMIT]: STAGE_NAMES.REGISTRATION,
+        [ACTIONS.APPROVE_VERIFY]: STAGE_NAMES.VERIFICATION,
+        [ACTIONS.REJECT_VERIFY]: STAGE_NAMES.VERIFICATION,
+        [ACTIONS.APPROVE_REVIEW]: STAGE_NAMES.REVIEW,
+        [ACTIONS.REJECT_REVIEW]: STAGE_NAMES.REVIEW,
+      };
+      const materialStage = stageMaterialMap[effectiveAction];
+      let materialCheck = { complete: true, missing: [], required: [], uploaded: [] };
+      if (materialStage && effectiveAction.startsWith('approve')) {
+        materialCheck = this.validateMaterialsComplete(materialStage, order);
+        if (!materialCheck.complete) {
+          blockReasons.push(`材料缺失：${materialCheck.missing.join('、')}`);
+          result.summary.missingMaterials++;
+        }
+      } else if (materialStage && SUBMIT_ACTIONS.includes(effectiveAction)) {
+        materialCheck = this.validateMaterialsComplete(materialStage, order);
+        if (!materialCheck.complete) {
+          blockReasons.push(`登记阶段材料缺失：${materialCheck.missing.join('、')}`);
+          result.summary.missingMaterials++;
+        }
+      }
+
+      const hasLock = this.orderLocks.has(id);
+      if (!hasLock) {
+        result.summary.lockNeeded++;
+      }
+
+      result.summary.statusDistribution[order.status] = (result.summary.statusDistribution[order.status] || 0) + 1;
+
+      const canProcess = blockReasons.length === 0;
+      if (canProcess) result.summary.canProcess++;
+      else result.summary.blocked++;
+
+      const nextStatus = NEXT_STATUS_MAP[effectiveAction] || order.status;
+
+      result.orders.push({
+        orderId: order.id,
+        orderNo: order.orderNo,
+        title: order.title,
+        store: order.store,
+        status: order.status,
+        statusName: this.getStatusName(order.status),
+        stage: order.currentStage,
+        overdue: order.overdue,
+        overdueReason: order.overdueReason,
+        version: order.version,
+        effectiveAction,
+        effectiveActionName: this.getActionName(effectiveAction),
+        nextStatus,
+        nextStatusName: this.getStatusName(nextStatus),
+        nextStage: STATUS_TO_STAGE[nextStatus] || order.currentStage,
+        canProcess,
+        blockReasons,
+        missingMaterials: materialCheck.missing,
+        requiredMaterials: materialCheck.required,
+        uploadedMaterials: materialCheck.uploaded,
+        hasLock,
+        materialsVerified: materialCheck.complete,
+      });
+    }
+
+    if (SUBMIT_ACTIONS.includes(action) && submitStatuses.size > 1) {
+      result.summary.mixedSubmitStatuses = true;
+      result.summary.mixedSubmitStatusList = Array.from(submitStatuses).map(s => ({
+        value: s,
+        label: this.getStatusName(s),
+      }));
+    }
+
+    return result;
   }
 
   listAuditLogs({ orderId, operator, action, page = 1, pageSize = 50 } = {}) {
