@@ -1,0 +1,21 @@
+{
+  "name": "bus-schedule-backend",
+  "version": "1.0.0",
+  "description": "城市公交公司-跨班组交接确认发车计划系统 后端",
+  "main": "src/app.js",
+  "scripts": {
+    "start": "node src/app.js",
+    "dev": "node src/app.js",
+    "init-db": "node src/scripts/initDB.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "dayjs": "^1.11.10",
+    "jsonwebtoken": "^9.0.2",
+    "koa": "^2.15.0",
+    "koa-bodyparser": "^4.4.1",
+    "koa-router": "^12.0.1",
+    "koa2-cors": "^2.0.6",
+    "sql.js": "^1.14.1"
+  }
+}

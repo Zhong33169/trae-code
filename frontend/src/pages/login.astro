@@ -1,0 +1,19 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import LoginApp from '../components/LoginApp.jsx';
+---
+<BaseLayout>
+  <div class="login-container">
+    <div class="login-box">
+      <div class="login-title">城市公交公司</div>
+      <div class="login-subtitle">跨班组交接确认发车计划系统</div>
+      <LoginApp client:load />
+      <div class="login-accounts">
+        <div><b>测试账号（密码均为 123456）：</b></div>
+        <div>发车登记员：registrar1 / registrar2</div>
+        <div>发车审核主管：auditor1</div>
+        <div>城市公交公司复核负责人：reviewer1</div>
+      </div>
+    </div>
+  </div>
+</BaseLayout>

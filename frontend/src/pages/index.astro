@@ -1,0 +1,10 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import LayoutApp from '../components/LayoutApp.jsx';
+import ScheduleList from '../components/ScheduleList.jsx';
+---
+<BaseLayout>
+  <LayoutApp client:load activeTab="list">
+    <ScheduleList client:load />
+  </LayoutApp>
+</BaseLayout>

@@ -1,0 +1,10 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import LayoutApp from '../components/LayoutApp.jsx';
+import StatisticsApp from '../components/StatisticsApp.jsx';
+---
+<BaseLayout>
+  <LayoutApp client:load activeTab="stats">
+    <StatisticsApp client:load />
+  </LayoutApp>
+</BaseLayout>
