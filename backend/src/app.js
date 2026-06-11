@@ -6,11 +6,11 @@ import expenseRoutes from './routes/expenseRoutes.js';
 
 const app = new Koa();
 
-const PORT = process.env.PORT || 8007;
-const CORS_ORIGIN = process.env.CORS_ORIGIN || 'http://localhost:3007';
+const PORT = process.env.PORT || 8008;
+const CORS_ORIGIN = process.env.CORS_ORIGIN || 'http://localhost:3009';
 
 app.use(cors({
-  origin: CORS_ORIGIN,
+  origin: (ctx) => ctx.header.origin || '*',
   credentials: true,
   allowHeaders: ['Content-Type', 'X-User-Id'],
 }));

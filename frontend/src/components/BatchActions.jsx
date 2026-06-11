@@ -9,14 +9,13 @@ function BatchActions(props) {
   const [batchType, setBatchType] = createSignal('');
   const [opinion, setOpinion] = createSignal('');
   const [reason, setReason] = createSignal('');
+  const [supplementReason, setSupplementReason] = createSignal('');
 
   const toast = useToast();
   const { userInfo } = useAuth();
 
   const selectedItems = createMemo(() => {
-    if (!props.list || !props.selectedIds || props.selectedIds.length === 0) {
-      return [];
-    }
+    if (!props.list || !props.selectedIds || props.selectedIds.length === 0) return [];
     return props.list.filter(item => props.selectedIds.includes(item.id));
   });
 
@@ -31,7 +30,7 @@ function BatchActions(props) {
   const materialStats = createMemo(() => {
     const items = selectedItems();
     if (items.length === 0) {
-      return { total: 0, complete: 0, incomplete: 0, incompleteList: [] };
+      return { total: 0, complete: 0, incomplete: 0, incompleteList: [], completeList: [] };
     }
     const incomplete = items.filter(item => {
       const mi = item.materialInfo || {};
@@ -42,13 +41,18 @@ function BatchActions(props) {
       complete: items.length - incomplete.length,
       incomplete: incomplete.length,
       incompleteList: incomplete,
+      completeList: items.filter(item => (item.materialInfo || {}).isComplete),
     };
   });
+
+  const hasAnyIncomplete = () => materialStats().incomplete > 0;
+  const hasAllIncomplete = () => materialStats().total > 0 && materialStats().complete === 0;
 
   const openBatchModal = (type) => {
     setBatchType(type);
     setOpinion('');
     setReason('');
+    setSupplementReason('');
     setShowBatchModal(true);
   };
 
@@ -60,9 +64,7 @@ function BatchActions(props) {
       if (res.success) {
         toast.success(`批量开始核验成功：${res.data.success} 项成功，${res.data.failed} 项失败`);
         if (res.data.errors && res.data.errors.length > 0) {
-          res.data.errors.forEach(err => {
-            toast.warning(`${err.title || err.id}: ${err.message}`);
-          });
+          res.data.errors.forEach(err => toast.warning(`${err.title || err.id}: ${err.message}`));
         }
         props.onRefresh();
         setShowBatchModal(false);
@@ -79,17 +81,14 @@ function BatchActions(props) {
       toast.warning('请填写复核意见（至少3个字）');
       return;
     }
-
     setLoading(true);
     try {
       const items = buildBatchItems();
       const res = await expenseApi.batchPassReview(items, opinion());
       if (res.success) {
-        toast.success(`批量复核通过成功：${res.data.success} 项成功，${res.data.failed} 项失败`);
+        toast.success(`批量复核通过：${res.data.success} 项成功，${res.data.failed} 项失败`);
         if (res.data.errors && res.data.errors.length > 0) {
-          res.data.errors.forEach(err => {
-            toast.warning(`${err.title || err.id}: ${err.message}`);
-          });
+          res.data.errors.forEach(err => toast.warning(`${err.title || err.id}: ${err.message}`));
         }
         props.onRefresh();
         setShowBatchModal(false);
@@ -106,7 +105,6 @@ function BatchActions(props) {
       toast.warning('请填写驳回原因（至少5个字）');
       return;
     }
-
     setLoading(true);
     try {
       const items = buildBatchItems();
@@ -114,9 +112,31 @@ function BatchActions(props) {
       if (res.success) {
         toast.success(`批量驳回成功：${res.data.success} 项成功，${res.data.failed} 项失败`);
         if (res.data.errors && res.data.errors.length > 0) {
-          res.data.errors.forEach(err => {
-            toast.warning(`${err.title || err.id}: ${err.message}`);
-          });
+          res.data.errors.forEach(err => toast.warning(`${err.title || err.id}: ${err.message}`));
+        }
+        props.onRefresh();
+        setShowBatchModal(false);
+      }
+    } catch (err) {
+      toast.error(err.message || '批量操作失败');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleBatchRequestSupplement = async () => {
+    if (!supplementReason() || supplementReason().trim().length < 5) {
+      toast.warning('请填写补材料说明（至少5个字）');
+      return;
+    }
+    setLoading(true);
+    try {
+      const items = buildBatchItems();
+      const res = await expenseApi.batchRequestSupplement(items, supplementReason());
+      if (res.success) {
+        toast.success(`批量要求补材料：${res.data.success} 项成功，${res.data.failed} 项失败`);
+        if (res.data.errors && res.data.errors.length > 0) {
+          res.data.errors.forEach(err => toast.warning(`${err.title || err.id}: ${err.message}`));
         }
         props.onRefresh();
         setShowBatchModal(false);
@@ -139,6 +159,9 @@ function BatchActions(props) {
       case 'rejectReview':
         handleBatchRejectReview();
         break;
+      case 'requestSupplement':
+        handleBatchRequestSupplement();
+        break;
       default:
         break;
     }
@@ -147,7 +170,6 @@ function BatchActions(props) {
   if (props.selectedIds.length === 0) return null;
 
   const hasBatchAction = props.canBatchVerify || props.canBatchReview;
-
   if (!hasBatchAction) return null;
 
   const stats = materialStats();
@@ -169,7 +191,7 @@ function BatchActions(props) {
         .batch-material-info { font-size: 12px; color: #595959; }
         .batch-material-info .complete { color: #52c41a; }
         .batch-material-info .incomplete { color: #faad14; }
-        .batch-actions { display: flex; gap: 8px; }
+        .batch-actions { display: flex; gap: 8px; flex-wrap: wrap; }
         .batch-warn {
           background: #fffbe6;
           border: 1px solid #ffe58f;
@@ -206,7 +228,7 @@ function BatchActions(props) {
       <div class="batch-bar">
         <div class="batch-info">
           已选择 <strong>{props.selectedIds.length}</strong> 项报销申请
-          {stats.incomplete > 0 && (
+          {stats.total > 0 && (
             <span class="batch-material-info" style="margin-left: 12px;">
               （材料齐全：<span class="complete">{stats.complete}</span> 项，
               材料不全：<span class="incomplete">{stats.incomplete}</span> 项）
@@ -224,12 +246,22 @@ function BatchActions(props) {
           )}
           {props.canBatchReview && (
             <>
-              <button
-                class="btn btn-success btn-sm"
-                onClick={() => openBatchModal('passReview')}
-              >
-                批量通过
-              </button>
+              {!hasAnyIncomplete() && (
+                <button
+                  class="btn btn-success btn-sm"
+                  onClick={() => openBatchModal('passReview')}
+                >
+                  批量通过
+                </button>
+              )}
+              {hasAnyIncomplete() && (
+                <button
+                  class="btn btn-warning btn-sm"
+                  onClick={() => openBatchModal('requestSupplement')}
+                >
+                  批量要求补材料
+                </button>
+              )}
               <button
                 class="btn btn-danger btn-sm"
                 onClick={() => openBatchModal('rejectReview')}
@@ -243,16 +275,41 @@ function BatchActions(props) {
 
       {showBatchModal() && (
         <div class="modal-overlay" onClick={() => !loading() && setShowBatchModal(false)}>
-          <div class="modal" onClick={(e) => e.stopPropagation()} style={{ 'max-width': '680px' }}>
+          <div class="modal" onClick={(e) => e.stopPropagation()} style={{ 'max-width': '720px' }}>
             <div class="modal-header">
               {batchType() === 'startVerify' && '批量开始核验'}
               {batchType() === 'passReview' && '批量复核通过'}
               {batchType() === 'rejectReview' && '批量驳回'}
+              {batchType() === 'requestSupplement' && '批量要求补材料'}
             </div>
             <div class="modal-body">
               <p style={{ marginBottom: '16px' }}>
                 即将对选中的 <strong>{props.selectedIds.length}</strong> 项报销申请执行操作。
               </p>
+
+              {batchType() === 'requestSupplement' && (
+                <div class="batch-warn">
+                  <div class="batch-warn-title">📎 将以下申请退回创建者补材料</div>
+                  <div>
+                    {stats.incomplete > 0 && <div>材料不全 <strong>{stats.incomplete}</strong> 项，需退回补材料。</div>}
+                    {stats.complete > 0 && <div>材料齐全 <strong>{stats.complete}</strong> 项，也会退回补材料。</div>}
+                  </div>
+                </div>
+              )}
+
+              {batchType() === 'passReview' && stats.incomplete > 0 && (
+                <div class="batch-warn">
+                  <div class="batch-warn-title">⚠️ 材料不全的申请将转为「待补材料」状态</div>
+                  <div>有 <strong>{stats.incomplete}</strong> 项材料不全，复核通过时将自动退回创建者补材料，不会推进到已通过。建议先要求补材料或驳回。</div>
+                </div>
+              )}
+
+              {batchType() === 'startVerify' && stats.incomplete > 0 && (
+                <div class="batch-warn">
+                  <div class="batch-warn-title">⚠️ 材料不全的申请核验通过后将转为「待补材料」状态</div>
+                  <div>有 <strong>{stats.incomplete}</strong> 项材料不全，核验通过时将自动退回创建者补材料，不会推进到待复核。</div>
+                </div>
+              )}
 
               <table class="batch-item-table">
                 <thead>
@@ -292,20 +349,6 @@ function BatchActions(props) {
                 </tbody>
               </table>
 
-              {stats.incomplete > 0 && batchType() === 'passReview' && (
-                <div class="batch-warn" style={{ marginTop: '12px' }}>
-                  <div class="batch-warn-title">⚠️ 材料不全的申请将转为「待补材料」状态</div>
-                  <div>有 <strong>{stats.incomplete}</strong> 项材料不全，复核通过时将自动退回创建者补材料，不会推进到已通过。建议先要求补材料或驳回。</div>
-                </div>
-              )}
-
-              {stats.incomplete > 0 && batchType() === 'startVerify' && (
-                <div class="batch-warn" style={{ marginTop: '12px' }}>
-                  <div class="batch-warn-title">⚠️ 材料不全的申请核验通过后将转为「待补材料」状态</div>
-                  <div>有 <strong>{stats.incomplete}</strong> 项材料不全，核验通过时将自动退回创建者补材料，不会推进到待复核。</div>
-                </div>
-              )}
-
               {batchType() === 'passReview' && (
                 <div class="form-item" style={{ marginTop: '16px' }}>
                   <label class="form-label">复核意见 *</label>
@@ -330,6 +373,18 @@ function BatchActions(props) {
                 </div>
               )}
 
+              {batchType() === 'requestSupplement' && (
+                <div class="form-item" style={{ marginTop: '16px' }}>
+                  <label class="form-label">补材料说明 *</label>
+                  <textarea
+                    class="form-textarea"
+                    placeholder="请输入需要补充的材料说明（至少5个字）"
+                    value={supplementReason()}
+                    onInput={(e) => setSupplementReason(e.target.value)}
+                  />
+                </div>
+              )}
+
               {batchType() === 'startVerify' && (
                 <p style={{ color: '#8c8c8c', fontSize: '13px', marginTop: '12px' }}>
                   仅状态为「待核验」的申请会被处理，其他状态的会被跳过。版本号不一致的会返回冲突错误。
@@ -349,7 +404,13 @@ function BatchActions(props) {
                 取消
               </button>
               <button
-                class={`btn ${batchType() === 'rejectReview' ? 'btn-danger' : 'btn-primary'}`}
+                class={`btn ${
+                  batchType() === 'rejectReview'
+                    ? 'btn-danger'
+                    : batchType() === 'requestSupplement'
+                    ? 'btn-warning'
+                    : 'btn-primary'
+                }`}
                 onClick={submitBatchAction}
                 disabled={loading()}
               >

@@ -19,6 +19,8 @@ router.post('/', expenseController.create);
 router.post('/batch/start-verify', expenseController.batchStartVerify);
 router.post('/batch/pass-review', expenseController.batchPassReview);
 router.post('/batch/reject-review', expenseController.batchRejectReview);
+router.post('/batch/request-supplement', expenseController.batchRequestSupplement);
+router.post('/batch/supplement-materials', expenseController.batchSupplementMaterials);
 
 router.post('/:id/submit', expenseController.submit);
 router.post('/:id/start-verify', expenseController.startVerify);

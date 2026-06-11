@@ -1,13 +1,19 @@
-import { v4 as uuidv4 } from 'uuid';
+import Database from 'better-sqlite3';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import fs from 'fs';
 
-const now = Date.now();
-const day = 24 * 60 * 60 * 1000;
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const DB_DIR = path.join(__dirname, '../../data');
+const DB_PATH = path.join(DB_DIR, 'fsc_expense.db');
 
-export const users = [
-  { id: 'u1', name: '张专员', role: 'clerk', dept: '报销组' },
-  { id: 'u2', name: '李会计', role: 'accountant', dept: '费用核算组' },
-  { id: 'u3', name: '王经理', role: 'manager', dept: '财务管理部' },
-];
+if (!fs.existsSync(DB_DIR)) {
+  fs.mkdirSync(DB_DIR, { recursive: true });
+}
+
+export const db = new Database(DB_PATH);
+db.pragma('journal_mode = WAL');
+db.pragma('foreign_keys = ON');
 
 export const expenseStatuses = {
   DRAFT: 'draft',
@@ -76,258 +82,225 @@ export const requiredMaterialLabels = {
   other: ['增值税发票'],
 };
 
-const makeExpense = (overrides = {}) => {
-  const base = {
-    id: uuidv4(),
-    title: '差旅费报销',
-    applicant: '张三',
-    applicantDept: '销售部',
-    amount: 5000,
-    expenseType: 'travel',
-    creator: null,
-    currentHandler: null,
-    status: expenseStatuses.DRAFT,
-    materials: [],
-    deadline: now + 3 * day,
-    createdAt: now - day,
-    updatedAt: now - day,
-    version: 1,
-    lastResult: null,
-    lastHandler: null,
-    lastHandleTime: null,
-    exceptionReason: null,
-    auditLogs: [],
-    verifyOpinion: null,
-    reviewOpinion: null,
-  };
-  return { ...base, ...overrides };
+const initSchema = () => {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      role TEXT NOT NULL,
+      dept TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS expenses (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      applicant TEXT NOT NULL DEFAULT '',
+      applicantDept TEXT NOT NULL DEFAULT '',
+      amount REAL NOT NULL DEFAULT 0,
+      expenseType TEXT NOT NULL DEFAULT 'other',
+      creator TEXT NOT NULL,
+      currentHandler TEXT,
+      status TEXT NOT NULL DEFAULT 'draft',
+      deadline INTEGER NOT NULL,
+      createdAt INTEGER NOT NULL,
+      updatedAt INTEGER NOT NULL,
+      version INTEGER NOT NULL DEFAULT 1,
+      lastResult TEXT,
+      lastHandler TEXT,
+      lastHandleTime INTEGER,
+      exceptionReason TEXT,
+      verifyOpinion TEXT,
+      reviewOpinion TEXT,
+      FOREIGN KEY (creator) REFERENCES users(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS expense_materials (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      expenseId TEXT NOT NULL,
+      materialType TEXT NOT NULL,
+      FOREIGN KEY (expenseId) REFERENCES expenses(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS audit_logs (
+      id TEXT PRIMARY KEY,
+      expenseId TEXT NOT NULL,
+      action TEXT NOT NULL,
+      userId TEXT NOT NULL,
+      userName TEXT NOT NULL,
+      time INTEGER NOT NULL,
+      remark TEXT NOT NULL,
+      FOREIGN KEY (expenseId) REFERENCES expenses(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_expenses_status ON expenses(status);
+    CREATE INDEX IF NOT EXISTS idx_expenses_creator ON expenses(creator);
+    CREATE INDEX IF NOT EXISTS idx_expenses_handler ON expenses(currentHandler);
+    CREATE INDEX IF NOT EXISTS idx_expenses_deadline ON expenses(deadline);
+    CREATE INDEX IF NOT EXISTS idx_materials_expense ON expense_materials(expenseId);
+    CREATE INDEX IF NOT EXISTS idx_audit_expense ON audit_logs(expenseId);
+    CREATE INDEX IF NOT EXISTS idx_audit_time ON audit_logs(time);
+  `);
 };
 
-export const expenses = [
-  makeExpense({
-    id: 'e1',
-    title: '北京出差差旅费',
-    applicant: '陈销售',
-    applicantDept: '销售一部',
-    amount: 8650,
-    expenseType: 'travel',
-    creator: 'u1',
-    status: expenseStatuses.SUBMITTED,
-    currentHandler: null,
-    materials: ['invoice', 'itinerary', 'hotel_bill'],
-    deadline: now + 1 * day,
-    createdAt: now - 2 * day,
-    updatedAt: now - 2 * day,
-    lastResult: '已提交待核验，材料齐全',
-    lastHandler: 'u1',
-    lastHandleTime: now - 2 * day,
-    exceptionReason: null,
-    auditLogs: [
-      { id: 'a1', action: 'create', userId: 'u1', userName: '张专员', time: now - 2 * day, remark: '创建报销单，添加发票、行程单、酒店账单' },
-      { id: 'a2', action: 'submit', userId: 'u1', userName: '张专员', time: now - 2 * day, remark: '提交报销申请，材料齐全：增值税发票、行程单、酒店账单' },
-    ],
-  }),
-  makeExpense({
-    id: 'e2',
-    title: '办公用品采购',
-    applicant: '刘行政',
-    applicantDept: '行政部',
-    amount: 3200,
-    expenseType: 'office',
-    creator: 'u1',
-    status: expenseStatuses.VERIFYING,
-    currentHandler: 'u2',
-    materials: ['expense_detail'],
-    deadline: now + 4 * 3600 * 1000,
-    createdAt: now - 3 * day,
-    updatedAt: now - day,
-    lastResult: '核验中，发票被退回需补',
-    lastHandler: 'u2',
-    lastHandleTime: now - day,
+const seedData = () => {
+  const userCount = db.prepare('SELECT COUNT(*) as c FROM users').get().c;
+  if (userCount > 0) return;
+
+  const now = Date.now();
+  const day = 24 * 60 * 60 * 1000;
+
+  const insertUser = db.prepare(`INSERT INTO users (id, name, role, dept) VALUES (?, ?, ?, ?)`);
+  insertUser.run('u1', '张专员', 'clerk', '报销组');
+  insertUser.run('u2', '李会计', 'accountant', '费用核算组');
+  insertUser.run('u3', '王经理', 'manager', '财务管理部');
+
+  const insertExpense = db.prepare(`INSERT INTO expenses
+    (id, title, applicant, applicantDept, amount, expenseType, creator, currentHandler, status,
+     deadline, createdAt, updatedAt, version, lastResult, lastHandler, lastHandleTime,
+     exceptionReason, verifyOpinion, reviewOpinion)
+    VALUES (@id, @title, @applicant, @applicantDept, @amount, @expenseType, @creator,
+            @currentHandler, @status, @deadline, @createdAt, @updatedAt, @version,
+            @lastResult, @lastHandler, @lastHandleTime, @exceptionReason,
+            @verifyOpinion, @reviewOpinion)`);
+
+  const insertMaterial = db.prepare(`INSERT INTO expense_materials (expenseId, materialType) VALUES (?, ?)`);
+  const insertAudit = db.prepare(`INSERT INTO audit_logs
+    (id, expenseId, action, userId, userName, time, remark)
+    VALUES (?, ?, ?, ?, ?, ?, ?)`);
+
+  const addExpense = (exp, materials, logs) => {
+    insertExpense.run(exp);
+    for (const m of materials) insertMaterial.run(exp.id, m);
+    for (const l of logs) insertAudit.run(l.id, exp.id, l.action, l.userId, l.userName, l.time, l.remark);
+  };
+
+  addExpense({
+    id: 'e1', title: '北京出差差旅费', applicant: '陈销售', applicantDept: '销售一部',
+    amount: 8650, expenseType: 'travel', creator: 'u1', currentHandler: null,
+    status: 'submitted', deadline: now + 1 * day, createdAt: now - 2 * day, updatedAt: now - 2 * day,
+    version: 1, lastResult: '已提交待核验，材料齐全', lastHandler: 'u1', lastHandleTime: now - 2 * day,
+    exceptionReason: null, verifyOpinion: null, reviewOpinion: null,
+  }, ['invoice', 'itinerary', 'hotel_bill'], [
+    { id: 'a1', action: 'create', userId: 'u1', userName: '张专员', time: now - 2 * day, remark: '创建报销单，添加发票、行程单、酒店账单' },
+    { id: 'a2', action: 'submit', userId: 'u1', userName: '张专员', time: now - 2 * day, remark: '提交报销申请，材料齐全：增值税发票、行程单、酒店账单' },
+  ]);
+
+  addExpense({
+    id: 'e2', title: '办公用品采购', applicant: '刘行政', applicantDept: '行政部',
+    amount: 3200, expenseType: 'office', creator: 'u1', currentHandler: 'u2',
+    status: 'verifying', deadline: now + 4 * 3600 * 1000, createdAt: now - 3 * day, updatedAt: now - day,
+    version: 2, lastResult: '核验中，发票被退回需补', lastHandler: 'u2', lastHandleTime: now - day,
     exceptionReason: '材料不全，缺少：增值税发票（原发票不合规被退回）',
-    auditLogs: [
-      { id: 'a3', action: 'create', userId: 'u1', userName: '张专员', time: now - 3 * day, remark: '创建报销单，添加发票、采购明细' },
-      { id: 'a4', action: 'submit', userId: 'u1', userName: '张专员', time: now - 3 * day, remark: '提交报销申请，材料齐全：增值税发票、采购明细' },
-      { id: 'a5', action: 'start_verify', userId: 'u2', userName: '李会计', time: now - day, remark: '开始核验，发现增值税发票不合规需补，材料不全：缺少增值税发票' },
-    ],
-  }),
-  makeExpense({
-    id: 'e3',
-    title: '客户招待费',
-    applicant: '王销售',
-    applicantDept: '销售二部',
-    amount: 12800,
-    expenseType: 'entertainment',
-    creator: 'u1',
-    status: expenseStatuses.PENDING_REVIEW,
-    currentHandler: null,
-    materials: ['invoice', 'expense_detail', 'meeting_minutes'],
-    deadline: now + 12 * 3600 * 1000,
-    createdAt: now - 4 * day,
-    updatedAt: now - 6 * 3600 * 1000,
-    lastResult: '核验通过，材料齐全，待财务经理复核',
-    lastHandler: 'u2',
-    lastHandleTime: now - 6 * 3600 * 1000,
+    verifyOpinion: null, reviewOpinion: null,
+  }, ['expense_detail'], [
+    { id: 'a3', action: 'create', userId: 'u1', userName: '张专员', time: now - 3 * day, remark: '创建报销单，添加发票、采购明细' },
+    { id: 'a4', action: 'submit', userId: 'u1', userName: '张专员', time: now - 3 * day, remark: '提交报销申请，材料齐全：增值税发票、采购明细' },
+    { id: 'a5', action: 'start_verify', userId: 'u2', userName: '李会计', time: now - day, remark: '开始核验，发现增值税发票不合规需补，材料不全：缺少增值税发票' },
+  ]);
+
+  addExpense({
+    id: 'e3', title: '客户招待费', applicant: '王销售', applicantDept: '销售二部',
+    amount: 12800, expenseType: 'entertainment', creator: 'u1', currentHandler: null,
+    status: 'pending_review', deadline: now + 12 * 3600 * 1000, createdAt: now - 4 * day, updatedAt: now - 6 * 3600 * 1000,
+    version: 2, lastResult: '核验通过，材料齐全，待财务经理复核', lastHandler: 'u2', lastHandleTime: now - 6 * 3600 * 1000,
     exceptionReason: null,
     verifyOpinion: '票据齐全：增值税发票、费用明细、招待说明均已提供；金额合理，建议通过',
-    auditLogs: [
-      { id: 'a6', action: 'create', userId: 'u1', userName: '张专员', time: now - 4 * day, remark: '创建报销单，添加发票、明细、会议纪要' },
-      { id: 'a7', action: 'submit', userId: 'u1', userName: '张专员', time: now - 4 * day, remark: '提交报销申请，材料齐全：增值税发票、费用明细、参会/招待说明' },
-      { id: 'a8', action: 'start_verify', userId: 'u2', userName: '李会计', time: now - 2 * day, remark: '开始核验，材料齐全' },
-      { id: 'a9', action: 'verify_pass', userId: 'u2', userName: '李会计', time: now - 6 * 3600 * 1000, remark: '核验通过：票据齐全，金额合理，建议通过，材料状态：齐全' },
-    ],
-  }),
-  makeExpense({
-    id: 'e4',
-    title: '上海展会差旅费',
-    applicant: '赵市场',
-    applicantDept: '市场部',
-    amount: 6750,
-    expenseType: 'travel',
-    creator: 'u1',
-    status: expenseStatuses.SUBMITTED,
-    currentHandler: null,
-    materials: ['invoice', 'itinerary', 'hotel_bill'],
-    deadline: now - 6 * 3600 * 1000,
-    createdAt: now - 5 * day,
-    updatedAt: now - 5 * day,
-    lastResult: '已逾期未处理，请尽快核验',
-    lastHandler: 'u1',
-    lastHandleTime: now - 5 * day,
+    reviewOpinion: null,
+  }, ['invoice', 'expense_detail', 'meeting_minutes'], [
+    { id: 'a6', action: 'create', userId: 'u1', userName: '张专员', time: now - 4 * day, remark: '创建报销单，添加发票、明细、会议纪要' },
+    { id: 'a7', action: 'submit', userId: 'u1', userName: '张专员', time: now - 4 * day, remark: '提交报销申请，材料齐全：增值税发票、费用明细、参会/招待说明' },
+    { id: 'a8', action: 'start_verify', userId: 'u2', userName: '李会计', time: now - 2 * day, remark: '开始核验，材料齐全' },
+    { id: 'a9', action: 'verify_pass', userId: 'u2', userName: '李会计', time: now - 6 * 3600 * 1000, remark: '核验通过：票据齐全，金额合理，建议通过，材料状态：齐全' },
+  ]);
+
+  addExpense({
+    id: 'e4', title: '上海展会差旅费', applicant: '赵市场', applicantDept: '市场部',
+    amount: 6750, expenseType: 'travel', creator: 'u1', currentHandler: null,
+    status: 'submitted', deadline: now - 6 * 3600 * 1000, createdAt: now - 5 * day, updatedAt: now - 5 * day,
+    version: 1, lastResult: '已逾期未处理，请尽快核验', lastHandler: 'u1', lastHandleTime: now - 5 * day,
     exceptionReason: '已逾期超过处理时限 6 小时，需加急处理',
-    auditLogs: [
-      { id: 'a10', action: 'create', userId: 'u1', userName: '张专员', time: now - 5 * day, remark: '创建报销单，添加发票、行程单、酒店账单' },
-      { id: 'a11', action: 'submit', userId: 'u1', userName: '张专员', time: now - 5 * day, remark: '提交报销申请，材料齐全：增值税发票、行程单、酒店账单' },
-    ],
-  }),
-  makeExpense({
-    id: 'e5',
-    title: '培训报名费',
-    applicant: '孙人事',
-    applicantDept: '人力资源部',
-    amount: 4500,
-    expenseType: 'training',
-    creator: 'u1',
-    status: expenseStatuses.APPROVED,
-    currentHandler: null,
-    materials: ['invoice', 'training_notice', 'approval_doc'],
-    deadline: now + 5 * day,
-    createdAt: now - 6 * day,
-    updatedAt: now - 1 * day,
-    lastResult: '复核通过，流程完成',
-    lastHandler: 'u3',
-    lastHandleTime: now - 1 * day,
+    verifyOpinion: null, reviewOpinion: null,
+  }, ['invoice', 'itinerary', 'hotel_bill'], [
+    { id: 'a10', action: 'create', userId: 'u1', userName: '张专员', time: now - 5 * day, remark: '创建报销单，添加发票、行程单、酒店账单' },
+    { id: 'a11', action: 'submit', userId: 'u1', userName: '张专员', time: now - 5 * day, remark: '提交报销申请，材料齐全：增值税发票、行程单、酒店账单' },
+  ]);
+
+  addExpense({
+    id: 'e5', title: '培训报名费', applicant: '孙人事', applicantDept: '人力资源部',
+    amount: 4500, expenseType: 'training', creator: 'u1', currentHandler: null,
+    status: 'approved', deadline: now + 5 * day, createdAt: now - 6 * day, updatedAt: now - 1 * day,
+    version: 3, lastResult: '复核通过，流程完成', lastHandler: 'u3', lastHandleTime: now - 1 * day,
     exceptionReason: null,
     verifyOpinion: '培训项目已备案，票据合规：发票、培训通知、审批文件齐全',
     reviewOpinion: '同意报销，培训内容符合年度培训计划',
-    auditLogs: [
-      { id: 'a12', action: 'create', userId: 'u1', userName: '张专员', time: now - 6 * day, remark: '创建报销单，添加发票、培训通知、审批文件' },
-      { id: 'a13', action: 'submit', userId: 'u1', userName: '张专员', time: now - 6 * day, remark: '提交报销申请，材料齐全：增值税发票、培训通知、审批文件' },
-      { id: 'a14', action: 'start_verify', userId: 'u2', userName: '李会计', time: now - 4 * day, remark: '开始核验，材料齐全' },
-      { id: 'a15', action: 'verify_pass', userId: 'u2', userName: '李会计', time: now - 3 * day, remark: '核验通过：培训项目已备案，票据合规，材料状态：齐全' },
-      { id: 'a16', action: 'review_pass', userId: 'u3', userName: '王经理', time: now - 1 * day, remark: '复核通过：同意报销，培训内容符合年度培训计划，材料状态：齐全' },
-    ],
-  }),
-  makeExpense({
-    id: 'e6',
-    title: '交通补贴报销',
-    applicant: '周运营',
-    applicantDept: '运营部',
-    amount: 890,
-    expenseType: 'transport',
-    creator: 'u1',
-    status: expenseStatuses.REJECTED,
-    currentHandler: null,
-    materials: ['taxi_receipt', 'expense_detail'],
-    deadline: now + 2 * day,
-    createdAt: now - 2 * day,
-    updatedAt: now - 10 * 3600 * 1000,
-    lastResult: '核验驳回，材料与行程不符',
-    lastHandler: 'u2',
-    lastHandleTime: now - 10 * 3600 * 1000,
+  }, ['invoice', 'training_notice', 'approval_doc'], [
+    { id: 'a12', action: 'create', userId: 'u1', userName: '张专员', time: now - 6 * day, remark: '创建报销单，添加发票、培训通知、审批文件' },
+    { id: 'a13', action: 'submit', userId: 'u1', userName: '张专员', time: now - 6 * day, remark: '提交报销申请，材料齐全：增值税发票、培训通知、审批文件' },
+    { id: 'a14', action: 'start_verify', userId: 'u2', userName: '李会计', time: now - 4 * day, remark: '开始核验，材料齐全' },
+    { id: 'a15', action: 'verify_pass', userId: 'u2', userName: '李会计', time: now - 3 * day, remark: '核验通过：培训项目已备案，票据合规，材料状态：齐全' },
+    { id: 'a16', action: 'review_pass', userId: 'u3', userName: '王经理', time: now - 1 * day, remark: '复核通过：同意报销，培训内容符合年度培训计划，材料状态：齐全' },
+  ]);
+
+  addExpense({
+    id: 'e6', title: '交通补贴报销', applicant: '周运营', applicantDept: '运营部',
+    amount: 890, expenseType: 'transport', creator: 'u1', currentHandler: null,
+    status: 'rejected', deadline: now + 2 * day, createdAt: now - 2 * day, updatedAt: now - 10 * 3600 * 1000,
+    version: 3, lastResult: '核验驳回，材料与行程不符', lastHandler: 'u2', lastHandleTime: now - 10 * 3600 * 1000,
     exceptionReason: '材料异常：出租车票时间与出差日程不一致，需核实',
     verifyOpinion: '出租车票时间与出差日程不一致，其中3张票据日期不在出差期间，需重新核实后提交',
-    auditLogs: [
-      { id: 'a17', action: 'create', userId: 'u1', userName: '张专员', time: now - 2 * day, remark: '创建报销单，添加出租车票、行程明细' },
-      { id: 'a18', action: 'submit', userId: 'u1', userName: '张专员', time: now - 2 * day, remark: '提交报销申请，材料齐全：出租车票/交通票、行程明细' },
-      { id: 'a19', action: 'start_verify', userId: 'u2', userName: '李会计', time: now - 20 * 3600 * 1000, remark: '开始核验，材料齐全' },
-      { id: 'a20', action: 'verify_reject', userId: 'u2', userName: '李会计', time: now - 10 * 3600 * 1000, remark: '核验驳回：出租车票时间与出差日程不一致，3张票据日期不在出差期间，材料状态：齐全' },
-    ],
-  }),
-  makeExpense({
-    id: 'e7',
-    title: '通讯费报销',
-    applicant: '吴技术',
-    applicantDept: '技术部',
-    amount: 560,
-    expenseType: 'communication',
-    creator: 'u1',
-    status: expenseStatuses.DRAFT,
-    currentHandler: 'u1',
-    materials: [],
-    deadline: now + 7 * day,
-    createdAt: now - 1 * day,
-    updatedAt: now - 1 * day,
-    lastResult: '草稿，材料待补充',
-    lastHandler: 'u1',
-    lastHandleTime: now - 1 * day,
+    reviewOpinion: null,
+  }, ['taxi_receipt', 'expense_detail'], [
+    { id: 'a17', action: 'create', userId: 'u1', userName: '张专员', time: now - 2 * day, remark: '创建报销单，添加出租车票、行程明细' },
+    { id: 'a18', action: 'submit', userId: 'u1', userName: '张专员', time: now - 2 * day, remark: '提交报销申请，材料齐全：出租车票/交通票、行程明细' },
+    { id: 'a19', action: 'start_verify', userId: 'u2', userName: '李会计', time: now - 20 * 3600 * 1000, remark: '开始核验，材料齐全' },
+    { id: 'a20', action: 'verify_reject', userId: 'u2', userName: '李会计', time: now - 10 * 3600 * 1000, remark: '核验驳回：出租车票时间与出差日程不一致，3张票据日期不在出差期间，材料状态：齐全' },
+  ]);
+
+  addExpense({
+    id: 'e7', title: '通讯费报销', applicant: '吴技术', applicantDept: '技术部',
+    amount: 560, expenseType: 'communication', creator: 'u1', currentHandler: 'u1',
+    status: 'draft', deadline: now + 7 * day, createdAt: now - 1 * day, updatedAt: now - 1 * day,
+    version: 1, lastResult: '草稿，材料待补充', lastHandler: 'u1', lastHandleTime: now - 1 * day,
     exceptionReason: '材料不全，缺少：通讯费发票',
-    auditLogs: [
-      { id: 'a21', action: 'create', userId: 'u1', userName: '张专员', time: now - 1 * day, remark: '创建报销单，待补充通讯费发票' },
-    ],
-  }),
-  makeExpense({
-    id: 'e8',
-    title: '差旅住宿费',
-    applicant: '郑销售',
-    applicantDept: '销售一部',
-    amount: 3200,
-    expenseType: 'travel',
-    creator: 'u1',
-    status: expenseStatuses.SUPPLEMENT_REQUIRED,
-    currentHandler: 'u1',
-    materials: ['invoice', 'hotel_bill'],
-    deadline: now - 2 * day,
-    createdAt: now - 7 * day,
-    updatedAt: now - 2 * day,
-    lastResult: '材料不全，需补齐：行程单，已退回补材料',
-    lastHandler: 'u2',
-    lastHandleTime: now - 2 * day,
+    verifyOpinion: null, reviewOpinion: null,
+  }, [], [
+    { id: 'a21', action: 'create', userId: 'u1', userName: '张专员', time: now - 1 * day, remark: '创建报销单，待补充通讯费发票' },
+  ]);
+
+  addExpense({
+    id: 'e8', title: '差旅住宿费', applicant: '郑销售', applicantDept: '销售一部',
+    amount: 3200, expenseType: 'travel', creator: 'u1', currentHandler: 'u1',
+    status: 'supplement_required', deadline: now - 2 * day, createdAt: now - 7 * day, updatedAt: now - 2 * day,
+    version: 4, lastResult: '材料不全，需补齐：行程单，已退回补材料', lastHandler: 'u2', lastHandleTime: now - 2 * day,
     exceptionReason: '材料不全（缺少：行程单），需补齐后重新提交',
     verifyOpinion: '酒店发票和账单齐全，但缺行程单，需补齐后重新提交',
-    auditLogs: [
-      { id: 'a22', action: 'create', userId: 'u1', userName: '张专员', time: now - 7 * day, remark: '创建报销单，添加发票、酒店账单' },
-      { id: 'a23', action: 'submit', userId: 'u1', userName: '张专员', time: now - 7 * day, remark: '提交报销申请，材料齐全：增值税发票、行程单、酒店账单' },
-      { id: 'a24', action: 'start_verify', userId: 'u2', userName: '李会计', time: now - 5 * day, remark: '开始核验，发现材料不全：缺少行程单' },
-      { id: 'a25', action: 'verify_supplement', userId: 'u2', userName: '李会计', time: now - 2 * day, remark: '核验发现材料不全：酒店发票和账单齐全，但缺行程单，需补齐后重新提交，缺少：行程单，退回补材料' },
-    ],
-  }),
-  makeExpense({
-    id: 'e9',
-    title: '市场活动招待费',
-    applicant: '何市场',
-    applicantDept: '市场部',
-    amount: 5600,
-    expenseType: 'entertainment',
-    creator: 'u1',
-    status: expenseStatuses.SUPPLEMENT_REQUIRED,
-    currentHandler: 'u1',
-    materials: ['invoice'],
-    deadline: now + 3 * day,
-    createdAt: now - 8 * day,
-    updatedAt: now - 1 * day,
-    lastResult: '材料不全，需补齐：费用明细、参会/招待说明，已退回补材料',
-    lastHandler: 'u3',
-    lastHandleTime: now - 1 * day,
+    reviewOpinion: null,
+  }, ['invoice', 'hotel_bill'], [
+    { id: 'a22', action: 'create', userId: 'u1', userName: '张专员', time: now - 7 * day, remark: '创建报销单，添加发票、酒店账单' },
+    { id: 'a23', action: 'submit', userId: 'u1', userName: '张专员', time: now - 7 * day, remark: '提交报销申请，材料齐全：增值税发票、行程单、酒店账单' },
+    { id: 'a24', action: 'start_verify', userId: 'u2', userName: '李会计', time: now - 5 * day, remark: '开始核验，发现材料不全：缺少行程单' },
+    { id: 'a25', action: 'verify_supplement', userId: 'u2', userName: '李会计', time: now - 2 * day, remark: '核验发现材料不全：酒店发票和账单齐全，但缺行程单，需补齐后重新提交，缺少：行程单，退回补材料' },
+  ]);
+
+  addExpense({
+    id: 'e9', title: '市场活动招待费', applicant: '何市场', applicantDept: '市场部',
+    amount: 5600, expenseType: 'entertainment', creator: 'u1', currentHandler: 'u1',
+    status: 'supplement_required', deadline: now + 3 * day, createdAt: now - 8 * day, updatedAt: now - 1 * day,
+    version: 4, lastResult: '材料不全，需补齐：费用明细、参会/招待说明，已退回补材料', lastHandler: 'u3', lastHandleTime: now - 1 * day,
     exceptionReason: '材料不全（缺少：费用明细、参会/招待说明），需补齐后重新提交',
     verifyOpinion: '票据合规，金额合理，但缺费用明细和招待说明',
     reviewOpinion: '仅有发票，缺少费用明细和招待说明，无法确认招待合规性，退回补材料',
-    auditLogs: [
-      { id: 'a26', action: 'create', userId: 'u1', userName: '张专员', time: now - 8 * day, remark: '创建报销单，添加发票、费用明细、招待说明' },
-      { id: 'a27', action: 'submit', userId: 'u1', userName: '张专员', time: now - 8 * day, remark: '提交报销申请，材料齐全：增值税发票、费用明细、参会/招待说明' },
-      { id: 'a28', action: 'start_verify', userId: 'u2', userName: '李会计', time: now - 6 * day, remark: '开始核验，材料齐全' },
-      { id: 'a29', action: 'verify_pass', userId: 'u2', userName: '李会计', time: now - 4 * day, remark: '核验通过：票据合规，金额合理，材料状态：齐全' },
-      { id: 'a30', action: 'review_supplement', userId: 'u3', userName: '王经理', time: now - 1 * day, remark: '复核发现材料不全：仅有发票，缺少费用明细和招待说明，无法确认招待合规性，退回补材料，缺少：费用明细、参会/招待说明，退回补材料' },
-    ],
-  }),
-];
+  }, ['invoice'], [
+    { id: 'a26', action: 'create', userId: 'u1', userName: '张专员', time: now - 8 * day, remark: '创建报销单，添加发票、费用明细、招待说明' },
+    { id: 'a27', action: 'submit', userId: 'u1', userName: '张专员', time: now - 8 * day, remark: '提交报销申请，材料齐全：增值税发票、费用明细、参会/招待说明' },
+    { id: 'a28', action: 'start_verify', userId: 'u2', userName: '李会计', time: now - 6 * day, remark: '开始核验，材料齐全' },
+    { id: 'a29', action: 'verify_pass', userId: 'u2', userName: '李会计', time: now - 4 * day, remark: '核验通过：票据合规，金额合理，材料状态：齐全' },
+    { id: 'a30', action: 'review_supplement', userId: 'u3', userName: '王经理', time: now - 1 * day, remark: '复核发现材料不全：仅有发票，缺少费用明细和招待说明，无法确认招待合规性，退回补材料，缺少：费用明细、参会/招待说明，退回补材料' },
+  ]);
+};
+
+initSchema();
+seedData();
+
+export const users = () => db.prepare('SELECT * FROM users').all();
+export const getUserById = (id) => db.prepare('SELECT * FROM users WHERE id = ?').get(id);

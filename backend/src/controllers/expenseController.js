@@ -124,6 +124,22 @@ export const batchRejectReview = async (ctx) => {
   });
 };
 
+export const batchRequestSupplement = async (ctx) => {
+  handleService(ctx, () => {
+    const { items, reason } = ctx.request.body;
+    const userId = ctx.state.userId;
+    return expenseService.batchRequestSupplement(items, userId, { reason });
+  });
+};
+
+export const batchSupplementMaterials = async (ctx) => {
+  handleService(ctx, () => {
+    const { items } = ctx.request.body;
+    const userId = ctx.state.userId;
+    return expenseService.batchSupplementMaterials(items, userId);
+  });
+};
+
 export const batchStartVerify = async (ctx) => {
   handleService(ctx, () => {
     const { items } = ctx.request.body;

@@ -123,6 +123,14 @@ export const expenseApi = {
   batchRejectReview: (items, reason) => {
     return request('/api/expenses/batch/reject-review', { method: 'POST', body: { items, reason } });
   },
+
+  batchRequestSupplement: (items, reason) => {
+    return request('/api/expenses/batch/request-supplement', { method: 'POST', body: { items, reason } });
+  },
+
+  batchSupplementMaterials: (items) => {
+    return request('/api/expenses/batch/supplement-materials', { method: 'POST', body: { items } });
+  },
 };
 
 export const setCurrentUser = (userId) => {

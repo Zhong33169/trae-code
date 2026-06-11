@@ -1,4 +1,4 @@
-import { createSignal, createContext, useContext } from 'solid-js';
+import { createSignal, createContext, useContext, createComponent, children as resolveChildren } from 'solid-js';
 
 const RouterContext = createContext(null);
 
@@ -17,9 +17,9 @@ export const RouterProvider = (props) => {
   const getParams = (pattern) => {
     const pathParts = currentPath().split('/').filter(Boolean);
     const patternParts = pattern.split('/').filter(Boolean);
-    
+
     if (pathParts.length !== patternParts.length) return null;
-    
+
     const params = {};
     for (let i = 0; i < patternParts.length; i++) {
       if (patternParts[i].startsWith(':')) {
@@ -42,11 +42,11 @@ export const RouterProvider = (props) => {
     getParams,
   };
 
-  return (
-    <RouterContext.Provider value={value}>
-      {props.children}
-    </RouterContext.Provider>
-  );
+  const inner = resolveChildren(() => props.children);
+  return createComponent(RouterContext.Provider, {
+    value: value,
+    get children() { return inner; },
+  });
 };
 
 export const useRouter = () => {
@@ -65,7 +65,7 @@ export const useNavigate = () => {
 export const useParams = () => {
   const { currentPath } = useRouter();
   const path = currentPath();
-  
+
   const match = path.match(/^\/expenses\/([^/]+)/);
   if (match) {
     return { id: match[1] };

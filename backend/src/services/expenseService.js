@@ -1,6 +1,7 @@
 import {
-  expenses,
+  db,
   users,
+  getUserById,
   expenseStatuses,
   statusLabels,
   expenseTypeLabels,
@@ -11,8 +12,6 @@ import {
 import { v4 as uuidv4 } from 'uuid';
 
 const WARN_THRESHOLD = 24 * 60 * 60 * 1000;
-
-const getUserById = (id) => users.find(u => u.id === id);
 
 const calcDeadlineInfo = (deadline) => {
   const now = Date.now();
@@ -41,18 +40,12 @@ const calcDeadlineInfo = (deadline) => {
     }
   }
 
-  return {
-    isOverdue,
-    isWarning,
-    text,
-    diff,
-    deadline,
-  };
+  return { isOverdue, isWarning, text, diff, deadline };
 };
 
 const calcMaterialInfo = (exp) => {
   const required = requiredMaterialsByType[exp.expenseType] || [];
-  const requiredLabels = requiredMaterialLabels[exp.expenseType] || [];
+  const reqLabels = requiredMaterialLabels[exp.expenseType] || [];
   const uploaded = exp.materials || [];
 
   const missing = [];
@@ -60,7 +53,7 @@ const calcMaterialInfo = (exp) => {
   required.forEach((m, idx) => {
     if (!uploaded.includes(m)) {
       missing.push(m);
-      missingLabels.push(requiredLabels[idx]);
+      missingLabels.push(reqLabels[idx]);
     }
   });
 
@@ -68,13 +61,30 @@ const calcMaterialInfo = (exp) => {
 
   return {
     required,
-    requiredLabels,
+    requiredLabels: reqLabels,
     uploaded,
     uploadedLabels: uploaded.map(m => materialTypes[m] || m),
     missing,
     missingLabels,
     isComplete,
   };
+};
+
+const loadMaterials = (expenseId) => {
+  const rows = db.prepare('SELECT materialType FROM expense_materials WHERE expenseId = ? ORDER BY id').all(expenseId);
+  return rows.map(r => r.materialType);
+};
+
+const loadAuditLogs = (expenseId) => {
+  return db.prepare('SELECT * FROM audit_logs WHERE expenseId = ? ORDER BY time DESC').all(expenseId);
+};
+
+const loadExpenseRow = (id) => {
+  const row = db.prepare('SELECT * FROM expenses WHERE id = ?').get(id);
+  if (!row) return null;
+  row.materials = loadMaterials(id);
+  row.auditLogs = loadAuditLogs(id);
+  return row;
 };
 
 const enrichExpense = (exp) => {
@@ -99,81 +109,24 @@ const enrichExpense = (exp) => {
   };
 };
 
-export const getExpenseList = ({ userId, role, status, warningLevel, keyword } = {}) => {
-  let list = [...expenses];
-
-  if (status) {
-    list = list.filter(e => e.status === status);
-  }
-
-  if (warningLevel === 'overdue') {
-    list = list.filter(e => e.deadline < Date.now());
-  } else if (warningLevel === 'warning') {
-    const now = Date.now();
-    list = list.filter(e => e.deadline >= now && e.deadline <= now + WARN_THRESHOLD);
-  } else if (warningLevel === 'normal') {
-    list = list.filter(e => e.deadline > Date.now() + WARN_THRESHOLD);
-  }
-
-  if (role && role !== 'manager') {
-    list = list.filter(e => {
-      if (e.currentHandler === userId) return true;
-      if (role === 'clerk' && e.creator === userId) return true;
-      if (e.lastHandler === userId && e.status === expenseStatuses.DRAFT) return true;
-      return false;
-    });
-  }
-
-  if (keyword) {
-    const kw = keyword.toLowerCase();
-    list = list.filter(e =>
-      e.title.toLowerCase().includes(kw) ||
-      e.applicant.toLowerCase().includes(kw) ||
-      e.id.toLowerCase().includes(kw)
-    );
-  }
-
-  list.sort((a, b) => {
-    const aOverdue = a.deadline < Date.now();
-    const bOverdue = b.deadline < Date.now();
-    if (aOverdue && !bOverdue) return -1;
-    if (!aOverdue && bOverdue) return 1;
-    return a.deadline - b.deadline;
-  });
-
-  return list.map(enrichExpense);
-};
-
-export const getExpenseDetail = (id) => {
-  const exp = expenses.find(e => e.id === id);
-  if (!exp) return null;
-  return enrichExpense(exp);
-};
-
-const addAuditLog = (exp, action, userId, remark) => {
+const addAuditLog = (expId, action, userId, remark) => {
   const user = getUserById(userId);
-  exp.auditLogs.push({
-    id: uuidv4(),
-    action,
-    userId,
-    userName: user ? user.name : '未知',
-    time: Date.now(),
-    remark,
-  });
+  const id = uuidv4();
+  db.prepare('INSERT INTO audit_logs (id, expenseId, action, userId, userName, time, remark) VALUES (?, ?, ?, ?, ?, ?, ?)')
+    .run(id, expId, action, userId, user ? user.name : '未知', Date.now(), remark);
 };
 
-const updateLastInfo = (exp, result, userId) => {
-  exp.lastResult = result;
-  exp.lastHandler = userId;
-  exp.lastHandleTime = Date.now();
+const updateLastInfo = (id, result, userId) => {
+  db.prepare('UPDATE expenses SET lastResult = ?, lastHandler = ?, lastHandleTime = ?, updatedAt = ? WHERE id = ?')
+    .run(result, userId, Date.now(), Date.now(), id);
 };
 
 const checkVersion = (exp, version) => {
   if (version !== undefined && exp.version !== version) {
     throw new Error('数据已被他人修改，请刷新后重试');
   }
-  exp.version += 1;
-  exp.updatedAt = Date.now();
+  db.prepare('UPDATE expenses SET version = version + 1, updatedAt = ? WHERE id = ?')
+    .run(Date.now(), exp.id);
 };
 
 const checkPermission = (role, allowedRoles) => {
@@ -190,12 +143,74 @@ const checkMaterials = (exp, strict = true) => {
   return info;
 };
 
-export const getMaterialConfig = () => {
-  return {
-    materialTypes,
-    requiredMaterialsByType,
-    requiredMaterialLabels,
-  };
+const replaceMaterials = (expenseId, materials) => {
+  db.prepare('DELETE FROM expense_materials WHERE expenseId = ?').run(expenseId);
+  const stmt = db.prepare('INSERT INTO expense_materials (expenseId, materialType) VALUES (?, ?)');
+  for (const m of materials) stmt.run(expenseId, m);
+};
+
+const updateExpenseFields = (id, fields) => {
+  const keys = Object.keys(fields);
+  if (keys.length === 0) return;
+  const setSql = keys.map(k => `${k} = @${k}`).join(', ');
+  const stmt = db.prepare(`UPDATE expenses SET ${setSql} WHERE id = @id`);
+  stmt.run({ ...fields, id });
+};
+
+export const getMaterialConfig = () => ({
+  materialTypes,
+  requiredMaterialsByType,
+  requiredMaterialLabels,
+});
+
+export const getExpenseList = ({ userId, role, status, warningLevel, keyword } = {}) => {
+  let sql = 'SELECT * FROM expenses WHERE 1=1';
+  const params = [];
+
+  if (status) {
+    sql += ' AND status = ?';
+    params.push(status);
+  }
+
+  if (warningLevel === 'overdue') {
+    sql += ' AND deadline < ?';
+    params.push(Date.now());
+  } else if (warningLevel === 'warning') {
+    const now = Date.now();
+    sql += ' AND deadline >= ? AND deadline <= ?';
+    params.push(now, now + WARN_THRESHOLD);
+  } else if (warningLevel === 'normal') {
+    sql += ' AND deadline > ?';
+    params.push(Date.now() + WARN_THRESHOLD);
+  }
+
+  if (role && role !== 'manager') {
+    sql += ' AND (currentHandler = ? OR creator = ? OR (lastHandler = ? AND status = ?))';
+    params.push(userId, userId, userId, expenseStatuses.DRAFT);
+  }
+
+  if (keyword) {
+    sql += ' AND (LOWER(title) LIKE ? OR LOWER(applicant) LIKE ? OR LOWER(id) LIKE ?)';
+    const kw = `%${keyword.toLowerCase()}%`;
+    params.push(kw, kw, kw);
+  }
+
+  sql += ' ORDER BY (deadline < ?) DESC, deadline ASC';
+  params.push(Date.now());
+
+  const rows = db.prepare(sql).all(...params);
+  const enriched = rows.map(r => {
+    r.materials = loadMaterials(r.id);
+    r.auditLogs = [];
+    return enrichExpense(r);
+  });
+  return enriched;
+};
+
+export const getExpenseDetail = (id) => {
+  const exp = loadExpenseRow(id);
+  if (!exp) return null;
+  return enrichExpense(exp);
 };
 
 export const createExpense = (data, userId) => {
@@ -205,9 +220,11 @@ export const createExpense = (data, userId) => {
 
   const day = 24 * 60 * 60 * 1000;
   const materials = data.materials || [];
+  const id = uuidv4();
+  const now = Date.now();
 
   const exp = {
-    id: uuidv4(),
+    id,
     title: data.title || '报销申请',
     applicant: data.applicant || '',
     applicantDept: data.applicantDept || '',
@@ -216,21 +233,19 @@ export const createExpense = (data, userId) => {
     creator: userId,
     currentHandler: userId,
     status: expenseStatuses.DRAFT,
-    materials,
-    deadline: data.deadline ? new Date(data.deadline).getTime() : Date.now() + 3 * day,
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
+    deadline: data.deadline ? new Date(data.deadline).getTime() : now + 3 * day,
+    createdAt: now,
+    updatedAt: now,
     version: 1,
     lastResult: '已创建草稿',
     lastHandler: userId,
-    lastHandleTime: Date.now(),
+    lastHandleTime: now,
     exceptionReason: null,
-    auditLogs: [],
     verifyOpinion: null,
     reviewOpinion: null,
   };
 
-  const materialInfo = calcMaterialInfo(exp);
+  const materialInfo = calcMaterialInfo({ ...exp, materials });
   const materialRemark = materials.length > 0
     ? `添加材料：${materials.map(m => materialTypes[m] || m).join('、')}`
     : '待补充材料';
@@ -240,205 +255,221 @@ export const createExpense = (data, userId) => {
     exp.lastResult = '草稿，材料待补充';
   }
 
-  addAuditLog(exp, 'create', userId, `创建报销单，${materialRemark}`);
-  expenses.unshift(exp);
-  return enrichExpense(exp);
+  db.prepare(`INSERT INTO expenses
+    (id, title, applicant, applicantDept, amount, expenseType, creator, currentHandler, status,
+     deadline, createdAt, updatedAt, version, lastResult, lastHandler, lastHandleTime,
+     exceptionReason, verifyOpinion, reviewOpinion)
+    VALUES
+    (@id, @title, @applicant, @applicantDept, @amount, @expenseType, @creator, @currentHandler, @status,
+     @deadline, @createdAt, @updatedAt, @version, @lastResult, @lastHandler, @lastHandleTime,
+     @exceptionReason, @verifyOpinion, @reviewOpinion)`).run(exp);
+
+  replaceMaterials(id, materials);
+  addAuditLog(id, 'create', userId, `创建报销单，${materialRemark}`);
+
+  const loaded = loadExpenseRow(id);
+  return enrichExpense(loaded);
 };
 
 export const updateMaterials = (id, data, userId, version) => {
-  const exp = expenses.find(e => e.id === id);
+  const exp = loadExpenseRow(id);
   if (!exp) throw new Error('报销申请不存在');
   const user = getUserById(userId);
   if (!user) throw new Error('用户不存在');
 
-  if (exp.status !== expenseStatuses.DRAFT) {
-    throw new Error('只有草稿状态可以修改材料');
-  }
-  if (exp.creator !== userId) {
-    throw new Error('只能修改自己创建的报销单材料');
-  }
+  if (exp.status !== expenseStatuses.DRAFT) throw new Error('只有草稿状态可以修改材料');
+  if (exp.creator !== userId) throw new Error('只能修改自己创建的报销单材料');
 
   checkVersion(exp, version);
 
   const oldMaterials = [...exp.materials];
-  exp.materials = data.materials || [];
+  const newMaterials = data.materials || [];
+  replaceMaterials(id, newMaterials);
+  exp.materials = newMaterials;
 
   const materialInfo = calcMaterialInfo(exp);
 
-  const added = exp.materials.filter(m => !oldMaterials.includes(m));
-  const removed = oldMaterials.filter(m => !exp.materials.includes(m));
+  const added = newMaterials.filter(m => !oldMaterials.includes(m));
+  const removed = oldMaterials.filter(m => !newMaterials.includes(m));
 
   let remark = '更新材料';
   if (added.length > 0) remark += `，新增：${added.map(m => materialTypes[m] || m).join('、')}`;
   if (removed.length > 0) remark += `，移除：${removed.map(m => materialTypes[m] || m).join('、')}`;
 
+  let lastResult;
+  let exceptionReason;
   if (!materialInfo.isComplete) {
-    exp.exceptionReason = `材料不全，缺少：${materialInfo.missingLabels.join('、')}`;
-    exp.lastResult = '草稿，材料待补充';
+    exceptionReason = `材料不全，缺少：${materialInfo.missingLabels.join('、')}`;
+    lastResult = '草稿，材料待补充';
   } else {
-    exp.exceptionReason = null;
-    exp.lastResult = '草稿，材料已齐全';
+    exceptionReason = null;
+    lastResult = '草稿，材料已齐全';
   }
 
-  addAuditLog(exp, 'update_materials', userId, remark);
-  updateLastInfo(exp, exp.lastResult, userId);
+  updateExpenseFields(id, { exceptionReason, lastResult });
+  addAuditLog(id, 'update_materials', userId, remark);
+  updateLastInfo(id, lastResult, userId);
 
-  return enrichExpense(exp);
+  return enrichExpense(loadExpenseRow(id));
 };
 
 export const submitExpense = (id, userId, version) => {
-  const exp = expenses.find(e => e.id === id);
+  const exp = loadExpenseRow(id);
   if (!exp) throw new Error('报销申请不存在');
   const user = getUserById(userId);
   if (!user) throw new Error('用户不存在');
 
   checkPermission(user.role, ['clerk']);
 
-  if (exp.status !== expenseStatuses.DRAFT) {
-    throw new Error('只有草稿状态可以提交');
-  }
-  if (exp.creator !== userId) {
-    throw new Error('只能提交自己创建的报销单');
-  }
+  if (exp.status !== expenseStatuses.DRAFT) throw new Error('只有草稿状态可以提交');
+  if (exp.creator !== userId) throw new Error('只能提交自己创建的报销单');
 
   if (!exp.applicant || !exp.amount || exp.amount <= 0) {
     throw new Error('请完善申请人和金额信息');
   }
 
   const materialInfo = checkMaterials(exp, true);
-
   checkVersion(exp, version);
-  exp.status = expenseStatuses.SUBMITTED;
-  exp.currentHandler = null;
-  exp.exceptionReason = null;
 
-  addAuditLog(exp, 'submit', userId, `提交报销申请，材料齐全：${materialInfo.uploadedLabels.join('、')}`);
-  updateLastInfo(exp, '已提交待核验，材料齐全', userId);
+  updateExpenseFields(id, {
+    status: expenseStatuses.SUBMITTED,
+    currentHandler: null,
+    exceptionReason: null,
+  });
 
-  return enrichExpense(exp);
+  addAuditLog(id, 'submit', userId, `提交报销申请，材料齐全：${materialInfo.uploadedLabels.join('、')}`);
+  updateLastInfo(id, '已提交待核验，材料齐全', userId);
+
+  return enrichExpense(loadExpenseRow(id));
 };
 
 export const startVerify = (id, userId, version) => {
-  const exp = expenses.find(e => e.id === id);
+  const exp = loadExpenseRow(id);
   if (!exp) throw new Error('报销申请不存在');
   const user = getUserById(userId);
   if (!user) throw new Error('用户不存在');
 
   checkPermission(user.role, ['accountant']);
-
-  if (exp.status !== expenseStatuses.SUBMITTED) {
-    throw new Error('只有已提交状态可以开始核验');
-  }
+  if (exp.status !== expenseStatuses.SUBMITTED) throw new Error('只有已提交状态可以开始核验');
 
   checkVersion(exp, version);
   const materialInfo = calcMaterialInfo(exp);
-  exp.status = expenseStatuses.VERIFYING;
-  exp.currentHandler = userId;
 
+  let lastResult;
+  let exceptionReason;
   let remark = '开始核验';
+
   if (!materialInfo.isComplete) {
-    exp.exceptionReason = `材料不全，缺少：${materialInfo.missingLabels.join('、')}`;
-    exp.lastResult = '核验中，发现材料不全';
+    exceptionReason = `材料不全，缺少：${materialInfo.missingLabels.join('、')}`;
+    lastResult = '核验中，发现材料不全';
     remark += `，发现材料不全：${materialInfo.missingLabels.join('、')}`;
   } else {
-    exp.lastResult = '核验中，材料齐全';
+    lastResult = '核验中，材料齐全';
     remark += '，材料齐全';
   }
 
-  addAuditLog(exp, 'start_verify', userId, remark);
-  updateLastInfo(exp, exp.lastResult, userId);
+  updateExpenseFields(id, {
+    status: expenseStatuses.VERIFYING,
+    currentHandler: userId,
+    exceptionReason,
+  });
 
-  return enrichExpense(exp);
+  addAuditLog(id, 'start_verify', userId, remark);
+  updateLastInfo(id, lastResult, userId);
+
+  return enrichExpense(loadExpenseRow(id));
 };
 
 export const passVerify = (id, userId, data = {}, version) => {
-  const exp = expenses.find(e => e.id === id);
+  const exp = loadExpenseRow(id);
   if (!exp) throw new Error('报销申请不存在');
   const user = getUserById(userId);
   if (!user) throw new Error('用户不存在');
 
   checkPermission(user.role, ['accountant']);
-
-  if (exp.status !== expenseStatuses.VERIFYING) {
-    throw new Error('只有核验中状态可以通过核验');
-  }
-  if (exp.currentHandler !== userId) {
-    throw new Error('只能处理分配给自己的报销单');
-  }
+  if (exp.status !== expenseStatuses.VERIFYING) throw new Error('只有核验中状态可以通过核验');
+  if (exp.currentHandler !== userId) throw new Error('只能处理分配给自己的报销单');
 
   if (!data.opinion || data.opinion.trim().length < 5) {
     throw new Error('请填写核验意见（至少5个字）');
   }
 
   const materialInfo = checkMaterials(exp, false);
-
   checkVersion(exp, version);
-  exp.verifyOpinion = data.opinion;
+
+  let newStatus, newHandler, exceptionReason, lastResult, auditAction, auditRemark;
 
   if (materialInfo.isComplete) {
-    exp.status = expenseStatuses.PENDING_REVIEW;
-    exp.currentHandler = null;
-    exp.exceptionReason = null;
-    exp.lastResult = '核验通过，材料齐全，待复核';
-    addAuditLog(exp, 'verify_pass', userId, `核验通过：${data.opinion}，材料状态：齐全`);
+    newStatus = expenseStatuses.PENDING_REVIEW;
+    newHandler = null;
+    exceptionReason = null;
+    lastResult = '核验通过，材料齐全，待复核';
+    auditAction = 'verify_pass';
+    auditRemark = `核验通过：${data.opinion}，材料状态：齐全`;
   } else {
-    exp.status = expenseStatuses.SUPPLEMENT_REQUIRED;
-    exp.currentHandler = exp.creator;
-    exp.exceptionReason = `材料不全（缺少：${materialInfo.missingLabels.join('、')}），需补齐后重新提交`;
-    exp.lastResult = `材料不全，需补齐：${materialInfo.missingLabels.join('、')}，已退回补材料`;
-    addAuditLog(exp, 'verify_supplement', userId, `核验发现材料不全：${data.opinion}，缺少：${materialInfo.missingLabels.join('、')}，退回补材料`);
+    newStatus = expenseStatuses.SUPPLEMENT_REQUIRED;
+    newHandler = exp.creator;
+    exceptionReason = `材料不全（缺少：${materialInfo.missingLabels.join('、')}），需补齐后重新提交`;
+    lastResult = `材料不全，需补齐：${materialInfo.missingLabels.join('、')}，已退回补材料`;
+    auditAction = 'verify_supplement';
+    auditRemark = `核验发现材料不全：${data.opinion}，缺少：${materialInfo.missingLabels.join('、')}，退回补材料`;
   }
 
-  updateLastInfo(exp, exp.lastResult, userId);
+  updateExpenseFields(id, {
+    status: newStatus,
+    currentHandler: newHandler,
+    exceptionReason,
+    verifyOpinion: data.opinion,
+    lastResult,
+  });
 
-  return enrichExpense(exp);
+  addAuditLog(id, auditAction, userId, auditRemark);
+  updateLastInfo(id, lastResult, userId);
+
+  return enrichExpense(loadExpenseRow(id));
 };
 
 export const rejectVerify = (id, userId, data = {}, version) => {
-  const exp = expenses.find(e => e.id === id);
+  const exp = loadExpenseRow(id);
   if (!exp) throw new Error('报销申请不存在');
   const user = getUserById(userId);
   if (!user) throw new Error('用户不存在');
 
   checkPermission(user.role, ['accountant']);
-
-  if (exp.status !== expenseStatuses.VERIFYING) {
-    throw new Error('只有核验中状态可以驳回');
-  }
-  if (exp.currentHandler !== userId) {
-    throw new Error('只能处理分配给自己的报销单');
-  }
+  if (exp.status !== expenseStatuses.VERIFYING) throw new Error('只有核验中状态可以驳回');
+  if (exp.currentHandler !== userId) throw new Error('只能处理分配给自己的报销单');
 
   if (!data.reason || data.reason.trim().length < 5) {
     throw new Error('请填写驳回原因（至少5个字）');
   }
 
   const materialInfo = checkMaterials(exp, false);
-
   checkVersion(exp, version);
-  exp.status = expenseStatuses.REJECTED;
-  exp.currentHandler = null;
-  exp.verifyOpinion = data.reason;
-  exp.exceptionReason = data.reason;
 
-  addAuditLog(exp, 'verify_reject', userId, `核验驳回：${data.reason}，材料状态：${materialInfo.isComplete ? '齐全' : '缺少：' + materialInfo.missingLabels.join('、')}`);
-  updateLastInfo(exp, '核验驳回', userId);
+  updateExpenseFields(id, {
+    status: expenseStatuses.REJECTED,
+    currentHandler: null,
+    verifyOpinion: data.reason,
+    exceptionReason: data.reason,
+  });
 
-  return enrichExpense(exp);
+  addAuditLog(id, 'verify_reject', userId,
+    `核验驳回：${data.reason}，材料状态：${materialInfo.isComplete ? '齐全' : '缺少：' + materialInfo.missingLabels.join('、')}`);
+  updateLastInfo(id, '核验驳回', userId);
+
+  return enrichExpense(loadExpenseRow(id));
 };
 
 export const requestSupplement = (id, userId, data = {}, version) => {
-  const exp = expenses.find(e => e.id === id);
+  const exp = loadExpenseRow(id);
   if (!exp) throw new Error('报销申请不存在');
   const user = getUserById(userId);
   if (!user) throw new Error('用户不存在');
 
   checkPermission(user.role, ['accountant', 'manager']);
-
   if (exp.status !== expenseStatuses.VERIFYING && exp.status !== expenseStatuses.PENDING_REVIEW) {
     throw new Error('只有核验中或待复核状态可以要求补材料');
   }
-
   if (exp.status === expenseStatuses.VERIFYING && exp.currentHandler !== userId) {
     throw new Error('只能处理分配给自己的报销单');
   }
@@ -448,91 +479,101 @@ export const requestSupplement = (id, userId, data = {}, version) => {
   }
 
   checkVersion(exp, version);
-  exp.status = expenseStatuses.SUPPLEMENT_REQUIRED;
-  exp.currentHandler = exp.creator;
-  exp.exceptionReason = `需补材料：${data.reason}`;
+
+  updateExpenseFields(id, {
+    status: expenseStatuses.SUPPLEMENT_REQUIRED,
+    currentHandler: exp.creator,
+    exceptionReason: `需补材料：${data.reason}`,
+  });
 
   const roleLabel = user.role === 'manager' ? '复核' : '核验';
-  addAuditLog(exp, 'request_supplement', userId, `${roleLabel}要求补材料：${data.reason}`);
-  updateLastInfo(exp, '需补充材料，退回创建者', userId);
+  addAuditLog(id, 'request_supplement', userId, `${roleLabel}要求补材料：${data.reason}`);
+  updateLastInfo(id, '需补充材料，退回创建者', userId);
 
-  return enrichExpense(exp);
+  return enrichExpense(loadExpenseRow(id));
 };
 
 export const passReview = (id, userId, data = {}, version) => {
-  const exp = expenses.find(e => e.id === id);
+  const exp = loadExpenseRow(id);
   if (!exp) throw new Error('报销申请不存在');
   const user = getUserById(userId);
   if (!user) throw new Error('用户不存在');
 
   checkPermission(user.role, ['manager']);
-
-  if (exp.status !== expenseStatuses.PENDING_REVIEW) {
-    throw new Error('只有待复核状态可以复核通过');
-  }
+  if (exp.status !== expenseStatuses.PENDING_REVIEW) throw new Error('只有待复核状态可以复核通过');
 
   if (!data.opinion || data.opinion.trim().length < 3) {
     throw new Error('请填写复核意见');
   }
 
   const materialInfo = checkMaterials(exp, false);
-
   checkVersion(exp, version);
-  exp.reviewOpinion = data.opinion;
+
+  let newStatus, newHandler, exceptionReason, lastResult, auditAction, auditRemark;
 
   if (materialInfo.isComplete) {
-    exp.status = expenseStatuses.APPROVED;
-    exp.currentHandler = null;
-    exp.exceptionReason = null;
-    exp.lastResult = '复核通过，流程完成';
-    addAuditLog(exp, 'review_pass', userId, `复核通过：${data.opinion}，材料状态：齐全`);
+    newStatus = expenseStatuses.APPROVED;
+    newHandler = null;
+    exceptionReason = null;
+    lastResult = '复核通过，流程完成';
+    auditAction = 'review_pass';
+    auditRemark = `复核通过：${data.opinion}，材料状态：齐全`;
   } else {
-    exp.status = expenseStatuses.SUPPLEMENT_REQUIRED;
-    exp.currentHandler = exp.creator;
-    exp.exceptionReason = `材料不全（缺少：${materialInfo.missingLabels.join('、')}），需补齐后重新提交`;
-    exp.lastResult = `材料不全，需补齐：${materialInfo.missingLabels.join('、')}，已退回补材料`;
-    addAuditLog(exp, 'review_supplement', userId, `复核发现材料不全：${data.opinion}，缺少：${materialInfo.missingLabels.join('、')}，退回补材料`);
+    newStatus = expenseStatuses.SUPPLEMENT_REQUIRED;
+    newHandler = exp.creator;
+    exceptionReason = `材料不全（缺少：${materialInfo.missingLabels.join('、')}），需补齐后重新提交`;
+    lastResult = `材料不全，需补齐：${materialInfo.missingLabels.join('、')}，已退回补材料`;
+    auditAction = 'review_supplement';
+    auditRemark = `复核发现材料不全：${data.opinion}，缺少：${materialInfo.missingLabels.join('、')}，退回补材料`;
   }
 
-  updateLastInfo(exp, exp.lastResult, userId);
+  updateExpenseFields(id, {
+    status: newStatus,
+    currentHandler: newHandler,
+    exceptionReason,
+    reviewOpinion: data.opinion,
+    lastResult,
+  });
 
-  return enrichExpense(exp);
+  addAuditLog(id, auditAction, userId, auditRemark);
+  updateLastInfo(id, lastResult, userId);
+
+  return enrichExpense(loadExpenseRow(id));
 };
 
 export const rejectReview = (id, userId, data = {}, version) => {
-  const exp = expenses.find(e => e.id === id);
+  const exp = loadExpenseRow(id);
   if (!exp) throw new Error('报销申请不存在');
   const user = getUserById(userId);
   if (!user) throw new Error('用户不存在');
 
   checkPermission(user.role, ['manager']);
-
-  if (exp.status !== expenseStatuses.PENDING_REVIEW) {
-    throw new Error('只有待复核状态可以复核驳回');
-  }
+  if (exp.status !== expenseStatuses.PENDING_REVIEW) throw new Error('只有待复核状态可以复核驳回');
 
   if (!data.reason || data.reason.trim().length < 5) {
     throw new Error('请填写驳回原因（至少5个字）');
   }
 
   const materialInfo = checkMaterials(exp, false);
-
   checkVersion(exp, version);
-  exp.status = expenseStatuses.REJECTED;
-  exp.currentHandler = null;
-  exp.reviewOpinion = data.reason;
-  exp.exceptionReason = data.reason;
 
-  addAuditLog(exp, 'review_reject', userId, `复核驳回：${data.reason}，材料状态：${materialInfo.isComplete ? '齐全' : '缺少：' + materialInfo.missingLabels.join('、')}`);
-  updateLastInfo(exp, '复核驳回', userId);
+  updateExpenseFields(id, {
+    status: expenseStatuses.REJECTED,
+    currentHandler: null,
+    reviewOpinion: data.reason,
+    exceptionReason: data.reason,
+  });
 
-  return enrichExpense(exp);
+  addAuditLog(id, 'review_reject', userId,
+    `复核驳回：${data.reason}，材料状态：${materialInfo.isComplete ? '齐全' : '缺少：' + materialInfo.missingLabels.join('、')}`);
+  updateLastInfo(id, '复核驳回', userId);
+
+  return enrichExpense(loadExpenseRow(id));
 };
 
 export const batchPassReview = (items, userId, data = {}) => {
   const results = [];
   const errors = [];
-
   for (const item of items) {
     try {
       const result = passReview(item.id, userId, { opinion: data.opinion || '批量复核通过' }, item.version);
@@ -541,14 +582,12 @@ export const batchPassReview = (items, userId, data = {}) => {
       errors.push({ id: item.id, title: item.title, message: err.message });
     }
   }
-
   return { success: results.length, failed: errors.length, results, errors };
 };
 
 export const batchRejectReview = (items, userId, data = {}) => {
   const results = [];
   const errors = [];
-
   for (const item of items) {
     try {
       const result = rejectReview(item.id, userId, { reason: data.reason || '批量驳回' }, item.version);
@@ -557,14 +596,12 @@ export const batchRejectReview = (items, userId, data = {}) => {
       errors.push({ id: item.id, title: item.title, message: err.message });
     }
   }
-
   return { success: results.length, failed: errors.length, results, errors };
 };
 
 export const batchStartVerify = (items, userId) => {
   const results = [];
   const errors = [];
-
   for (const item of items) {
     try {
       const result = startVerify(item.id, userId, item.version);
@@ -573,14 +610,40 @@ export const batchStartVerify = (items, userId) => {
       errors.push({ id: item.id, title: item.title, message: err.message });
     }
   }
+  return { success: results.length, failed: errors.length, results, errors };
+};
 
+export const batchRequestSupplement = (items, userId, data = {}) => {
+  const results = [];
+  const errors = [];
+  for (const item of items) {
+    try {
+      const result = requestSupplement(item.id, userId, { reason: data.reason || '批量要求补材料' }, item.version);
+      results.push(result);
+    } catch (err) {
+      errors.push({ id: item.id, title: item.title, message: err.message });
+    }
+  }
+  return { success: results.length, failed: errors.length, results, errors };
+};
+
+export const batchSupplementMaterials = (items, userId) => {
+  const results = [];
+  const errors = [];
+  for (const item of items) {
+    try {
+      const result = supplementMaterials(item.id, { materials: item.materials || [] }, userId, item.version);
+      results.push(result);
+    } catch (err) {
+      errors.push({ id: item.id, title: item.title, message: err.message });
+    }
+  }
   return { success: results.length, failed: errors.length, results, errors };
 };
 
 export const getStats = ({ userId, role } = {}) => {
   const list = getExpenseList({ userId, role });
   const now = Date.now();
-
   const total = list.length;
   const overdue = list.filter(e => e.deadline < now).length;
   const warning = list.filter(e => e.deadline >= now && e.deadline <= now + WARN_THRESHOLD).length;
@@ -593,28 +656,21 @@ export const getStats = ({ userId, role } = {}) => {
 
   const myPending = list.filter(e => e.currentHandler === userId).length;
 
-  return {
-    total,
-    overdue,
-    warning,
-    normal,
-    byStatus,
-    myPending,
-  };
+  return { total, overdue, warning, normal, byStatus, myPending };
 };
 
 export const getAuditLogs = (id) => {
-  const exp = expenses.find(e => e.id === id);
+  const exp = db.prepare('SELECT id FROM expenses WHERE id = ?').get(id);
   if (!exp) return null;
-  return exp.auditLogs.sort((a, b) => b.time - a.time);
+  return db.prepare('SELECT * FROM audit_logs WHERE expenseId = ? ORDER BY time DESC').all(id);
 };
 
 export const getUsers = () => {
-  return users.map(u => ({ id: u.id, name: u.name, role: u.role, dept: u.dept }));
+  return users();
 };
 
 export const updateExpenseDeadline = (id, deadline, userId) => {
-  const exp = expenses.find(e => e.id === id);
+  const exp = loadExpenseRow(id);
   if (!exp) throw new Error('报销申请不存在');
   const user = getUserById(userId);
   if (!user) throw new Error('用户不存在');
@@ -622,17 +678,21 @@ export const updateExpenseDeadline = (id, deadline, userId) => {
   checkPermission(user.role, ['manager', 'clerk']);
 
   const oldDeadline = exp.deadline;
-  exp.deadline = new Date(deadline).getTime();
-  exp.updatedAt = Date.now();
-  exp.version += 1;
+  const newDeadline = new Date(deadline).getTime();
 
-  addAuditLog(exp, 'update_deadline', userId, `调整截止时间：从${new Date(oldDeadline).toLocaleString()}到${new Date(exp.deadline).toLocaleString()}`);
+  updateExpenseFields(id, {
+    deadline: newDeadline,
+    version: exp.version + 1,
+  });
 
-  return enrichExpense(exp);
+  addAuditLog(id, 'update_deadline', userId,
+    `调整截止时间：从${new Date(oldDeadline).toLocaleString()}到${new Date(newDeadline).toLocaleString()}`);
+
+  return enrichExpense(loadExpenseRow(id));
 };
 
 export const supplementMaterials = (id, data, userId, version) => {
-  const exp = expenses.find(e => e.id === id);
+  const exp = loadExpenseRow(id);
   if (!exp) throw new Error('报销申请不存在');
   const user = getUserById(userId);
   if (!user) throw new Error('用户不存在');
@@ -647,28 +707,41 @@ export const supplementMaterials = (id, data, userId, version) => {
   checkVersion(exp, version);
 
   const oldMaterials = [...exp.materials];
-  exp.materials = data.materials || [];
+  const newMaterials = data.materials || [];
+  replaceMaterials(id, newMaterials);
+  exp.materials = newMaterials;
 
   const materialInfo = calcMaterialInfo(exp);
-
-  const added = exp.materials.filter(m => !oldMaterials.includes(m));
+  const added = newMaterials.filter(m => !oldMaterials.includes(m));
   const addedLabels = added.map(m => materialTypes[m] || m);
 
+  let newStatus, newHandler, exceptionReason, lastResult, auditAction, auditRemark;
+
   if (materialInfo.isComplete) {
-    exp.status = expenseStatuses.SUBMITTED;
-    exp.currentHandler = null;
-    exp.exceptionReason = null;
-    exp.lastResult = '材料已补齐，重新提交待核验';
-    addAuditLog(exp, 'supplement_complete', userId, `补充材料完成：新增${addedLabels.join('、')}，材料已齐全，重新提交`);
+    newStatus = expenseStatuses.SUBMITTED;
+    newHandler = null;
+    exceptionReason = null;
+    lastResult = '材料已补齐，重新提交待核验';
+    auditAction = 'supplement_complete';
+    auditRemark = `补充材料完成：新增${addedLabels.join('、')}，材料已齐全，重新提交`;
   } else {
-    exp.status = expenseStatuses.SUPPLEMENT_REQUIRED;
-    exp.currentHandler = exp.creator;
-    exp.exceptionReason = `材料不全（缺少：${materialInfo.missingLabels.join('、')}），需补齐后重新提交`;
-    exp.lastResult = `已补充部分材料，仍缺：${materialInfo.missingLabels.join('、')}`;
-    addAuditLog(exp, 'supplement_partial', userId, `补充材料：新增${addedLabels.length > 0 ? addedLabels.join('、') : '无'}，仍缺少：${materialInfo.missingLabels.join('、')}`);
+    newStatus = expenseStatuses.SUPPLEMENT_REQUIRED;
+    newHandler = exp.creator;
+    exceptionReason = `材料不全（缺少：${materialInfo.missingLabels.join('、')}），需补齐后重新提交`;
+    lastResult = `已补充部分材料，仍缺：${materialInfo.missingLabels.join('、')}`;
+    auditAction = 'supplement_partial';
+    auditRemark = `补充材料：新增${addedLabels.length > 0 ? addedLabels.join('、') : '无'}，仍缺少：${materialInfo.missingLabels.join('、')}`;
   }
 
-  updateLastInfo(exp, exp.lastResult, userId);
+  updateExpenseFields(id, {
+    status: newStatus,
+    currentHandler: newHandler,
+    exceptionReason,
+    lastResult,
+  });
 
-  return enrichExpense(exp);
+  addAuditLog(id, auditAction, userId, auditRemark);
+  updateLastInfo(id, lastResult, userId);
+
+  return enrichExpense(loadExpenseRow(id));
 };

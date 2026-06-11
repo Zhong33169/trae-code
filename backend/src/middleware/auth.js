@@ -1,4 +1,4 @@
-import { users } from '../data/database.js';
+import { users, getUserById } from '../data/database.js';
 
 export const authMiddleware = async (ctx, next) => {
   const userId = ctx.request.headers['x-user-id'];
@@ -9,7 +9,7 @@ export const authMiddleware = async (ctx, next) => {
     return;
   }
 
-  const user = users.find(u => u.id === userId);
+  const user = getUserById(userId);
   if (!user) {
     ctx.status = 401;
     ctx.body = { error: '用户不存在' };
@@ -26,7 +26,7 @@ export const authMiddleware = async (ctx, next) => {
 export const optionalAuthMiddleware = async (ctx, next) => {
   const userId = ctx.request.headers['x-user-id'];
   if (userId) {
-    const user = users.find(u => u.id === userId);
+    const user = getUserById(userId);
     if (user) {
       ctx.state.user = user;
       ctx.state.userId = user.id;
