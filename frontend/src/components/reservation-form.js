@@ -89,7 +89,7 @@ export class ReservationForm extends LitElement {
       offline_attachment_count: 0,
       offline_count: 1,
       offline_status: '',
-      offline_attachment_list: '',
+      offline_attachment_list: [],
       force_submit: false,
     }
     this.batchWarning = null
@@ -101,6 +101,9 @@ export class ReservationForm extends LitElement {
   }
 
   _onInput(field, value) {
+    if (field === 'offline_attachment_list') {
+      value = value.split(',').map(a => a.trim()).filter(a => a)
+    }
     this.form = { ...this.form, [field]: value }
     if (field === 'batch_no') this._debounceBatchCheck(value)
     if (['batch_no', 'offline_count', 'offline_status', 'offline_attachment_list'].includes(field)) {
@@ -134,22 +137,21 @@ export class ReservationForm extends LitElement {
       return
     }
     try {
-      const offline_statuses = [{
-        reservation_no: 'NEW',
-        status: this.form.offline_status || 'draft',
-        attachments: this.form.offline_attachment_list || '',
-      }]
+      const offline_statuses = []
       if (this.batchWarning?.mismatch_details) {
         this.batchWarning.mismatch_details.forEach(d => {
-          if (d.reservation_no !== 'NEW') {
-            offline_statuses.push({
-              reservation_no: d.reservation_no,
-              status: d.status,
-              attachments: d.online_attachments || '',
-            })
-          }
+          offline_statuses.push({
+            reservation_no: d.reservation_no,
+            status: d.status,
+            attachments: d.online_attachments ? d.online_attachments.split(',').map(a => a.trim()).filter(a => a) : [],
+          })
         })
       }
+      offline_statuses.push({
+        reservation_no: 'NEW',
+        status: this.form.offline_status || 'draft',
+        attachments: this.form.offline_attachment_list || [],
+      })
       const result = await batchApi.statusCheck({
         batch_no: this.form.batch_no,
         offline_count: this.form.offline_count,
@@ -192,7 +194,7 @@ export class ReservationForm extends LitElement {
       const offline_statuses = [{
         reservation_no: 'NEW',
         status: this.form.offline_status || 'draft',
-        attachments: this.form.offline_attachment_list || '',
+        attachments: this.form.offline_attachment_list || [],
       }]
       const createResult = await reservationApi.create(this.form)
       await reservationApi.submit(createResult.id, {
@@ -470,7 +472,7 @@ export class ReservationForm extends LitElement {
             <div class="form-group">
               <label>线下附件清单 <span class="section-badge badge-offline">线下</span></label>
               <textarea placeholder="请输入线下台账中登记的附件文件名，多个用逗号分隔"
-                .value=${this.form.offline_attachment_list}
+                .value=${Array.isArray(this.form.offline_attachment_list) ? this.form.offline_attachment_list.join(', ') : (this.form.offline_attachment_list || '')}
                 @input=${(e) => this._onInput('offline_attachment_list', e.target.value)}></textarea>
               <div class="hint-text">线下纸质台账中记录的附件名称</div>
             </div>

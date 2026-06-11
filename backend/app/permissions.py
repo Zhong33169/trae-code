@@ -138,17 +138,32 @@ def reconcile_offline_online(
         })
         is_consistent = False
 
-    online_by_no = {r.reservation_no: r for r in online_items}
-    offline_by_no = {s.get("reservation_no"): s for s in offline_statuses if s.get("reservation_no")}
+    offline_by_no = {}
+    for s in offline_statuses:
+        no = s.get("reservation_no")
+        if no:
+            offline_by_no[no] = s
+    for a in offline_attachments:
+        no = a.get("reservation_no")
+        if no:
+            if no in offline_by_no:
+                offline_by_no[no]["attachments"] = a.get("attachments", [])
+            else:
+                offline_by_no[no] = {"reservation_no": no, "attachments": a.get("attachments", [])}
 
     for r in online_items:
+        online_att_list = []
+        if hasattr(r, 'offline_attachment_list') and r.offline_attachment_list:
+            online_att_list = r.offline_attachment_list if isinstance(r.offline_attachment_list, list) else []
+        online_att_names = set(a.strip() for a in (r.attachment_names or "").split(",") if a.strip())
+
         item = {
             "reservation_no": r.reservation_no,
             "title": r.title,
             "online_status": r.status,
             "offline_status": None,
-            "online_attachments": r.attachment_names or "",
-            "offline_attachments": "",
+            "online_attachments": sorted(online_att_names) if online_att_names else [],
+            "offline_attachments": [],
             "status_diffs": [],
             "attachment_diffs": [],
             "is_consistent": True,
@@ -167,23 +182,42 @@ def reconcile_offline_online(
                 item["is_consistent"] = False
                 is_consistent = False
 
-            offline_att = offline.get("attachments") or ""
-            item["offline_attachments"] = offline_att
-            online_att_set = set(a.strip() for a in (r.attachment_names or "").split(",") if a.strip())
-            offline_att_set = set(a.strip() for a in offline_att.split(",") if a.strip())
-            if online_att_set != offline_att_set:
-                missing_online = offline_att_set - online_att_set
-                missing_offline = online_att_set - offline_att_set
+            offline_att_raw = offline.get("attachments", [])
+            if isinstance(offline_att_raw, str):
+                offline_att_set = set(a.strip() for a in offline_att_raw.split(",") if a.strip())
+            elif isinstance(offline_att_raw, list):
+                offline_att_set = set(str(a).strip() for a in offline_att_raw if str(a).strip())
+            else:
+                offline_att_set = set()
+            item["offline_attachments"] = sorted(offline_att_set) if offline_att_set else []
+
+            if online_att_names != offline_att_set:
+                missing_online = offline_att_set - online_att_names
+                missing_offline = online_att_names - offline_att_set
                 item["attachment_diffs"].append({
                     "field": "附件",
-                    "online_value": r.attachment_names or "(空)",
-                    "offline_value": offline_att or "(空)",
-                    "missing_online": list(missing_online),
-                    "missing_offline": list(missing_offline),
-                    "message": "附件清单不一致",
+                    "online_value": sorted(online_att_names) if online_att_names else "(空)",
+                    "offline_value": sorted(offline_att_set) if offline_att_set else "(空)",
+                    "missing_online": sorted(missing_online),
+                    "missing_offline": sorted(missing_offline),
+                    "message": "附件清单不一致" + (f"，线下多出{sorted(missing_online)}" if missing_online else "") + (f"，线上多出{sorted(missing_offline)}" if missing_offline else ""),
                 })
                 item["is_consistent"] = False
                 is_consistent = False
+        else:
+            if online_att_names:
+                item["offline_attachments"] = []
+                if online_att_names:
+                    item["attachment_diffs"].append({
+                        "field": "附件",
+                        "online_value": sorted(online_att_names),
+                        "offline_value": "(未填写)",
+                        "missing_online": [],
+                        "missing_offline": sorted(online_att_names),
+                        "message": "线下未登记附件",
+                    })
+                    item["is_consistent"] = False
+                    is_consistent = False
 
         item_results.append(item)
 
@@ -193,7 +227,7 @@ def reconcile_offline_online(
         is_consistent = False
         diffs.append({
             "field": "批次状态一致性",
-            "online_value": list(online_statuses),
+            "online_value": [STATUS_LABELS.get(s, s) for s in online_statuses],
             "offline_value": None,
             "status": "diff",
             "message": f"批次内存在不同状态：{', '.join(STATUS_LABELS.get(s, s) for s in online_statuses)}，不允许继续提交",

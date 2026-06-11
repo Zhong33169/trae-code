@@ -76,16 +76,32 @@ async def check_batch(request: Request):
         message = f"批次 {batch_no} 内存在不同状态：{', '.join(STATUS_LABELS.get(s, s) for s in statuses)}，不允许继续提交。请逐单核对线下台账状态。"
 
     mismatch_details = []
+    offline_statuses = []
     for r in reservations:
+        att_list = r.offline_attachment_list if isinstance(r.offline_attachment_list, list) else []
+        online_att = [a.strip() for a in (r.attachment_names or "").split(",") if a.strip()]
         mismatch_details.append({
             "reservation_no": r.reservation_no,
             "title": r.title,
             "status": r.status,
             "status_label": STATUS_LABELS.get(r.status, r.status),
+            "offline_status": r.offline_status,
             "offline_count": r.offline_count,
             "online_attachments": r.attachment_names or "",
+            "offline_attachments": att_list,
             "suggestion": "请核对线下台账对应条目状态是否一致" if has_status_mismatch else "",
         })
+        offline_statuses.append({
+            "reservation_no": r.reservation_no,
+            "status": r.offline_status or r.status,
+            "attachments": att_list if att_list else online_att,
+        })
+
+    offline_count = existing.offline_count if existing else len(reservations)
+    reconcile = reconcile_offline_online(reservations, offline_count, offline_statuses)
+    if reconcile["is_blocked"]:
+        is_blocked = True
+        message = reconcile["message"]
 
     return JSONResponse({
         "batch_no": batch_no,
@@ -96,6 +112,7 @@ async def check_batch(request: Request):
         "existing_count": len(reservations),
         "statuses": list(statuses),
         "mismatch_details": mismatch_details,
+        "reconcile": reconcile,
     })
 
 
@@ -119,8 +136,15 @@ async def reconcile_batch(request: Request):
     if not reservations:
         return JSONResponse({"detail": "批次不存在"}, status_code=404)
 
+    if not offline_statuses:
+        for r in reservations:
+            entry = {"reservation_no": r.reservation_no, "status": r.offline_status or r.status}
+            att_list = r.offline_attachment_list if isinstance(r.offline_attachment_list, list) else []
+            entry["attachments"] = att_list if att_list else [a.strip() for a in (r.attachment_names or "").split(",") if a.strip()]
+            offline_statuses.append(entry)
+
     reconcile = reconcile_offline_online(
-        reservations, offline_count, offline_statuses, offline_attachments
+        reservations, offline_count or len(reservations), offline_statuses, offline_attachments
     )
 
     batch = db.query(BatchRecord).filter(BatchRecord.batch_no == batch_no).first()
@@ -179,7 +203,14 @@ async def get_batch_reservations(request: Request):
     has_mismatch = len(statuses) > 1
 
     offline_count = batch.offline_count if batch else len(reservations)
-    reconcile = reconcile_offline_online(reservations, offline_count)
+    offline_statuses = []
+    for r in reservations:
+        entry = {"reservation_no": r.reservation_no, "status": r.offline_status or r.status}
+        att_list = r.offline_attachment_list if isinstance(r.offline_attachment_list, list) else []
+        entry["attachments"] = att_list if att_list else [a.strip() for a in (r.attachment_names or "").split(",") if a.strip()]
+        offline_statuses.append(entry)
+
+    reconcile = reconcile_offline_online(reservations, offline_count, offline_statuses)
 
     result = [
         {
@@ -198,6 +229,7 @@ async def get_batch_reservations(request: Request):
             "offline_attachment_count": r.offline_attachment_count,
             "offline_count": r.offline_count,
             "offline_status": r.offline_status,
+            "offline_attachment_list": r.offline_attachment_list if isinstance(r.offline_attachment_list, list) else [],
             "offline_checked": r.offline_checked,
             "offline_check_diff": r.offline_check_diff,
             "created_at": r.created_at.isoformat() if r.created_at else None,
@@ -237,8 +269,15 @@ async def batch_status_check(request: Request):
     if not reservations:
         return JSONResponse({"detail": "批次不存在"}, status_code=404)
 
+    if not offline_statuses:
+        for r in reservations:
+            entry = {"reservation_no": r.reservation_no, "status": r.offline_status or r.status}
+            att_list = r.offline_attachment_list if isinstance(r.offline_attachment_list, list) else []
+            entry["attachments"] = att_list if att_list else [a.strip() for a in (r.attachment_names or "").split(",") if a.strip()]
+            offline_statuses.append(entry)
+
     reconcile = reconcile_offline_online(
-        reservations, offline_count, offline_statuses, offline_attachments
+        reservations, offline_count or len(reservations), offline_statuses, offline_attachments
     )
 
     return JSONResponse(reconcile)

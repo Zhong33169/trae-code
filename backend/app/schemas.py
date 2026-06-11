@@ -29,7 +29,7 @@ class MeetingReservationBase(BaseModel):
     offline_attachment_count: int = 0
     offline_count: int = 1
     offline_status: Optional[str] = None
-    offline_attachment_list: Optional[str] = None
+    offline_attachment_list: Optional[List[str]] = None
 
 
 class MeetingReservationCreate(MeetingReservationBase):
@@ -53,7 +53,7 @@ class MeetingReservationUpdate(BaseModel):
     audit_remark: Optional[str] = None
     offline_count: Optional[int] = None
     offline_status: Optional[str] = None
-    offline_attachment_list: Optional[str] = None
+    offline_attachment_list: Optional[List[str]] = None
 
 
 class MeetingReservationOut(MeetingReservationBase):

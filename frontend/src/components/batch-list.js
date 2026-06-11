@@ -397,7 +397,7 @@ export class BatchList extends LitElement {
                       <td>${r.offline_status ? html`<span class="status-tag" style="background:#fef3c7; color:#92400e;">${statusMap[r.offline_status] || r.offline_status}</span>` : html`<span style="color:#9ca3af;">未填写</span>`}</td>
                       <td>
                         <div style="font-size:12px;">${r.attachment_names || '（无）'}</div>
-                        <div style="font-size:11px; color:#92400e; margin-top:2px;">线下份数：${r.offline_attachment_count || 0}</div>
+                        <div style="font-size:11px; color:#92400e; margin-top:2px;">线下附件：${Array.isArray(r.offline_attachment_list) && r.offline_attachment_list.length ? r.offline_attachment_list.join('、') : (r.offline_attachment_count || 0) + '份'}</div>
                       </td>
                       <td>
                         ${rec ? html`

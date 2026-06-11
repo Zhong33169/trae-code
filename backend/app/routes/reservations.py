@@ -110,9 +110,19 @@ async def get_reservation(request: Request):
         batch_items = db.query(MeetingReservation).filter(
             MeetingReservation.batch_no == reservation.batch_no
         ).all()
+        offline_statuses = []
+        for bi in batch_items:
+            entry = {"reservation_no": bi.reservation_no, "status": bi.offline_status or bi.status}
+            att_list = bi.offline_attachment_list if isinstance(bi.offline_attachment_list, list) else []
+            if att_list:
+                entry["attachments"] = att_list
+            else:
+                entry["attachments"] = [a.strip() for a in (bi.attachment_names or "").split(",") if a.strip()]
+            offline_statuses.append(entry)
         reconcile = reconcile_offline_online(
             batch_items,
-            reservation.offline_count or 1,
+            sum(bi.offline_count or 1 for bi in batch_items),
+            offline_statuses,
         )
         result["batch_reconcile"] = reconcile
 
@@ -126,6 +136,9 @@ async def create_reservation(request: Request):
 
     body = await request.json()
     db = next(get_db())
+
+    if isinstance(body.get("offline_attachment_list"), str):
+        body["offline_attachment_list"] = [a.strip() for a in body["offline_attachment_list"].split(",") if a.strip()]
 
     try:
         data = MeetingReservationCreate(**body)
@@ -143,14 +156,38 @@ async def create_reservation(request: Request):
     block_detail = None
 
     if is_duplicate and batch_items:
-        online_statuses = set(r.status for r in batch_items)
-        if len(online_statuses) > 1 and not data.force_submit:
-            block_reason = f"批次 {data.batch_no} 内存在不同状态，不允许继续录入。请先逐单核对线下台账。"
-            block_detail = {
-                "existing_count": len(batch_items),
-                "statuses": list(online_statuses),
-                "message": "重复批次且状态不一致",
-            }
+        all_items = list(batch_items)
+        offline_statuses = []
+        for bi in batch_items:
+            entry = {"reservation_no": bi.reservation_no, "status": bi.offline_status or bi.status}
+            att_list = bi.offline_attachment_list if isinstance(bi.offline_attachment_list, list) else []
+            entry["attachments"] = att_list if att_list else [a.strip() for a in (bi.attachment_names or "").split(",") if a.strip()]
+            offline_statuses.append(entry)
+        new_offline_entry = {
+            "reservation_no": "NEW",
+            "status": data.offline_status or "draft",
+            "attachments": data.offline_attachment_list or [a.strip() for a in (data.attachment_names or "").split(",") if a.strip()],
+        }
+        offline_statuses.append(new_offline_entry)
+
+        reconcile = reconcile_offline_online(
+            all_items, data.offline_count or len(all_items) + 1, offline_statuses,
+        )
+        item_results = reconcile["item_results"]
+
+        if reconcile["is_blocked"] and not data.force_submit:
+            block_reason = f"批次 {data.batch_no} 核对发现差异：{reconcile['message']}"
+            block_detail = {"diffs": reconcile["diffs"], "message": reconcile["message"]}
+
+        if not reconcile["is_consistent"] and not data.force_submit:
+            online_statuses = set(r.status for r in batch_items)
+            if len(online_statuses) > 1:
+                block_reason = f"批次 {data.batch_no} 内存在不同状态，不允许继续录入。请先逐单核对线下台账。"
+                block_detail = {
+                    "existing_count": len(batch_items),
+                    "statuses": list(online_statuses),
+                    "message": "重复批次且状态不一致",
+                }
 
     if block_reason and not data.force_submit:
         add_block_log(
@@ -167,6 +204,7 @@ async def create_reservation(request: Request):
             "batch_warning_msg": block_reason,
             "existing_count": len(batch_items) if batch_items else 0,
             "can_force_submit": True,
+            "reconcile": {"item_results": item_results, "diffs": block_detail.get("diffs", []) if block_detail else []},
         }, status_code=409)
 
     is_valid, errors = validate_required_fields(data.model_dump())
@@ -196,7 +234,7 @@ async def create_reservation(request: Request):
         offline_attachment_count=data.offline_attachment_count,
         offline_count=data.offline_count,
         offline_status=data.offline_status,
-        offline_attachment_list=data.offline_attachment_list,
+        offline_attachment_list=data.offline_attachment_list or [],
         status="draft",
         created_by=current["name"],
         updated_by=current["name"],
@@ -256,6 +294,8 @@ async def update_reservation(request: Request):
         return JSONResponse({"detail": err}, status_code=403)
 
     try:
+        if isinstance(body.get("offline_attachment_list"), str):
+            body["offline_attachment_list"] = [a.strip() for a in body["offline_attachment_list"].split(",") if a.strip()]
         data = MeetingReservationUpdate(**body)
     except Exception as e:
         return JSONResponse({"detail": f"参数校验失败: {str(e)}"}, status_code=400)
@@ -302,9 +342,16 @@ async def submit_reservation(request: Request):
         MeetingReservation.batch_no == reservation.batch_no
     ).all()
 
-    offline_count = body.get("offline_count", reservation.offline_count or len(batch_items))
-    offline_statuses = body.get("offline_statuses", [])
+    offline_count = body.get("offline_count", sum(bi.offline_count or 1 for bi in batch_items))
     force_submit = body.get("force_submit", False)
+
+    offline_statuses = body.get("offline_statuses", [])
+    if not offline_statuses:
+        for bi in batch_items:
+            entry = {"reservation_no": bi.reservation_no, "status": bi.offline_status or bi.status}
+            att_list = bi.offline_attachment_list if isinstance(bi.offline_attachment_list, list) else []
+            entry["attachments"] = att_list if att_list else [a.strip() for a in (bi.attachment_names or "").split(",") if a.strip()]
+            offline_statuses.append(entry)
 
     reconcile = reconcile_offline_online(batch_items, offline_count, offline_statuses)
 
@@ -318,7 +365,7 @@ async def submit_reservation(request: Request):
         add_block_log(
             db, rid, reservation.batch_no, "batch_mismatch",
             reconcile["message"], current["name"], current["role"],
-            detail=reconcile["diffs"],
+            detail={"diffs": reconcile["diffs"]},
             item_results=reconcile["item_results"],
         )
         db.commit()
@@ -327,7 +374,7 @@ async def submit_reservation(request: Request):
             "blocked": True,
             "block_type": "batch_mismatch",
             "reconcile": reconcile,
-            "can_force_submit": False,
+            "can_force_submit": True,
         }, status_code=409)
 
     is_valid, errors = validate_required_fields({
@@ -528,15 +575,21 @@ async def review_reservation(request: Request):
         batch_items = db.query(MeetingReservation).filter(
             MeetingReservation.batch_no == reservation.batch_no
         ).all()
-        offline_count = body.get("offline_count", reservation.offline_count or len(batch_items))
+        offline_count = body.get("offline_count", sum(bi.offline_count or 1 for bi in batch_items))
         offline_statuses = body.get("offline_statuses", [])
+        if not offline_statuses:
+            for bi in batch_items:
+                entry = {"reservation_no": bi.reservation_no, "status": bi.offline_status or bi.status}
+                att_list = bi.offline_attachment_list if isinstance(bi.offline_attachment_list, list) else []
+                entry["attachments"] = att_list if att_list else [a.strip() for a in (bi.attachment_names or "").split(",") if a.strip()]
+                offline_statuses.append(entry)
         reconcile = reconcile_offline_online(batch_items, offline_count, offline_statuses)
 
         if reconcile["is_blocked"]:
             add_block_log(
                 db, rid, reservation.batch_no, "batch_mismatch",
                 reconcile["message"], current["name"], current["role"],
-                detail=reconcile["diffs"],
+                detail={"diffs": reconcile["diffs"]},
                 item_results=reconcile["item_results"],
             )
             db.commit()
@@ -664,20 +717,36 @@ async def reconcile_reservation(request: Request):
         MeetingReservation.batch_no == reservation.batch_no
     ).all()
 
-    offline_count = body.get("offline_count", reservation.offline_count or len(batch_items))
+    offline_count = body.get("offline_count", sum(bi.offline_count or 1 for bi in batch_items))
     offline_statuses = body.get("offline_statuses", [])
+
+    if not offline_statuses:
+        for bi in batch_items:
+            entry = {"reservation_no": bi.reservation_no, "status": bi.offline_status or bi.status}
+            att_list = bi.offline_attachment_list if isinstance(bi.offline_attachment_list, list) else []
+            entry["attachments"] = att_list if att_list else [a.strip() for a in (bi.attachment_names or "").split(",") if a.strip()]
+            offline_statuses.append(entry)
+
     offline_attachments = body.get("offline_attachments", [])
 
     reconcile = reconcile_offline_online(
         batch_items, offline_count, offline_statuses, offline_attachments
     )
 
+    if body.get("offline_status"):
+        reservation.offline_status = body["offline_status"]
+    offline_att_list = body.get("offline_attachment_list")
+    if offline_att_list is not None:
+        if isinstance(offline_att_list, str):
+            offline_att_list = [a.strip() for a in offline_att_list.split(",") if a.strip()]
+        reservation.offline_attachment_list = offline_att_list
+    if body.get("offline_count"):
+        reservation.offline_count = offline_count
+
     reservation.offline_check_diff = reconcile
     reservation.offline_checked = True
     reservation.offline_checked_at = datetime.now()
     reservation.offline_checked_by = current["name"]
-    if body.get("offline_count"):
-        reservation.offline_count = offline_count
 
     add_audit_log(
         db, reservation.id, reservation.batch_no, "reconcile",

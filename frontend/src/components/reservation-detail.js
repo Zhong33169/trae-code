@@ -486,7 +486,7 @@ export class ReservationDetail extends LitElement {
       this.offlineForm = {
         offline_count: reservation.offline_count || 1,
         offline_status: reservation.offline_status || '',
-        offline_attachment_list: reservation.offline_attachment_list || '',
+        offline_attachment_list: Array.isArray(reservation.offline_attachment_list) ? reservation.offline_attachment_list : [],
       }
     } catch (e) {
       console.error('加载详情失败', e)
@@ -551,7 +551,15 @@ export class ReservationDetail extends LitElement {
   async _handleSubmit() {
     if (!confirm('确认提交该会议预约单进行审核吗？请确保已核对线下台账信息。')) return
     try {
-      await reservationApi.submit(this.reservationId)
+      const r = this.reservation
+      await reservationApi.submit(this.reservationId, {
+        offline_count: r.offline_count || 1,
+        offline_statuses: [{
+          reservation_no: r.reservation_no,
+          status: r.offline_status || r.status,
+          attachments: Array.isArray(r.offline_attachment_list) ? r.offline_attachment_list : [],
+        }],
+      })
       this._showMessage('提交成功，已进入审核队列')
       this._loadData()
       this.dispatchEvent(new CustomEvent('updated'))
@@ -623,7 +631,15 @@ export class ReservationDetail extends LitElement {
   async _handleReviewPass() {
     if (!confirm('确认复核通过并归档？归档后将无法修改。请核对线下台账是否一致。')) return
     try {
-      await reservationApi.review(this.reservationId, 'pass')
+      const r = this.reservation
+      await reservationApi.review(this.reservationId, 'pass', {
+        offline_count: r.offline_count || 1,
+        offline_statuses: [{
+          reservation_no: r.reservation_no,
+          status: r.offline_status || r.status,
+          attachments: Array.isArray(r.offline_attachment_list) ? r.offline_attachment_list : [],
+        }],
+      })
       this._showMessage('复核通过，已归档')
       this._loadData()
       this.dispatchEvent(new CustomEvent('updated'))
@@ -1249,7 +1265,7 @@ export class ReservationDetail extends LitElement {
           </div>
           <div class="form-group">
             <label>线下附件清单 <span class="section-badge badge-offline">线下</span></label>
-            <textarea placeholder="多个用逗号分隔" .value=${this.offlineForm.offline_attachment_list || ''}
+            <textarea placeholder="多个用逗号分隔" .value=${Array.isArray(this.offlineForm.offline_attachment_list) ? this.offlineForm.offline_attachment_list.join(', ') : (this.offlineForm.offline_attachment_list || '')}
               @input=${(e) => { this.offlineForm = {...this.offlineForm, offline_attachment_list: e.target.value}; this.requestUpdate() }}></textarea>
           </div>
           <button class="primary" @click=${this._handleOfflineReconcile}>重新核对并保存</button>
@@ -1260,7 +1276,13 @@ export class ReservationDetail extends LitElement {
 
   async _handleOfflineReconcile() {
     try {
-      await reservationApi.reconcile(this.reservationId, this.offlineForm)
+      const payload = {
+        ...this.offlineForm,
+        offline_attachment_list: Array.isArray(this.offlineForm.offline_attachment_list)
+          ? this.offlineForm.offline_attachment_list
+          : (this.offlineForm.offline_attachment_list || '').split(',').map(a => a.trim()).filter(a => a),
+      }
+      await reservationApi.reconcile(this.reservationId, payload)
       this._showMessage('离线台账核对完成')
       this._loadData()
     } catch (e) {
