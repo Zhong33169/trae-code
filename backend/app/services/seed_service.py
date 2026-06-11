@@ -243,7 +243,26 @@ def seed_data(db: Session):
 
     failed_items = [item.id for item in batch2.items if item.status == BatchItemStatus.FAILED]
     if failed_items:
-        BatchService.retry_failed_items(db, batch2.id, failed_items[:2], u_reviewer)
+        BatchService.retry_failed_items(
+            db, batch2.id, failed_items[:2], u_reviewer,
+            "复核岗重新提交：已确认订单资料完整，请再次校验"
+        )
+
+    db.refresh(orders[9])
+    if orders[9].status == OrderStatus.IN_TRANSIT:
+        order_before = orders[9]
+        batch3_order_ids = [order_before.id, orders[2].id]
+        batch3 = BatchService.create_batch(db, batch3_order_ids, OrderStatus.DELIVERED, "batch_status", u_handler)
+        batch3 = BatchService.execute_batch(
+            db, batch3.id, u_handler,
+            "办理岗批量签收：补充车辆调度单和签收人后重试"
+        )
+        batch3_fail_ids = [item.id for item in batch3.items if item.status == BatchItemStatus.FAILED]
+        if batch3_fail_ids:
+            BatchService.retry_failed_items(
+                db, batch3.id, batch3_fail_ids, u_handler,
+                "第二次重试：仍缺证据或状态不允许"
+            )
 
     orders[8] = db.query(TransportOrder).filter(TransportOrder.id == orders[8].id).first()
     if orders[8].status == OrderStatus.DELIVERED:

@@ -105,8 +105,10 @@ export class ApiService {
     );
   }
 
-  retryBatch(id: number, batchItemIds: number[]): Observable<BatchChange> {
-    return this.http.post<BatchChange>(`${API_BASE}/batches/${id}/retry`, { batch_item_ids: batchItemIds }, { headers: this.getAuthHeaders() }).pipe(
+  retryBatch(id: number, batchItemIds: number[], remark?: string): Observable<BatchChange> {
+    const body: any = { batch_item_ids: batchItemIds };
+    if (remark) body.remark = remark;
+    return this.http.post<BatchChange>(`${API_BASE}/batches/${id}/retry`, body, { headers: this.getAuthHeaders() }).pipe(
       catchError(this.handleError)
     );
   }

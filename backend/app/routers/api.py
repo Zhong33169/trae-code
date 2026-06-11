@@ -96,10 +96,28 @@ class OrderController(Controller):
     async def update_order(
         self, db: Session, current_user: User, order_id: int, data: TransportOrderUpdate
     ) -> TransportOrderOut:
+        order = db.query(TransportOrder).filter(TransportOrder.id == order_id).first()
         try:
             order = OrderService.update_order_info(db, order_id, data.model_dump(exclude_unset=True), current_user)
             return TransportOrderOut.model_validate(order)
         except OrderValidationError as e:
+            if order:
+                fail_log = AuditLog(
+                    order_id=order.id,
+                    order_no=order.order_no,
+                    user_id=current_user.id,
+                    username=current_user.username,
+                    action="update_order_failed",
+                    old_status=order.status.value,
+                    new_status=order.status.value,
+                    old_version=order.version,
+                    new_version=order.version,
+                    detail=f"更新订单信息失败",
+                    remark=data.remark,
+                    failure_reason=f"[{e.code}] {e.message}",
+                )
+                db.add(fail_log)
+                db.commit()
             raise HTTPException(status_code=400, detail={"error": e.message, "code": e.code})
 
     @post("/{order_id:int}/transition")
@@ -119,10 +137,29 @@ class OrderController(Controller):
     async def upload_evidence(
         self, db: Session, current_user: User, order_id: int, data: EvidenceUpload
     ) -> EvidenceOut:
+        order = db.query(TransportOrder).filter(TransportOrder.id == order_id).first()
         try:
             evidence = OrderService.add_evidence(db, order_id, data.model_dump(), current_user)
             return EvidenceOut.model_validate(evidence)
         except OrderValidationError as e:
+            if order:
+                from app.models.database import AuditLog
+                fail_log = AuditLog(
+                    order_id=order.id,
+                    order_no=order.order_no,
+                    user_id=current_user.id,
+                    username=current_user.username,
+                    action="upload_evidence_failed",
+                    old_status=order.status.value,
+                    new_status=order.status.value,
+                    old_version=order.version,
+                    new_version=order.version,
+                    detail=f"上传证据失败: {data.evidence_type} - {data.file_name}",
+                    remark=data.remark,
+                    failure_reason=f"[{e.code}] {e.message}",
+                )
+                db.add(fail_log)
+                db.commit()
             raise HTTPException(status_code=400, detail={"error": e.message, "code": e.code})
 
     @get("/{order_id:int}/evidences")
@@ -177,7 +214,7 @@ class BatchController(Controller):
     ) -> BatchChangeOut:
         try:
             batch = BatchService.retry_failed_items(
-                db, batch_id, data.batch_item_ids, current_user
+                db, batch_id, data.batch_item_ids, current_user, data.remark
             )
             return BatchChangeOut.model_validate(batch)
         except OrderValidationError as e:

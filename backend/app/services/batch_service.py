@@ -1,7 +1,7 @@
 from datetime import datetime
 import random
 import string
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 from sqlalchemy.orm import Session
 from app.models.database import (
     User, TransportOrder, BatchChange, BatchItem, AuditLog,
@@ -57,7 +57,7 @@ class BatchService:
         return batch
 
     @staticmethod
-    def execute_batch(db: Session, batch_id: int, user: User) -> BatchChange:
+    def execute_batch(db: Session, batch_id: int, user: User, remark: Optional[str] = None) -> BatchChange:
         batch = db.query(BatchChange).filter(BatchChange.id == batch_id).first()
         if not batch:
             raise OrderValidationError(f"批次不存在：id={batch_id}", code="BATCH_NOT_FOUND")
@@ -101,13 +101,32 @@ class BatchService:
 
             try:
                 old_status = order.status
+                old_version_val = order.version
                 OrderService.validate_transition(db, order, batch.target_status, user, order.version)
-                OrderService.transition_order(db, order.id, batch.target_status, user, order.version, f"批量变更批次: {batch.batch_no}")
+                OrderService.transition_order(db, order.id, batch.target_status, user, order.version, remark or f"批量变更批次: {batch.batch_no}")
+                db.refresh(order)
 
                 item.status = BatchItemStatus.SUCCESS
                 item.error_message = None
                 item.processed_at = datetime.utcnow()
                 success_count += 1
+
+                success_log = AuditLog(
+                    order_id=order.id,
+                    order_no=order.order_no,
+                    batch_id=batch.id,
+                    batch_no=batch.batch_no,
+                    user_id=user.id,
+                    username=user.username,
+                    action="batch_item_success",
+                    old_status=old_status.value if old_status else None,
+                    new_status=batch.target_status.value,
+                    old_version=old_version_val,
+                    new_version=order.version,
+                    detail=f"批量处理成功：{old_status.value if old_status else '-'} → {batch.target_status.value}",
+                    remark=remark,
+                )
+                db.add(success_log)
             except OrderValidationError as e:
                 item.status = BatchItemStatus.FAILED
                 item.error_message = f"[{e.code}] {e.message}"
@@ -123,7 +142,10 @@ class BatchService:
                     action="batch_item_failed",
                     old_status=old_status.value if old_status else None,
                     new_status=None,
+                    old_version=order.version,
+                    new_version=order.version,
                     detail=f"批量处理失败：目标状态 {batch.target_status.value}",
+                    remark=remark,
                     failure_reason=item.error_message,
                 )
                 db.add(fail_log)
@@ -154,10 +176,36 @@ class BatchService:
         return batch
 
     @staticmethod
-    def retry_failed_items(db: Session, batch_id: int, batch_item_ids: List[int], user: User) -> BatchChange:
+    def retry_failed_items(db: Session, batch_id: int, batch_item_ids: List[int], user: User, remark: Optional[str] = None) -> BatchChange:
         batch = db.query(BatchChange).filter(BatchChange.id == batch_id).first()
         if not batch:
             raise OrderValidationError(f"批次不存在：id={batch_id}", code="BATCH_NOT_FOUND")
+
+        from app.services.order_service import ROLE_LABELS, OrderStatus, RoleEnum
+
+        allowed_target_statuses = {
+            RoleEnum.HANDLER: [OrderStatus.DISPATCHED, OrderStatus.IN_TRANSIT, OrderStatus.DELIVERED],
+            RoleEnum.REVIEWER: [OrderStatus.REVIEWED, OrderStatus.REJECTED],
+            RoleEnum.INITIATOR: [OrderStatus.ENTRUSTED],
+        }
+        allowed = allowed_target_statuses.get(user.role, [])
+        if batch.target_status not in allowed:
+            role_name = ROLE_LABELS.get(user.role, user.role.value)
+            target_label = {
+                OrderStatus.DISPATCHED: "已调度", OrderStatus.IN_TRANSIT: "运输中",
+                OrderStatus.DELIVERED: "已签收", OrderStatus.REVIEWED: "已归档",
+                OrderStatus.REJECTED: "驳回", OrderStatus.ENTRUSTED: "已委托"
+            }.get(batch.target_status, batch.target_status.value)
+            allowed_labels = [
+                {OrderStatus.DISPATCHED: "已调度", OrderStatus.IN_TRANSIT: "运输中",
+                 OrderStatus.DELIVERED: "已签收", OrderStatus.REVIEWED: "已归档",
+                 OrderStatus.REJECTED: "驳回", OrderStatus.ENTRUSTED: "已委托"}.get(s, s.value)
+                for s in allowed
+            ]
+            raise OrderValidationError(
+                f"角色无权限：您是【{role_name}】，无权将订单批量变更为【{target_label}】，仅可批量变更 {', '.join(allowed_labels)}",
+                code="ROLE_PERMISSION_DENIED"
+            )
 
         items = db.query(BatchItem).filter(
             BatchItem.batch_id == batch_id,
@@ -165,6 +213,7 @@ class BatchService:
         ).all()
 
         retry_count = 0
+        retry_order_ids = []
         for item in items:
             if item.status in [BatchItemStatus.FAILED, BatchItemStatus.RETRY_PENDING]:
                 item.status = BatchItemStatus.RETRY_PENDING
@@ -172,6 +221,7 @@ class BatchService:
                 item.processed_at = None
                 item.error_message = None
                 retry_count += 1
+                retry_order_ids.append(item.order_id)
 
         if batch.success_count + batch.failed_count == batch.total_count:
             batch.failed_count = batch.failed_count - retry_count
@@ -182,10 +232,11 @@ class BatchService:
             user_id=user.id,
             username=user.username,
             action="retry_batch_items",
-            detail=f"重新执行 {retry_count} 条失败项"
+            detail=f"重新执行 {retry_count} 条失败项，涉及订单: {', '.join([str(i) for i in retry_order_ids])}",
+            remark=remark
         )
         db.add(log)
         db.commit()
         db.refresh(batch)
 
-        return BatchService.execute_batch(db, batch_id, user)
+        return BatchService.execute_batch(db, batch_id, user, remark=remark)

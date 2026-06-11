@@ -233,7 +233,11 @@ const NEXT_STATUS_MAP: Record<string, { target: OrderStatus; label: string; requ
                 <span class="audit-status" *ngIf="log.old_status || log.new_status">
                   {{ log.old_status || '—' }} → {{ log.new_status || '—' }}
                 </span>
+                <span class="audit-version" *ngIf="log.old_version !== undefined || log.new_version !== undefined">
+                  v{{ log.old_version ?? '—' }}→v{{ log.new_version ?? '—' }}
+                </span>
                 <span class="audit-detail">{{ log.detail }}</span>
+                <span class="audit-remark" *ngIf="log.remark">📝 {{ log.remark }}</span>
                 <span class="audit-failure" *ngIf="log.failure_reason">❌ {{ log.failure_reason }}</span>
               </div>
             </div>
@@ -382,6 +386,8 @@ const NEXT_STATUS_MAP: Record<string, { target: OrderStatus; label: string; requ
     .audit-action { background: #eef2ff; color: #4338ca; padding: 1px 7px; border-radius: 4px; }
     .audit-status { color: #059669; }
     .audit-detail { color: #6b7280; flex: 1; }
+    .audit-version { color: #6366f1; font-family: monospace; font-size: 12px; }
+    .audit-remark { color: #92400e; background: #fffbeb; padding: 1px 7px; border-radius: 4px; flex: 100%; }
     .audit-failure { color: #b91c1c; background: #fef2f2; padding: 1px 7px; border-radius: 4px; flex: 100%; font-family: monospace; }
     .audit-item-failed { border-left: 3px solid #ef4444; background: #fff5f5; }
 
@@ -450,6 +456,13 @@ export class OrderListComponent implements OnInit {
     this.api.getCurrentUser().subscribe((u) => {
       this.currentUser = u;
       this.selectedOrderIds = [];
+      this.showCreateModal = false;
+      this.showBatchModal = false;
+      this.editForm = { plate_number: '', driver: '', receiver: '' };
+      this.newEvidence = { evidence_type: 'entrustment', file_name: '', file_ref: '', remark: '' };
+      this.createForm = { customer: '', cargo_name: '', cargo_weight: 0, origin: '', destination: '' };
+      this.batchForm = { target_status: 'entrusted' };
+      this.auditLogs = [];
       if (u) {
         this.refreshOrders();
         if (this.selectedOrder) {

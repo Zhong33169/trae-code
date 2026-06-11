@@ -90,7 +90,10 @@ export interface AuditLog {
   action: string;
   old_status?: string;
   new_status?: string;
+  old_version?: number;
+  new_version?: number;
   detail?: string;
+  remark?: string;
   failure_reason?: string;
   created_at: string;
 }

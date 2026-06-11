@@ -180,6 +180,7 @@ class OrderService:
             raise OrderValidationError(f"订单不存在：id={order_id}", code="ORDER_NOT_FOUND")
 
         old_status = order.status
+        old_version_val = order.version
         OrderService.validate_transition(db, order, target_status, user, expected_version)
 
         order.status = target_status
@@ -204,7 +205,10 @@ class OrderService:
             action=f"transition_{target_status.value}",
             old_status=old_status,
             new_status=target_status,
-            detail=remark or f"状态变更: {old_status.value} → {target_status.value}"
+            detail=remark or f"状态变更: {old_status.value} → {target_status.value}",
+            old_version=old_version_val,
+            new_version=order.version,
+            remark=remark
         )
 
         db.commit()
@@ -255,12 +259,15 @@ class OrderService:
                 code="INVALID_STATUS_TRANSITION"
             )
 
+        old_version_val = order.version
+        remark = evidence_data.get("remark")
+
         evidence = OrderEvidence(
             order_id=order_id,
             evidence_type=evidence_type,
             file_name=evidence_data["file_name"],
             file_ref=evidence_data["file_ref"],
-            remark=evidence_data.get("remark"),
+            remark=remark,
             uploaded_by=user.id,
         )
         db.add(evidence)
@@ -272,7 +279,10 @@ class OrderService:
             action="upload_evidence",
             old_status=order.status,
             new_status=order.status,
-            detail=f"上传证据: {evidence_label} - {evidence_data['file_name']}"
+            detail=f"上传证据: {evidence_label} - {evidence_data['file_name']}",
+            old_version=old_version_val,
+            new_version=order.version,
+            remark=remark
         )
         db.commit()
         db.refresh(evidence)
@@ -347,6 +357,7 @@ class OrderService:
         if not changed:
             return order
 
+        old_version_val = order.version
         order.version += 1
         order.updated_at = datetime.utcnow()
 
@@ -357,7 +368,10 @@ class OrderService:
             action="update_order",
             old_status=order.status,
             new_status=order.status,
-            detail=f"更新订单信息: {detail_str}"
+            detail=f"更新订单信息: {detail_str}",
+            old_version=old_version_val,
+            new_version=order.version,
+            remark=data.get("remark")
         )
         db.commit()
         db.refresh(order)
@@ -367,7 +381,9 @@ class OrderService:
     def _log_audit(db: Session, order: TransportOrder, user: User, action: str,
                    old_status, new_status, detail: str,
                    failure_reason: Optional[str] = None,
-                   batch_id: Optional[int] = None, batch_no: Optional[str] = None):
+                   batch_id: Optional[int] = None, batch_no: Optional[str] = None,
+                   old_version: Optional[int] = None, new_version: Optional[int] = None,
+                   remark: Optional[str] = None):
         log = AuditLog(
             order_id=order.id,
             order_no=order.order_no,
@@ -376,7 +392,10 @@ class OrderService:
             action=action,
             old_status=old_status.value if old_status else None,
             new_status=new_status.value if new_status else None,
+            old_version=old_version,
+            new_version=new_version,
             detail=detail,
+            remark=remark,
             failure_reason=failure_reason,
             batch_id=batch_id,
             batch_no=batch_no,

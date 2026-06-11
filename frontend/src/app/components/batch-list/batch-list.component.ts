@@ -75,6 +75,14 @@ import {
               </span>
             </div>
             <div class="action-group">
+              <input
+                *ngIf="hasFailedItems"
+                type="text"
+                [(ngModel)]="retryRemark"
+                placeholder="重试备注（可选）"
+                class="filter-input"
+                style="min-width: 220px;"
+              />
               <button
                 *ngIf="hasFailedItems"
                 (click)="retryAllFailed()"
@@ -147,14 +155,21 @@ import {
             </div>
           </div>
 
-          <div class="detail-section">
+            <div class="detail-section">
             <h4>📜 批次审计日志</h4>
             <div class="audit-list" *ngIf="auditLogs.length > 0">
               <div *ngFor="let log of auditLogs" class="audit-item" [class.audit-item-failed]="!!log.failure_reason">
                 <span class="audit-time">{{ formatTime(log.created_at) }}</span>
                 <span class="audit-user">{{ log.username }}</span>
                 <span class="audit-action">{{ log.action }}</span>
+                <span class="audit-status" *ngIf="log.old_status || log.new_status">
+                  {{ log.old_status || '—' }} → {{ log.new_status || '—' }}
+                </span>
+                <span class="audit-version" *ngIf="log.old_version !== undefined || log.new_version !== undefined">
+                  v{{ log.old_version ?? '—' }}→v{{ log.new_version ?? '—' }}
+                </span>
                 <span class="audit-detail">{{ log.detail }}</span>
+                <span class="audit-remark" *ngIf="log.remark">📝 {{ log.remark }}</span>
                 <span class="audit-failure" *ngIf="log.failure_reason">❌ {{ log.failure_reason }}</span>
               </div>
             </div>
@@ -256,6 +271,8 @@ import {
     .audit-user { font-weight: 500; color: #6d28d9; }
     .audit-action { background: #f5f3ff; color: #6d28d9; padding: 1px 7px; border-radius: 4px; }
     .audit-detail { color: #6b7280; flex: 1; }
+    .audit-version { color: #6366f1; font-family: monospace; font-size: 12px; }
+    .audit-remark { color: #92400e; background: #fffbeb; padding: 1px 7px; border-radius: 4px; flex: 100%; }
     .audit-failure { color: #b91c1c; background: #fef2f2; padding: 1px 7px; border-radius: 4px; flex: 100%; font-family: monospace; }
     .audit-item-failed { border-left: 3px solid #ef4444; background: #fff5f5; }
 
@@ -273,12 +290,14 @@ export class BatchListComponent implements OnInit {
   selectedBatch: BatchChange | null = null;
   auditLogs: AuditLog[] = [];
   selectedRetryIds: number[] = [];
+  retryRemark = '';
   currentUser: User | null = null;
 
   ngOnInit() {
     this.api.getCurrentUser().subscribe((u) => {
       this.currentUser = u;
       this.selectedRetryIds = [];
+      this.retryRemark = '';
       if (u) {
         this.refresh();
       } else {
@@ -328,10 +347,12 @@ export class BatchListComponent implements OnInit {
   retryAllFailed() {
     if (!this.selectedBatch || !this.hasFailedItems) return;
     const ids = this.failedItems.map((i) => i.id);
-    this.api.retryBatch(this.selectedBatch.id, ids).subscribe({
+    const remark = this.retryRemark;
+    this.api.retryBatch(this.selectedBatch.id, ids, remark).subscribe({
       next: (batch) => {
         this.selectBatch(batch);
         this.refresh();
+        this.retryRemark = '';
         alert(`重试完成：成功 ${batch.success_count} 条，失败 ${batch.failed_count} 条`);
       },
       error: (e) => alert('重试失败：' + e.message),
@@ -340,11 +361,13 @@ export class BatchListComponent implements OnInit {
 
   retrySelected() {
     if (!this.selectedBatch || this.selectedRetryIds.length === 0) return;
-    this.api.retryBatch(this.selectedBatch.id, this.selectedRetryIds).subscribe({
+    const remark = this.retryRemark;
+    this.api.retryBatch(this.selectedBatch.id, this.selectedRetryIds, remark).subscribe({
       next: (batch) => {
         this.selectBatch(batch);
         this.selectedRetryIds = [];
         this.refresh();
+        this.retryRemark = '';
         alert(`重试完成：成功 ${batch.success_count} 条，失败 ${batch.failed_count} 条`);
       },
       error: (e) => alert('重试失败：' + e.message),

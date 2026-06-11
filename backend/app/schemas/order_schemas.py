@@ -65,6 +65,7 @@ class TransportOrderUpdate(BaseModel):
     plate_number: Optional[str] = None
     driver: Optional[str] = None
     receiver: Optional[str] = None
+    remark: Optional[str] = None
 
 
 class EvidenceUpload(BaseModel):
@@ -119,6 +120,7 @@ class BatchCreateRequest(BaseModel):
 
 class BatchRetryRequest(BaseModel):
     batch_item_ids: List[int]
+    remark: Optional[str] = None
 
 
 class AuditLogOut(BaseModel):
@@ -132,7 +134,10 @@ class AuditLogOut(BaseModel):
     action: str
     old_status: Optional[str]
     new_status: Optional[str]
+    old_version: Optional[int]
+    new_version: Optional[int]
     detail: Optional[str]
+    remark: Optional[str]
     failure_reason: Optional[str]
     created_at: datetime
 
