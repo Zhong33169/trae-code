@@ -1,0 +1,27 @@
+[package]
+name = "creative-demand-backend"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+axum = "0.7"
+tokio = { version = "1.0", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sqlx = { version = "0.7", features = ["runtime-tokio", "sqlite", "chrono", "macros"] }
+chrono = { version = "0.4", features = ["serde"] }
+jsonwebtoken = "9.0"
+bcrypt = "0.15"
+uuid = { version = "1.0", features = ["v4", "serde"] }
+anyhow = "1.0"
+thiserror = "1.0"
+tower-http = { version = "0.5", features = ["cors"] }
+tower = "0.4"
+dotenvy = "0.15"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+futures = "0.3"
+rand = "0.8"
+
+[dev-dependencies]
+reqwest = { version = "0.12", features = ["json"] }
