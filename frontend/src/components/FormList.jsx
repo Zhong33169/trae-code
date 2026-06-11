@@ -34,7 +34,7 @@ export default function FormList({ forms, loading, selectedId, selectedIds, onSe
                 <input
                   type="checkbox"
                   checked={isChecked}
-                  onChange={() => onToggleSelect(f.id)}
+                  onChange={() => onToggleSelect(f)}
                 />
               </label>
               <span className="form-code">{f.code}</span>

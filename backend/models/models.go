@@ -118,9 +118,10 @@ type ProcessFormRequest struct {
 }
 
 type BatchProcessRequest struct {
-	FormIDs []string `json:"form_ids"`
-	Action  string   `json:"action"`
-	Reason  string   `json:"reason,omitempty"`
+	FormIDs      []string `json:"form_ids"`
+	FormVersions map[string]int `json:"form_versions,omitempty"`
+	Action       string   `json:"action"`
+	Reason       string   `json:"reason,omitempty"`
 }
 
 type UploadEvidenceRequest struct {

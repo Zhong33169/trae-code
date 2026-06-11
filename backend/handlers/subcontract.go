@@ -558,7 +558,13 @@ func BatchProcess(c echo.Context) error {
 	failCount := 0
 
 	for _, fid := range req.FormIDs {
-		form, errResp := processFormCore(fid, req.Action, userID, userRole, 0, req.Reason)
+		expectedVersion := 0
+		if req.FormVersions != nil {
+			if v, ok := req.FormVersions[fid]; ok {
+				expectedVersion = v
+			}
+		}
+		form, errResp := processFormCore(fid, req.Action, userID, userRole, expectedVersion, req.Reason)
 		item := BatchItemResult{
 			FormID:  fid,
 			Success: errResp == nil,

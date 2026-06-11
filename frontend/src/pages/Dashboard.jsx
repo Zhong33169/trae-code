@@ -31,7 +31,7 @@ export default function Dashboard() {
   const [selectedForm, setSelectedForm] = useState(null)
   const [filters, setFilters] = useState({ status: '', project: '', search: '' })
   const [projects, setProjects] = useState([])
-  const [selectedIds, setSelectedIds] = useState(new Set())
+  const [selectedForms, setSelectedForms] = useState(new Map())
   const [showCreate, setShowCreate] = useState(false)
   const [loading, setLoading] = useState(true)
   const [notification, setNotification] = useState(null)
@@ -80,11 +80,11 @@ export default function Dashboard() {
     }
   }
 
-  const handleToggleSelect = (id) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
+  const handleToggleSelect = (form) => {
+    setSelectedForms((prev) => {
+      const next = new Map(prev)
+      if (next.has(form.id)) next.delete(form.id)
+      else next.set(form.id, form.version)
       return next
     })
   }
@@ -98,7 +98,7 @@ export default function Dashboard() {
         ...data
       })
       showNotification('操作成功', 'success')
-      setSelectedIds(new Set())
+      setSelectedForms(new Map())
       refreshAll()
     } catch (err) {
       showNotification(`${err.data?.reason || err.data?.message || err.message}`, 'error')
@@ -107,12 +107,15 @@ export default function Dashboard() {
 
   const handleBatchProcess = async (action, reason = '') => {
     try {
+      const form_versions = {}
+      for (const [id, v] of selectedForms) form_versions[id] = v
       const result = await api.batchProcess({
-        form_ids: Array.from(selectedIds),
+        form_ids: Array.from(selectedForms.keys()),
+        form_versions,
         action,
         reason
       })
-      setSelectedIds(new Set())
+      setSelectedForms(new Map())
       refreshAll()
       if (result.fail_count > 0) {
         setBatchResult(result)
@@ -196,12 +199,12 @@ export default function Dashboard() {
                   + 新建进场单
                 </button>
               )}
-              {selectedIds.size > 0 && (
+              {selectedForms.size > 0 && (
                 <BatchToolbar
-                  selectedCount={selectedIds.size}
+                  selectedCount={selectedForms.size}
                   userRole={user.role}
                   onProcess={handleBatchProcess}
-                  onClear={() => setSelectedIds(new Set())}
+                  onClear={() => setSelectedForms(new Map())}
                 />
               )}
             </div>
@@ -211,7 +214,7 @@ export default function Dashboard() {
             forms={forms}
             loading={loading}
             selectedId={selectedId}
-            selectedIds={selectedIds}
+            selectedIds={selectedForms}
             onSelect={handleSelectForm}
             onToggleSelect={handleToggleSelect}
           />
