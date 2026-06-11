@@ -25,46 +25,18 @@ def init_database():
 
 def create_users():
     users = [
-        {
-            'username': 'registrar1',
-            'password': '123456',
-            'name': '张登记',
-            'role': 'registrar',
-        },
-        {
-            'username': 'registrar2',
-            'password': '123456',
-            'name': '李登记',
-            'role': 'registrar',
-        },
-        {
-            'username': 'auditor1',
-            'password': '123456',
-            'name': '王审核',
-            'role': 'auditor',
-        },
-        {
-            'username': 'auditor2',
-            'password': '123456',
-            'name': '赵审核',
-            'role': 'auditor',
-        },
-        {
-            'username': 'reviewer1',
-            'password': '123456',
-            'name': '陈复核',
-            'role': 'reviewer',
-        },
+        {'username': 'registrar1', 'password': '123456', 'name': '张登记', 'role': 'registrar'},
+        {'username': 'registrar2', 'password': '123456', 'name': '李登记', 'role': 'registrar'},
+        {'username': 'auditor1', 'password': '123456', 'name': '王审核', 'role': 'auditor'},
+        {'username': 'auditor2', 'password': '123456', 'name': '赵审核', 'role': 'auditor'},
+        {'username': 'reviewer1', 'password': '123456', 'name': '陈复核', 'role': 'reviewer'},
     ]
 
     created = []
     for u in users:
         user, is_new = User.objects.get_or_create(
             username=u['username'],
-            defaults={
-                'name': u['name'],
-                'role': u['role'],
-            }
+            defaults={'name': u['name'], 'role': u['role']}
         )
         if is_new:
             user.set_password(u['password'])
@@ -81,6 +53,7 @@ def create_sample_tickets():
     registrar1 = User.objects.get(username='registrar1')
     registrar2 = User.objects.get(username='registrar2')
     auditor1 = User.objects.get(username='auditor1')
+    auditor2 = User.objects.get(username='auditor2')
     reviewer1 = User.objects.get(username='reviewer1')
 
     now = timezone.now()
@@ -97,10 +70,14 @@ def create_sample_tickets():
             'deadline': now + timedelta(hours=12),
             'logs': [
                 ('create', '', 'confirm', '', 'pending', registrar1, '创建高风险需求交付单'),
+                ('submit', 'confirm', 'confirm', 'pending', 'pending', registrar1, '提交审核，分配审核主管王审核办理'),
             ],
             'evidences_per_log': [
                 [('需求规格说明书', 'doc', 'https://example.com/spec.docx'),
                  ('外包合同草案', 'doc', 'https://example.com/contract.pdf'),
+                 ('安全评估报告', 'link', 'https://example.com/security')],
+                [('需求规格说明书V2', 'doc', 'https://example.com/spec-v2.docx'),
+                 ('外包合同正式版', 'doc', 'https://example.com/contract-final.pdf'),
                  ('安全评估报告', 'link', 'https://example.com/security')],
             ],
         },
@@ -115,10 +92,13 @@ def create_sample_tickets():
             'deadline': now + timedelta(days=2),
             'logs': [
                 ('create', '', 'confirm', '', 'pending', registrar2, '创建需求交付单'),
+                ('submit', 'confirm', 'confirm', 'pending', 'pending', registrar2, '提交审核'),
                 ('approve', 'confirm', 'schedule', 'pending', 'pending', auditor1, '需求确认通过，已完成需求分析，进入排期评估阶段'),
             ],
             'evidences_per_log': [
                 [('需求文档V1.0', 'doc', 'https://example.com/req-v1.docx')],
+                [('需求文档V1.0', 'doc', 'https://example.com/req-v1.docx'),
+                 ('原型设计稿', 'link', 'https://example.com/prototype')],
                 [('需求评审会议纪要', 'doc', 'https://example.com/meeting-minutes.docx'),
                  ('原型设计稿', 'link', 'https://example.com/prototype')],
             ],
@@ -134,10 +114,12 @@ def create_sample_tickets():
             'deadline': now + timedelta(days=3),
             'logs': [
                 ('create', '', 'confirm', '', 'pending', registrar1, '创建官网改版需求'),
+                ('submit', 'confirm', 'confirm', 'pending', 'pending', registrar1, '提交审核'),
                 ('approve', 'confirm', 'schedule', 'pending', 'pending', auditor1, '需求确认通过'),
                 ('approve', 'schedule', 'acceptance', 'pending', 'pending', auditor1, '排期评估通过，开发已完成，进入交付验收阶段'),
             ],
             'evidences_per_log': [
+                [('设计需求说明', 'doc', 'https://example.com/design-req.pdf')],
                 [('设计需求说明', 'doc', 'https://example.com/design-req.pdf')],
                 [('排期表', 'doc', 'https://example.com/schedule.xlsx')],
                 [('测试报告', 'doc', 'https://example.com/test-report.pdf'),
@@ -145,21 +127,29 @@ def create_sample_tickets():
             ],
         },
         {
-            'title': '高风险-数据迁移项目（退回补正中）',
-            'description': '历史业务系统数据迁移至新平台，涉及大量用户敏感数据，数据一致性要求极高。',
+            'title': '高风险-数据迁移项目（退回补正→补正再提交→审核中）',
+            'description': '历史业务系统数据迁移至新平台，涉及大量用户敏感数据，数据一致性要求极高。经历了缺证据被退回、补正后重新提交的完整流程。',
             'risk_level': 'high',
             'stage': 'confirm',
-            'status': 'returned',
+            'status': 'pending',
             'creator': registrar2,
-            'handler': registrar2,
+            'handler': auditor1,
             'deadline': now + timedelta(days=1),
             'logs': [
                 ('create', '', 'confirm', '', 'pending', registrar2, '创建数据迁移项目需求'),
-                ('reject', 'confirm', 'confirm', 'pending', 'returned', auditor1, '退回补正：缺少数据安全评估报告和迁移回滚方案，请补充后重新提交。证据材料数量不足，高风险项目需至少3份证据。'),
+                ('submit', 'confirm', 'confirm', 'pending', 'pending', registrar2, '首次提交审核'),
+                ('validate_fail', 'confirm', 'confirm', 'pending', 'pending', auditor1, '校验失败（尝试approve）：高风险需求在需求确认阶段至少需要3份证据材料，当前仅1份'),
+                ('reject', 'confirm', 'confirm', 'pending', 'returned', auditor1, '退回补正：缺少数据安全评估报告和迁移回滚方案，证据材料数量不足，高风险项目需至少3份证据'),
+                ('revise', 'confirm', 'confirm', 'returned', 'pending', registrar2, '补正提交：已补充数据安全评估报告、迁移回滚方案和三方审计报告，重新提交审核'),
             ],
             'evidences_per_log': [
                 [('迁移需求说明', 'doc', 'https://example.com/migration-req.docx')],
+                [('迁移需求说明', 'doc', 'https://example.com/migration-req.docx')],
+                [],
                 [('退回意见说明', 'doc', 'https://example.com/reject-note.pdf')],
+                [('数据安全评估报告', 'doc', 'https://example.com/security-assessment.pdf'),
+                 ('迁移回滚方案', 'doc', 'https://example.com/rollback-plan.pdf'),
+                 ('三方审计报告', 'link', 'https://example.com/audit-report')],
             ],
         },
         {
@@ -173,11 +163,14 @@ def create_sample_tickets():
             'deadline': now - timedelta(days=1),
             'logs': [
                 ('create', '', 'confirm', '', 'pending', registrar1, '创建客服系统优化需求'),
+                ('submit', 'confirm', 'confirm', 'pending', 'pending', registrar1, '提交审核'),
                 ('approve', 'confirm', 'schedule', 'pending', 'pending', auditor1, '需求确认通过，进入排期评估'),
                 ('validate_fail', 'schedule', 'schedule', 'pending', 'overdue', None, '系统自动标记逾期'),
             ],
             'evidences_per_log': [
                 [('需求文档', 'doc', 'https://example.com/cs-req.docx')],
+                [('需求文档', 'doc', 'https://example.com/cs-req.docx'),
+                 ('功能清单', 'doc', 'https://example.com/cs-features.xlsx')],
                 [('确认意见', 'doc', 'https://example.com/confirm-opinion.pdf')],
                 [],
             ],
@@ -193,12 +186,15 @@ def create_sample_tickets():
             'deadline': now - timedelta(days=5),
             'logs': [
                 ('create', '', 'confirm', '', 'pending', registrar2, '创建营销活动平台需求'),
+                ('submit', 'confirm', 'confirm', 'pending', 'pending', registrar2, '提交审核'),
                 ('approve', 'confirm', 'schedule', 'pending', 'pending', auditor1, '需求确认通过，评审通过'),
                 ('approve', 'schedule', 'acceptance', 'pending', 'pending', auditor1, '排期评估通过，开发团队交付完成'),
                 ('archive', 'acceptance', 'acceptance', 'pending', 'completed', reviewer1, '复核归档：验收通过，功能完整，性能达标，文档齐全'),
             ],
             'evidences_per_log': [
                 [('活动平台需求V1', 'doc', 'https://example.com/marketing-req.docx')],
+                [('活动平台需求V1', 'doc', 'https://example.com/marketing-req.docx'),
+                 ('技术方案', 'link', 'https://example.com/tech-spec')],
                 [('需求评审记录', 'doc', 'https://example.com/review.docx')],
                 [('开发排期表', 'doc', 'https://example.com/dev-schedule.xlsx'),
                  ('交付清单', 'doc', 'https://example.com/delivery-list.docx')],
@@ -208,28 +204,35 @@ def create_sample_tickets():
             ],
         },
         {
-            'title': '低风险-内部工具小需求（待补正）',
-            'description': '内部使用的小工具开发，用于提升日常办公效率。',
+            'title': '低风险-内部工具小需求（补正再提交流程）',
+            'description': '内部使用的小工具开发，用于提升日常办公效率。经历了排期评估阶段被退回、补正后重新提交的完整流程。',
             'risk_level': 'low',
             'stage': 'schedule',
-            'status': 'returned',
+            'status': 'pending',
             'creator': registrar1,
-            'handler': registrar1,
+            'handler': auditor1,
             'deadline': now + timedelta(days=4),
             'logs': [
                 ('create', '', 'confirm', '', 'pending', registrar1, '创建内部工具需求'),
+                ('submit', 'confirm', 'confirm', 'pending', 'pending', registrar1, '提交审核'),
                 ('approve', 'confirm', 'schedule', 'pending', 'pending', auditor1, '需求简单，确认通过'),
-                ('reject', 'schedule', 'schedule', 'pending', 'returned', auditor1, '退回补正：排期不够明确，缺少人力资源分配信息，请补充详细排期表和人力配置。'),
+                ('validate_fail', 'schedule', 'schedule', 'pending', 'pending', auditor1, '校验失败（尝试approve）：中风险需求在排期评估阶段至少需要2份证据材料，当前仅0份'),
+                ('reject', 'schedule', 'schedule', 'pending', 'returned', auditor1, '退回补正：排期不够明确，缺少人力资源分配信息，请补充详细排期表和人力配置'),
+                ('revise', 'schedule', 'schedule', 'returned', 'pending', registrar1, '补正提交：已补充详细排期表和人力配置方案，重新提交审核'),
             ],
             'evidences_per_log': [
                 [('工具需求描述', 'doc', 'https://example.com/tool-req.txt')],
+                [('工具需求描述', 'doc', 'https://example.com/tool-req.txt')],
+                [],
                 [],
                 [('退回说明', 'doc', 'https://example.com/schedule-reject.pdf')],
+                [('详细排期表', 'doc', 'https://example.com/detailed-schedule.xlsx'),
+                 ('人力配置方案', 'doc', 'https://example.com/staffing-plan.docx')],
             ],
         },
         {
-            'title': '高风险-风控模型升级项目',
-            'description': '风控模型升级，涉及核心风控算法调整，影响面广，需严格评审。',
+            'title': '高风险-风控模型升级项目（处理人越权校验失败样例）',
+            'description': '风控模型升级，涉及核心风控算法调整，影响面广，需严格评审。包含非当前处理人尝试操作的校验失败记录。',
             'risk_level': 'high',
             'stage': 'confirm',
             'status': 'pending',
@@ -238,11 +241,17 @@ def create_sample_tickets():
             'deadline': now + timedelta(hours=8),
             'logs': [
                 ('create', '', 'confirm', '', 'pending', registrar1, '创建风控模型升级需求'),
+                ('submit', 'confirm', 'confirm', 'pending', 'pending', registrar1, '提交审核，分配审核主管王审核办理'),
+                ('validate_fail', 'confirm', 'confirm', 'pending', 'pending', auditor2, '校验失败（尝试approve）：当前处理人为「王审核」，您无权办理此需求交付单'),
             ],
             'evidences_per_log': [
                 [('模型升级方案', 'doc', 'https://example.com/risk-model.docx'),
                  ('影响评估报告', 'doc', 'https://example.com/impact-assessment.pdf'),
                  ('技术方案评审链接', 'link', 'https://example.com/tech-review')],
+                [('模型升级方案', 'doc', 'https://example.com/risk-model.docx'),
+                 ('影响评估报告', 'doc', 'https://example.com/impact-assessment.pdf'),
+                 ('技术方案评审链接', 'link', 'https://example.com/tech-review')],
+                [],
             ],
         },
     ]
@@ -316,12 +325,13 @@ def main():
     print('  需求交付审核主管: auditor2 / 123456 (赵审核)')
     print('  软件外包项目组复核负责人: reviewer1 / 123456 (陈复核)')
     print('\n样例数据包含:')
-    print('  - 正常流转中的需求（各阶段）')
+    print('  - 正常流转各阶段（含提交→审核→通过完整链路）')
     print('  - 高/中/低风险等级')
-    print('  - 退回补正状态')
-    print('  - 逾期状态')
+    print('  - 退回补正 → 补正再提交完整审计链')
+    print('  - 逾期场景（含系统自动标记validate_fail）')
     print('  - 已完成归档')
-    print('  - 缺证据场景')
+    print('  - 证据不足校验失败留痕（validate_fail）')
+    print('  - 非当前处理人越权操作校验失败留痕（handler_mismatch）')
 
 
 if __name__ == '__main__':

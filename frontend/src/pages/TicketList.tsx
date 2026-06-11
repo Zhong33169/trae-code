@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Search, Filter, Plus, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useAppStore } from '@/store/appStore';
 import { RiskBadge, StatusBadge, StageBadge } from '@/components/Badges';
@@ -32,10 +32,23 @@ const statusOptions: { value: TicketStatus | ''; label: string }[] = [
 export default function TicketList() {
   const { tickets, ticketsTotal, fetchTickets, user, loading } = useAppStore();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
-  const [stage, setStage] = useState<Stage | ''>('');
-  const [riskLevel, setRiskLevel] = useState<RiskLevel | ''>('');
-  const [status, setStatus] = useState<TicketStatus | ''>('');
+  const [tab, setTab] = useState<'all' | 'my_todo'>(() => {
+    return searchParams.get('tab') === 'my_todo' ? 'my_todo' : 'all';
+  });
+  const [stage, setStage] = useState<Stage | ''>(() => {
+    const s = searchParams.get('stage');
+    return (s && ['confirm', 'schedule', 'acceptance'].includes(s)) ? s as Stage : '';
+  });
+  const [riskLevel, setRiskLevel] = useState<RiskLevel | ''>(() => {
+    const r = searchParams.get('risk_level');
+    return (r && ['high', 'medium', 'low'].includes(r)) ? r as RiskLevel : '';
+  });
+  const [status, setStatus] = useState<TicketStatus | ''>(() => {
+    const s = searchParams.get('status');
+    return (s && ['pending', 'processing', 'returned', 'completed', 'overdue'].includes(s)) ? s as TicketStatus : '';
+  });
   const [keyword, setKeyword] = useState('');
   const [page, setPage] = useState(1);
   const pageSize = 10;
@@ -48,8 +61,9 @@ export default function TicketList() {
       keyword,
       page,
       page_size: pageSize,
+      my_todo: tab === 'my_todo',
     });
-  }, [stage, riskLevel, status, keyword, page, fetchTickets]);
+  }, [stage, riskLevel, status, keyword, page, tab, fetchTickets]);
 
   const totalPages = Math.ceil(ticketsTotal / pageSize);
   const canCreate = user?.role === 'registrar';
@@ -82,6 +96,27 @@ export default function TicketList() {
 
       <div className="bg-white rounded-xl border border-slate-100 p-4">
         <div className="flex items-center gap-3 flex-wrap">
+          <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1">
+            <button
+              onClick={() => { setTab('all'); setPage(1); }}
+              className={cn(
+                'px-3 py-1.5 text-sm font-medium rounded-md transition-colors',
+                tab === 'all' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+              )}
+            >
+              全部需求
+            </button>
+            <button
+              onClick={() => { setTab('my_todo'); setPage(1); }}
+              className={cn(
+                'px-3 py-1.5 text-sm font-medium rounded-md transition-colors',
+                tab === 'my_todo' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-500 hover:text-slate-700'
+              )}
+            >
+              我的待办
+            </button>
+          </div>
+
           <div className="relative flex-1 max-w-xs">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
             <input
@@ -222,8 +257,14 @@ export default function TicketList() {
                   </span>
                 </td>
                 <td className="px-5 py-4">
-                  <span className="text-sm text-slate-600">
+                  <span className={cn(
+                    'text-sm',
+                    ticket.current_handler_id === user?.id ? 'font-semibold text-blue-600' : 'text-slate-600'
+                  )}>
                     {ticket.current_handler_name || '-'}
+                    {ticket.current_handler_id === user?.id && (
+                      <span className="ml-1 text-xs text-blue-500">(我)</span>
+                    )}
                   </span>
                 </td>
                 <td className="px-5 py-4">

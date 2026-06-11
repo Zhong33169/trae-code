@@ -42,6 +42,7 @@ export default function Dashboard() {
       icon: FileText,
       color: 'from-blue-500 to-blue-600',
       bgColor: 'bg-blue-50',
+      onClick: () => navigate('/tickets'),
     },
     {
       label: '我的待办',
@@ -49,6 +50,7 @@ export default function Dashboard() {
       icon: Clock,
       color: 'from-indigo-500 to-indigo-600',
       bgColor: 'bg-indigo-50',
+      onClick: () => navigate('/tickets?tab=my_todo'),
     },
     {
       label: '已逾期',
@@ -56,6 +58,7 @@ export default function Dashboard() {
       icon: AlertTriangle,
       color: 'from-red-500 to-red-600',
       bgColor: 'bg-red-50',
+      onClick: () => navigate('/tickets?status=overdue'),
     },
     {
       label: '高风险',
@@ -63,6 +66,7 @@ export default function Dashboard() {
       icon: TrendingUp,
       color: 'from-amber-500 to-orange-600',
       bgColor: 'bg-amber-50',
+      onClick: () => navigate('/tickets?risk_level=high'),
     },
   ];
 
@@ -92,7 +96,8 @@ export default function Dashboard() {
         {statCards.map((card, index) => (
           <div
             key={index}
-            className="bg-white rounded-xl p-5 border border-slate-100 hover:shadow-md transition-shadow"
+            onClick={card.onClick}
+            className="bg-white rounded-xl p-5 border border-slate-100 hover:shadow-md transition-shadow cursor-pointer"
           >
             <div className="flex items-start justify-between">
               <div>

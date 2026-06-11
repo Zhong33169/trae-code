@@ -49,8 +49,18 @@ export default function TicketDetail() {
 
   const currentStageIndex = ticket ? getStageIndex(ticket.stage) : -1;
 
+  const isCurrentUserHandler = () => {
+    if (!ticket || !user) return false;
+    if (user.role === 'registrar' && ticket.status === 'returned' && ticket.creator_id === user.id) {
+      return true;
+    }
+    return ticket.current_handler_id === user.id;
+  };
+
   const getAvailableActions = () => {
     if (!ticket || !user) return [];
+
+    if (!isCurrentUserHandler()) return [];
 
     const actions: { key: string; label: string; type: 'primary' | 'danger' | 'default' }[] = [];
 
@@ -518,6 +528,22 @@ export default function TicketDetail() {
                     {action.label}
                   </button>
                 ))}
+              </div>
+            </div>
+          )}
+
+          {availableActions.length === 0 && ticket.status !== 'completed' && (
+            <div className="bg-slate-50 rounded-xl border border-slate-200 p-5">
+              <div className="flex items-start gap-3">
+                <AlertCircle className="w-5 h-5 text-slate-400 flex-shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-medium text-slate-600">暂无操作权限</p>
+                  <p className="text-xs text-slate-500 mt-1">
+                    {isCurrentUserHandler()
+                      ? '当前状态下没有可执行的操作'
+                      : `当前处理人为「${ticket.current_handler_name || '暂无'}」，请等待对方处理后再操作`}
+                  </p>
+                </div>
               </div>
             </div>
           )}

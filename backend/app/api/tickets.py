@@ -29,6 +29,7 @@ def list_tickets(
     status: str = None,
     keyword: str = None,
     handler_id: int = None,
+    my_todo: bool = False,
     page: int = 1,
     page_size: int = 20,
 ):
@@ -39,6 +40,7 @@ def list_tickets(
         'status': status,
         'keyword': keyword,
         'handler_id': handler_id,
+        'my_todo': my_todo,
     }
     return ticket_service.get_ticket_list(filters, page, page_size, user)
 

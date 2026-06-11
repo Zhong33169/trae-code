@@ -2,6 +2,7 @@ from app.models import User, Ticket, TicketLog, Evidence
 from app.services.validation_service import (
     ValidationError,
     validate_ticket_action,
+    write_validate_fail_log,
     get_stage_deadline,
     find_user_by_role,
     STAGE_TRANSITIONS,
@@ -10,7 +11,11 @@ from app.services.validation_service import (
 from django.utils import timezone
 from django.db import transaction
 from django.db.models import Q, Count
-import uuid
+
+
+def _assign_handler(ticket: Ticket):
+    handler_role = 'auditor' if ticket.stage in ['confirm', 'schedule'] else 'reviewer'
+    ticket.current_handler = find_user_by_role(handler_role)
 
 
 def create_ticket(user: User, data: dict) -> Ticket:
@@ -55,17 +60,20 @@ def create_ticket(user: User, data: dict) -> Ticket:
 
 def submit_ticket(ticket: Ticket, user: User, data: dict) -> Ticket:
     with transaction.atomic():
-        if ticket.version != data.get('version'):
-            raise ValidationError('版本号不匹配，请刷新页面后重试', 'version_conflict')
-
+        version = data.get('version', ticket.version)
         evidences = data.get('evidences', [])
-        validate_ticket_action(ticket, user, 'submit', evidences)
+
+        try:
+            validate_ticket_action(ticket, user, 'submit', version, evidences)
+        except ValidationError as e:
+            write_validate_fail_log(ticket, user, 'submit', e.message)
+            raise
 
         old_stage = ticket.stage
         old_status = ticket.status
 
         ticket.status = 'pending'
-        ticket.current_handler = find_user_by_role('auditor') if ticket.stage in ['confirm', 'schedule'] else find_user_by_role('reviewer')
+        _assign_handler(ticket)
         ticket.version += 1
         ticket.save()
 
@@ -94,11 +102,14 @@ def submit_ticket(ticket: Ticket, user: User, data: dict) -> Ticket:
 
 def approve_ticket(ticket: Ticket, user: User, data: dict) -> Ticket:
     with transaction.atomic():
-        if ticket.version != data.get('version'):
-            raise ValidationError('版本号不匹配，请刷新页面后重试', 'version_conflict')
-
+        version = data.get('version', ticket.version)
         evidences = data.get('evidences', [])
-        validate_ticket_action(ticket, user, 'approve', evidences)
+
+        try:
+            validate_ticket_action(ticket, user, 'approve', version, evidences)
+        except ValidationError as e:
+            write_validate_fail_log(ticket, user, 'approve', e.message)
+            raise
 
         old_stage = ticket.stage
         old_status = ticket.status
@@ -109,7 +120,7 @@ def approve_ticket(ticket: Ticket, user: User, data: dict) -> Ticket:
         if next_stage:
             ticket.stage = next_stage
             ticket.status = 'pending'
-            ticket.current_handler = find_user_by_role('auditor') if next_stage == 'schedule' else find_user_by_role('reviewer')
+            _assign_handler(ticket)
             ticket.deadline = get_stage_deadline(next_stage, ticket.risk_level)
         else:
             ticket.status = 'completed'
@@ -143,11 +154,14 @@ def approve_ticket(ticket: Ticket, user: User, data: dict) -> Ticket:
 
 def reject_ticket(ticket: Ticket, user: User, data: dict) -> Ticket:
     with transaction.atomic():
-        if ticket.version != data.get('version'):
-            raise ValidationError('版本号不匹配，请刷新页面后重试', 'version_conflict')
-
+        version = data.get('version', ticket.version)
         evidences = data.get('evidences', [])
-        validate_ticket_action(ticket, user, 'reject', evidences)
+
+        try:
+            validate_ticket_action(ticket, user, 'reject', version, evidences)
+        except ValidationError as e:
+            write_validate_fail_log(ticket, user, 'reject', e.message)
+            raise
 
         old_stage = ticket.stage
         old_status = ticket.status
@@ -186,11 +200,14 @@ def revise_ticket(ticket: Ticket, user: User, data: dict) -> Ticket:
 
 def archive_ticket(ticket: Ticket, user: User, data: dict) -> Ticket:
     with transaction.atomic():
-        if ticket.version != data.get('version'):
-            raise ValidationError('版本号不匹配，请刷新页面后重试', 'version_conflict')
-
+        version = data.get('version', ticket.version)
         evidences = data.get('evidences', [])
-        validate_ticket_action(ticket, user, 'archive', evidences)
+
+        try:
+            validate_ticket_action(ticket, user, 'archive', version, evidences)
+        except ValidationError as e:
+            write_validate_fail_log(ticket, user, 'archive', e.message)
+            raise
 
         old_stage = ticket.stage
         old_status = ticket.status
@@ -242,9 +259,6 @@ def execute_action(ticket: Ticket, user: User, action: str, data: dict) -> Ticke
 def get_ticket_list(filters: dict, page: int = 1, page_size: int = 20, user: User = None) -> dict:
     queryset = Ticket.objects.all()
 
-    if user and user.role == 'registrar':
-        queryset = queryset.filter(creator=user)
-
     if filters.get('stage'):
         queryset = queryset.filter(stage=filters['stage'])
 
@@ -260,6 +274,11 @@ def get_ticket_list(filters: dict, page: int = 1, page_size: int = 20, user: Use
 
     if filters.get('handler_id'):
         queryset = queryset.filter(current_handler_id=filters['handler_id'])
+
+    if filters.get('my_todo') and user:
+        queryset = queryset.filter(current_handler_id=user.id, status__in=['pending', 'returned', 'overdue'])
+    elif user and user.role == 'registrar':
+        queryset = queryset.filter(Q(creator=user) | Q(current_handler=user))
 
     total = queryset.count()
 
@@ -311,7 +330,7 @@ def get_dashboard_stats(user: User) -> dict:
 
     overdue_count = queryset.filter(status='overdue').count()
 
-    my_todo = Ticket.objects.filter(current_handler=user, status='pending').count()
+    my_todo = Ticket.objects.filter(current_handler=user, status__in=['pending', 'returned', 'overdue']).count()
 
     return {
         'total_pending': total_pending,
