@@ -1,0 +1,149 @@
+import { createSignal, onMount } from "solid-js";
+import Layout from "~/components/Layout";
+import { api } from "~/lib/api";
+import { showToast } from "~/store/toast";
+
+export default function Statistics() {
+  const [stats, setStats] = createSignal<any>(null);
+  const [loading, setLoading] = createSignal(true);
+
+  const loadStats = async () => {
+    setLoading(true);
+    try {
+      const result = await api.getStatistics();
+      setStats(result.data);
+    } catch (err: any) {
+      showToast(err.message || "加载失败", "error");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  onMount(() => {
+    loadStats();
+  });
+
+  return (
+    <Layout>
+      <div class="card">
+        <div class="card-header">
+          <h2 class="card-title">数据统计</h2>
+        </div>
+
+        {loading() ? (
+          <div class="loading">加载中...</div>
+        ) : stats() ? (
+          <>
+            <div class="stat-grid">
+              <div class="stat-card">
+                <div class="stat-value">{stats().total}</div>
+                <div class="stat-label">任务总数</div>
+              </div>
+
+              <div class="stat-card">
+                <div class="stat-value warning">{stats().timeoutCount}</div>
+                <div class="stat-label">超时任务数</div>
+              </div>
+
+              <div class="stat-card">
+                <div class="stat-value">{stats().archived}</div>
+                <div class="stat-label">已归档任务</div>
+              </div>
+
+              <div class="stat-card">
+                <div class="stat-value" style="color: #1890ff;">
+                  {stats().registered + stats().auditPassed + stats().reviewRejected + stats().auditRejected + stats().pendingRegistration}
+                </div>
+                <div class="stat-label">进行中任务</div>
+              </div>
+            </div>
+
+            <div class="stat-grid">
+              <div class="stat-card">
+                <div class="stat-value" style="color: #8c8c8c;">
+                  {stats().pendingRegistration}
+                </div>
+                <div class="stat-label">待登记</div>
+              </div>
+
+              <div class="stat-card">
+                <div class="stat-value" style="color: #1890ff;">
+                  {stats().registered}
+                </div>
+                <div class="stat-label">待审核</div>
+              </div>
+
+              <div class="stat-card">
+                <div class="stat-value" style="color: #faad14;">
+                  {stats().auditPassed}
+                </div>
+                <div class="stat-label">待复核</div>
+              </div>
+
+              <div class="stat-card">
+                <div class="stat-value danger">
+                  {stats().auditRejected + stats().reviewRejected}
+                </div>
+                <div class="stat-label">已驳回</div>
+              </div>
+            </div>
+
+            <div class="detail-section" style="margin-top: 24px;">
+              <h3>状态说明</h3>
+              <div class="detail-grid">
+                <div class="detail-item">
+                  <span class="label">待登记：</span>
+                  <span class="value">任务已创建，等待种植登记员提交登记信息</span>
+                </div>
+                <div class="detail-item">
+                  <span class="label">待审核：</span>
+                  <span class="value">登记已提交，等待种植审核主管审核</span>
+                </div>
+                <div class="detail-item">
+                  <span class="label">审核驳回：</span>
+                  <span class="value">审核未通过，需要种植登记员补正后重新提交</span>
+                </div>
+                <div class="detail-item">
+                  <span class="label">待复核：</span>
+                  <span class="value">审核已通过，等待农业合作社复核负责人复核</span>
+                </div>
+                <div class="detail-item">
+                  <span class="label">复核驳回：</span>
+                  <span class="value">复核未通过，需要重新审核</span>
+                </div>
+                <div class="detail-item">
+                  <span class="label">已归档：</span>
+                  <span class="value">复核通过，任务完成归档</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="detail-section" style="margin-top: 24px;">
+              <h3>节点超时规则</h3>
+              <div class="detail-grid">
+                <div class="detail-item">
+                  <span class="label">登记节点：</span>
+                  <span class="value">24 小时内完成</span>
+                </div>
+                <div class="detail-item">
+                  <span class="label">审核节点：</span>
+                  <span class="value">48 小时内完成</span>
+                </div>
+                <div class="detail-item">
+                  <span class="label">复核节点：</span>
+                  <span class="value">72 小时内完成</span>
+                </div>
+                <div class="detail-item">
+                  <span class="label">超时计算：</span>
+                  <span class="value">从节点开始处理时间起算</span>
+                </div>
+              </div>
+            </div>
+          </>
+        ) : (
+          <div class="empty">暂无数据</div>
+        )}
+      </div>
+    </Layout>
+  );
+}
