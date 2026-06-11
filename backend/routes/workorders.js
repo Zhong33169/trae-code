@@ -251,6 +251,364 @@ router.post('/scan', (req, res) => {
   });
 });
 
+
+router.post('/batch/audit', (req, res) => {
+  const { ids, result, action, checkItems, opinion, comment } = req.body;
+  const actualResult = result || action;
+  const actualOpinion = opinion || comment;
+  const userId = req.user.id;
+  const userName = req.user.name;
+  const userRole = req.user.role;
+
+  if (userRole !== 'auditor') {
+    return res.status(403).json({ success: false, message: '只有生产审核主管可以批量核验', code: 'PERMISSION_DENIED' });
+  }
+
+  if (!ids || !Array.isArray(ids) || ids.length === 0) {
+    return res.status(400).json({ success: false, message: '请选择要处理的工单', code: 'NO_SELECTED' });
+  }
+
+  if (!actualResult || (actualResult !== 'pass' && actualResult !== 'reject')) {
+    return res.status(400).json({ success: false, message: '无效的处理结果', code: 'INVALID_RESULT' });
+  }
+
+  if (actualResult === 'pass' && (!checkItems || !Array.isArray(checkItems) || checkItems.length < 2)) {
+    return res.status(400).json({
+      success: false,
+      message: '请完成核验项检查',
+      code: 'CHECK_ITEMS_REQUIRED',
+      detail: '批量核验通过至少需要完成两项核验'
+    });
+  }
+
+  if (!actualOpinion || actualOpinion.trim().length < 5) {
+    return res.status(400).json({
+      success: false,
+      message: '请填写核验意见',
+      code: 'OPINION_REQUIRED',
+      detail: '核验意见至少需要5个字符'
+    });
+  }
+
+  const results = [];
+  let successCount = 0;
+  let failCount = 0;
+
+  for (const id of ids) {
+    try {
+      const workOrder = store.getWorkOrderById(id);
+      if (!workOrder) {
+        store.addAuditLog({
+          workOrderId: id,
+          qrCode: null,
+          action: 'batch_audit_fail',
+          actionName: '批量核验失败',
+          userId,
+          userName,
+          role: userRole,
+          roleName: getRoleName(userRole),
+          details: { reason: '工单不存在', batch: true },
+          result: 'fail',
+          errorCode: 'NOT_FOUND'
+        });
+        results.push({ id, success: false, message: '工单不存在', code: 'NOT_FOUND' });
+        failCount++;
+        continue;
+      }
+
+      if (workOrder.status !== 'pending_audit') {
+        store.addAuditLog({
+          workOrderId: workOrder.id,
+          qrCode: workOrder.qrCode,
+          action: 'batch_audit_fail',
+          actionName: '批量核验失败',
+          userId,
+          userName,
+          role: userRole,
+          roleName: getRoleName(userRole),
+          details: { reason: '状态错误', currentStatus: workOrder.status, batch: true },
+          result: 'fail',
+          errorCode: 'INVALID_STATUS'
+        });
+        results.push({ id, success: false, message: '工单状态不允许核验', code: 'INVALID_STATUS' });
+        failCount++;
+        continue;
+      }
+
+      const lockResult = store.acquireLock(id, userId);
+      if (!lockResult.success) {
+        store.addAuditLog({
+          workOrderId: workOrder.id,
+          qrCode: workOrder.qrCode,
+          action: 'batch_audit_fail',
+          actionName: '批量核验失败',
+          userId,
+          userName,
+          role: userRole,
+          roleName: getRoleName(userRole),
+          details: { reason: '并发冲突', lockedBy: lockResult.lockedBy, batch: true },
+          result: 'fail',
+          errorCode: 'CONFLICT'
+        });
+        results.push({ id, success: false, message: `工单被${lockResult.lockedBy}占用`, code: 'CONFLICT' });
+        failCount++;
+        continue;
+      }
+
+      if (actualResult === 'pass') {
+        workOrder.status = 'pending_review';
+        workOrder.currentRole = 'reviewer';
+      } else {
+        workOrder.status = 'rejected';
+        workOrder.currentRole = 'registrar';
+        workOrder.rejectInfo = {
+          fromRole: 'auditor',
+          rejectTime: new Date().toISOString(),
+          reason: actualOpinion.trim(),
+          rejectCount: (workOrder.rejectInfo?.rejectCount || 0) + 1
+        };
+      }
+
+      workOrder.updatedAt = new Date().toISOString();
+      workOrder.version++;
+      workOrder.auditorInfo = {
+        userId,
+        userName,
+        auditTime: new Date().toISOString(),
+        checkItems,
+        result: actualResult,
+        opinion: actualOpinion.trim()
+      };
+
+      store.releaseLock(id);
+
+      store.addAuditLog({
+        workOrderId: workOrder.id,
+        qrCode: workOrder.qrCode,
+        action: actualResult === 'pass' ? 'batch_audit_pass' : 'batch_audit_reject',
+        actionName: actualResult === 'pass' ? '批量核验通过' : '批量核验驳回',
+        userId,
+        userName,
+        role: userRole,
+        roleName: getRoleName(userRole),
+        details: { checkItems, batch: true, total: ids.length },
+        opinion: actualOpinion.trim(),
+        result: actualResult
+      });
+
+      results.push({ id, success: true, message: '处理成功' });
+      successCount++;
+    } catch (e) {
+      store.addAuditLog({
+        workOrderId: id,
+        qrCode: null,
+        action: 'batch_audit_fail',
+        actionName: '批量核验失败',
+        userId,
+        userName,
+        role: userRole,
+        roleName: getRoleName(userRole),
+        details: { reason: e.message, batch: true },
+        result: 'fail',
+        errorCode: 'ERROR'
+      });
+      results.push({ id, success: false, message: e.message, code: 'ERROR' });
+      failCount++;
+    }
+  }
+
+  res.json({
+    success: true,
+    message: `批量处理完成：成功 ${successCount} 个，失败 ${failCount} 个`,
+    data: {
+      successCount,
+      failCount,
+      success: successCount,
+      failed: failCount,
+      total: ids.length,
+      results
+    }
+  });
+});
+
+router.post('/batch/review', (req, res) => {
+  const { ids, result, action, opinion, comment } = req.body;
+  const actualResult = result || action;
+  const actualOpinion = opinion || comment;
+  const userId = req.user.id;
+  const userName = req.user.name;
+  const userRole = req.user.role;
+
+  if (userRole !== 'reviewer') {
+    return res.status(403).json({ success: false, message: '只有复核负责人可以批量复核', code: 'PERMISSION_DENIED' });
+  }
+
+  if (!ids || !Array.isArray(ids) || ids.length === 0) {
+    return res.status(400).json({ success: false, message: '请选择要处理的工单', code: 'NO_SELECTED' });
+  }
+
+  if (!actualResult || (actualResult !== 'pass' && actualResult !== 'reject')) {
+    return res.status(400).json({ success: false, message: '无效的处理结果', code: 'INVALID_RESULT' });
+  }
+
+  if (!actualOpinion || actualOpinion.trim().length < 5) {
+    return res.status(400).json({
+      success: false,
+      message: '请填写复核意见',
+      code: 'OPINION_REQUIRED',
+      detail: '复核意见至少需要5个字符'
+    });
+  }
+
+  const results = [];
+  let successCount = 0;
+  let failCount = 0;
+
+  for (const id of ids) {
+    try {
+      const workOrder = store.getWorkOrderById(id);
+      if (!workOrder) {
+        store.addAuditLog({
+          workOrderId: id,
+          qrCode: null,
+          action: 'batch_review_fail',
+          actionName: '批量复核失败',
+          userId,
+          userName,
+          role: userRole,
+          roleName: getRoleName(userRole),
+          details: { reason: '工单不存在', batch: true },
+          result: 'fail',
+          errorCode: 'NOT_FOUND'
+        });
+        results.push({ id, success: false, message: '工单不存在', code: 'NOT_FOUND' });
+        failCount++;
+        continue;
+      }
+
+      if (workOrder.status !== 'pending_review') {
+        store.addAuditLog({
+          workOrderId: workOrder.id,
+          qrCode: workOrder.qrCode,
+          action: 'batch_review_fail',
+          actionName: '批量复核失败',
+          userId,
+          userName,
+          role: userRole,
+          roleName: getRoleName(userRole),
+          details: { reason: '状态错误', currentStatus: workOrder.status, batch: true },
+          result: 'fail',
+          errorCode: 'INVALID_STATUS'
+        });
+        results.push({ id, success: false, message: '工单状态不允许复核', code: 'INVALID_STATUS' });
+        failCount++;
+        continue;
+      }
+
+      const lockResult = store.acquireLock(id, userId);
+      if (!lockResult.success) {
+        store.addAuditLog({
+          workOrderId: workOrder.id,
+          qrCode: workOrder.qrCode,
+          action: 'batch_review_fail',
+          actionName: '批量复核失败',
+          userId,
+          userName,
+          role: userRole,
+          roleName: getRoleName(userRole),
+          details: { reason: '并发冲突', lockedBy: lockResult.lockedBy, batch: true },
+          result: 'fail',
+          errorCode: 'CONFLICT'
+        });
+        results.push({ id, success: false, message: `工单被${lockResult.lockedBy}占用`, code: 'CONFLICT' });
+        failCount++;
+        continue;
+      }
+
+      if (actualResult === 'pass') {
+        const archiveNo = `GD2024${String(Date.now() % 1000000).padStart(6, '0')}${Math.floor(Math.random() * 100)}`;
+        workOrder.status = 'completed';
+        workOrder.currentRole = null;
+        workOrder.reviewerInfo = {
+          userId,
+          userName,
+          reviewTime: new Date().toISOString(),
+          archiveNo,
+          result: actualResult,
+          opinion: actualOpinion.trim()
+        };
+      } else {
+        workOrder.status = 'rejected';
+        workOrder.currentRole = 'registrar';
+        workOrder.rejectInfo = {
+          fromRole: 'reviewer',
+          rejectTime: new Date().toISOString(),
+          reason: actualOpinion.trim(),
+          rejectCount: (workOrder.rejectInfo?.rejectCount || 0) + 1
+        };
+        workOrder.reviewerInfo = {
+          userId,
+          userName,
+          reviewTime: new Date().toISOString(),
+          result: actualResult,
+          opinion: actualOpinion.trim()
+        };
+      }
+
+      workOrder.updatedAt = new Date().toISOString();
+      workOrder.version++;
+
+      store.releaseLock(id);
+
+      store.addAuditLog({
+        workOrderId: workOrder.id,
+        qrCode: workOrder.qrCode,
+        action: actualResult === 'pass' ? 'batch_review_pass' : 'batch_review_reject',
+        actionName: actualResult === 'pass' ? '批量复核归档' : '批量复核驳回',
+        userId,
+        userName,
+        role: userRole,
+        roleName: getRoleName(userRole),
+        details: { batch: true, total: ids.length },
+        opinion: actualOpinion.trim(),
+        result: actualResult
+      });
+
+      results.push({ id, success: true, message: '处理成功' });
+      successCount++;
+    } catch (e) {
+      store.addAuditLog({
+        workOrderId: id,
+        qrCode: null,
+        action: 'batch_review_fail',
+        actionName: '批量复核失败',
+        userId,
+        userName,
+        role: userRole,
+        roleName: getRoleName(userRole),
+        details: { reason: e.message, batch: true },
+        result: 'fail',
+        errorCode: 'ERROR'
+      });
+      results.push({ id, success: false, message: e.message, code: 'ERROR' });
+      failCount++;
+    }
+  }
+
+  res.json({
+    success: true,
+    message: `批量处理完成：成功 ${successCount} 个，失败 ${failCount} 个`,
+    data: {
+      successCount,
+      failCount,
+      success: successCount,
+      failed: failCount,
+      total: ids.length,
+      results
+    }
+  });
+});
+
 router.post('/:id/submit', (req, res) => {
   const { id } = req.params;
   const { materials, opinion, comment, deadline } = req.body;
@@ -277,12 +635,25 @@ router.post('/:id/submit', (req, res) => {
     });
   }
 
-  if (!materials || !Array.isArray(materials) || materials.length === 0) {
+  if (!materials || !Array.isArray(materials) || materials.length < 3) {
+    store.addAuditLog({
+      workOrderId: workOrder.id,
+      qrCode: workOrder.qrCode,
+      action: 'submit_fail',
+      actionName: '提交登记失败',
+      userId,
+      userName,
+      role: userRole,
+      roleName: getRoleName(userRole),
+      details: { reason: '证据缺失，上传材料不足', materialsCount: materials?.length || 0, required: 3 },
+      result: 'fail',
+      errorCode: 'MATERIALS_REQUIRED'
+    });
     return res.status(400).json({
       success: false,
       message: '请上传必需的生产材料',
       code: 'MATERIALS_REQUIRED',
-      detail: '至少需要提交生产图纸、工艺卡和领料单'
+      detail: `至少需要提交3份材料（当前${materials?.length || 0}份），需包含生产图纸、工艺卡和领料单`
     });
   }
 
@@ -301,11 +672,47 @@ router.post('/:id/submit', (req, res) => {
 
   const deadlineDate = new Date(workOrder.deadline);
   if (deadlineDate < new Date()) {
+    store.addAuditLog({
+      workOrderId: workOrder.id,
+      qrCode: workOrder.qrCode,
+      action: 'submit_fail',
+      actionName: '提交登记失败',
+      userId,
+      userName,
+      role: userRole,
+      roleName: getRoleName(userRole),
+      details: { reason: '已超过处理时限', deadline: workOrder.deadline },
+      result: 'fail',
+      errorCode: 'DEADLINE_EXCEEDED'
+    });
     return res.status(400).json({
       success: false,
       message: '已超过处理时限',
       code: 'DEADLINE_EXCEEDED',
       detail: `该工单应于 ${deadlineDate.toLocaleDateString()} 前完成，现已逾期，请联系主管`
+    });
+  }
+
+  const lockResult = store.acquireLock(id, userId);
+  if (!lockResult.success) {
+    store.addAuditLog({
+      workOrderId: workOrder.id,
+      qrCode: workOrder.qrCode,
+      action: 'submit_fail',
+      actionName: '提交登记失败',
+      userId,
+      userName,
+      role: userRole,
+      roleName: getRoleName(userRole),
+      details: { reason: '并发冲突', lockedBy: lockResult.lockedBy },
+      result: 'fail',
+      errorCode: 'CONFLICT'
+    });
+    return res.status(409).json({
+      success: false,
+      message: '工单正在被处理',
+      code: 'CONFLICT',
+      detail: `该工单正在由「${lockResult.lockedBy}」处理，请稍后再试`
     });
   }
 
@@ -367,6 +774,19 @@ router.post('/:id/audit', (req, res) => {
   }
 
   if (workOrder.status !== 'pending_audit') {
+    store.addAuditLog({
+      workOrderId: workOrder.id,
+      qrCode: workOrder.qrCode,
+      action: 'audit_fail',
+      actionName: '核验失败',
+      userId,
+      userName,
+      role: userRole,
+      roleName: getRoleName(userRole),
+      details: { reason: '状态错误', currentStatus: workOrder.status },
+      result: 'fail',
+      errorCode: 'INVALID_STATUS'
+    });
     return res.status(400).json({ 
       success: false, 
       message: '工单状态不允许核验',
@@ -376,6 +796,19 @@ router.post('/:id/audit', (req, res) => {
   }
 
   if (!checkItems || !Array.isArray(checkItems) || checkItems.length < 2) {
+    store.addAuditLog({
+      workOrderId: workOrder.id,
+      qrCode: workOrder.qrCode,
+      action: 'audit_fail',
+      actionName: '核验失败',
+      userId,
+      userName,
+      role: userRole,
+      roleName: getRoleName(userRole),
+      details: { reason: '核验项不足', checkItemsCount: checkItems?.length || 0 },
+      result: 'fail',
+      errorCode: 'CHECK_ITEMS_REQUIRED'
+    });
     return res.status(400).json({
       success: false,
       message: '请完成核验项检查',
@@ -385,11 +818,47 @@ router.post('/:id/audit', (req, res) => {
   }
 
   if (!actualOpinion || actualOpinion.trim().length < 5) {
+    store.addAuditLog({
+      workOrderId: workOrder.id,
+      qrCode: workOrder.qrCode,
+      action: 'audit_fail',
+      actionName: '核验失败',
+      userId,
+      userName,
+      role: userRole,
+      roleName: getRoleName(userRole),
+      details: { reason: '处理意见不足', opinionLength: actualOpinion?.length || 0 },
+      result: 'fail',
+      errorCode: 'OPINION_REQUIRED'
+    });
     return res.status(400).json({
       success: false,
       message: '请填写核验意见',
       code: 'OPINION_REQUIRED',
       detail: '核验意见至少需要5个字符'
+    });
+  }
+
+  const lockResult = store.acquireLock(id, userId);
+  if (!lockResult.success) {
+    store.addAuditLog({
+      workOrderId: workOrder.id,
+      qrCode: workOrder.qrCode,
+      action: 'audit_fail',
+      actionName: '核验失败',
+      userId,
+      userName,
+      role: userRole,
+      roleName: getRoleName(userRole),
+      details: { reason: '并发冲突', lockedBy: lockResult.lockedBy },
+      result: 'fail',
+      errorCode: 'CONFLICT'
+    });
+    return res.status(409).json({
+      success: false,
+      message: '工单正在被处理',
+      code: 'CONFLICT',
+      detail: `该工单正在由「${lockResult.lockedBy}」处理，请稍后再试`
     });
   }
 
@@ -465,6 +934,19 @@ router.post('/:id/review', (req, res) => {
   }
 
   if (workOrder.status !== 'pending_review') {
+    store.addAuditLog({
+      workOrderId: workOrder.id,
+      qrCode: workOrder.qrCode,
+      action: 'review_fail',
+      actionName: '复核失败',
+      userId,
+      userName,
+      role: userRole,
+      roleName: getRoleName(userRole),
+      details: { reason: '状态错误', currentStatus: workOrder.status },
+      result: 'fail',
+      errorCode: 'INVALID_STATUS'
+    });
     return res.status(400).json({ 
       success: false, 
       message: '工单状态不允许复核',
@@ -473,8 +955,43 @@ router.post('/:id/review', (req, res) => {
     });
   }
 
+  if (!actualOpinion || actualOpinion.trim().length < 5) {
+    store.addAuditLog({
+      workOrderId: workOrder.id,
+      qrCode: workOrder.qrCode,
+      action: 'review_fail',
+      actionName: '复核失败',
+      userId,
+      userName,
+      role: userRole,
+      roleName: getRoleName(userRole),
+      details: { reason: '处理意见不足', opinionLength: actualOpinion?.length || 0 },
+      result: 'fail',
+      errorCode: 'OPINION_REQUIRED'
+    });
+    return res.status(400).json({
+      success: false,
+      message: '请填写复核意见',
+      code: 'OPINION_REQUIRED',
+      detail: '复核意见至少需要5个字符'
+    });
+  }
+
   if (actualResult === 'pass') {
     if (!archiveNo || archiveNo.trim().length < 5) {
+      store.addAuditLog({
+        workOrderId: workOrder.id,
+        qrCode: workOrder.qrCode,
+        action: 'review_fail',
+        actionName: '复核失败',
+        userId,
+        userName,
+        role: userRole,
+        roleName: getRoleName(userRole),
+        details: { reason: '归档编号不足', archiveNoLength: archiveNo?.length || 0 },
+        result: 'fail',
+        errorCode: 'ARCHIVE_NO_REQUIRED'
+      });
       return res.status(400).json({
         success: false,
         message: '请填写归档编号',
@@ -482,7 +999,34 @@ router.post('/:id/review', (req, res) => {
         detail: '归档编号至少需要5个字符'
       });
     }
+  } else if (actualResult !== 'reject') {
+    return res.status(400).json({ success: false, message: '无效的复核结果', code: 'INVALID_RESULT' });
+  }
 
+  const lockResult = store.acquireLock(id, userId);
+  if (!lockResult.success) {
+    store.addAuditLog({
+      workOrderId: workOrder.id,
+      qrCode: workOrder.qrCode,
+      action: 'review_fail',
+      actionName: '复核失败',
+      userId,
+      userName,
+      role: userRole,
+      roleName: getRoleName(userRole),
+      details: { reason: '并发冲突', lockedBy: lockResult.lockedBy },
+      result: 'fail',
+      errorCode: 'CONFLICT'
+    });
+    return res.status(409).json({
+      success: false,
+      message: '工单正在被处理',
+      code: 'CONFLICT',
+      detail: `该工单正在由「${lockResult.lockedBy}」处理，请稍后再试`
+    });
+  }
+
+  if (actualResult === 'pass') {
     workOrder.status = 'completed';
     workOrder.currentRole = null;
   } else if (actualResult === 'reject') {
@@ -494,17 +1038,6 @@ router.post('/:id/review', (req, res) => {
       reason: actualOpinion.trim(),
       rejectCount: (workOrder.rejectInfo?.rejectCount || 0) + 1
     };
-  } else {
-    return res.status(400).json({ success: false, message: '无效的复核结果', code: 'INVALID_RESULT' });
-  }
-
-  if (!actualOpinion || actualOpinion.trim().length < 5) {
-    return res.status(400).json({
-      success: false,
-      message: '请填写复核意见',
-      code: 'OPINION_REQUIRED',
-      detail: '复核意见至少需要5个字符'
-    });
   }
 
   workOrder.updatedAt = new Date().toISOString();
@@ -541,205 +1074,7 @@ router.post('/:id/review', (req, res) => {
   });
 });
 
-router.post('/batch/audit', (req, res) => {
-  const { ids, result, action, checkItems, opinion, comment } = req.body;
-  const actualResult = result || action;
-  const actualOpinion = opinion || comment;
-  const userId = req.user.id;
-  const userName = req.user.name;
-  const userRole = req.user.role;
 
-  if (userRole !== 'auditor') {
-    return res.status(403).json({ success: false, message: '只有生产审核主管可以批量核验', code: 'PERMISSION_DENIED' });
-  }
-
-  if (!ids || !Array.isArray(ids) || ids.length === 0) {
-    return res.status(400).json({ success: false, message: '请选择要处理的工单', code: 'NO_SELECTED' });
-  }
-
-  const results = [];
-  let successCount = 0;
-  let failCount = 0;
-
-  for (const id of ids) {
-    try {
-      const workOrder = store.getWorkOrderById(id);
-      if (!workOrder) {
-        results.push({ id, success: false, message: '工单不存在', code: 'NOT_FOUND' });
-        failCount++;
-        continue;
-      }
-
-      if (workOrder.status !== 'pending_audit') {
-        results.push({ id, success: false, message: '工单状态不允许核验', code: 'INVALID_STATUS' });
-        failCount++;
-        continue;
-      }
-
-      if (actualResult === 'pass') {
-        workOrder.status = 'pending_review';
-        workOrder.currentRole = 'reviewer';
-      } else {
-        workOrder.status = 'rejected';
-        workOrder.currentRole = 'registrar';
-        workOrder.rejectInfo = {
-          fromRole: 'auditor',
-          rejectTime: new Date().toISOString(),
-          reason: actualOpinion,
-          rejectCount: (workOrder.rejectInfo?.rejectCount || 0) + 1
-        };
-      }
-
-      workOrder.updatedAt = new Date().toISOString();
-      workOrder.version++;
-      workOrder.auditorInfo = {
-        userId,
-        userName,
-        auditTime: new Date().toISOString(),
-        checkItems,
-        result: actualResult,
-        opinion: actualOpinion
-      };
-
-      store.addAuditLog({
-        workOrderId: workOrder.id,
-        qrCode: workOrder.qrCode,
-        action: actualResult === 'pass' ? 'batch_audit_pass' : 'batch_audit_reject',
-        actionName: actualResult === 'pass' ? '批量核验通过' : '批量核验驳回',
-        userId,
-        userName,
-        role: userRole,
-        roleName: getRoleName(userRole),
-        details: { checkItems, batch: true, total: ids.length },
-        opinion: actualOpinion,
-        result: actualResult
-      });
-
-      results.push({ id, success: true, message: '处理成功' });
-      successCount++;
-    } catch (e) {
-      results.push({ id, success: false, message: e.message, code: 'ERROR' });
-      failCount++;
-    }
-  }
-
-  res.json({
-    success: true,
-    message: `批量处理完成：成功 ${successCount} 个，失败 ${failCount} 个`,
-    data: {
-      successCount,
-      failCount,
-      success: successCount,
-      failed: failCount,
-      total: ids.length,
-      results
-    }
-  });
-});
-
-router.post('/batch/review', (req, res) => {
-  const { ids, result, action, opinion, comment } = req.body;
-  const actualResult = result || action;
-  const actualOpinion = opinion || comment;
-  const userId = req.user.id;
-  const userName = req.user.name;
-  const userRole = req.user.role;
-
-  if (userRole !== 'reviewer') {
-    return res.status(403).json({ success: false, message: '只有复核负责人可以批量复核', code: 'PERMISSION_DENIED' });
-  }
-
-  if (!ids || !Array.isArray(ids) || ids.length === 0) {
-    return res.status(400).json({ success: false, message: '请选择要处理的工单', code: 'NO_SELECTED' });
-  }
-
-  const results = [];
-  let successCount = 0;
-  let failCount = 0;
-
-  for (const id of ids) {
-    try {
-      const workOrder = store.getWorkOrderById(id);
-      if (!workOrder) {
-        results.push({ id, success: false, message: '工单不存在', code: 'NOT_FOUND' });
-        failCount++;
-        continue;
-      }
-
-      if (workOrder.status !== 'pending_review') {
-        results.push({ id, success: false, message: '工单状态不允许复核', code: 'INVALID_STATUS' });
-        failCount++;
-        continue;
-      }
-
-      if (actualResult === 'pass') {
-        const archiveNo = `GD2024${String(Date.now() % 1000000).padStart(6, '0')}`;
-        workOrder.status = 'completed';
-        workOrder.currentRole = null;
-        workOrder.reviewerInfo = {
-          userId,
-          userName,
-          reviewTime: new Date().toISOString(),
-          archiveNo,
-          result: actualResult,
-          opinion: actualOpinion
-        };
-      } else {
-        workOrder.status = 'rejected';
-        workOrder.currentRole = 'registrar';
-        workOrder.rejectInfo = {
-          fromRole: 'reviewer',
-          rejectTime: new Date().toISOString(),
-          reason: actualOpinion,
-          rejectCount: (workOrder.rejectInfo?.rejectCount || 0) + 1
-        };
-        workOrder.reviewerInfo = {
-          userId,
-          userName,
-          reviewTime: new Date().toISOString(),
-          result: actualResult,
-          opinion: actualOpinion
-        };
-      }
-
-      workOrder.updatedAt = new Date().toISOString();
-      workOrder.version++;
-
-      store.addAuditLog({
-        workOrderId: workOrder.id,
-        qrCode: workOrder.qrCode,
-        action: actualResult === 'pass' ? 'batch_review_pass' : 'batch_review_reject',
-        actionName: actualResult === 'pass' ? '批量复核归档' : '批量复核驳回',
-        userId,
-        userName,
-        role: userRole,
-        roleName: getRoleName(userRole),
-        details: { batch: true, total: ids.length },
-        opinion: actualOpinion,
-        result: actualResult
-      });
-
-      results.push({ id, success: true, message: '处理成功' });
-      successCount++;
-    } catch (e) {
-      results.push({ id, success: false, message: e.message, code: 'ERROR' });
-      failCount++;
-    }
-  }
-
-  res.json({
-    success: true,
-    message: `批量处理完成：成功 ${successCount} 个，失败 ${failCount} 个`,
-    data: {
-      successCount,
-      failCount,
-      success: successCount,
-      failed: failCount,
-      total: ids.length,
-      results
-    }
-  });
-});
 
 function getRoleName(role) {
   const map = {

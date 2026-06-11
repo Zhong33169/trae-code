@@ -96,6 +96,146 @@ class DataStore {
     for (let i = 16; i <= 20; i++) {
       this.qrCodePool.push(`WO${String(2024000 + i).padStart(10, '0')}`);
     }
+
+    this._generateDemoFailureLogs();
+  }
+
+  _generateDemoFailureLogs() {
+    const baseTime = Date.now();
+    const hour = 60 * 60 * 1000;
+
+    this.addAuditLog({
+      id: 'log_demo_invalid_qr',
+      workOrderId: null,
+      qrCode: 'INVALID12345',
+      action: 'scan_fail',
+      actionName: '扫码失败',
+      userId: 'reg001',
+      userName: '张登记',
+      role: 'registrar',
+      roleName: '生产登记员',
+      timestamp: new Date(baseTime - 2 * hour).toISOString(),
+      details: { reason: '二维码格式错误，不在编码池中', scannedCode: 'INVALID12345' },
+      result: 'fail',
+      errorCode: 'INVALID_QR'
+    });
+
+    this.addAuditLog({
+      id: 'log_demo_duplicate',
+      workOrderId: 'wo10',
+      qrCode: 'WO0002024010',
+      action: 'scan_fail',
+      actionName: '扫码失败',
+      userId: 'aud001',
+      userName: '王审核',
+      role: 'auditor',
+      roleName: '生产审核主管',
+      timestamp: new Date(baseTime - 1.8 * hour).toISOString(),
+      details: { reason: '工单已归档，无需重复扫码处理', workOrderStatus: 'completed' },
+      result: 'fail',
+      errorCode: 'ALREADY_COMPLETED'
+    });
+
+    this.addAuditLog({
+      id: 'log_demo_wrong_role',
+      workOrderId: 'wo5',
+      qrCode: 'WO0002024005',
+      action: 'scan_fail',
+      actionName: '扫码失败',
+      userId: 'rev001',
+      userName: '陈复核',
+      role: 'reviewer',
+      roleName: '制造工厂复核负责人',
+      timestamp: new Date(baseTime - 1.5 * hour).toISOString(),
+      details: { 
+        reason: '越权操作，非当前处理人', 
+        expectedRole: 'auditor', 
+        expectedRoleName: '生产审核主管',
+        currentRole: 'reviewer'
+      },
+      result: 'fail',
+      errorCode: 'WRONG_ROLE'
+    });
+
+    this.addAuditLog({
+      id: 'log_demo_wrong_status',
+      workOrderId: 'wo2',
+      qrCode: 'WO0002024002',
+      action: 'audit_fail',
+      actionName: '核验失败',
+      userId: 'aud002',
+      userName: '赵审核',
+      role: 'auditor',
+      roleName: '生产审核主管',
+      timestamp: new Date(baseTime - 1 * hour).toISOString(),
+      details: { 
+        reason: '流程顺序错误，工单未提交登记', 
+        workOrderStatus: 'draft',
+        expectedStatus: 'pending_audit'
+      },
+      result: 'fail',
+      errorCode: 'WRONG_STATUS'
+    });
+
+    this.addAuditLog({
+      id: 'log_demo_conflict',
+      workOrderId: 'wo7',
+      qrCode: 'WO0002024007',
+      action: 'audit_fail',
+      actionName: '核验失败',
+      userId: 'aud002',
+      userName: '赵审核',
+      role: 'auditor',
+      roleName: '生产审核主管',
+      timestamp: new Date(baseTime - 0.5 * hour).toISOString(),
+      details: { 
+        reason: '并发冲突，工单被他人占用', 
+        lockedBy: '王审核',
+        lockDuration: '30秒'
+      },
+      result: 'fail',
+      errorCode: 'CONFLICT'
+    });
+
+    this.addAuditLog({
+      id: 'log_demo_materials',
+      workOrderId: 'wo1',
+      qrCode: 'WO0002024001',
+      action: 'submit_fail',
+      actionName: '提交登记失败',
+      userId: 'reg002',
+      userName: '李登记',
+      role: 'registrar',
+      roleName: '生产登记员',
+      timestamp: new Date(baseTime - 0.3 * hour).toISOString(),
+      details: { 
+        reason: '证据缺失，上传材料不足', 
+        materialsCount: 1,
+        required: 3
+      },
+      result: 'fail',
+      errorCode: 'MATERIALS_REQUIRED'
+    });
+
+    this.addAuditLog({
+      id: 'log_demo_opinion',
+      workOrderId: 'wo6',
+      qrCode: 'WO0002024006',
+      action: 'review_fail',
+      actionName: '复核失败',
+      userId: 'rev002',
+      userName: '刘复核',
+      role: 'reviewer',
+      roleName: '制造工厂复核负责人',
+      timestamp: new Date(baseTime - 0.2 * hour).toISOString(),
+      details: { 
+        reason: '处理意见过短', 
+        opinionLength: 2,
+        required: 5
+      },
+      result: 'fail',
+      errorCode: 'OPINION_REQUIRED'
+    });
   }
 
   _getDeadline(status) {

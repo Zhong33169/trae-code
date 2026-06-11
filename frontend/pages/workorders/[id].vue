@@ -323,7 +323,7 @@ const loadAuditLogs = async () => {
   try {
     const res = await api.get('/audit/workorder/' + route.params.id)
     if (res.success) {
-      auditLogs.value = res.data
+      auditLogs.value = res.data.list || res.data || []
     }
   } catch (e) {
     console.error('加载审计记录失败', e)

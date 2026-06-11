@@ -212,7 +212,7 @@ const loadFailureStats = async () => {
   try {
     const res = await api.get('/audit/failures')
     if (res.success) {
-      failureStats.value = res.data
+      failureStats.value = res.data.failureTypes || []
     }
   } catch (e) {
     console.error('加载失败统计失败', e)
