@@ -17,6 +17,7 @@ export default function ScheduleDetail({ scheduleId }) {
   const [id, setId] = useState('');
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState(null);
   const [submitting, setSubmitting] = useState(false);
@@ -38,12 +39,16 @@ export default function ScheduleDetail({ scheduleId }) {
   const loadDetail = useCallback(async () => {
     if (!id) return;
     setLoading(true);
+    setLoadError(null);
     const r = await api.getSchedule(id);
     setLoading(false);
     if (r.ok && r.data.code === 0) {
       setData(r.data.data);
     } else {
-      toast(r.data?.message || '加载失败', 'error');
+      setLoadError({ code: r.data?.code || r.status, message: r.data?.message || '加载失败' });
+      if (r.data?.code !== 403) {
+        toast(r.data?.message || '加载失败', 'error');
+      }
     }
   }, [id]);
 
@@ -146,8 +151,29 @@ export default function ScheduleDetail({ scheduleId }) {
   };
 
   if (!user || !id) return null;
-  if (loading && !data) return <div className="card"><div className="empty">加载中...</div></div>;
-  if (!loading && !data) return <div className="card"><div className="empty">加载失败</div></div>;
+  if (loading) return <div className="card"><div className="empty">加载中...</div></div>;
+  if (loadError?.code === 403) {
+    return (
+      <div className="card">
+        <div className="empty" style={{ padding: '60px 20px' }}>
+          <div style={{ fontSize: 48, marginBottom: 12 }}>🔒</div>
+          <div style={{ fontSize: 16, color: '#606266', marginBottom: 8 }}>无权查看此发车计划</div>
+          <div style={{ fontSize: 13, color: '#909399', marginBottom: 20 }}>{loadError.message}</div>
+          <a href="/" className="btn btn-default">返回列表</a>
+        </div>
+      </div>
+    );
+  }
+  if (!data) {
+    return (
+      <div className="card">
+        <div className="empty">
+          <div style={{ fontSize: 14, color: '#909399', marginBottom: 12 }}>{loadError?.message || '加载失败'}</div>
+          <button className="btn btn-primary" onClick={loadDetail}>重新加载</button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div>

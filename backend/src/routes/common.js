@@ -75,24 +75,25 @@ router.get('/operation-logs', authMiddleware, async (ctx) => {
   let params = [];
 
   if (scheduleId) {
-    whereClauses.push('schedule_id = ?');
+    whereClauses.push('ol.schedule_id = ?');
     params.push(scheduleId);
   }
 
   if (user.role === config.roles.REGISTRAR) {
-    whereClauses.push(`schedule_id IN (SELECT id FROM bus_schedules WHERE created_by = ${user.id})`);
+    whereClauses.push('ol.schedule_id IN (SELECT id FROM bus_schedules WHERE created_by = ?)');
+    params.push(user.id);
   }
 
   const whereSQL = whereClauses.length ? 'WHERE ' + whereClauses.join(' AND ') : '';
 
-  const totalRow = db.get(`SELECT COUNT(*) as count FROM operation_logs ${whereSQL}`, params);
+  const totalRow = db.get(`SELECT COUNT(*) as count FROM operation_logs ol ${whereSQL}`, params);
   const total = totalRow?.count || 0;
 
   const offset = (page - 1) * pageSize;
   const list = db.all(`
-    SELECT * FROM operation_logs
+    SELECT ol.* FROM operation_logs ol
     ${whereSQL}
-    ORDER BY created_at DESC
+    ORDER BY ol.created_at DESC
     LIMIT ? OFFSET ?
   `, [...params, Number(pageSize), offset]);
 

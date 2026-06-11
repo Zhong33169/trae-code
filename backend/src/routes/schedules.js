@@ -16,6 +16,13 @@ function validateHandover(handover) {
   return null;
 }
 
+function checkSchedulePermission(schedule, user) {
+  if (user.role === config.roles.REGISTRAR && schedule.created_by !== user.id) {
+    return { code: 403, message: '无权查看此发车计划' };
+  }
+  return null;
+}
+
 function buildScheduleWithDetails(row) {
   if (!row) return null;
   const handover = db.get('SELECT * FROM handover_records WHERE schedule_id = ?', [row.id]);
@@ -102,10 +109,17 @@ router.get('/', authMiddleware, async (ctx) => {
 });
 
 router.get('/:id', authMiddleware, async (ctx) => {
+  const user = ctx.state.user;
   const row = db.get('SELECT * FROM bus_schedules WHERE id = ?', [ctx.params.id]);
   if (!row) {
     ctx.status = 404;
     ctx.body = { code: 404, message: '发车计划不存在' };
+    return;
+  }
+  const permErr = checkSchedulePermission(row, user);
+  if (permErr) {
+    ctx.status = permErr.code;
+    ctx.body = { code: permErr.code, message: permErr.message };
     return;
   }
   ctx.body = { code: 0, data: buildScheduleWithDetails(row) };
