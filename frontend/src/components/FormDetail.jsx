@@ -28,6 +28,7 @@ export default function FormDetail({ formData, user, onProcess, onRefresh, onNot
     onProcess(pendingRejectAction, { reason: rejectReason })
     setShowRejectModal(false)
     setRejectReason('')
+    setPendingRejectAction('')
   }
 
   const missingEvidence = []
@@ -56,32 +57,32 @@ export default function FormDetail({ formData, user, onProcess, onRefresh, onNot
         <div className="detail-actions">
           {canSubmit && (
             <button className="btn btn-primary" onClick={() => onProcess('submit')}>
-              提交登记
+              提交登记 (v{form.version})
             </button>
           )}
           {canForemanVerify && (
             <button className="btn btn-primary" onClick={() => onProcess('verify_foreman')}>
-              现场核验通过
+              现场核验通过 (v{form.version})
             </button>
           )}
           {canForemanReject && (
             <button className="btn btn-danger" onClick={() => handleReject('reject_foreman')}>
-              核验驳回
+              核验驳回 (v{form.version})
             </button>
           )}
           {canManagerConfirm && (
             <button className="btn btn-primary" onClick={() => onProcess('confirm_manager')}>
-              项目经理确认
+              项目经理确认 (v{form.version})
             </button>
           )}
           {canManagerReject && (
             <button className="btn btn-danger" onClick={() => handleReject('reject_manager')}>
-              经理驳回
+              经理驳回 (v{form.version})
             </button>
           )}
           {canArchive && (
             <button className="btn btn-secondary" onClick={() => onProcess('archive')}>
-              归档
+              归档 (v{form.version})
             </button>
           )}
         </div>

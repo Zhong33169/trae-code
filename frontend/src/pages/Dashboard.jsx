@@ -100,10 +100,15 @@ export default function Dashboard() {
   }
 
   const handleProcess = async (action, data = {}) => {
+    const version = selectedForm?.form?.version
+    if (!version || version <= 0) {
+      showNotification('缺少版本信息，请刷新页面后重试', 'error')
+      return
+    }
     try {
       await api.processForm({
         form_id: selectedId,
-        expected_version: selectedForm?.form?.version,
+        expected_version: version,
         action,
         ...data
       })
@@ -111,7 +116,14 @@ export default function Dashboard() {
       setSelectedForms(new Map())
       refreshAll()
     } catch (err) {
-      showNotification(`${err.data?.reason || err.data?.message || err.message}`, 'error')
+      const reason = err.data?.reason || ''
+      const message = err.data?.message || err.message
+      if (reason === 'version_conflict') {
+        showNotification(`版本冲突：${message}，正在刷新...`, 'error')
+        refreshAll()
+      } else {
+        showNotification(`${reason ? reason + '：' : ''}${message}`, 'error')
+      }
     }
   }
 

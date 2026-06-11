@@ -529,6 +529,14 @@ func ProcessForm(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, models.ErrorResponse{Code: 400, Message: "表单ID不能为空", Reason: "missing_form_id"})
 	}
 
+	if req.ExpectedVersion <= 0 {
+		return c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Code:    400,
+			Message: "缺少版本号，请刷新页面后重试",
+			Reason:  "missing_version",
+		})
+	}
+
 	userID := middleware.GetUserID(c)
 	userRole := middleware.GetUserRole(c)
 
