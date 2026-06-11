@@ -42,6 +42,14 @@ type ScanResponse struct {
 	RecordID      uint   `json:"record_id,omitempty"`
 	ApplicationID uint   `json:"application_id,omitempty"`
 	NextAction    string `json:"next_action,omitempty"`
+	Evidence      string `json:"evidence,omitempty"`
+	QRMatched     bool   `json:"qr_matched"`
+	HandlerMatched bool  `json:"handler_matched"`
+	IsDuplicate   bool   `json:"is_duplicate"`
+	StayInPlace   bool   `json:"stay_in_place"`
+	CurrentStatus string `json:"current_status,omitempty"`
+	ExpectedHandler string `json:"expected_handler,omitempty"`
+	ExpectedHandlerID *uint `json:"expected_handler_id,omitempty"`
 }
 
 func (h *ScanHandler) ScanQRCode(c *gin.Context) {
@@ -80,7 +88,7 @@ func (h *ScanHandler) ScanQRCode(c *gin.Context) {
 		return
 	}
 
-	if app.Status != models.StatusPendingScan && app.Status != models.StatusScanFailed {
+	if app.Status != models.StatusPendingScan && app.Status != models.StatusScanFailed && app.Status != models.StatusRevisionRequired {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error":  "当前状态不允许扫码核验",
 			"status": app.Status,
@@ -88,14 +96,23 @@ func (h *ScanHandler) ScanQRCode(c *gin.Context) {
 		return
 	}
 
+	originalStatus := app.Status
 	scanTime := time.Now()
 	result := "success"
 	failureReason := ""
+	qrMatched := true
+	handlerMatched := true
+	isDuplicate := false
+	stayInPlace := false
 
 	if req.QRCode != app.QRCode {
 		result = "fail"
-		failureReason = "二维码不匹配：扫码内容与投保申请绑定的二维码不一致"
-	} else {
+		qrMatched = false
+		stayInPlace = true
+		failureReason = "二维码不匹配：扫码内容与投保申请绑定的二维码不一致，请核对投保资料"
+	}
+
+	if qrMatched {
 		var count int64
 		h.db.Model(&models.ScanRecord{}).Where(
 			"application_id = ? AND result = 'success' AND qr_code = ?",
@@ -104,7 +121,18 @@ func (h *ScanHandler) ScanQRCode(c *gin.Context) {
 
 		if count > 0 {
 			result = "duplicate"
-			failureReason = "重复扫码：该二维码已成功核验过，请勿重复扫码"
+			isDuplicate = true
+			stayInPlace = true
+			failureReason = "重复扫码：该二维码已成功核验过，同一申请只能通过扫码核验一次"
+		}
+	}
+
+	if qrMatched && !isDuplicate {
+		if app.CurrentHandlerID != nil && *app.CurrentHandlerID != userID {
+			result = "handler_mismatch"
+			handlerMatched = false
+			stayInPlace = true
+			failureReason = "扫码人与当前处理人不匹配，该申请的责任人是：" + app.CurrentHandlerName
 		}
 	}
 
@@ -134,11 +162,19 @@ func (h *ScanHandler) ScanQRCode(c *gin.Context) {
 	}
 
 	response := ScanResponse{
-		Success:       result == "success",
-		Result:        result,
-		Message:       h.getResultMessage(result, failureReason),
-		RecordID:      scanRecord.ID,
-		ApplicationID: app.ID,
+		Success:           result == "success",
+		Result:            result,
+		Message:           h.getResultMessage(result, failureReason),
+		RecordID:          scanRecord.ID,
+		ApplicationID:     app.ID,
+		Evidence:          evidence,
+		QRMatched:         qrMatched,
+		HandlerMatched:    handlerMatched,
+		IsDuplicate:       isDuplicate,
+		StayInPlace:       stayInPlace,
+		CurrentStatus:     string(originalStatus),
+		ExpectedHandler:   app.CurrentHandlerName,
+		ExpectedHandlerID: app.CurrentHandlerID,
 	}
 
 	if result != "success" {
@@ -152,18 +188,29 @@ func (h *ScanHandler) ScanQRCode(c *gin.Context) {
 			app.ID,
 			c.ClientIP(),
 			c.Request.UserAgent(),
-			"扫码核验失败: "+app.ApplicationNo+", 原因: "+failureReason,
+			"扫码核验失败: "+app.ApplicationNo+", 结果: "+result+", 原因: "+failureReason,
 		)
 
 		tx := h.db.Begin()
-		app.Status = models.StatusScanFailed
-		app.ExceptionReason = failureReason
-		app.LastProcessResult = "扫码核验失败: " + failureReason
-		app.LastProcessedAt = &scanTime
-		app.LastProcessedByID = &userID
-		app.LastProcessedByName = userName
-		app.Version++
-		app.UpdatedAt = scanTime
+
+		if stayInPlace {
+			app.ExceptionReason = failureReason
+			app.LastProcessResult = "扫码核验失败(" + result + "): " + failureReason
+			app.LastProcessedAt = &scanTime
+			app.LastProcessedByID = &userID
+			app.LastProcessedByName = userName
+			app.Version++
+			app.UpdatedAt = scanTime
+		} else {
+			app.Status = models.StatusScanFailed
+			app.ExceptionReason = failureReason
+			app.LastProcessResult = "扫码核验失败: " + failureReason
+			app.LastProcessedAt = &scanTime
+			app.LastProcessedByID = &userID
+			app.LastProcessedByName = userName
+			app.Version++
+			app.UpdatedAt = scanTime
+		}
 
 		if err := tx.Save(&app).Error; err != nil {
 			tx.Rollback()
@@ -174,12 +221,12 @@ func (h *ScanHandler) ScanQRCode(c *gin.Context) {
 		processRecord := &models.ProcessRecord{
 			ApplicationID: app.ID,
 			Action:        "scan_fail",
-			FromStatus:    models.StatusPendingScan,
-			ToStatus:      models.StatusScanFailed,
+			FromStatus:    originalStatus,
+			ToStatus:      app.Status,
 			HandlerRole:   userRole,
 			HandlerID:     userID,
 			HandlerName:   userName,
-			Opinion:       "扫码核验失败: " + failureReason,
+			Opinion:       "扫码核验失败: " + failureReason + " [扫码结果类型: " + result + "]",
 			TimeLimitMet:  true,
 			ProcessingTime: 0,
 			CreatedAt:     scanTime,
@@ -192,7 +239,13 @@ func (h *ScanHandler) ScanQRCode(c *gin.Context) {
 		}
 
 		tx.Commit()
-		response.NextAction = "留在原队列，需重新核验或联系管理员"
+
+		if stayInPlace {
+			response.NextAction = "停在原队列：请核对信息后联系对应责任人或使用正确二维码重新核验"
+		} else {
+			response.NextAction = "留在原队列，需重新核验或联系管理员"
+		}
+		response.CurrentStatus = string(app.Status)
 
 		c.JSON(http.StatusOK, response)
 		return
@@ -213,10 +266,49 @@ func (h *ScanHandler) ScanQRCode(c *gin.Context) {
 			"扫码通过但材料不全: "+app.ApplicationNo+", 原因: "+materialsMsg,
 		)
 
+		tx := h.db.Begin()
+		app.ExceptionReason = materialsMsg
+		app.LastProcessResult = "扫码通过但" + materialsMsg
+		app.LastProcessedAt = &scanTime
+		app.LastProcessedByID = &userID
+		app.LastProcessedByName = userName
+		app.Version++
+		app.UpdatedAt = scanTime
+
+		if err := tx.Save(&app).Error; err != nil {
+			tx.Rollback()
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "更新申请状态失败"})
+			return
+		}
+
+		processRecord := &models.ProcessRecord{
+			ApplicationID: app.ID,
+			Action:        "scan_materials_missing",
+			FromStatus:    originalStatus,
+			ToStatus:      app.Status,
+			HandlerRole:   userRole,
+			HandlerID:     userID,
+			HandlerName:   userName,
+			Opinion:       "扫码核验通过但材料不全: " + materialsMsg,
+			TimeLimitMet:  true,
+			ProcessingTime: 0,
+			CreatedAt:     scanTime,
+		}
+
+		if err := tx.Create(processRecord).Error; err != nil {
+			tx.Rollback()
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "保存处理记录失败"})
+			return
+		}
+
+		tx.Commit()
+
 		response.Success = false
 		response.Result = "materials_missing"
-		response.Message = "扫码成功，但" + materialsMsg + "，请补正材料后再提交"
-		response.NextAction = "补充材料后重新提交审核"
+		response.Message = "扫码成功，但" + materialsMsg + "，请补正材料后再提交审核"
+		response.NextAction = "补充材料后重新提交审核，当前仍停留在登记员队列"
+		response.StayInPlace = true
+		response.Evidence = evidence
 		c.JSON(http.StatusOK, response)
 		return
 	}
@@ -244,7 +336,7 @@ func (h *ScanHandler) ScanQRCode(c *gin.Context) {
 	processRecord := &models.ProcessRecord{
 		ApplicationID: app.ID,
 		Action:        "scan_pass",
-		FromStatus:    models.StatusPendingScan,
+		FromStatus:    originalStatus,
 		ToStatus:      models.StatusPendingReview,
 		HandlerRole:   userRole,
 		HandlerID:     userID,
@@ -274,13 +366,14 @@ func (h *ScanHandler) ScanQRCode(c *gin.Context) {
 		app.ID,
 		c.ClientIP(),
 		c.Request.UserAgent(),
-		"扫码核验通过: "+app.ApplicationNo,
+		"扫码核验通过: "+app.ApplicationNo+", 凭证: "+evidence[:16]+"...",
 	)
 
 	response.Success = true
 	response.Result = "success"
 	response.Message = "扫码核验通过，已流转至主管审核队列"
 	response.NextAction = "等待投保审核主管处理"
+	response.CurrentStatus = string(models.StatusPendingReview)
 
 	c.JSON(http.StatusOK, response)
 }
@@ -308,6 +401,10 @@ func (h *ScanHandler) getResultMessage(result string, reason string) string {
 		return "重复扫码: " + reason
 	case "invalid":
 		return "二维码无效: " + reason
+	case "handler_mismatch":
+		return "扫码人不匹配: " + reason
+	case "materials_missing":
+		return "材料缺失: " + reason
 	default:
 		return reason
 	}

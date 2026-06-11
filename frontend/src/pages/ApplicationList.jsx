@@ -1,12 +1,14 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import {
   Table, Tag, Button, Space, Input, Select, Modal, Form, InputNumber,
-  message, Popconfirm, Checkbox, Tooltip, Badge
+  message, Popconfirm, Checkbox, Tooltip, Badge, Alert, Divider, Descriptions
 } from 'antd'
 import {
   PlusOutlined, QrcodeOutlined, ReloadOutlined,
   AppstoreOutlined, FilterOutlined, UserOutlined,
-  ExclamationCircleOutlined, CheckCircleOutlined
+  ExclamationCircleOutlined, CheckCircleOutlined,
+  SafetyCertificateOutlined, LockOutlined, TeamOutlined,
+  CopyOutlined, EyeOutlined
 } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { applicationAPI } from '../api'
@@ -23,6 +25,7 @@ export default function ApplicationList({ user }) {
   const [list, setList] = useState([])
   const [loading, setLoading] = useState(false)
   const [selectedRowKeys, setSelectedRowKeys] = useState([])
+  const [selectedApps, setSelectedApps] = useState([])
   const [filters, setFilters] = useState({
     status: '',
     role_filter: user?.role || '',
@@ -35,6 +38,8 @@ export default function ApplicationList({ user }) {
   const [batchModalVisible, setBatchModalVisible] = useState(false)
   const [formModalVisible, setFormModalVisible] = useState(false)
   const [editingApp, setEditingApp] = useState(null)
+  const [qrModalVisible, setQrModalVisible] = useState(false)
+  const [qrModalApp, setQrModalApp] = useState(null)
 
   const navigate = useNavigate()
 
@@ -42,7 +47,8 @@ export default function ApplicationList({ user }) {
     setLoading(true)
     try {
       const res = await applicationAPI.list(filters)
-      setList(res.data.data)
+      const data = res.data.data || []
+      setList(data)
     } catch (error) {
       message.error('加载列表失败')
     } finally {
@@ -54,6 +60,11 @@ export default function ApplicationList({ user }) {
     loadList()
   }, [filters])
 
+  useEffect(() => {
+    const apps = list.filter(a => selectedRowKeys.includes(a.id))
+    setSelectedApps(apps)
+  }, [selectedRowKeys, list])
+
   const getDeadlineClass = (app) => {
     if (!app.time_limit_met) return 'overdue'
     if (app.hours_left < 24) return 'warning'
@@ -61,6 +72,19 @@ export default function ApplicationList({ user }) {
   }
 
   const handleScan = (app) => {
+    if (app.current_handler_id && app.current_handler_id !== user?.id) {
+      Modal.warning({
+        title: '扫码人不匹配',
+        content: (
+          <div>
+            <p>该申请的当前责任人是：<strong>{app.current_handler_name}</strong>（ID: {app.current_handler_id}）</p>
+            <p>您的ID是：<strong>{user?.id}</strong></p>
+            <p>请由指定责任人扫码，或先在详情页认领此任务</p>
+          </div>
+        ),
+      })
+      return
+    }
     setScanApp(app)
     setScanModalVisible(true)
   }
@@ -68,6 +92,11 @@ export default function ApplicationList({ user }) {
   const handleScanSuccess = () => {
     setScanModalVisible(false)
     loadList()
+  }
+
+  const handleShowQR = (app) => {
+    setQrModalApp(app)
+    setQrModalVisible(true)
   }
 
   const handleCreate = () => {
@@ -80,8 +109,16 @@ export default function ApplicationList({ user }) {
       message.error('当前状态不允许修改')
       return
     }
+    if (app.is_locked) {
+      message.warning('该申请正在被处理中，请稍后再试')
+      return
+    }
     if (app.current_handler_role && app.current_handler_role !== user?.role) {
       message.error(`当前岗位无法修改此申请`)
+      return
+    }
+    if (app.current_handler_id && app.current_handler_id !== user?.id) {
+      message.warning(`该申请由 ${app.current_handler_name} 负责，请与其沟通后再操作`)
       return
     }
     setEditingApp(app)
@@ -98,17 +135,29 @@ export default function ApplicationList({ user }) {
       message.warning('请先选择要处理的申请')
       return
     }
+    const lockedApps = selectedApps.filter(a => a.is_locked)
+    if (lockedApps.length > 0) {
+      message.warning(`选中的申请中有 ${lockedApps.length} 条正在被处理，请等待处理完成`)
+      return
+    }
+    const firstStatus = selectedApps[0]?.status
+    const notSameStatus = selectedApps.some(a => a.status !== firstStatus)
+    if (notSameStatus) {
+      message.error('批量处理要求所有申请为相同状态，请重新选择')
+      return
+    }
     setBatchModalVisible(true)
   }
 
   const handleBatchSuccess = () => {
     setBatchModalVisible(false)
     setSelectedRowKeys([])
+    setSelectedApps([])
     loadList()
   }
 
   const getAvailableActions = () => {
-    const firstApp = list.find(a => a.id === selectedRowKeys[0])
+    const firstApp = selectedApps[0]
     if (!firstApp) return []
 
     const status = firstApp.status
@@ -116,9 +165,6 @@ export default function ApplicationList({ user }) {
 
     const actions = []
     if (role === 'registrar') {
-      if (['pending_scan', 'scan_failed'].includes(status)) {
-        // 扫码是单独的操作
-      }
       if (status === 'revision_required') {
         actions.push({ value: 'submit_revise', label: ACTION_LABELS.submit_revise })
       }
@@ -138,7 +184,7 @@ export default function ApplicationList({ user }) {
 
   const canScan = (app) => {
     return user?.role === 'registrar' &&
-      ['pending_scan', 'scan_failed'].includes(app.status) &&
+      ['pending_scan', 'scan_failed', 'revision_required'].includes(app.status) &&
       !app.is_locked
   }
 
@@ -146,6 +192,14 @@ export default function ApplicationList({ user }) {
     return user?.role === 'registrar' &&
       ['pending_scan', 'revision_required', 'scan_failed'].includes(app.status) &&
       !app.is_locked
+  }
+
+  const rowClassName = (record) => {
+    if (record.is_locked) return 'row-locked'
+    if (!record.time_limit_met) return 'row-overdue'
+    if (record.is_my_task) return 'row-mine'
+    if (record.exception_reason) return 'row-exception'
+    return ''
   }
 
   const columns = [
@@ -156,13 +210,27 @@ export default function ApplicationList({ user }) {
       width: 160,
       fixed: 'left',
       render: (text, record) => (
-        <Space>
-          <a onClick={() => navigate(`/applications/${record.id}`)}>{text}</a>
-          {record.is_locked && (
-            <Tooltip title="正在被处理中">
-              <Badge status="processing" text="处理中" />
-            </Tooltip>
-          )}
+        <Space direction="vertical" size={2}>
+          <Space>
+            <a onClick={() => navigate(`/applications/${record.id}`)}><strong>{text}</strong></a>
+            {record.is_locked && (
+              <Tooltip title={record.locked_by ? `正在被 ${record.locked_by} 处理中` : '正在被处理中'}>
+                <Badge status="processing" text={<span><LockOutlined /> 处理中</span>} />
+              </Tooltip>
+            )}
+          </Space>
+          <Space size={4}>
+            {record.is_my_task ? (
+              <Tag color="blue" style={{ margin: 0 }}><UserOutlined /> 我的任务</Tag>
+            ) : (
+              record.current_handler_role === user?.role && (
+                <Tag color="default" style={{ margin: 0 }}><TeamOutlined /> 同岗待认领</Tag>
+              )
+            )}
+            {record.version > 1 && (
+              <Tag color="purple" style={{ margin: 0 }}>v{record.version}</Tag>
+            )}
+          </Space>
         </Space>
       ),
     },
@@ -170,45 +238,72 @@ export default function ApplicationList({ user }) {
       title: '投保人',
       dataIndex: 'applicant_name',
       key: 'applicant_name',
-      width: 100,
+      width: 90,
     },
     {
-      title: '身份证号',
-      dataIndex: 'applicant_id_card',
-      key: 'applicant_id_card',
-      width: 180,
+      title: '绑定二维码',
+      dataIndex: 'qr_code',
+      key: 'qr_code',
+      width: 170,
+      render: (text, record) => (
+        <Space>
+          <QrcodeOutlined style={{ color: '#1890ff' }} />
+          <Tooltip title={`二维码：${text}\n点击查看详情`}>
+            <a onClick={() => handleShowQR(record)}>
+              <code style={{ background: '#f0f5ff', padding: '2px 8px', borderRadius: 4, color: '#1890ff' }}>
+                {text}
+              </code>
+            </a>
+          </Tooltip>
+        </Space>
+      ),
     },
     {
-      title: '险种',
-      dataIndex: 'insurance_type',
-      key: 'insurance_type',
-      width: 80,
-    },
-    {
-      title: '保额',
-      dataIndex: 'insurance_amount',
-      key: 'insurance_amount',
-      width: 100,
-      render: (val) => `¥${val.toLocaleString()}`,
+      title: '险种/保额',
+      key: 'insurance',
+      width: 130,
+      render: (_, record) => (
+        <Space direction="vertical" size={2}>
+          <span>{record.insurance_type}</span>
+          <span style={{ color: '#666', fontSize: 12 }}>¥{record.insurance_amount.toLocaleString()}</span>
+        </Space>
+      ),
     },
     {
       title: '状态',
       dataIndex: 'status',
       key: 'status',
-      width: 120,
+      width: 110,
       render: (status) => (
-        <Tag color={STATUS_COLORS[status]}>{STATUS_LABELS[status]}</Tag>
+        <Tag color={STATUS_COLORS[status]} style={{ fontSize: 12, padding: '2px 10px' }}>
+          {STATUS_LABELS[status]}
+        </Tag>
       ),
     },
     {
       title: '当前责任人',
       dataIndex: 'current_handler_name',
       key: 'current_handler_name',
-      width: 180,
+      width: 150,
       render: (text, record) => (
         <Space direction="vertical" size={0}>
-          <span><UserOutlined /> {text || '待认领'}</span>
-          <Tag style={{ margin: 0 }}>{ROLE_LABELS[record.current_handler_role] || '-'}</Tag>
+          <Space>
+            {record.is_my_task ? (
+              <span style={{ color: '#1890ff', fontWeight: 600 }}>
+                <UserOutlined /> {text || '待我认领'}
+              </span>
+            ) : (
+              <span><UserOutlined /> {text || '待认领'}</span>
+            )}
+          </Space>
+          <Tag color={record.current_handler_role === user?.role ? 'blue' : 'default'} style={{ margin: 0 }}>
+            {ROLE_LABELS[record.current_handler_role] || '-'}
+          </Tag>
+          {record.locked_by && (
+            <span style={{ color: '#faad14', fontSize: 12 }}>
+              <LockOutlined /> {record.locked_by} 正在处理
+            </span>
+          )}
         </Space>
       ),
     },
@@ -216,14 +311,53 @@ export default function ApplicationList({ user }) {
       title: '截止时间',
       dataIndex: 'deadline',
       key: 'deadline',
-      width: 180,
+      width: 160,
       render: (deadline, record) => {
         return (
           <span className={getDeadlineClass(record)}>
-            {dayjs(deadline).format('YYYY-MM-DD HH:mm')}
-            {!record.time_limit_met && <span> (已逾期)</span>}
-            {record.time_limit_met && record.hours_left < 24 && <span> (剩余{record.hours_left}小时)</span>}
+            <div>{dayjs(deadline).format('YYYY-MM-DD HH:mm')}</div>
+            <div style={{ fontSize: 12 }}>
+              {!record.time_limit_met && <span style={{ color: '#ff4d4f' }}>⚠ 已逾期</span>}
+              {record.time_limit_met && record.hours_left < 24 && (
+                <span style={{ color: '#faad14' }}>⏰ 剩余{record.hours_left}小时</span>
+              )}
+              {record.time_limit_met && record.hours_left >= 24 && (
+                <span style={{ color: '#52c41a' }}>✓ 剩余{record.hours_left}小时</span>
+              )}
+            </div>
           </span>
+        )
+      },
+    },
+    {
+      title: '扫码核验凭证',
+      key: 'evidence',
+      width: 150,
+      render: (_, record) => {
+        if (!record.last_evidence) {
+          return <span style={{ color: '#999' }}>未扫码</span>
+        }
+        const resultTag = record.last_scan_result === 'success' ? (
+          <Tag color="green" style={{ margin: 0 }}>通过</Tag>
+        ) : record.last_scan_result === 'duplicate' ? (
+          <Tag color="orange" style={{ margin: 0 }}>重复</Tag>
+        ) : record.last_scan_result === 'handler_mismatch' ? (
+          <Tag color="purple" style={{ margin: 0 }}>人不匹配</Tag>
+        ) : (
+          <Tag color="red" style={{ margin: 0 }}>失败</Tag>
+        )
+        return (
+          <Space direction="vertical" size={2}>
+            <Space>
+              <SafetyCertificateOutlined style={{ color: record.last_scan_result === 'success' ? '#52c41a' : '#ff4d4f' }} />
+              {resultTag}
+            </Space>
+            <Tooltip title={`核验凭证：${record.last_evidence}\n扫码时间：${record.last_scan_time ? dayjs(record.last_scan_time).format('YYYY-MM-DD HH:mm:ss') : '-'}`}>
+              <code style={{ fontSize: 11, color: '#666', background: '#f9f9f9', padding: '1px 4px', borderRadius: 2 }}>
+                {record.last_evidence}
+              </code>
+            </Tooltip>
+          </Space>
         )
       },
     },
@@ -231,13 +365,23 @@ export default function ApplicationList({ user }) {
       title: '异常原因',
       dataIndex: 'exception_reason',
       key: 'exception_reason',
-      width: 200,
+      width: 180,
       ellipsis: true,
-      render: (text) => {
-        if (!text) return '-'
+      render: (text, record) => {
+        if (!text) return <span style={{ color: '#999' }}>-</span>
         return (
-          <Tooltip title={text}>
-            <span><ExclamationCircleOutlined style={{ color: '#ff4d4f' }} /> {text}</span>
+          <Tooltip title={
+            <div>
+              <div><strong>异常原因：</strong></div>
+              <div>{text}</div>
+              <Divider style={{ margin: '8px 0' }} />
+              <div>申请编号：{record.application_no}</div>
+              <div>当前状态：{STATUS_LABELS[record.status]}</div>
+            </div>
+          }>
+            <span style={{ color: '#ff4d4f' }}>
+              <ExclamationCircleOutlined /> {text.length > 25 ? text.slice(0, 25) + '...' : text}
+            </span>
           </Tooltip>
         )
       },
@@ -250,13 +394,28 @@ export default function ApplicationList({ user }) {
       ellipsis: true,
       render: (text, record) => {
         return (
-          <Tooltip title={text}>
-            <span>
+          <Tooltip title={
+            <div>
+              <div>{text || '-'}</div>
               {record.last_processed_by_name && (
-                <span style={{ color: '#999' }}>[{record.last_processed_by_name}]</span>
+                <div style={{ marginTop: 8, color: '#666' }}>
+                  处理人：{record.last_processed_by_name}
+                  {record.last_processed_at && (
+                    <span> （{dayjs(record.last_processed_at).format('YYYY-MM-DD HH:mm')}）</span>
+                  )}
+                </div>
               )}
-              {text || '-'}
-            </span>
+            </div>
+          }>
+            <Space direction="vertical" size={0}>
+              <span>{text || '-'}</span>
+              {record.last_processed_by_name && (
+                <span style={{ color: '#999', fontSize: 12 }}>
+                  [{record.last_processed_by_name}]
+                  {record.last_processed_at && ` · ${dayjs(record.last_processed_at).format('MM-DD HH:mm')}`}
+                </span>
+              )}
+            </Space>
           </Tooltip>
         )
       },
@@ -264,16 +423,25 @@ export default function ApplicationList({ user }) {
     {
       title: '操作',
       key: 'action',
-      width: 180,
+      width: 200,
       fixed: 'right',
       render: (_, record) => (
-        <Space size="small">
+        <Space size="small" wrap>
           <Button
             type="link"
             size="small"
+            icon={<EyeOutlined />}
             onClick={() => navigate(`/applications/${record.id}`)}
           >
             详情
+          </Button>
+          <Button
+            type="link"
+            size="small"
+            icon={<QrcodeOutlined />}
+            onClick={() => handleShowQR(record)}
+          >
+            二维码
           </Button>
           {canScan(record) && (
             <Button
@@ -281,8 +449,9 @@ export default function ApplicationList({ user }) {
               size="small"
               icon={<QrcodeOutlined />}
               onClick={() => handleScan(record)}
+              danger={record.status === 'scan_failed'}
             >
-              扫码
+              {record.status === 'scan_failed' ? '重新扫码' : '扫码核验'}
             </Button>
           )}
           {canEdit(record) && (
@@ -303,22 +472,23 @@ export default function ApplicationList({ user }) {
     selectedRowKeys,
     onChange: (newSelectedRowKeys) => {
       const selectedApps = list.filter(a => newSelectedRowKeys.includes(a.id))
-      const allSameStatus = selectedApps.every(a => a.status === selectedApps[0]?.status)
-      const allUnlocked = selectedApps.every(a => !a.is_locked)
-
-      if (!allSameStatus && selectedApps.length > 1) {
-        message.warning('批量处理请选择相同状态的申请')
-        return
+      if (selectedApps.length > 1) {
+        const allSameStatus = selectedApps.every(a => a.status === selectedApps[0]?.status)
+        if (!allSameStatus) {
+          message.warning('批量处理请选择相同状态的申请')
+          return
+        }
       }
-      if (!allUnlocked) {
+      const lockedApps = selectedApps.filter(a => a.is_locked)
+      if (lockedApps.length > 0) {
         message.warning('存在正在处理中的申请，请等待处理完成后再选择')
         return
       }
-
       setSelectedRowKeys(newSelectedRowKeys)
     },
     getCheckboxProps: (record) => ({
       disabled: record.is_locked ||
+        (record.exception_reason && record.status === 'pending_scan') ||
         (user?.role === 'registrar' &&
           !['revision_required'].includes(record.status)) ||
         (user?.role === 'supervisor' && record.status !== 'pending_review') ||
@@ -326,8 +496,40 @@ export default function ApplicationList({ user }) {
     }),
   }
 
+  const selectedVersions = selectedApps.map(a => a.version)
+
+  const myTaskCount = list.filter(a => a.is_my_task).length
+  const lockedCount = list.filter(a => a.is_locked).length
+  const overdueCount = list.filter(a => !a.time_limit_met).length
+  const exceptionCount = list.filter(a => a.exception_reason).length
+
   return (
     <div>
+      <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, alignItems: 'center' }}>
+        <h2 style={{ margin: 0 }}>投保申请列表</h2>
+        <Space wrap size={8}>
+          <Tag color="blue">我的待办：{myTaskCount}</Tag>
+          {lockedCount > 0 && <Tag color="orange">处理中：{lockedCount}</Tag>}
+          {overdueCount > 0 && <Tag color="red">已逾期：{overdueCount}</Tag>}
+          {exceptionCount > 0 && <Tag color="warning">异常：{exceptionCount}</Tag>}
+        </Space>
+      </div>
+
+      {(lockedCount > 0 || overdueCount > 0 || exceptionCount > 0) && (
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginBottom: 16 }}
+          message={
+            <Space wrap>
+              {lockedCount > 0 && <span>🔒 有 {lockedCount} 条申请正在被其他用户处理，请等待或刷新确认</span>}
+              {overdueCount > 0 && <span>⏰ 有 {overdueCount} 条申请已逾期，请优先处理</span>}
+              {exceptionCount > 0 && <span>⚠ 有 {exceptionCount} 条申请存在异常，请及时跟进</span>}
+            </Space>
+          }
+        />
+      )}
+
       <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
         <Space wrap>
           {user?.role === 'registrar' && (
@@ -340,6 +542,8 @@ export default function ApplicationList({ user }) {
             </Button>
           )}
           <Button
+            type="primary"
+            ghost
             icon={<AppstoreOutlined />}
             onClick={handleBatchProcess}
             disabled={selectedRowKeys.length === 0}
@@ -356,15 +560,15 @@ export default function ApplicationList({ user }) {
         </Space>
         <Space wrap>
           <Search
-            placeholder="搜索申请编号/投保人/身份证"
+            placeholder="搜索编号/投保人/身份证/二维码"
             allowClear
-            style={{ width: 250 }}
+            style={{ width: 260 }}
             onSearch={(value) => setFilters({ ...filters, search: value })}
           />
           <Select
             placeholder="状态筛选"
             allowClear
-            style={{ width: 150 }}
+            style={{ width: 140 }}
             onChange={(value) => setFilters({ ...filters, status: value })}
           >
             {Object.entries(STATUS_LABELS).map(([key, label]) => (
@@ -374,7 +578,7 @@ export default function ApplicationList({ user }) {
           <Select
             placeholder="岗位筛选"
             allowClear
-            style={{ width: 150 }}
+            style={{ width: 140 }}
             value={filters.role_filter}
             onChange={(value) => setFilters({ ...filters, role_filter: value })}
           >
@@ -386,7 +590,7 @@ export default function ApplicationList({ user }) {
             checked={filters.only_mine}
             onChange={(e) => setFilters({ ...filters, only_mine: e.target.checked })}
           >
-            只看我的
+            只看我的任务
           </Checkbox>
         </Space>
       </div>
@@ -397,11 +601,12 @@ export default function ApplicationList({ user }) {
         dataSource={list}
         rowKey="id"
         loading={loading}
-        scroll={{ x: 1600 }}
+        rowClassName={rowClassName}
+        scroll={{ x: 1850 }}
         pagination={{
           showSizeChanger: true,
           showQuickJumper: true,
-          showTotal: (total) => `共 ${total} 条`,
+          showTotal: (total) => `共 ${total} 条 | 我的 ${myTaskCount} 条`,
           defaultPageSize: 20,
         }}
       />
@@ -420,6 +625,8 @@ export default function ApplicationList({ user }) {
         <BatchProcessModal
           visible={batchModalVisible}
           selectedIds={selectedRowKeys}
+          selectedVersions={selectedVersions}
+          selectedStatus={selectedApps[0]?.status}
           availableActions={getAvailableActions()}
           onCancel={() => setBatchModalVisible(false)}
           onSuccess={handleBatchSuccess}
@@ -434,6 +641,84 @@ export default function ApplicationList({ user }) {
           onCancel={() => setFormModalVisible(false)}
           onSuccess={handleFormSuccess}
         />
+      )}
+
+      {qrModalVisible && qrModalApp && (
+        <Modal
+          title="投保申请 - 绑定二维码信息"
+          open={qrModalVisible}
+          onCancel={() => setQrModalVisible(false)}
+          footer={[
+            <Button key="close" onClick={() => setQrModalVisible(false)}>
+              关闭
+            </Button>,
+            <Button key="detail" type="primary" onClick={() => {
+              setQrModalVisible(false)
+              navigate(`/applications/${qrModalApp.id}`)
+            }}>
+              查看详情
+            </Button>,
+          ]}
+          width={520}
+        >
+          <Descriptions column={1} bordered size="small">
+            <Descriptions.Item label="申请编号">
+              <strong>{qrModalApp.application_no}</strong>
+            </Descriptions.Item>
+            <Descriptions.Item label="投保人">
+              {qrModalApp.applicant_name}（{qrModalApp.applicant_id_card}）
+            </Descriptions.Item>
+            <Descriptions.Item label="险种/保额">
+              {qrModalApp.insurance_type} / ¥{qrModalApp.insurance_amount.toLocaleString()}
+            </Descriptions.Item>
+            <Descriptions.Item label="绑定二维码">
+              <Space>
+                <QrcodeOutlined style={{ color: '#1890ff', fontSize: 16 }} />
+                <code style={{ background: '#f0f5ff', padding: '4px 10px', borderRadius: 4, color: '#1890ff', fontSize: 14, fontWeight: 600 }}>
+                  {qrModalApp.qr_code}
+                </code>
+                <Button
+                  type="link"
+                  size="small"
+                  icon={<CopyOutlined />}
+                  style={{ padding: 0, height: 'auto' }}
+                  onClick={() => {
+                    navigator.clipboard?.writeText(qrModalApp.qr_code)
+                    message.success('二维码已复制')
+                  }}
+                />
+              </Space>
+            </Descriptions.Item>
+            <Descriptions.Item label="当前状态">
+              <Tag color={STATUS_COLORS[qrModalApp.status]}>{STATUS_LABELS[qrModalApp.status]}</Tag>
+            </Descriptions.Item>
+            <Descriptions.Item label="当前责任人">
+              {qrModalApp.current_handler_name
+                ? `${qrModalApp.current_handler_name}（${ROLE_LABELS[qrModalApp.current_handler_role]}）`
+                : '待认领'}
+            </Descriptions.Item>
+            {qrModalApp.last_evidence && (
+              <Descriptions.Item label="最近扫码凭证">
+                <Space direction="vertical" size={4}>
+                  <SafetyCertificateOutlined style={{ color: '#52c41a' }} />
+                  <code style={{
+                    background: qrModalApp.last_scan_result === 'success' ? '#f6ffed' : '#fff2f0',
+                    padding: '4px 8px',
+                    borderRadius: 4,
+                    fontSize: 12,
+                    wordBreak: 'break-all',
+                  }}>
+                    {qrModalApp.last_evidence}
+                  </code>
+                  <span style={{ color: '#999', fontSize: 12 }}>
+                    结果：{qrModalApp.last_scan_result}
+                    {qrModalApp.last_scan_time && ` · ${dayjs(qrModalApp.last_scan_time).format('YYYY-MM-DD HH:mm:ss')}`}
+                  </span>
+                </Space>
+              </Descriptions.Item>
+            )}
+          </Descriptions>
+        </Modal>
       )}
     </div>
   )

@@ -76,3 +76,161 @@ body {
 .material-table .ant-table-thead > tr > th {
   background: #fafafa;
 }
+
+/* ========== 表格行样式（锁定 / 逾期 / 我的任务 / 异常） ========== */
+.row-locked > td {
+  background: rgba(250, 250, 250, 0.85) !important;
+  color: rgba(0, 0, 0, 0.45) !important;
+  opacity: 0.85;
+}
+.row-locked:hover > td {
+  background: rgba(245, 245, 245, 0.9) !important;
+}
+
+.row-overdue > td {
+  background: linear-gradient(90deg, #fff2f0 0%, transparent 20%) !important;
+  border-left: 3px solid #ff4d4f !important;
+}
+.row-overdue:hover > td {
+  background: linear-gradient(90deg, #ffccc7 0%, #fff2f0 20%) !important;
+}
+
+.row-mine > td {
+  background: linear-gradient(90deg, #e6f4ff 0%, transparent 18%) !important;
+  border-left: 3px solid #1677ff !important;
+}
+.row-mine:hover > td {
+  background: linear-gradient(90deg, #bae0ff 0%, #e6f4ff 18%) !important;
+}
+
+.row-exception > td {
+  background: linear-gradient(90deg, #fff7e6 0%, transparent 20%) !important;
+  border-left: 3px solid #faad14 !important;
+}
+.row-exception:hover > td {
+  background: linear-gradient(90deg, #ffe7ba 0%, #fff7e6 20%) !important;
+}
+
+/* 混合样式优先级（我的任务 + 逾期） */
+.row-mine.row-overdue > td {
+  border-left-color: #ff4d4f !important;
+  background: linear-gradient(90deg, #fff2f0 0%, #e6f4ff 25%, transparent 60%) !important;
+}
+/* 异常 + 逾期 */
+.row-exception.row-overdue > td {
+  border-left-color: #ff4d4f !important;
+  background: linear-gradient(90deg, #fff2f0 0%, #fff7e6 30%, transparent 70%) !important;
+}
+
+/* ========== 二维码相关 ========== */
+.qr-code-cell {
+  font-family: 'Courier New', 'SF Mono', monospace;
+  font-size: 11px;
+  background: #f0f5ff;
+  padding: 3px 8px;
+  border-radius: 4px;
+  color: #1677ff;
+  font-weight: 600;
+  display: inline-block;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.scan-evidence-cell {
+  font-family: 'Courier New', 'SF Mono', monospace;
+  font-size: 11px;
+  background: #f5f5f5;
+  padding: 2px 6px;
+  border-radius: 3px;
+  color: #1890ff;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: inline-block;
+  vertical-align: middle;
+}
+
+/* ========== 顶部统计条 ========== */
+.stat-summary-row {
+  margin-bottom: 12px;
+}
+
+/* ========== Tooltip 中换行支持 ========== */
+.tooltip-multiline {
+  white-space: pre-line;
+  line-height: 1.6;
+}
+
+/* ========== 二维码 Modal 中的凭证展示 ========== */
+.evidence-display {
+  font-family: 'Courier New', 'SF Mono', monospace;
+  font-size: 11px;
+  background: linear-gradient(135deg, #f0f5ff, #f6ffed);
+  padding: 10px 12px;
+  border-radius: 6px;
+  color: #1677ff;
+  word-break: break-all;
+  line-height: 1.5;
+  border: 1px dashed #91caff;
+  user-select: all;
+}
+
+/* ========== 责任人列特殊样式 ========== */
+.handler-mine-tag {
+  border-color: #1677ff !important;
+  color: #1677ff !important;
+  font-weight: 600;
+}
+
+.handler-mismatch-tag {
+  background: #fff2f0 !important;
+  border-color: #ff7875 !important;
+  color: #ff4d4f !important;
+}
+
+/* ========== 通用文字截断 ========== */
+.text-ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.text-ellipsis-2 {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+/* ========== 表格单元格内紧凑间距 ========== */
+.cell-sub-info {
+  font-size: 11px;
+  color: #999;
+  margin-top: 2px;
+  line-height: 1.4;
+}
+
+/* ========== 统计页签动画 ========== */
+.stat-highlight {
+  animation: pulse-warn 2s ease-in-out infinite;
+}
+
+@keyframes pulse-warn {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.75; }
+}
+
+/* ========== 应用整体顶部空间 ========== */
+.app-main-content {
+  padding: 16px 24px;
+}
+
+@media (max-width: 992px) {
+  .app-main-content {
+    padding: 12px 8px;
+  }
+}

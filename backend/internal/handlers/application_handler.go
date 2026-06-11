@@ -47,6 +47,7 @@ type ProcessRequest struct {
 
 type BatchProcessRequest struct {
 	IDs              []uint `json:"ids" binding:"required"`
+	Versions         []int  `json:"versions"`
 	Action           string `json:"action" binding:"required"`
 	Opinion          string `json:"opinion" binding:"required"`
 	MaterialsChecked string `json:"materials_checked"`
@@ -80,8 +81,8 @@ func (h *ApplicationHandler) List(c *gin.Context) {
 
 	if search != "" {
 		query = query.Where(
-			"application_no LIKE ? OR applicant_name LIKE ? OR applicant_id_card LIKE ?",
-			"%"+search+"%", "%"+search+"%", "%"+search+"%",
+			"application_no LIKE ? OR applicant_name LIKE ? OR applicant_id_card LIKE ? OR qr_code LIKE ?",
+			"%"+search+"%", "%"+search+"%", "%"+search+"%", "%"+search+"%",
 		)
 	}
 
@@ -91,33 +92,84 @@ func (h *ApplicationHandler) List(c *gin.Context) {
 		return
 	}
 
+	appIDs := make([]uint, 0, len(applications))
+	for _, app := range applications {
+		appIDs = append(appIDs, app.ID)
+	}
+
+	scanRecordMap := make(map[uint]models.ScanRecord)
+	if len(appIDs) > 0 {
+		var scanRecords []models.ScanRecord
+		h.db.Where("application_id IN ?", appIDs).
+			Order("scan_time DESC").
+			Find(&scanRecords)
+		for _, sr := range scanRecords {
+			if _, exists := scanRecordMap[sr.ApplicationID]; !exists {
+				scanRecordMap[sr.ApplicationID] = sr
+			}
+		}
+	}
+
 	result := make([]gin.H, 0, len(applications))
 	for _, app := range applications {
 		timeLimitMet, hoursLeft := h.workflow.CheckDeadline(app.Deadline)
 		isLocked := h.appState.IsApplicationLocked(app.ID)
+		lockedBy := ""
+		if lockerID, found := h.appState.GetApplicationLocker(app.ID); found {
+			var locker models.User
+			if h.db.First(&locker, lockerID).Error == nil {
+				lockedBy = locker.Name
+			}
+		}
+
+		var lastEvidence string
+		var lastScanResult string
+		var lastScanTime *time.Time
+		if sr, ok := scanRecordMap[app.ID]; ok {
+			if len(sr.Evidence) > 16 {
+				lastEvidence = sr.Evidence[:16] + "..."
+			} else {
+				lastEvidence = sr.Evidence
+			}
+			lastScanResult = sr.Result
+			lastScanTime = &sr.ScanTime
+		}
+
+		isMyTask := app.CurrentHandlerRole == userRole &&
+			(app.CurrentHandlerID == nil || *app.CurrentHandlerID == userID)
 
 		result = append(result, gin.H{
-			"id":                    app.ID,
-			"application_no":        app.ApplicationNo,
-			"applicant_name":        app.ApplicantName,
-			"insurance_type":        app.InsuranceType,
-			"insurance_amount":      app.InsuranceAmount,
-			"status":                app.Status,
-			"current_handler_role":  app.CurrentHandlerRole,
-			"current_handler_name":  app.CurrentHandlerName,
-			"deadline":              app.Deadline,
-			"exception_reason":      app.ExceptionReason,
-			"last_process_result":   app.LastProcessResult,
-			"last_processed_at":     app.LastProcessedAt,
-			"last_processed_by_name": app.LastProcessedByName,
-			"time_limit_met":        timeLimitMet,
-			"hours_left":            hoursLeft,
-			"is_locked":             isLocked,
-			"created_at":            app.CreatedAt,
+			"id":                      app.ID,
+			"application_no":          app.ApplicationNo,
+			"applicant_name":          app.ApplicantName,
+			"applicant_id_card":       app.ApplicantIDCard,
+			"insurance_type":          app.InsuranceType,
+			"insurance_amount":        app.InsuranceAmount,
+			"qr_code":                 app.QRCode,
+			"status":                  app.Status,
+			"current_handler_role":    app.CurrentHandlerRole,
+			"current_handler_id":      app.CurrentHandlerID,
+			"current_handler_name":    app.CurrentHandlerName,
+			"deadline":                app.Deadline,
+			"exception_reason":        app.ExceptionReason,
+			"last_process_result":     app.LastProcessResult,
+			"last_processed_at":       app.LastProcessedAt,
+			"last_processed_by_name":  app.LastProcessedByName,
+			"last_processed_by_id":    app.LastProcessedByID,
+			"time_limit_met":          timeLimitMet,
+			"hours_left":              hoursLeft,
+			"is_locked":               isLocked,
+			"locked_by":               lockedBy,
+			"version":                 app.Version,
+			"last_evidence":           lastEvidence,
+			"last_scan_result":        lastScanResult,
+			"last_scan_time":          lastScanTime,
+			"is_my_task":              isMyTask,
+			"created_at":              app.CreatedAt,
 		})
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": result})
+	c.JSON(http.StatusOK, gin.H{"data": result, "total": len(result)})
 }
 
 func (h *ApplicationHandler) Get(c *gin.Context) {
@@ -134,16 +186,67 @@ func (h *ApplicationHandler) Get(c *gin.Context) {
 	}
 
 	userRole := models.Role(c.GetString("role"))
+	userID := c.GetUint("user_id")
 	availableActions := h.workflow.GetAvailableActions(&app, userRole)
 	timeLimitMet, hoursLeft := h.workflow.CheckDeadline(app.Deadline)
 	isLocked := h.appState.IsApplicationLocked(app.ID)
+	lockedBy := ""
+	if lockerID, found := h.appState.GetApplicationLocker(app.ID); found {
+		var locker models.User
+		if h.db.First(&locker, lockerID).Error == nil {
+			lockedBy = locker.Name
+		}
+	}
+
+	isHandler := app.CurrentHandlerRole == userRole &&
+		(app.CurrentHandlerID == nil || *app.CurrentHandlerID == userID)
+
+	canScan := userRole == models.RoleRegistrar &&
+		(app.Status == models.StatusPendingScan ||
+			app.Status == models.StatusScanFailed ||
+			app.Status == models.StatusRevisionRequired) &&
+		!isLocked
+
+	canEdit := userRole == models.RoleRegistrar &&
+		(app.Status == models.StatusPendingScan ||
+			app.Status == models.StatusRevisionRequired ||
+			app.Status == models.StatusScanFailed) &&
+		!isLocked
+
+	var lastScanRecord *models.ScanRecord
+	var scanRecords []models.ScanRecord
+	h.db.Where("application_id = ?", app.ID).
+		Order("scan_time DESC").
+		Limit(1).
+		Find(&scanRecords)
+	if len(scanRecords) > 0 {
+		lastScanRecord = &scanRecords[0]
+	}
+
+	var scanEvidenceShort string
+	if lastScanRecord != nil && lastScanRecord.Evidence != "" {
+		if len(lastScanRecord.Evidence) > 32 {
+			scanEvidenceShort = lastScanRecord.Evidence[:32] + "..."
+		} else {
+			scanEvidenceShort = lastScanRecord.Evidence
+		}
+	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"data":             app,
+		"data":              app,
 		"available_actions": availableActions,
-		"time_limit_met":   timeLimitMet,
-		"hours_left":       hoursLeft,
-		"is_locked":        isLocked,
+		"time_limit_met":    timeLimitMet,
+		"hours_left":        hoursLeft,
+		"is_locked":         isLocked,
+		"locked_by":         lockedBy,
+		"is_handler":        isHandler,
+		"can_scan":          canScan,
+		"can_edit":          canEdit,
+		"expected_handler_id": app.CurrentHandlerID,
+		"expected_handler_name": app.CurrentHandlerName,
+		"last_scan_record":  lastScanRecord,
+		"scan_evidence_short": scanEvidenceShort,
+		"current_user_id":   userID,
 	})
 }
 
@@ -413,15 +516,69 @@ func (h *ApplicationHandler) BatchProcess(c *gin.Context) {
 	userRole := models.Role(c.GetString("role"))
 	userName := c.GetString("name")
 
+	if len(req.IDs) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请至少选择一条申请"})
+		return
+	}
+
+	if len(req.Versions) > 0 && len(req.Versions) != len(req.IDs) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "版本号数量与申请数量不匹配"})
+		return
+	}
+
+	versionMap := make(map[uint]int)
+	for i, id := range req.IDs {
+		if len(req.Versions) > i {
+			versionMap[id] = req.Versions[i]
+		}
+	}
+
+	var applications []models.Application
+	if err := h.db.Where("id IN ?", req.IDs).Find(&applications).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "查询申请失败"})
+		return
+	}
+
+	if len(applications) != len(req.IDs) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "部分申请不存在"})
+		return
+	}
+
+	firstStatus := applications[0].Status
+	allSameStatus := true
+	for _, app := range applications[1:] {
+		if app.Status != firstStatus {
+			allSameStatus = false
+			break
+		}
+	}
+	if !allSameStatus {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "批量处理要求所有申请为相同状态，请重新选择"})
+		return
+	}
+
+	action := services.ProcessAction(req.Action)
+	for _, app := range applications {
+		if _, err := h.workflow.ValidateTransition(&app, action, userRole); err != nil {
+			c.JSON(http.StatusForbidden, gin.H{
+				"error": "越权操作：申请 " + app.ApplicationNo + " 无法执行该动作 - " + err.Error(),
+			})
+			return
+		}
+	}
+
 	results := make([]gin.H, 0)
 	successCount := 0
 	failCount := 0
 
-	for _, appID := range req.IDs {
+	for idx, appID := range req.IDs {
+		app := applications[idx]
+
 		unlock, err := h.appState.TryLockApplication(appID, userID)
 		if err != nil {
 			results = append(results, gin.H{
 				"id":    appID,
+				"application_no": app.ApplicationNo,
 				"success": false,
 				"error":  err.Error(),
 			})
@@ -429,19 +586,38 @@ func (h *ApplicationHandler) BatchProcess(c *gin.Context) {
 			continue
 		}
 
-		var app models.Application
-		if err := h.db.First(&app, appID).Error; err != nil {
-			unlock()
-			results = append(results, gin.H{
-				"id":    appID,
-				"success": false,
-				"error":  "投保申请不存在",
-			})
-			failCount++
-			continue
+		expectedVersion, hasVersion := versionMap[appID]
+		if hasVersion {
+			var latestApp models.Application
+			if err := h.db.First(&latestApp, appID).Error; err != nil {
+				unlock()
+				results = append(results, gin.H{
+					"id":    appID,
+					"application_no": app.ApplicationNo,
+					"success": false,
+					"error":  "申请不存在",
+				})
+				failCount++
+				continue
+			}
+			if latestApp.Version != expectedVersion {
+				unlock()
+				results = append(results, gin.H{
+					"id":    appID,
+					"application_no": app.ApplicationNo,
+					"success": false,
+					"error": "数据版本不匹配，请刷新后重试（您的版本: " +
+						strconv.Itoa(expectedVersion) + ", 当前版本: " +
+						strconv.Itoa(latestApp.Version) + ")",
+					"your_version":    expectedVersion,
+					"current_version": latestApp.Version,
+				})
+				failCount++
+				continue
+			}
+			app = latestApp
 		}
 
-		action := services.ProcessAction(req.Action)
 		rule, err := h.workflow.ValidateTransition(&app, action, userRole)
 		if err != nil {
 			unlock()
@@ -453,6 +629,27 @@ func (h *ApplicationHandler) BatchProcess(c *gin.Context) {
 			})
 			failCount++
 			continue
+		}
+
+		if action == services.ActionApprove || action == services.ActionSubmitRevise {
+			materials := app.Materials
+			if req.MaterialsChecked != "" {
+				materials = req.MaterialsChecked
+			}
+			materialsOK, materialsMsg, materialList := h.workflow.ValidateMaterials(materials, app.InsuranceType)
+			if !materialsOK {
+				unlock()
+				results = append(results, gin.H{
+					"id":    appID,
+					"application_no": app.ApplicationNo,
+					"success": false,
+					"error":  materialsMsg,
+				})
+				failCount++
+				continue
+			}
+			materialsJSON, _ := json.Marshal(materialList)
+			req.MaterialsChecked = string(materialsJSON)
 		}
 
 		startTime := time.Now()
@@ -509,7 +706,18 @@ func (h *ApplicationHandler) BatchProcess(c *gin.Context) {
 			continue
 		}
 
-		tx.Commit()
+		if err := tx.Commit().Error; err != nil {
+			unlock()
+			results = append(results, gin.H{
+				"id":    appID,
+				"application_no": app.ApplicationNo,
+				"success": false,
+				"error":  "提交事务失败",
+			})
+			failCount++
+			continue
+		}
+
 		unlock()
 
 		successCount++
@@ -518,6 +726,7 @@ func (h *ApplicationHandler) BatchProcess(c *gin.Context) {
 			"application_no": app.ApplicationNo,
 			"success": true,
 			"new_status": app.Status,
+			"new_version": app.Version,
 		})
 
 		_ = h.workflow.CreateAuditLog(
@@ -530,7 +739,7 @@ func (h *ApplicationHandler) BatchProcess(c *gin.Context) {
 			app.ID,
 			c.ClientIP(),
 			c.Request.UserAgent(),
-			"批量处理投保申请: "+app.ApplicationNo+", 动作: "+req.Action,
+			"批量处理投保申请(批次"+strconv.Itoa(len(req.IDs))+"条): "+app.ApplicationNo+", 动作: "+req.Action+", 意见: "+req.Opinion,
 		)
 	}
 
@@ -538,6 +747,8 @@ func (h *ApplicationHandler) BatchProcess(c *gin.Context) {
 		"results":       results,
 		"success_count": successCount,
 		"fail_count":    failCount,
+		"processed_status": string(firstStatus),
+		"target_action": req.Action,
 	})
 }
 

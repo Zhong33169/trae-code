@@ -2,6 +2,7 @@ package services
 
 import (
 	"errors"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -35,7 +36,7 @@ func (s *AppState) TryLockApplication(appID uint, userID uint) (func(), error) {
 }
 
 func (s *AppState) TryLockScan(appID uint, userID uint) (func(), error) {
-	key := "scan_" + string(rune(appID))
+	key := "scan_" + strconv.FormatUint(uint64(appID), 10)
 	_, loaded := s.scanLock.LoadOrStore(key, userID)
 	if loaded {
 		return nil, errors.New("该投保申请正在扫码核验中，请稍后再试")
@@ -56,4 +57,13 @@ func (s *AppState) TryLockScan(appID uint, userID uint) (func(), error) {
 func (s *AppState) IsApplicationLocked(appID uint) bool {
 	_, loaded := s.processingLock.Load(appID)
 	return loaded
+}
+
+func (s *AppState) GetApplicationLocker(appID uint) (uint, bool) {
+	val, loaded := s.processingLock.Load(appID)
+	if !loaded {
+		return 0, false
+	}
+	userID, ok := val.(uint)
+	return userID, ok
 }
