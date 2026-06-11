@@ -111,13 +111,19 @@ import { ApiService } from '../api.service';
                     <span class="inline-block text-xs px-2.5 py-1 rounded-full font-medium" [ngClass]="statusBadge(p.status)">{{ p.status_label }}</span>
                   </td>
                   <td class="px-4 py-3">
-                    <div class="flex gap-1 items-center">
+                    <div class="flex gap-1 items-center flex-wrap">
                       <span *ngIf="p.evidences.REGISTRATION" title="登记证据" class="text-sm">✅</span>
                       <span *ngIf="!p.evidences.REGISTRATION" title="缺登记证据" class="text-sm opacity-30">⬜</span>
                       <span *ngIf="p.evidences.VERIFICATION" title="核验证据" class="text-sm">🔍</span>
                       <span *ngIf="!p.evidences.VERIFICATION && (p.status==='PENDING_REVIEW'||p.status==='PENDING_CONFIRM'||p.status==='COMPLETED')" title="缺核验证据" class="text-sm opacity-30">⬜</span>
                       <span *ngIf="p.evidences.ARCHIVAL" title="归档证据" class="text-sm">📦</span>
                       <span *ngIf="!p.evidences.ARCHIVAL && (p.status==='PENDING_CONFIRM'||p.status==='COMPLETED')" title="缺归档证据" class="text-sm opacity-30">⬜</span>
+                    </div>
+                    <div *ngIf="p.missing_labels?.length" class="mt-1 flex flex-wrap gap-1">
+                      <span *ngFor="let ml of p.missing_labels" class="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">缺{{ ml }}</span>
+                    </div>
+                    <div *ngIf="p.uploadable_evidence?.length" class="mt-1">
+                      <button (click)="quickUpload(p, $event)" class="text-[10px] px-2 py-0.5 rounded bg-primary text-white hover:bg-blue-700">📎 补传证据</button>
                     </div>
                   </td>
                   <td class="px-4 py-3 text-slate-600 text-xs">{{ p.creator_name }}</td>
@@ -319,6 +325,24 @@ import { ApiService } from '../api.service';
           </div>
         </div>
       </div>
+
+      <div *ngIf="showQuickUpload" class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" (click)="showQuickUpload = false">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6" (click)="$event.stopPropagation()">
+          <h3 class="text-lg font-bold mb-2">📎 补传证据</h3>
+          <div class="text-sm text-slate-500 mb-3">{{ quickUploadPlan?.plan_no }} - {{ quickUploadPlan?.title }}</div>
+          <div *ngFor="let ev of quickUploadTypes" class="mb-3 p-3 rounded-lg border border-slate-200">
+            <div class="font-medium text-sm mb-2">{{ ev.label }} ({{ ev.type }})</div>
+            <div class="grid grid-cols-2 gap-2">
+              <input [(ngModel)]="quickUploadForm[ev.type].name" placeholder="文件名" class="px-3 py-1.5 border border-slate-200 rounded text-sm">
+              <input [(ngModel)]="quickUploadForm[ev.type].url" placeholder="文件路径" class="px-3 py-1.5 border border-slate-200 rounded text-sm">
+            </div>
+          </div>
+          <div class="mt-4 flex justify-end gap-3">
+            <button (click)="showQuickUpload = false" class="px-4 py-2 border border-slate-200 rounded-lg text-sm">取消</button>
+            <button (click)="doQuickUpload()" class="px-4 py-2 bg-primary text-white rounded-lg text-sm">上传</button>
+          </div>
+        </div>
+      </div>
     </div>
   `
 })
@@ -350,6 +374,11 @@ export class QueuePage implements OnInit, OnDestroy {
 
   showCreate = false;
   form: any = { customer_name: '', plan_date: '', title: '', change_type: '配置变更', risk_level: 'MEDIUM', description: '' };
+
+  showQuickUpload = false;
+  quickUploadPlan: any = null;
+  quickUploadTypes: any[] = [];
+  quickUploadForm: any = {};
 
   timer: any;
 
@@ -489,6 +518,44 @@ export class QueuePage implements OnInit, OnDestroy {
       }
     } catch (e: any) {
       (window as any).showToast?.('error', '创建失败', e.error?.message || e.message);
+    }
+  }
+
+  quickUpload(p: any, event: Event) {
+    event.stopPropagation();
+    this.quickUploadPlan = p;
+    const LABELS: any = { REGISTRATION: '登记证据', VERIFICATION: '过程核验证据', ARCHIVAL: '复核归档证据' };
+    this.quickUploadTypes = (p.uploadable_evidence || []).map((t: string) => ({ type: t, label: LABELS[t] || t }));
+    this.quickUploadForm = {};
+    for (const ev of this.quickUploadTypes) {
+      this.quickUploadForm[ev.type] = { name: '', url: '' };
+    }
+    this.showQuickUpload = true;
+  }
+
+  async doQuickUpload() {
+    let uploaded = 0;
+    for (const ev of this.quickUploadTypes) {
+      const form = this.quickUploadForm[ev.type];
+      if (form.name && form.url) {
+        try {
+          const res = await this.api.uploadEvidence(this.quickUploadPlan.id, {
+            evidence_type: ev.type,
+            name: form.name,
+            url: form.url,
+            version: this.quickUploadPlan.version,
+            source: 'queue'
+          });
+          if (res.code === 0) uploaded++;
+        } catch {}
+      }
+    }
+    this.showQuickUpload = false;
+    if (uploaded > 0) {
+      (window as any).showToast?.('success', '补传成功', `已上传 ${uploaded} 份证据`);
+      this.reload();
+    } else {
+      (window as any).showToast?.('warning', '未上传', '请填写文件名和路径');
     }
   }
 }

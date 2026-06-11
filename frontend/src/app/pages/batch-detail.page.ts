@@ -71,8 +71,9 @@ import { ApiService } from '../api.service';
                 <th class="px-5 py-3">结果</th>
                 <th class="px-5 py-3">计划单</th>
                 <th class="px-5 py-3">操作时状态</th>
-                <th class="px-5 py-3">重试次数</th>
-                <th class="px-5 py-3">最后尝试</th>
+                <th class="px-5 py-3">版本</th>
+                <th class="px-5 py-3">缺失证据</th>
+                <th class="px-5 py-3">重试</th>
                 <th class="px-5 py-3">错误信息</th>
                 <th class="px-5 py-3">办理</th>
               </tr>
@@ -94,8 +95,18 @@ import { ApiService } from '../api.service';
                 <td class="px-5 py-3">
                   <span class="text-xs px-2 py-0.5 rounded" [ngClass]="statusBadge(it.current_status)">{{ it.current_status }}</span>
                 </td>
-                <td class="px-5 py-3">{{ it.retry_count || 0 }}</td>
-                <td class="px-5 py-3 text-xs text-slate-400">{{ it.last_attempt_at || '-' }}</td>
+                <td class="px-5 py-3 text-xs text-slate-500">v{{ it.plan_version || '-' }}</td>
+                <td class="px-5 py-3">
+                  <div *ngIf="it.status === 'FAILED' && it.missing_labels?.length" class="flex flex-wrap gap-1">
+                    <span *ngFor="let ml of it.missing_labels" class="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">缺{{ ml }}</span>
+                  </div>
+                  <div *ngIf="it.status === 'FAILED' && it.uploadable_evidence?.length" class="mt-1">
+                    <button (click)="openItemUpload(it)" class="text-[10px] px-2 py-0.5 rounded bg-primary text-white hover:bg-blue-700">📎 补传</button>
+                  </div>
+                  <div *ngIf="it.status === 'FAILED' && !it.missing_labels?.length" class="text-xs text-slate-400">非证据原因</div>
+                  <div *ngIf="it.status === 'SUCCESS'" class="text-xs text-slate-400">-</div>
+                </td>
+                <td class="px-5 py-3 text-xs">{{ it.retry_count || 0 }}</td>
                 <td class="px-5 py-3 max-w-xs">
                   <div *ngIf="it.status === 'SUCCESS'" class="text-slate-400 text-xs">-</div>
                   <div *ngIf="it.status === 'FAILED'" class="text-danger text-xs">
@@ -111,6 +122,24 @@ import { ApiService } from '../api.service';
           </table>
         </div>
       </div>
+
+      <div *ngIf="showItemUpload" class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" (click)="showItemUpload = false">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6" (click)="$event.stopPropagation()">
+          <h3 class="text-lg font-bold mb-2">📎 补传证据</h3>
+          <div class="text-sm text-slate-500 mb-3">{{ uploadItem?.plan_no }} - {{ uploadItem?.title }} (v{{ uploadItem?.plan_version }})</div>
+          <div *ngFor="let ev of uploadItem?.uploadable_evidence || []" class="mb-3 p-3 rounded-lg border border-slate-200">
+            <div class="font-medium text-sm mb-2">{{ ev.label }} ({{ ev.type }})</div>
+            <div class="grid grid-cols-2 gap-2">
+              <input [(ngModel)]="uploadForm[ev.type].name" placeholder="文件名" class="px-3 py-1.5 border border-slate-200 rounded text-sm">
+              <input [(ngModel)]="uploadForm[ev.type].url" placeholder="文件路径" class="px-3 py-1.5 border border-slate-200 rounded text-sm">
+            </div>
+          </div>
+          <div class="mt-4 flex justify-end gap-3">
+            <button (click)="showItemUpload = false" class="px-4 py-2 border border-slate-200 rounded-lg text-sm">取消</button>
+            <button (click)="doItemUpload()" class="px-4 py-2 bg-primary text-white rounded-lg text-sm">上传并刷新</button>
+          </div>
+        </div>
+      </div>
     </div>
   `
 })
@@ -118,6 +147,9 @@ export class BatchDetailPage implements OnInit {
   batch: any = null;
   filter = 'all';
   comment = '';
+  showItemUpload = false;
+  uploadItem: any = null;
+  uploadForm: any = {};
   constructor(private route: ActivatedRoute, private api: ApiService) {}
 
   ngOnInit() {
@@ -162,5 +194,41 @@ export class BatchDetailPage implements OnInit {
       PENDING_CONFIRM: 'bg-purple-100 text-purple-700', COMPLETED: 'bg-green-100 text-green-700',
       REJECTED: 'bg-red-100 text-red-700'
     } as any)[s] || 'bg-slate-100';
+  }
+
+  openItemUpload(it: any) {
+    this.uploadItem = it;
+    this.uploadForm = {};
+    for (const ev of (it.uploadable_evidence || [])) {
+      this.uploadForm[ev.type] = { name: '', url: '' };
+    }
+    this.showItemUpload = true;
+  }
+
+  async doItemUpload() {
+    let uploaded = 0;
+    for (const ev of (this.uploadItem?.uploadable_evidence || [])) {
+      const form = this.uploadForm[ev.type];
+      if (form.name && form.url) {
+        try {
+          const res = await this.api.uploadEvidence(this.uploadItem.plan_id, {
+            evidence_type: ev.type,
+            name: form.name,
+            url: form.url,
+            version: this.uploadItem.plan_version,
+            batch_item_id: this.uploadItem.item_id,
+            source: 'batch_detail'
+          });
+          if (res.code === 0) uploaded++;
+        } catch {}
+      }
+    }
+    this.showItemUpload = false;
+    if (uploaded > 0) {
+      (window as any).showToast?.('success', '补传成功', `已上传 ${uploaded} 份证据，刷新批次详情`);
+      this.batch = await this.api.batchDetail(this.batch.id);
+    } else {
+      (window as any).showToast?.('warning', '未上传', '请填写文件名和路径');
+    }
   }
 }

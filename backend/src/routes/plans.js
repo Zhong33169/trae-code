@@ -2,7 +2,7 @@ import { db } from '../db/schema.js';
 import { ROLES, STATUS, STATUS_LABEL, EVIDENCE_TYPE } from '../db/seed.js';
 import {
   checkTransition, checkEvidences, getPlanWithDetail, audit,
-  TRANSITION_RULES, requiredEvidences, ERROR_CODES
+  TRANSITION_RULES, requiredEvidences, ERROR_CODES, EVIDENCE_LABEL
 } from '../utils/workflow.js';
 import { nanoid } from 'nanoid';
 
@@ -79,11 +79,47 @@ export default async function planRoutes(fastify) {
       }
     }
 
-    const results = list.map(p => ({
-      ...p,
-      status_label: STATUS_LABEL[p.status],
-      evidences: evidenceMap[p.id] || {}
-    }));
+    const results = list.map(p => {
+      const userRole = user.role;
+      const rules = TRANSITION_RULES[p.status] || {};
+      const nextActions = [];
+      for (const [action, rule] of Object.entries(rules)) {
+        if (rule.roles.includes(userRole)) {
+          const reqTypes = requiredEvidences(p, action);
+          const eCheck = checkEvidences(p.id, reqTypes);
+          nextActions.push({
+            action,
+            allowed: eCheck.ok,
+            missing_evidences: eCheck.missing_types || [],
+            missing_labels: eCheck.missing_labels || []
+          });
+        }
+      }
+      const ROLE_EVIDENCE_RULES = { CSM: ['REGISTRATION'], DELIVERY: ['VERIFICATION'], DIRECTOR: ['ARCHIVAL'] };
+      const myTypes = ROLE_EVIDENCE_RULES[userRole] || [];
+      const allMissing = [];
+      const allMissingLabels = [];
+      for (const na of nextActions) {
+        if (!na.allowed) {
+          for (const mt of na.missing_evidences) {
+            if (!allMissing.includes(mt)) allMissing.push(mt);
+          }
+          for (const ml of na.missing_labels) {
+            if (!allMissingLabels.includes(ml)) allMissingLabels.push(ml);
+          }
+        }
+      }
+      const uploadable = myTypes.filter(t => allMissing.includes(t));
+
+      return {
+        ...p,
+        status_label: STATUS_LABEL[p.status],
+        evidences: evidenceMap[p.id] || {},
+        missing_evidences: allMissing,
+        missing_labels: allMissingLabels,
+        uploadable_evidence: uploadable
+      };
+    });
 
     return {
       code: 0,
@@ -310,7 +346,7 @@ export default async function planRoutes(fastify) {
     const plan = d.prepare('SELECT * FROM launch_plans WHERE id=?').get(planId);
     if (!plan) return reply.code(404).send({ code: 404, message: '不存在' });
 
-    const { evidence_type, name, url, version } = request.body || {};
+    const { evidence_type, name, url, version, batch_item_id, source } = request.body || {};
     if (!['REGISTRATION', 'VERIFICATION', 'ARCHIVAL'].includes(evidence_type)) {
       return reply.code(400).send({ code: 400, message: '证据类型非法' });
     }
@@ -359,7 +395,9 @@ export default async function planRoutes(fastify) {
         evidence_type,
         evidence_name: name,
         evidence_url: url,
-        evidence_label: EVIDENCE_TYPE[evidence_type]
+        evidence_label: EVIDENCE_TYPE[evidence_type],
+        batch_item_id: batch_item_id || null,
+        source: source || 'plan_detail'
       }, request.ip);
 
     return { code: 0, data: getPlanWithDetail(planId) };

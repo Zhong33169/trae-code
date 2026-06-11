@@ -135,13 +135,13 @@ backend/data/launch_plan.db
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/api/plans/queue?status=&risk_level=&change_type=&keyword=&page=&size=` | **角色感知的队列**（核心首屏接口） |
+| GET | `/api/plans/queue?status=&risk_level=&change_type=&keyword=&page=&size=` | **角色感知的队列**（核心首屏接口，返回 `missing_evidences / missing_labels / uploadable_evidence`） |
 | GET | `/api/plans/stats` | 按状态计数（顶部统计卡） |
-| GET | `/api/plans/:id` | 详情 + 证据 + 流转 + 可用操作提示 |
+| GET | `/api/plans/:id` | 详情 + 证据 + 流转 + 可用操作提示（含 `role_match / missing_evidences / missing_labels`） |
 | POST | `/api/plans` | CSM 新建（仅 CSM） |
 | PATCH | `/api/plans/:id` | CSM 编辑（仅草稿/驳回 + 创建人 + version 校验） |
 | **POST** | **`/api/plans/:id/action`** | **核心状态流转**：body `{action, comment, version}` |
-| POST | `/api/plans/:id/evidence` | 证据上传（按证据类型分角色 + version 校验） |
+| POST | `/api/plans/:id/evidence` | 证据上传（按证据类型分角色 + version 校验 + `batch_item_id / source` 关联批次） |
 | GET | `/api/plans/:id/audit` | 单计划单的审计日志 |
 
 ### 📦 批次（批量操作）
@@ -149,9 +149,9 @@ backend/data/launch_plan.db
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | **POST** | **`/api/batch/action`** | 批量操作：`{plan_ids[], action, comment, plan_versions{id:ver}}` → 返回 `batch_no + items[]（success/failed 均保留）` |
-| POST | `/api/batch/:batchId/retry` | 仅重试该批次失败项 |
+| POST | `/api/batch/:batchId/retry` | 仅重试该批次失败项，统计自动重算 |
 | GET | `/api/batches` | 批次列表 |
-| GET | `/api/batches/:batchId` | 批次详情 + 明细（含错误码/错误信息） |
+| GET | `/api/batches/:batchId` | 批次详情：每个 item 含 `plan_version / missing_evidences / missing_labels / uploadable_evidence / next_allowed_actions` |
 
 ### 📝 审计
 
@@ -221,13 +221,14 @@ fetch('/api/plans/1/action', {
 2. 开另一个浏览器或无痕窗口，同样用 csm_wang 登录，进入 0003，随便修改描述并保存
 3. 回到第一个窗口，提交旧版本的编辑 → 返回 **409 / OLD_VERSION**
 
-### 场景 6：批量核验 - 部分成功 + 失败重试（重点！）
-1. `delivery_zhang` 登录 → 队列
+### 场景 6：批量核验 - 部分成功 + 补传证据 + 重试成功（重点！）
+1. `delivery_zhang` 登录 → 队列，每条计划单的「证据」列**直接展示缺失标签**（如「缺过程核验证据」），缺证项还出现 **📎 补传证据** 按钮
 2. 勾选 `0001`✗ `0004`✗ `0007`✓ `0008`✗（共 4 条，**仅 0007 证据齐全**）
-3. 点「批量核验通过」→ 执行
-4. 结果：`成功 1 / 失败 3` → **失败项均清晰展示错误码+错误信息，不被吞**
-5. 进入「批次中心」→ 点批次号 → 看到明细 → 先对 0001/0004/0008 **补传核验证据**
-6. 回到批次详情 → 点「🔁 重试失败项」→ 3 条全部成功 → 批次统计**自动重算**为 `成功 4 / 失败 0`
+3. 点「批量核验通过」→ 结果：`成功 1 / 失败 3`
+4. 进入「批次中心」→ 点批次号 → **失败项直接显示「缺过程核验证据」标签 + 📎 补传按钮**
+5. 在批次详情中**直接点「📎 补传」** → 上传核验证据 → 列表自动刷新，缺失标签消失
+6. 点「🔁 重试失败项」→ 补了证据的项全部成功 → 批次统计**自动重算**为 `成功 4 / 失败 0`
+7. **要点**：无需离开批次页面去详情页补证据，补传+重试在**同一页面完成闭环**
 
 ### 场景 7：驳回 + 重新提交
 1. `delivery_zhang` → 对 `0006`（当前已被驳回，但可重开一条演示）或另选一条驳回
@@ -312,10 +313,12 @@ PORT=9000 CORS_ORIGIN=http://localhost:4000 npm start   # backend
 - [x] **证据累积前置规则**：verify_pass 需 REG+VER，confirm_pass 需 REG+VER+ARC
 - [x] 前端详情页按钮**根据实际缺失证据动态禁用**，上传证据后自动变亮
 - [x] 详情接口 `available_actions` 返回 `role_match / missing_evidences / missing_labels`
+- [x] **队列页每条计划单展示缺失证据标签 + 当前角色可补传按钮**
+- [x] **批次详情失败项展示缺失证据 + 补传按钮 + 补传后刷新列表和统计**
 - [x] 批量操作生成 **批次号 BATCH-YYYYMMDD-XXXXXX**
 - [x] 批量支持 **部分成功**，失败项 **保留错误码+错误信息**不被吞
 - [x] 失败项可在「批次详情」中 **补证据后一键重试**，重试后**统计自动重算**
-- [x] **全链路审计**：证据上传、状态流转、批量操作、批次重试均写入审计日志，含详细字段
+- [x] **全链路审计**：证据上传、状态流转、批量操作、批次重试均写入审计日志，含 `source / batch_item_id` 来源追踪
 - [x] 角色切换 / 筛选 / 详情办理 / 批量操作 **之间互相联动刷新**
 - [x] 绕页直调 API：`WRONG_ROLE / OLD_VERSION / MISSING_EVIDENCE / WRONG_STATUS` **全部拦截并返回具体中文原因**
 - [x] 后端 CORS 放行 3009，前端代理指向 8009

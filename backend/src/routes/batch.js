@@ -2,7 +2,7 @@ import { db } from '../db/schema.js';
 import { ROLES, STATUS, STATUS_LABEL } from '../db/seed.js';
 import {
   checkTransition, checkEvidences, audit, requiredEvidences, ERROR_CODES,
-  getPlanWithDetail
+  getPlanWithDetail, TRANSITION_RULES, EVIDENCE_LABEL
 } from '../utils/workflow.js';
 import { nanoid } from 'nanoid';
 
@@ -12,6 +12,13 @@ function genBatchNo() {
   const m = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
   return `BATCH-${y}${m}${day}-${nanoid(6).toUpperCase()}`;
+}
+
+function actionLabel(action) {
+  return {
+    submit: '提交核验', resubmit: '重新提交', verify_pass: '核验通过',
+    confirm_pass: '确认归档', reject: '驳回'
+  }[action] || action;
 }
 
 function executeSingleAction(plan, action, user, comment, planVersions) {
@@ -247,11 +254,62 @@ export default async function batchRoutes(fastify) {
     `).get(batchId);
     if (!batch) return reply.code(404).send({ code: 404, message: '不存在' });
     const items = d.prepare(`
-      SELECT bi.*, lp.plan_no, lp.title, lp.status AS current_status
-      FROM batch_items bi LEFT JOIN launch_plans lp ON bi.plan_id=lp.id
+      SELECT bi.id AS item_id, bi.batch_id, bi.plan_id, bi.status, bi.error_code,
+        bi.error_message, bi.retry_count, bi.last_attempt_at,
+        lp.plan_no, lp.title, lp.status AS current_status, lp.version AS plan_version
+      FROM batch_items bi LEFT JOIN launch_plans lp ON bi.plan_id = lp.id
       WHERE bi.batch_id=? ORDER BY bi.id
     `).all(batchId);
+
+    const userRole = request.user.role;
+    const ROLE_EVIDENCE_RULES = {
+      CSM: ['REGISTRATION'],
+      DELIVERY: ['VERIFICATION'],
+      DIRECTOR: ['ARCHIVAL']
+    };
+
+    for (const item of items) {
+      if (item.plan_id) {
+        const reqTypes = requiredEvidences({ status: item.current_status }, batch.action);
+        const eCheck = checkEvidences(item.plan_id, reqTypes);
+        item.missing_evidences = eCheck.missing_types || [];
+        item.missing_labels = eCheck.missing_labels || [];
+        item.required_evidences = reqTypes;
+      } else {
+        item.missing_evidences = [];
+        item.missing_labels = [];
+        item.required_evidences = [];
+      }
+
+      const rules = TRANSITION_RULES[item.current_status] || {};
+      const nextActions = [];
+      for (const [action, rule] of Object.entries(rules)) {
+        if (rule.roles.includes(userRole)) {
+          const reqTypes = requiredEvidences({ status: item.current_status }, action);
+          const eCheck = checkEvidences(item.plan_id, reqTypes);
+          nextActions.push({
+            action,
+            label: actionLabel(action),
+            allowed: eCheck.ok,
+            missing_evidences: eCheck.missing_types || [],
+            missing_labels: eCheck.missing_labels || []
+          });
+        }
+      }
+      item.next_allowed_actions = nextActions;
+
+      const uploadable = [];
+      const myTypes = ROLE_EVIDENCE_RULES[userRole] || [];
+      for (const t of myTypes) {
+        if (item.missing_evidences.includes(t)) {
+          uploadable.push({ type: t, label: EVIDENCE_LABEL[t] });
+        }
+      }
+      item.uploadable_evidence = uploadable;
+    }
+
     batch.items = items;
+    batch.role_evidence_rules = ROLE_EVIDENCE_RULES;
     return { code: 0, data: batch };
   });
 
