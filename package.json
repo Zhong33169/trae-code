@@ -1,0 +1,16 @@
+{
+  "name": "supervision-record-system",
+  "version": "1.0.0",
+  "description": "工程监理公司-异常申诉复核旁站记录单系统",
+  "private": true,
+  "scripts": {
+    "install:all": "cd backend && npm install && cd ../frontend && npm install",
+    "init:db": "cd backend && npm run init-db && npm run seed-data",
+    "start:backend": "cd backend && npm start",
+    "start:frontend": "cd frontend && npm run dev",
+    "dev:backend": "cd backend && npm run dev",
+    "reset:db": "cd backend && rm -rf data/supervision.db* && npm run init-db && npm run seed-data"
+  },
+  "keywords": ["supervision", "koa", "remix", "sqlite"],
+  "license": "MIT"
+}
