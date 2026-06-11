@@ -110,25 +110,25 @@ export const rejectReview = async (ctx) => {
 
 export const batchPassReview = async (ctx) => {
   handleService(ctx, () => {
-    const { ids, opinion } = ctx.request.body;
+    const { items, opinion } = ctx.request.body;
     const userId = ctx.state.userId;
-    return expenseService.batchPassReview(ids, userId, { opinion });
+    return expenseService.batchPassReview(items, userId, { opinion });
   });
 };
 
 export const batchRejectReview = async (ctx) => {
   handleService(ctx, () => {
-    const { ids, reason } = ctx.request.body;
+    const { items, reason } = ctx.request.body;
     const userId = ctx.state.userId;
-    return expenseService.batchRejectReview(ids, userId, { reason });
+    return expenseService.batchRejectReview(items, userId, { reason });
   });
 };
 
 export const batchStartVerify = async (ctx) => {
   handleService(ctx, () => {
-    const { ids } = ctx.request.body;
+    const { items } = ctx.request.body;
     const userId = ctx.state.userId;
-    return expenseService.batchStartVerify(ids, userId);
+    return expenseService.batchStartVerify(items, userId);
   });
 };
 

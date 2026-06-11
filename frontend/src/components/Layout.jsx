@@ -2,12 +2,14 @@ import { useNavigate } from '../router/index.js';
 import { useAuth } from '../stores/authStore';
 import { expenseApi } from '../api/expenseApi';
 import { useToast } from '../stores/toastStore';
-import { createSignal, onMount, children } from 'solid-js';
+import { useStatsRefresh } from '../stores/statsRefreshStore';
+import { createSignal, onMount, createEffect, children } from 'solid-js';
 
 function Layout(props) {
   const { userId, userInfo, logout, setUser } = useAuth();
   const navigate = useNavigate();
   const toast = useToast();
+  const { statsRefreshKey, triggerStatsRefresh } = useStatsRefresh();
   const [stats, setStats] = createSignal(null);
 
   const loadStats = async () => {
@@ -36,6 +38,12 @@ function Layout(props) {
       }
     }
     loadStats();
+  });
+
+  createEffect(() => {
+    if (statsRefreshKey() > 0) {
+      loadStats();
+    }
   });
 
   const handleLogout = () => {

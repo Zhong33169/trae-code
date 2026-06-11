@@ -108,16 +108,16 @@ export const expenseApi = {
     return request(`/api/expenses/${id}/update-deadline`, { method: 'POST', body: { deadline } });
   },
 
-  batchStartVerify: (ids) => {
-    return request('/api/expenses/batch/start-verify', { method: 'POST', body: { ids } });
+  batchStartVerify: (items) => {
+    return request('/api/expenses/batch/start-verify', { method: 'POST', body: { items } });
   },
 
-  batchPassReview: (ids, opinion) => {
-    return request('/api/expenses/batch/pass-review', { method: 'POST', body: { ids, opinion } });
+  batchPassReview: (items, opinion) => {
+    return request('/api/expenses/batch/pass-review', { method: 'POST', body: { items, opinion } });
   },
 
-  batchRejectReview: (ids, reason) => {
-    return request('/api/expenses/batch/reject-review', { method: 'POST', body: { ids, reason } });
+  batchRejectReview: (items, reason) => {
+    return request('/api/expenses/batch/reject-review', { method: 'POST', body: { items, reason } });
   },
 };
 

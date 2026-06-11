@@ -370,7 +370,7 @@ export const passVerify = (id, userId, data = {}, version) => {
     throw new Error('请填写核验意见（至少5个字）');
   }
 
-  const materialInfo = calcMaterialInfo(exp);
+  const materialInfo = checkMaterials(exp, false);
 
   checkVersion(exp, version);
   exp.status = expenseStatuses.PENDING_REVIEW;
@@ -381,11 +381,11 @@ export const passVerify = (id, userId, data = {}, version) => {
     exp.exceptionReason = null;
     exp.lastResult = '核验通过，材料齐全，待复核';
   } else {
-    exp.exceptionReason = `材料不全，缺少：${materialInfo.missingLabels.join('、')}，请经理酌情处理`;
-    exp.lastResult = '核验通过，但材料不全，待经理酌情复核';
+    exp.exceptionReason = `材料不全（缺少：${materialInfo.missingLabels.join('、')}），请经理酌情处理`;
+    exp.lastResult = `核验通过，但材料不全（缺${materialInfo.missingLabels.length}项），待经理酌情复核`;
   }
 
-  addAuditLog(exp, 'verify_pass', userId, `核验通过：${data.opinion}，材料状态：${materialInfo.isComplete ? '齐全' : '缺少' + materialInfo.missingLabels.join('、')}`);
+  addAuditLog(exp, 'verify_pass', userId, `核验通过：${data.opinion}，材料状态：${materialInfo.isComplete ? '齐全' : '缺少：' + materialInfo.missingLabels.join('、')}`);
   updateLastInfo(exp, exp.lastResult, userId);
 
   return enrichExpense(exp);
@@ -410,7 +410,7 @@ export const rejectVerify = (id, userId, data = {}, version) => {
     throw new Error('请填写驳回原因（至少5个字）');
   }
 
-  const materialInfo = calcMaterialInfo(exp);
+  const materialInfo = checkMaterials(exp, false);
 
   checkVersion(exp, version);
   exp.status = expenseStatuses.REJECTED;
@@ -418,7 +418,7 @@ export const rejectVerify = (id, userId, data = {}, version) => {
   exp.verifyOpinion = data.reason;
   exp.exceptionReason = data.reason;
 
-  addAuditLog(exp, 'verify_reject', userId, `核验驳回：${data.reason}，材料状态：${materialInfo.isComplete ? '齐全' : '缺少' + materialInfo.missingLabels.join('、')}`);
+  addAuditLog(exp, 'verify_reject', userId, `核验驳回：${data.reason}，材料状态：${materialInfo.isComplete ? '齐全' : '缺少：' + materialInfo.missingLabels.join('、')}`);
   updateLastInfo(exp, '核验驳回', userId);
 
   return enrichExpense(exp);
@@ -470,16 +470,23 @@ export const passReview = (id, userId, data = {}, version) => {
     throw new Error('请填写复核意见');
   }
 
-  const materialInfo = calcMaterialInfo(exp);
+  const materialInfo = checkMaterials(exp, false);
 
   checkVersion(exp, version);
   exp.status = expenseStatuses.APPROVED;
   exp.currentHandler = null;
   exp.reviewOpinion = data.opinion;
-  exp.exceptionReason = null;
 
-  addAuditLog(exp, 'review_pass', userId, `复核通过：${data.opinion}，材料状态：${materialInfo.isComplete ? '齐全' : '缺少' + materialInfo.missingLabels.join('、')}`);
-  updateLastInfo(exp, '复核通过，流程完成', userId);
+  if (materialInfo.isComplete) {
+    exp.exceptionReason = null;
+    exp.lastResult = '复核通过，流程完成';
+  } else {
+    exp.exceptionReason = `复核通过但材料不全（缺少：${materialInfo.missingLabels.join('、')}），已标记待补`;
+    exp.lastResult = `复核通过，但材料不全（缺${materialInfo.missingLabels.length}项），已标记待补`;
+  }
+
+  addAuditLog(exp, 'review_pass', userId, `复核通过：${data.opinion}，材料状态：${materialInfo.isComplete ? '齐全' : '缺少：' + materialInfo.missingLabels.join('、')}`);
+  updateLastInfo(exp, exp.lastResult, userId);
 
   return enrichExpense(exp);
 };
@@ -500,7 +507,7 @@ export const rejectReview = (id, userId, data = {}, version) => {
     throw new Error('请填写驳回原因（至少5个字）');
   }
 
-  const materialInfo = calcMaterialInfo(exp);
+  const materialInfo = checkMaterials(exp, false);
 
   checkVersion(exp, version);
   exp.status = expenseStatuses.REJECTED;
@@ -508,54 +515,54 @@ export const rejectReview = (id, userId, data = {}, version) => {
   exp.reviewOpinion = data.reason;
   exp.exceptionReason = data.reason;
 
-  addAuditLog(exp, 'review_reject', userId, `复核驳回：${data.reason}，材料状态：${materialInfo.isComplete ? '齐全' : '缺少' + materialInfo.missingLabels.join('、')}`);
+  addAuditLog(exp, 'review_reject', userId, `复核驳回：${data.reason}，材料状态：${materialInfo.isComplete ? '齐全' : '缺少：' + materialInfo.missingLabels.join('、')}`);
   updateLastInfo(exp, '复核驳回', userId);
 
   return enrichExpense(exp);
 };
 
-export const batchPassReview = (ids, userId, data = {}) => {
+export const batchPassReview = (items, userId, data = {}) => {
   const results = [];
   const errors = [];
 
-  for (const id of ids) {
+  for (const item of items) {
     try {
-      const result = passReview(id, userId, { opinion: data.opinion || '批量复核通过' });
+      const result = passReview(item.id, userId, { opinion: data.opinion || '批量复核通过' }, item.version);
       results.push(result);
     } catch (err) {
-      errors.push({ id, message: err.message });
+      errors.push({ id: item.id, title: item.title, message: err.message });
     }
   }
 
   return { success: results.length, failed: errors.length, results, errors };
 };
 
-export const batchRejectReview = (ids, userId, data = {}) => {
+export const batchRejectReview = (items, userId, data = {}) => {
   const results = [];
   const errors = [];
 
-  for (const id of ids) {
+  for (const item of items) {
     try {
-      const result = rejectReview(id, userId, { reason: data.reason || '批量驳回' });
+      const result = rejectReview(item.id, userId, { reason: data.reason || '批量驳回' }, item.version);
       results.push(result);
     } catch (err) {
-      errors.push({ id, message: err.message });
+      errors.push({ id: item.id, title: item.title, message: err.message });
     }
   }
 
   return { success: results.length, failed: errors.length, results, errors };
 };
 
-export const batchStartVerify = (ids, userId) => {
+export const batchStartVerify = (items, userId) => {
   const results = [];
   const errors = [];
 
-  for (const id of ids) {
+  for (const item of items) {
     try {
-      const result = startVerify(id, userId);
+      const result = startVerify(item.id, userId, item.version);
       results.push(result);
     } catch (err) {
-      errors.push({ id, message: err.message });
+      errors.push({ id: item.id, title: item.title, message: err.message });
     }
   }
 

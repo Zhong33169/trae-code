@@ -2,6 +2,7 @@ import { createSignal, createEffect, onMount } from 'solid-js';
 import { expenseApi } from '../api/expenseApi';
 import { useAuth } from '../stores/authStore';
 import { useToast } from '../stores/toastStore';
+import { useStatsRefresh } from '../stores/statsRefreshStore';
 import { useNavigate, useParams } from '../router';
 import AuditLogList from '../components/AuditLogList';
 import ActionModal from '../components/ActionModal';
@@ -11,6 +12,7 @@ function ExpenseDetail() {
   const navigate = useNavigate();
   const { userInfo } = useAuth();
   const toast = useToast();
+  const { triggerStatsRefresh } = useStatsRefresh();
 
   const [expense, setExpense] = createSignal(null);
   const [loading, setLoading] = createSignal(true);
@@ -34,6 +36,7 @@ function ExpenseDetail() {
       ]);
       if (expenseRes.success) {
         setExpense(expenseRes.data);
+        triggerStatsRefresh();
       }
       if (logsRes.success) {
         setAuditLogs(logsRes.data);

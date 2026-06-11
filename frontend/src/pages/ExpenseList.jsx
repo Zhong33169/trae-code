@@ -3,6 +3,7 @@ import { useNavigate } from '../router/index.js';
 import { expenseApi } from '../api/expenseApi';
 import { useToast } from '../stores/toastStore';
 import { useAuth } from '../stores/authStore';
+import { useStatsRefresh } from '../stores/statsRefreshStore';
 import BatchActions from '../components/BatchActions.jsx';
 import CreateModal from '../components/CreateModal.jsx';
 
@@ -19,6 +20,7 @@ function ExpenseList() {
   const navigate = useNavigate();
   const toast = useToast();
   const { userInfo } = useAuth();
+  const { triggerStatsRefresh } = useStatsRefresh();
 
   const loadList = async () => {
     setLoading(true);
@@ -51,6 +53,7 @@ function ExpenseList() {
 
   const refresh = () => {
     setRefetchKey(prev => prev + 1);
+    triggerStatsRefresh();
   };
 
   const handleStatusChange = (e) => {
