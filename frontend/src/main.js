@@ -1,0 +1,6 @@
+import './app/meeting-app.js'
+import './components/reservation-list.js'
+import './components/reservation-detail.js'
+import './components/reservation-form.js'
+import './components/batch-list.js'
+import './components/audit-log-list.js'
