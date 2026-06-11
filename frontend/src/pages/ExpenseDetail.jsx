@@ -67,21 +67,54 @@ function ExpenseDetail() {
 
   const canPassVerify = () => {
     if (!expense() || !userInfo()) return false;
+    const exp = expense();
+    if (exp.status !== 'verifying' || userInfo().role !== 'accountant' || exp.currentHandler !== userInfo().id) return false;
+    return exp.materialInfo?.isComplete;
+  };
+
+  const canRejectVerify = () => {
+    if (!expense() || !userInfo()) return false;
     return expense().status === 'verifying' && userInfo().role === 'accountant' && expense().currentHandler === userInfo().id;
   };
 
-  const canRejectVerify = () => canPassVerify();
-  const canRequestSupplement = () => canPassVerify();
+  const canRequestSupplementFromVerify = () => {
+    if (!expense() || !userInfo()) return false;
+    const exp = expense();
+    if (exp.status !== 'verifying' || userInfo().role !== 'accountant' || exp.currentHandler !== userInfo().id) return false;
+    return !exp.materialInfo?.isComplete;
+  };
 
   const canPassReview = () => {
     if (!expense() || !userInfo()) return false;
+    const exp = expense();
+    if (exp.status !== 'pending_review' || userInfo().role !== 'manager') return false;
+    return exp.materialInfo?.isComplete;
+  };
+
+  const canRejectReview = () => {
+    if (!expense() || !userInfo()) return false;
     return expense().status === 'pending_review' && userInfo().role === 'manager';
   };
-  const canRejectReview = () => canPassReview();
+
+  const canRequestSupplementFromReview = () => {
+    if (!expense() || !userInfo()) return false;
+    const exp = expense();
+    if (exp.status !== 'pending_review' || userInfo().role !== 'manager') return false;
+    return !exp.materialInfo?.isComplete;
+  };
 
   const canEditMaterials = () => {
     if (!expense() || !userInfo()) return false;
-    return expense().status === 'draft' && userInfo().role === 'clerk' && expense().creator === userInfo().id;
+    const exp = expense();
+    if (exp.status === 'draft' && userInfo().role === 'clerk' && exp.creator === userInfo().id) return true;
+    if (exp.status === 'supplement_required' && userInfo().role === 'clerk' && exp.creator === userInfo().id) return true;
+    return false;
+  };
+
+  const canSupplementMaterials = () => {
+    if (!expense() || !userInfo()) return false;
+    const exp = expense();
+    return exp.status === 'supplement_required' && userInfo().role === 'clerk' && exp.creator === userInfo().id;
   };
 
   const enterEditMaterial = () => {
@@ -106,16 +139,31 @@ function ExpenseDetail() {
 
   const saveMaterials = async () => {
     if (!expense()) return;
+    const exp = expense();
     setModalLoading(true);
     try {
-      const res = await expenseApi.updateMaterials(expense().id, {
-        materials: editMaterials(),
-        version: expense().version,
-      });
+      let res;
+      if (exp.status === 'supplement_required') {
+        res = await expenseApi.supplementMaterials(exp.id, {
+          materials: editMaterials(),
+          version: exp.version,
+        });
+      } else {
+        res = await expenseApi.updateMaterials(exp.id, {
+          materials: editMaterials(),
+          version: exp.version,
+        });
+      }
       if (res.success) {
-        setExpense(res.data);
+        const mi = res.data.materialInfo || {};
+        if (exp.status === 'supplement_required' && mi.isComplete) {
+          toast.success('材料已补齐，已重新提交待核验');
+        } else if (exp.status === 'supplement_required' && !mi.isComplete) {
+          toast.success('材料已更新，但仍需补齐剩余材料');
+        } else {
+          toast.success('材料更新成功');
+        }
         setMaterialEditMode(false);
-        toast.success('材料更新成功');
         loadData();
       }
     } catch (err) {
@@ -199,7 +247,7 @@ function ExpenseDetail() {
     try {
       const res = await expenseApi.requestSupplement(expense().id, { reason, version: expense().version });
       if (res.success) {
-        toast.success('已要求补材料');
+        toast.success('已要求补材料，已退回创建者');
         loadData();
       }
     } catch (err) {
@@ -354,6 +402,7 @@ function ExpenseDetail() {
   const mi = exp.materialInfo || {};
   const materialComplete = mi.isComplete;
   const deadlineInfo = exp.deadlineInfo || {};
+  const isSupplementRequired = exp.status === 'supplement_required';
 
   return (
     <div class="page">
@@ -417,8 +466,8 @@ function ExpenseDetail() {
             </div>
 
             {exp.exceptionReason && (
-              <div class="exception-section">
-                <div class="exception-label">⚠️ 异常原因</div>
+              <div class={`exception-section ${isSupplementRequired ? 'exception-supplement' : ''}`}>
+                <div class="exception-label">{isSupplementRequired ? '📎 待补材料' : '⚠️ 异常原因'}</div>
                 <div class="exception-content">{exp.exceptionReason}</div>
               </div>
             )}
@@ -433,7 +482,7 @@ function ExpenseDetail() {
                 </div>
                 {canEditMaterials() && !materialEditMode() && (
                   <button class="btn btn-sm btn-outline" onClick={enterEditMaterial}>
-                    编辑材料
+                    {isSupplementRequired ? '补充材料' : '编辑材料'}
                   </button>
                 )}
               </div>
@@ -459,12 +508,30 @@ function ExpenseDetail() {
                         </div>
                       ))}
                     </div>
+                    {!materialComplete && editMaterials().length > 0 && (() => {
+                      const tmpMissing = mi.required?.filter((key) => !editMaterials().includes(key)) || [];
+                      const tmpMissingLabels = tmpMissing.map((key, idx) => {
+                        const origIdx = mi.required.indexOf(key);
+                        return mi.requiredLabels?.[origIdx] || key;
+                      });
+                      return tmpMissing.length > 0 ? (
+                        <div class="material-warn">
+                          仍缺少：{tmpMissingLabels.join('、')}
+                        </div>
+                      ) : null;
+                    })()}
+                    {(() => {
+                      const tmpMissing = mi.required?.filter((key) => !editMaterials().includes(key)) || [];
+                      return tmpMissing.length === 0 ? (
+                        <div class="material-ok">✅ 材料已齐全，提交后将重新进入核验流程</div>
+                      ) : null;
+                    })()}
                     <div class="material-edit-actions">
                       <button class="btn" onClick={cancelEditMaterial} disabled={modalLoading()}>
                         取消
                       </button>
                       <button class="btn btn-primary" onClick={saveMaterials} disabled={modalLoading()}>
-                        {modalLoading() ? '保存中...' : '保存材料'}
+                        {modalLoading() ? '保存中...' : isSupplementRequired ? '提交补材料' : '保存材料'}
                       </button>
                     </div>
                   </div>
@@ -597,12 +664,12 @@ function ExpenseDetail() {
                   <div class="action-icon">✓</div>
                   <div class="action-info">
                     <div class="action-name">核验通过</div>
-                    <div class="action-desc">材料核验无误，提交复核</div>
+                    <div class="action-desc">材料齐全，核验无误提交复核</div>
                   </div>
                 </button>
               )}
 
-              {canRequestSupplement() && (
+              {canRequestSupplementFromVerify() && (
                 <button
                   class="action-btn action-warning"
                   onClick={() => {
@@ -613,7 +680,7 @@ function ExpenseDetail() {
                   <div class="action-icon">📎</div>
                   <div class="action-info">
                     <div class="action-name">要求补材料</div>
-                    <div class="action-desc">退回给创建者补充材料</div>
+                    <div class="action-desc">缺少：{(mi.missingLabels || []).join('、')}，退回补材料</div>
                   </div>
                 </button>
               )}
@@ -645,9 +712,23 @@ function ExpenseDetail() {
                   <div class="action-icon">✓</div>
                   <div class="action-info">
                     <div class="action-name">复核通过</div>
-                    <div class="action-desc">
-                      {materialComplete ? '材料齐全，同意报销' : `材料不全（缺${mi.missingLabels?.length || 0}项），酌情处理`}
-                    </div>
+                    <div class="action-desc">材料齐全，同意报销</div>
+                  </div>
+                </button>
+              )}
+
+              {canRequestSupplementFromReview() && (
+                <button
+                  class="action-btn action-warning"
+                  onClick={() => {
+                    setModalType('requestSupplement');
+                    setModalVisible(true);
+                  }}
+                >
+                  <div class="action-icon">📎</div>
+                  <div class="action-info">
+                    <div class="action-name">要求补材料</div>
+                    <div class="action-desc">缺少：{(mi.missingLabels || []).join('、')}，退回补材料</div>
                   </div>
                 </button>
               )}
@@ -668,7 +749,22 @@ function ExpenseDetail() {
                 </button>
               )}
 
-              {!canSubmit() && !canStartVerify() && !canPassVerify() && !canPassReview() && (
+              {canSupplementMaterials() && !materialEditMode() && (
+                <button
+                  class="action-btn action-primary"
+                  onClick={enterEditMaterial}
+                >
+                  <div class="action-icon">📎</div>
+                  <div class="action-info">
+                    <div class="action-name">补充材料</div>
+                    <div class="action-desc">
+                      {materialComplete ? '材料已齐全，可直接提交' : `缺：${(mi.missingLabels || []).join('、')}`}
+                    </div>
+                  </div>
+                </button>
+              )}
+
+              {!canSubmit() && !canStartVerify() && !canPassVerify() && !canPassReview() && !canSupplementMaterials() && (
                 <div class="no-actions">
                   您当前没有可用的操作
                 </div>

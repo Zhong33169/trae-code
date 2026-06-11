@@ -294,15 +294,15 @@ function BatchActions(props) {
 
               {stats.incomplete > 0 && batchType() === 'passReview' && (
                 <div class="batch-warn" style={{ marginTop: '12px' }}>
-                  <div class="batch-warn-title">⚠️ 材料不全的申请复核通过后仍会标记待补</div>
-                  <div>有 <strong>{stats.incomplete}</strong> 项材料不全，通过后异常原因将保留，需后续补充材料。</div>
+                  <div class="batch-warn-title">⚠️ 材料不全的申请将转为「待补材料」状态</div>
+                  <div>有 <strong>{stats.incomplete}</strong> 项材料不全，复核通过时将自动退回创建者补材料，不会推进到已通过。建议先要求补材料或驳回。</div>
                 </div>
               )}
 
               {stats.incomplete > 0 && batchType() === 'startVerify' && (
                 <div class="batch-warn" style={{ marginTop: '12px' }}>
-                  <div class="batch-warn-title">⚠️ 材料不全的申请核验时将记录异常</div>
-                  <div>有 <strong>{stats.incomplete}</strong> 项材料不全，开始核验后异常原因将自动写入状态。</div>
+                  <div class="batch-warn-title">⚠️ 材料不全的申请核验通过后将转为「待补材料」状态</div>
+                  <div>有 <strong>{stats.incomplete}</strong> 项材料不全，核验通过时将自动退回创建者补材料，不会推进到待复核。</div>
                 </div>
               )}
 

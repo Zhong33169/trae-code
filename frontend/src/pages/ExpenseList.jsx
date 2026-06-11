@@ -94,6 +94,7 @@ function ExpenseList() {
       submitted: { class: 'tag-info', text: '待核验' },
       verifying: { class: 'tag-warning', text: '核验中' },
       pending_review: { class: 'tag-primary', text: '待复核' },
+      supplement_required: { class: 'tag-warning', text: '待补材料' },
       approved: { class: 'tag-success', text: '已通过' },
       rejected: { class: 'tag-danger', text: '已驳回' },
       archived: { class: 'tag-default', text: '已归档' },
@@ -267,6 +268,7 @@ function ExpenseList() {
             <option value="submitted">待核验</option>
             <option value="verifying">核验中</option>
             <option value="pending_review">待复核</option>
+            <option value="supplement_required">待补材料</option>
             <option value="approved">已通过</option>
             <option value="rejected">已驳回</option>
           </select>

@@ -29,5 +29,6 @@ router.post('/:id/pass-review', expenseController.passReview);
 router.post('/:id/reject-review', expenseController.rejectReview);
 router.post('/:id/update-deadline', expenseController.updateDeadline);
 router.post('/:id/update-materials', expenseController.updateMaterials);
+router.post('/:id/supplement-materials', expenseController.supplementMaterials);
 
 export default router;

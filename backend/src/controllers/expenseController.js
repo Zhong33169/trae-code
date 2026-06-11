@@ -177,3 +177,12 @@ export const updateMaterials = async (ctx) => {
     return expenseService.updateMaterials(id, data, userId, data.version);
   });
 };
+
+export const supplementMaterials = async (ctx) => {
+  handleService(ctx, () => {
+    const { id } = ctx.params;
+    const data = ctx.request.body;
+    const userId = ctx.state.userId;
+    return expenseService.supplementMaterials(id, data, userId, data.version);
+  });
+};

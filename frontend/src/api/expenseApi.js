@@ -76,6 +76,10 @@ export const expenseApi = {
     return request(`/api/expenses/${id}/update-materials`, { method: 'POST', body: data });
   },
 
+  supplementMaterials: (id, data) => {
+    return request(`/api/expenses/${id}/supplement-materials`, { method: 'POST', body: data });
+  },
+
   submit: (id, version) => {
     return request(`/api/expenses/${id}/submit`, { method: 'POST', body: { version } });
   },

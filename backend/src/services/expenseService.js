@@ -373,19 +373,22 @@ export const passVerify = (id, userId, data = {}, version) => {
   const materialInfo = checkMaterials(exp, false);
 
   checkVersion(exp, version);
-  exp.status = expenseStatuses.PENDING_REVIEW;
-  exp.currentHandler = null;
   exp.verifyOpinion = data.opinion;
 
   if (materialInfo.isComplete) {
+    exp.status = expenseStatuses.PENDING_REVIEW;
+    exp.currentHandler = null;
     exp.exceptionReason = null;
     exp.lastResult = '核验通过，材料齐全，待复核';
+    addAuditLog(exp, 'verify_pass', userId, `核验通过：${data.opinion}，材料状态：齐全`);
   } else {
-    exp.exceptionReason = `材料不全（缺少：${materialInfo.missingLabels.join('、')}），请经理酌情处理`;
-    exp.lastResult = `核验通过，但材料不全（缺${materialInfo.missingLabels.length}项），待经理酌情复核`;
+    exp.status = expenseStatuses.SUPPLEMENT_REQUIRED;
+    exp.currentHandler = exp.creator;
+    exp.exceptionReason = `材料不全（缺少：${materialInfo.missingLabels.join('、')}），需补齐后重新提交`;
+    exp.lastResult = `材料不全，需补齐：${materialInfo.missingLabels.join('、')}，已退回补材料`;
+    addAuditLog(exp, 'verify_supplement', userId, `核验发现材料不全：${data.opinion}，缺少：${materialInfo.missingLabels.join('、')}，退回补材料`);
   }
 
-  addAuditLog(exp, 'verify_pass', userId, `核验通过：${data.opinion}，材料状态：${materialInfo.isComplete ? '齐全' : '缺少：' + materialInfo.missingLabels.join('、')}`);
   updateLastInfo(exp, exp.lastResult, userId);
 
   return enrichExpense(exp);
@@ -430,12 +433,13 @@ export const requestSupplement = (id, userId, data = {}, version) => {
   const user = getUserById(userId);
   if (!user) throw new Error('用户不存在');
 
-  checkPermission(user.role, ['accountant']);
+  checkPermission(user.role, ['accountant', 'manager']);
 
-  if (exp.status !== expenseStatuses.VERIFYING) {
-    throw new Error('只有核验中状态可以要求补材料');
+  if (exp.status !== expenseStatuses.VERIFYING && exp.status !== expenseStatuses.PENDING_REVIEW) {
+    throw new Error('只有核验中或待复核状态可以要求补材料');
   }
-  if (exp.currentHandler !== userId) {
+
+  if (exp.status === expenseStatuses.VERIFYING && exp.currentHandler !== userId) {
     throw new Error('只能处理分配给自己的报销单');
   }
 
@@ -444,11 +448,12 @@ export const requestSupplement = (id, userId, data = {}, version) => {
   }
 
   checkVersion(exp, version);
-  exp.status = expenseStatuses.DRAFT;
+  exp.status = expenseStatuses.SUPPLEMENT_REQUIRED;
   exp.currentHandler = exp.creator;
   exp.exceptionReason = `需补材料：${data.reason}`;
 
-  addAuditLog(exp, 'request_supplement', userId, `要求补材料：${data.reason}`);
+  const roleLabel = user.role === 'manager' ? '复核' : '核验';
+  addAuditLog(exp, 'request_supplement', userId, `${roleLabel}要求补材料：${data.reason}`);
   updateLastInfo(exp, '需补充材料，退回创建者', userId);
 
   return enrichExpense(exp);
@@ -473,19 +478,22 @@ export const passReview = (id, userId, data = {}, version) => {
   const materialInfo = checkMaterials(exp, false);
 
   checkVersion(exp, version);
-  exp.status = expenseStatuses.APPROVED;
-  exp.currentHandler = null;
   exp.reviewOpinion = data.opinion;
 
   if (materialInfo.isComplete) {
+    exp.status = expenseStatuses.APPROVED;
+    exp.currentHandler = null;
     exp.exceptionReason = null;
     exp.lastResult = '复核通过，流程完成';
+    addAuditLog(exp, 'review_pass', userId, `复核通过：${data.opinion}，材料状态：齐全`);
   } else {
-    exp.exceptionReason = `复核通过但材料不全（缺少：${materialInfo.missingLabels.join('、')}），已标记待补`;
-    exp.lastResult = `复核通过，但材料不全（缺${materialInfo.missingLabels.length}项），已标记待补`;
+    exp.status = expenseStatuses.SUPPLEMENT_REQUIRED;
+    exp.currentHandler = exp.creator;
+    exp.exceptionReason = `材料不全（缺少：${materialInfo.missingLabels.join('、')}），需补齐后重新提交`;
+    exp.lastResult = `材料不全，需补齐：${materialInfo.missingLabels.join('、')}，已退回补材料`;
+    addAuditLog(exp, 'review_supplement', userId, `复核发现材料不全：${data.opinion}，缺少：${materialInfo.missingLabels.join('、')}，退回补材料`);
   }
 
-  addAuditLog(exp, 'review_pass', userId, `复核通过：${data.opinion}，材料状态：${materialInfo.isComplete ? '齐全' : '缺少：' + materialInfo.missingLabels.join('、')}`);
   updateLastInfo(exp, exp.lastResult, userId);
 
   return enrichExpense(exp);
@@ -619,6 +627,48 @@ export const updateExpenseDeadline = (id, deadline, userId) => {
   exp.version += 1;
 
   addAuditLog(exp, 'update_deadline', userId, `调整截止时间：从${new Date(oldDeadline).toLocaleString()}到${new Date(exp.deadline).toLocaleString()}`);
+
+  return enrichExpense(exp);
+};
+
+export const supplementMaterials = (id, data, userId, version) => {
+  const exp = expenses.find(e => e.id === id);
+  if (!exp) throw new Error('报销申请不存在');
+  const user = getUserById(userId);
+  if (!user) throw new Error('用户不存在');
+
+  if (exp.status !== expenseStatuses.SUPPLEMENT_REQUIRED) {
+    throw new Error('只有待补材料状态可以补充材料');
+  }
+  if (exp.creator !== userId) {
+    throw new Error('只能补充自己创建的报销单材料');
+  }
+
+  checkVersion(exp, version);
+
+  const oldMaterials = [...exp.materials];
+  exp.materials = data.materials || [];
+
+  const materialInfo = calcMaterialInfo(exp);
+
+  const added = exp.materials.filter(m => !oldMaterials.includes(m));
+  const addedLabels = added.map(m => materialTypes[m] || m);
+
+  if (materialInfo.isComplete) {
+    exp.status = expenseStatuses.SUBMITTED;
+    exp.currentHandler = null;
+    exp.exceptionReason = null;
+    exp.lastResult = '材料已补齐，重新提交待核验';
+    addAuditLog(exp, 'supplement_complete', userId, `补充材料完成：新增${addedLabels.join('、')}，材料已齐全，重新提交`);
+  } else {
+    exp.status = expenseStatuses.SUPPLEMENT_REQUIRED;
+    exp.currentHandler = exp.creator;
+    exp.exceptionReason = `材料不全（缺少：${materialInfo.missingLabels.join('、')}），需补齐后重新提交`;
+    exp.lastResult = `已补充部分材料，仍缺：${materialInfo.missingLabels.join('、')}`;
+    addAuditLog(exp, 'supplement_partial', userId, `补充材料：新增${addedLabels.length > 0 ? addedLabels.join('、') : '无'}，仍缺少：${materialInfo.missingLabels.join('、')}`);
+  }
+
+  updateLastInfo(exp, exp.lastResult, userId);
 
   return enrichExpense(exp);
 };
