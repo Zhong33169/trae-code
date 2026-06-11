@@ -30,10 +30,6 @@ const EDIT_INFO_RULES: Record<string, Record<string, string[]>> = {
     driver: ['entrusted', 'dispatched', 'in_transit', 'rejected'],
     receiver: ['in_transit', 'delivered', 'rejected'],
   },
-  initiator: {
-    plate_number: ['draft', 'rejected'],
-    driver: ['draft', 'rejected'],
-  },
 };
 
 const NEXT_STATUS_MAP: Record<string, { target: OrderStatus; label: string; requires?: EvidenceType[]; variant?: string }[]> = {
@@ -230,7 +226,7 @@ const NEXT_STATUS_MAP: Record<string, { target: OrderStatus; label: string; requ
           <div class="detail-section">
             <h4>📜 审计日志</h4>
             <div class="audit-list" *ngIf="auditLogs.length > 0">
-              <div *ngFor="let log of auditLogs" class="audit-item">
+              <div *ngFor="let log of auditLogs" class="audit-item" [class.audit-item-failed]="!!log.failure_reason">
                 <span class="audit-time">{{ formatTime(log.created_at) }}</span>
                 <span class="audit-user">{{ log.username }}</span>
                 <span class="audit-action">{{ log.action }}</span>
@@ -238,6 +234,7 @@ const NEXT_STATUS_MAP: Record<string, { target: OrderStatus; label: string; requ
                   {{ log.old_status || '—' }} → {{ log.new_status || '—' }}
                 </span>
                 <span class="audit-detail">{{ log.detail }}</span>
+                <span class="audit-failure" *ngIf="log.failure_reason">❌ {{ log.failure_reason }}</span>
               </div>
             </div>
             <div *ngIf="auditLogs.length === 0" class="empty-tip">暂无审计记录</div>
@@ -385,6 +382,8 @@ const NEXT_STATUS_MAP: Record<string, { target: OrderStatus; label: string; requ
     .audit-action { background: #eef2ff; color: #4338ca; padding: 1px 7px; border-radius: 4px; }
     .audit-status { color: #059669; }
     .audit-detail { color: #6b7280; flex: 1; }
+    .audit-failure { color: #b91c1c; background: #fef2f2; padding: 1px 7px; border-radius: 4px; flex: 100%; font-family: monospace; }
+    .audit-item-failed { border-left: 3px solid #ef4444; background: #fff5f5; }
 
     .empty-tip { color: #9ca3af; font-size: 13px; padding: 12px; text-align: center; background: #fafafa; border-radius: 6px; }
 
@@ -450,8 +449,18 @@ export class OrderListComponent implements OnInit {
   ngOnInit() {
     this.api.getCurrentUser().subscribe((u) => {
       this.currentUser = u;
-      if (u) this.refreshOrders();
-      else this.orders = [];
+      this.selectedOrderIds = [];
+      if (u) {
+        this.refreshOrders();
+        if (this.selectedOrder) {
+          const refreshed = this.orders.find((o) => o.id === this.selectedOrder.id);
+          if (refreshed) this.selectOrder(refreshed);
+          else this.selectedOrder = null;
+        }
+      } else {
+        this.orders = [];
+        this.selectedOrder = null;
+      }
     });
   }
 

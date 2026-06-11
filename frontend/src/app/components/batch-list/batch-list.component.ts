@@ -150,11 +150,12 @@ import {
           <div class="detail-section">
             <h4>📜 批次审计日志</h4>
             <div class="audit-list" *ngIf="auditLogs.length > 0">
-              <div *ngFor="let log of auditLogs" class="audit-item">
+              <div *ngFor="let log of auditLogs" class="audit-item" [class.audit-item-failed]="!!log.failure_reason">
                 <span class="audit-time">{{ formatTime(log.created_at) }}</span>
                 <span class="audit-user">{{ log.username }}</span>
                 <span class="audit-action">{{ log.action }}</span>
                 <span class="audit-detail">{{ log.detail }}</span>
+                <span class="audit-failure" *ngIf="log.failure_reason">❌ {{ log.failure_reason }}</span>
               </div>
             </div>
             <div *ngIf="auditLogs.length === 0" class="empty-tip">暂无审计记录</div>
@@ -255,6 +256,8 @@ import {
     .audit-user { font-weight: 500; color: #6d28d9; }
     .audit-action { background: #f5f3ff; color: #6d28d9; padding: 1px 7px; border-radius: 4px; }
     .audit-detail { color: #6b7280; flex: 1; }
+    .audit-failure { color: #b91c1c; background: #fef2f2; padding: 1px 7px; border-radius: 4px; flex: 100%; font-family: monospace; }
+    .audit-item-failed { border-left: 3px solid #ef4444; background: #fff5f5; }
 
     .empty-tip { color: #9ca3af; font-size: 13px; padding: 12px; text-align: center; background: #fafafa; border-radius: 6px; }
   `]
@@ -275,8 +278,14 @@ export class BatchListComponent implements OnInit {
   ngOnInit() {
     this.api.getCurrentUser().subscribe((u) => {
       this.currentUser = u;
-      if (u) this.refresh();
-      else this.batches = [];
+      this.selectedRetryIds = [];
+      if (u) {
+        this.refresh();
+      } else {
+        this.batches = [];
+        this.selectedBatch = null;
+        this.auditLogs = [];
+      }
     });
   }
 

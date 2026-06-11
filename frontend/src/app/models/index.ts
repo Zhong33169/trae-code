@@ -91,6 +91,7 @@ export interface AuditLog {
   old_status?: string;
   new_status?: string;
   detail?: string;
+  failure_reason?: string;
   created_at: string;
 }
 

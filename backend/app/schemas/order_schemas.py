@@ -133,6 +133,7 @@ class AuditLogOut(BaseModel):
     old_status: Optional[str]
     new_status: Optional[str]
     detail: Optional[str]
+    failure_reason: Optional[str]
     created_at: datetime
 
     class Config:

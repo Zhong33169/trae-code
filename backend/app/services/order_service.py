@@ -90,12 +90,6 @@ EDITABLE_INFO_BY_ROLE_STATUS = {
             "receiver": [OrderStatus.IN_TRANSIT, OrderStatus.DELIVERED, OrderStatus.REJECTED],
         }
     },
-    RoleEnum.INITIATOR: {
-        "fields": {
-            "plate_number": [OrderStatus.DRAFT, OrderStatus.REJECTED],
-            "driver": [OrderStatus.DRAFT, OrderStatus.REJECTED],
-        }
-    },
 }
 
 

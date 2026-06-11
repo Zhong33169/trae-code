@@ -83,9 +83,24 @@ class BatchService:
                 item.error_message = f"订单不存在：id={item.order_id}"
                 item.processed_at = datetime.utcnow()
                 failed_count += 1
+                fail_log = AuditLog(
+                    order_id=item.order_id,
+                    order_no=item.order_no,
+                    batch_id=batch.id,
+                    batch_no=batch.batch_no,
+                    user_id=user.id,
+                    username=user.username,
+                    action="batch_item_failed",
+                    old_status=None,
+                    new_status=None,
+                    detail=f"批量处理失败（订单不存在）：目标状态 {batch.target_status.value}",
+                    failure_reason=item.error_message,
+                )
+                db.add(fail_log)
                 continue
 
             try:
+                old_status = order.status
                 OrderService.validate_transition(db, order, batch.target_status, user, order.version)
                 OrderService.transition_order(db, order.id, batch.target_status, user, order.version, f"批量变更批次: {batch.batch_no}")
 
@@ -98,6 +113,20 @@ class BatchService:
                 item.error_message = f"[{e.code}] {e.message}"
                 item.processed_at = datetime.utcnow()
                 failed_count += 1
+                fail_log = AuditLog(
+                    order_id=order.id,
+                    order_no=order.order_no,
+                    batch_id=batch.id,
+                    batch_no=batch.batch_no,
+                    user_id=user.id,
+                    username=user.username,
+                    action="batch_item_failed",
+                    old_status=old_status.value if old_status else None,
+                    new_status=None,
+                    detail=f"批量处理失败：目标状态 {batch.target_status.value}",
+                    failure_reason=item.error_message,
+                )
+                db.add(fail_log)
 
         batch.success_count = success_count
         batch.failed_count = failed_count
