@@ -5,8 +5,14 @@ use crate::models::{CreativeDemand, DemandStatus, TransitionRequest};
 pub struct TransitionResult {
     pub success: bool,
     pub message: String,
+    pub error_code: Option<String>,
     pub demand: Option<CreativeDemand>,
 }
+
+pub const ERROR_CODE_VERSION_CONFLICT: &str = "VERSION_CONFLICT";
+pub const ERROR_CODE_PERMISSION_DENIED: &str = "PERMISSION_DENIED";
+pub const ERROR_CODE_PREREQUISITE_MISSING: &str = "PREREQUISITE_MISSING";
+pub const ERROR_CODE_INVALID_TRANSITION: &str = "INVALID_TRANSITION";
 
 pub async fn validate_and_transition(
     pool: &SqlitePool,
@@ -32,10 +38,26 @@ pub async fn validate_and_transition(
             return Ok(TransitionResult {
                 success: false,
                 message: "创意需求单不存在".to_string(),
+                error_code: Some("NOT_FOUND".to_string()),
                 demand: None,
             });
         }
     };
+
+    if let Some(client_version) = request.version {
+        if client_version != demand.version {
+            tx.rollback().await?;
+            return Ok(TransitionResult {
+                success: false,
+                message: format!(
+                    "版本冲突：您的版本={}，当前最新版本={}，请刷新后重试",
+                    client_version, demand.version
+                ),
+                error_code: Some(ERROR_CODE_VERSION_CONFLICT.to_string()),
+                demand: Some(demand),
+            });
+        }
+    }
 
     let current_status = match DemandStatus::from_str(&demand.status) {
         Some(s) => s,
@@ -44,6 +66,7 @@ pub async fn validate_and_transition(
             return Ok(TransitionResult {
                 success: false,
                 message: "当前状态无效".to_string(),
+                error_code: Some(ERROR_CODE_INVALID_TRANSITION.to_string()),
                 demand: Some(demand),
             });
         }
@@ -56,6 +79,7 @@ pub async fn validate_and_transition(
             return Ok(TransitionResult {
                 success: false,
                 message: "目标状态无效".to_string(),
+                error_code: Some(ERROR_CODE_INVALID_TRANSITION.to_string()),
                 demand: Some(demand),
             });
         }
@@ -69,6 +93,7 @@ pub async fn validate_and_transition(
                 "权限不足或状态流转顺序错误：从 {} 到 {} 不允许角色 {} 操作",
                 demand.status, request.target_status, user_role
             ),
+            error_code: Some(ERROR_CODE_PERMISSION_DENIED.to_string()),
             demand: Some(demand),
         });
     }
@@ -78,6 +103,7 @@ pub async fn validate_and_transition(
         return Ok(TransitionResult {
             success: false,
             message: format!("证据缺失：{}", prereq_err),
+            error_code: Some(ERROR_CODE_PREREQUISITE_MISSING.to_string()),
             demand: Some(demand),
         });
     }
@@ -124,7 +150,11 @@ pub async fn validate_and_transition(
         tx.rollback().await?;
         return Ok(TransitionResult {
             success: false,
-            message: "并发冲突：该创意需求单已被其他用户修改，请刷新后重试".to_string(),
+            message: format!(
+                "并发冲突：该创意需求单已被其他用户修改（当前版本={}，您的版本={}），请刷新后重试",
+                demand.version + 1, demand.version
+            ),
+            error_code: Some(ERROR_CODE_VERSION_CONFLICT.to_string()),
             demand: Some(demand),
         });
     }
@@ -178,6 +208,7 @@ pub async fn validate_and_transition(
     Ok(TransitionResult {
         success: true,
         message: "状态流转成功".to_string(),
+        error_code: None,
         demand: Some(updated_demand),
     })
 }

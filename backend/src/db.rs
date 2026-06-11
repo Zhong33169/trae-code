@@ -52,15 +52,28 @@ pub async fn init_db(pool: &SqlitePool) -> Result<()> {
         r#"
         CREATE TABLE IF NOT EXISTS scan_records (
             id TEXT PRIMARY KEY,
-            creative_demand_id TEXT NOT NULL,
+            creative_demand_id TEXT,
             user_id TEXT NOT NULL,
+            user_name TEXT NOT NULL,
             user_role TEXT NOT NULL,
             scan_result TEXT NOT NULL,
+            error_code TEXT,
             error_message TEXT,
             scanned_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (creative_demand_id) REFERENCES creative_demands(id),
             FOREIGN KEY (user_id) REFERENCES users(id)
         )
+        "#
+    ).execute(pool).await?;
+
+    sqlx::query(
+        r#"
+        CREATE INDEX IF NOT EXISTS idx_scan_records_creative_demand ON scan_records(creative_demand_id)
+        "#
+    ).execute(pool).await?;
+
+    sqlx::query(
+        r#"
+        CREATE INDEX IF NOT EXISTS idx_scan_records_user ON scan_records(user_id)
         "#
     ).execute(pool).await?;
 

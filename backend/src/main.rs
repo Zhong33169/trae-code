@@ -66,6 +66,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/creative-demands/:id", get(handlers::creative_demand::get))
         .route("/creative-demands/:id", put(handlers::creative_demand::update))
         .route("/creative-demands/scan", post(handlers::creative_demand::scan))
+        .route("/creative-demands/scan-records", get(handlers::creative_demand::get_scan_records))
+        .route("/creative-demands/:id/scan-records", get(handlers::creative_demand::get_scan_records_for_demand))
         .route("/creative-demands/:id/transition", post(handlers::creative_demand::transition))
         .route("/creative-demands/batch-transition", post(handlers::creative_demand::batch_transition))
         .route("/creative-demands/statistics", get(handlers::creative_demand::statistics))

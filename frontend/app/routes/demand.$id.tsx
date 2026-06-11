@@ -4,10 +4,18 @@ import {
   apiFetch,
   CreativeDemand,
   AuditLog,
+  ScanRecord,
+  ApiError,
   statusLabels,
   statusColors,
   roleLabels,
+  scanResultLabels,
+  scanResultColors,
+  scanErrorCodeLabels,
   getAvailableActions,
+  getScanRecords,
+  updateCreativeDemand,
+  transitionCreativeDemand,
   DemandStatus,
 } from "~/api/client";
 
@@ -25,6 +33,7 @@ export default function DemandDetail() {
   const navigate = useNavigate();
   const [demand, setDemand] = useState<CreativeDemand | null>(null);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+  const [scanRecords, setScanRecords] = useState<ScanRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -33,7 +42,7 @@ export default function DemandDetail() {
   const [transitionComments, setTransitionComments] = useState("");
   const [showTransitionModal, setShowTransitionModal] = useState(false);
   const [selectedAction, setSelectedAction] = useState<any>(null);
-  const [activeTab, setActiveTab] = useState<"main" | "brief" | "schedule" | "confirmation" | "audit">("main");
+  const [activeTab, setActiveTab] = useState<"main" | "brief" | "schedule" | "confirmation" | "audit" | "scan">("main");
 
   const userStr = typeof window !== "undefined" ? localStorage.getItem("user") : null;
   const user = userStr ? JSON.parse(userStr) : null;
@@ -46,14 +55,16 @@ export default function DemandDetail() {
     if (!id) return;
     setLoading(true);
     try {
-      const [demandRes, logsRes] = await Promise.all([
+      const [demandRes, logsRes, scanRes] = await Promise.all([
         apiFetch<CreativeDemand>(`/api/creative-demands/${id}`),
         apiFetch<{ items: AuditLog[] }>(
           `/api/audit-logs?creative_demand_id=${id}`
         ),
+        getScanRecords(id, 1, 50),
       ]);
       setDemand(demandRes);
       setAuditLogs(logsRes.items);
+      setScanRecords(scanRes.items);
       initFormData(demandRes);
     } catch (err: any) {
       setError(err.message || "加载数据失败");
@@ -89,22 +100,24 @@ export default function DemandDetail() {
         schedule_materials: formData.schedule_materials?.length > 0 ? formData.schedule_materials : undefined,
         confirmation_materials: formData.confirmation_materials?.length > 0 ? formData.confirmation_materials : undefined,
         attachments: formData.attachments?.length > 0 ? formData.attachments : undefined,
+        version: demand.version,
       };
 
-      const updated = await apiFetch<CreativeDemand>(
-        `/api/creative-demands/${demand.id}`,
-        {
-          method: "PUT",
-          body: JSON.stringify(updateData),
-        }
-      );
+      const updated = await updateCreativeDemand(demand.id, updateData);
       setDemand(updated);
       initFormData(updated);
       setEditMode(false);
       alert("保存成功");
       loadData();
     } catch (err: any) {
-      alert(`保存失败：${err.message}`);
+      if (err instanceof ApiError && err.isVersionConflict()) {
+        const conflictMsg = err.details?.error || err.message;
+        alert(`版本冲突：${conflictMsg}\n\n页面将自动刷新以获取最新数据。`);
+        setEditMode(false);
+        loadData();
+      } else {
+        alert(`保存失败：${err.message}`);
+      }
     } finally {
       setSaving(false);
     }
@@ -114,16 +127,11 @@ export default function DemandDetail() {
     if (!demand || !selectedAction) return;
 
     try {
-      const result = await apiFetch<any>(
-        `/api/creative-demands/${demand.id}/transition`,
-        {
-          method: "POST",
-          body: JSON.stringify({
-            target_status: selectedAction.target,
-            comments: transitionComments || undefined,
-          }),
-        }
-      );
+      const result = await transitionCreativeDemand(demand.id, {
+        target_status: selectedAction.target,
+        comments: transitionComments || undefined,
+        version: demand.version,
+      });
 
       if (result.success) {
         alert("操作成功");
@@ -132,10 +140,19 @@ export default function DemandDetail() {
         setSelectedAction(null);
         loadData();
       } else {
-        alert(`操作失败：${result.error}`);
+        alert(`操作失败：${result.message}`);
       }
     } catch (err: any) {
-      alert(`操作失败：${err.message}`);
+      if (err instanceof ApiError && err.isVersionConflict()) {
+        const conflictMsg = err.details?.error || err.message;
+        alert(`版本冲突：${conflictMsg}\n\n页面将自动刷新以获取最新数据。`);
+        setShowTransitionModal(false);
+        setTransitionComments("");
+        setSelectedAction(null);
+        loadData();
+      } else {
+        alert(`操作失败：${err.message}`);
+      }
     }
   };
 
@@ -286,7 +303,7 @@ export default function DemandDetail() {
         <div className="lg:col-span-2 space-y-6">
           <div className="card p-6">
             <div className="flex flex-wrap gap-2 border-b pb-4 mb-4">
-              {(["main", "brief", "schedule", "confirmation", "audit"] as const).map((tab) => (
+              {(["main", "brief", "schedule", "confirmation", "scan", "audit"] as const).map((tab) => (
                 <button
                   key={tab}
                   className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
@@ -300,6 +317,7 @@ export default function DemandDetail() {
                   {tab === "brief" && "brief接收"}
                   {tab === "schedule" && "创意排期"}
                   {tab === "confirmation" && "客户确认"}
+                  {tab === "scan" && "扫码记录"}
                   {tab === "audit" && "审计记录"}
                 </button>
               ))}
@@ -577,6 +595,76 @@ export default function DemandDetail() {
                     <div className="text-green-700 font-medium">
                       ✓ 客户确认材料和处理意见已完整，可完成归档
                     </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {activeTab === "scan" && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-lg font-semibold">扫码核验记录</h3>
+                  <span className="text-sm text-gray-500">
+                    共 {scanRecords.length} 条记录
+                  </span>
+                </div>
+                {scanRecords.length === 0 ? (
+                  <div className="text-center py-12 text-gray-500">
+                    <div className="text-4xl mb-2">📱</div>
+                    <div>暂无扫码核验记录</div>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {scanRecords.map((record) => (
+                      <div
+                        key={record.id}
+                        className={`border rounded-lg p-4 ${
+                          record.scan_result === "success"
+                            ? "bg-green-50 border-green-200"
+                            : "bg-red-50 border-red-200"
+                        }`}
+                      >
+                        <div className="flex items-start justify-between">
+                          <div className="flex items-center gap-3">
+                            <div className="text-2xl">
+                              {record.scan_result === "success" ? "✅" : "❌"}
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="font-medium text-gray-900">
+                                  {record.user_name}
+                                </span>
+                                <span className="text-xs px-2 py-0.5 bg-gray-100 text-gray-600 rounded">
+                                  {roleLabels[record.user_role] || record.user_role}
+                                </span>
+                                <span
+                                  className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                                    scanResultColors[record.scan_result]
+                                  }`}
+                                >
+                                  {scanResultLabels[record.scan_result]}
+                                </span>
+                              </div>
+                              <div className="text-xs text-gray-500 mt-1">
+                                {new Date(record.scanned_at).toLocaleString()}
+                              </div>
+                              {record.error_code && (
+                                <div className="mt-2">
+                                  <span className="text-xs px-2 py-0.5 bg-red-100 text-red-700 rounded font-medium">
+                                    {scanErrorCodeLabels[record.error_code] || record.error_code}
+                                  </span>
+                                </div>
+                              )}
+                              {record.error_message && (
+                                <div className="mt-2 text-sm text-red-700 bg-red-100 px-3 py-2 rounded">
+                                  {record.error_message}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>

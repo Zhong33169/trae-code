@@ -43,7 +43,8 @@ export async function apiFetch<T>(
     throw new ApiError(
       data.error || `HTTP ${response.status}`,
       data.code || "UNKNOWN_ERROR",
-      response.status
+      response.status,
+      data
     );
   }
 
@@ -53,12 +54,18 @@ export async function apiFetch<T>(
 export class ApiError extends Error {
   code: string;
   status: number;
+  details?: any;
 
-  constructor(message: string, code: string, status: number) {
+  constructor(message: string, code: string, status: number, details?: any) {
     super(message);
     this.code = code;
     this.status = status;
+    this.details = details;
     this.name = "ApiError";
+  }
+
+  isVersionConflict(): boolean {
+    return this.code === "VERSION_CONFLICT" || this.status === 409;
   }
 }
 
@@ -124,6 +131,101 @@ export interface ScanResponse {
   error_message: string | null;
   is_current_handler: boolean;
   current_handler_role: string | null;
+}
+
+export interface ScanRecord {
+  id: string;
+  creative_demand_id: string;
+  creative_demand_code: string | null;
+  creative_demand_title: string | null;
+  user_id: string;
+  user_name: string;
+  user_role: string;
+  scan_result: "success" | "failed";
+  error_code: string | null;
+  error_message: string | null;
+  scanned_at: string;
+}
+
+export interface ScanRecordListResponse {
+  items: ScanRecord[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export const scanResultLabels: Record<string, string> = {
+  success: "核验通过",
+  failed: "核验失败",
+};
+
+export const scanResultColors: Record<string, string> = {
+  success: "bg-green-100 text-green-800",
+  failed: "bg-red-100 text-red-800",
+};
+
+export const scanErrorCodeLabels: Record<string, string> = {
+  INVALID_CODE: "无效二维码",
+  DUPLICATE_SCAN: "重复扫码",
+  WRONG_HANDLER: "非当前处理人",
+};
+
+export async function getScanRecords(demandId?: string, page = 1, pageSize = 20): Promise<ScanRecordListResponse> {
+  const params = new URLSearchParams({
+    page: String(page),
+    page_size: String(pageSize),
+  });
+  
+  const url = demandId 
+    ? `/api/creative-demands/${demandId}/scan-records?${params}`
+    : `/api/creative-demands/scan-records?${params}`;
+  
+  return apiFetch<ScanRecordListResponse>(url);
+}
+
+export interface UpdateCreativeDemandRequest {
+  title?: string;
+  client_name?: string;
+  brief_materials?: string[];
+  brief_deadline?: string;
+  brief_opinion?: string;
+  schedule_materials?: string[];
+  schedule_deadline?: string;
+  schedule_opinion?: string;
+  confirmation_materials?: string[];
+  confirmation_deadline?: string;
+  confirmation_opinion?: string;
+  attachments?: string[];
+  remarks?: string;
+  processing_result?: string;
+  return_reason?: string;
+  version?: number;
+}
+
+export interface TransitionRequest {
+  target_status: string;
+  comments?: string;
+  version?: number;
+}
+
+export async function updateCreativeDemand(
+  id: string,
+  data: UpdateCreativeDemandRequest
+): Promise<CreativeDemand> {
+  return apiFetch<CreativeDemand>(`/api/creative-demands/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function transitionCreativeDemand(
+  id: string,
+  data: TransitionRequest
+): Promise<{ success: boolean; message: string; data: CreativeDemand }> {
+  return apiFetch(`/api/creative-demands/${id}/transition`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
 }
 
 export interface Statistics {

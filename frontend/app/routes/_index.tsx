@@ -4,10 +4,19 @@ import {
   apiFetch,
   CreativeDemand,
   Statistics,
+  ScanRecord,
+  AuditLog,
   statusLabels,
   statusColors,
+  roleLabels,
+  scanResultLabels,
+  scanResultColors,
+  scanErrorCodeLabels,
   DemandStatus,
   getAvailableActions,
+  getScanRecords,
+  updateCreativeDemand,
+  transitionCreativeDemand,
   ApiError,
 } from "~/api/client";
 
@@ -15,6 +24,8 @@ export default function Index() {
   const navigate = useNavigate();
   const [demands, setDemands] = useState<CreativeDemand[]>([]);
   const [statistics, setStatistics] = useState<Statistics | null>(null);
+  const [recentScanRecords, setRecentScanRecords] = useState<ScanRecord[]>([]);
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [statusFilter, setStatusFilter] = useState<DemandStatus | "all">("all");
@@ -37,7 +48,7 @@ export default function Index() {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [statsRes, demandsRes] = await Promise.all([
+      const [statsRes, demandsRes, scanRes] = await Promise.all([
         apiFetch<Statistics>("/api/creative-demands/statistics"),
         apiFetch<{ items: CreativeDemand[]; total: number }>(
           `/api/creative-demands?${new URLSearchParams({
@@ -45,9 +56,11 @@ export default function Index() {
             ...(mineOnly ? { mine: "true" } : {}),
           })}`
         ),
+        getScanRecords(undefined, 1, 10),
       ]);
       setStatistics(statsRes);
       setDemands(demandsRes.items);
+      setRecentScanRecords(scanRes.items);
     } catch (err: any) {
       setError(err.message || "加载数据失败");
     } finally {
@@ -101,24 +114,53 @@ export default function Index() {
     if (!batchAction || selectedIds.size === 0) return;
 
     try {
+      const versions = Array.from(selectedIds).map(
+        (id) => demands.find((d) => d.id === id)?.version || 0
+      );
+
       const result = await apiFetch<any>("/api/creative-demands/batch-transition", {
         method: "POST",
         body: JSON.stringify({
           ids: Array.from(selectedIds),
           target_status: batchAction,
           comments: batchComments || undefined,
+          versions,
         }),
       });
 
-      alert(
-        `批量处理完成：成功 ${result.success_count} 个，失败 ${result.fail_count} 个`
-      );
+      let message = `批量处理完成：成功 ${result.success_count} 个，失败 ${result.fail_count} 个`;
+      if (result.results) {
+        const conflicts = result.results.filter(
+          (r: any) => r.error_code === "VERSION_CONFLICT"
+        );
+        if (conflicts.length > 0) {
+          message += `\n\n版本冲突 ${conflicts.length} 个，页面将自动刷新。`;
+        }
+      }
+      alert(message);
       setShowBatchModal(false);
       setSelectedIds(new Set());
       loadData();
     } catch (err: any) {
-      alert(`批量处理失败：${err.message}`);
+      if (err instanceof ApiError && err.isVersionConflict()) {
+        const conflictMsg = err.details?.error || err.message;
+        alert(`版本冲突：${conflictMsg}\n\n页面将自动刷新以获取最新数据。`);
+        loadData();
+      } else {
+        alert(`批量处理失败：${err.message}`);
+      }
     }
+  };
+
+  const toggleRow = (id: string, event: React.MouseEvent) => {
+    event.stopPropagation();
+    const newExpanded = new Set(expandedRows);
+    if (newExpanded.has(id)) {
+      newExpanded.delete(id);
+    } else {
+      newExpanded.add(id);
+    }
+    setExpandedRows(newExpanded);
   };
 
   const handleQuickAction = async (
@@ -132,17 +174,26 @@ export default function Index() {
     if (comments === null) return;
 
     try {
-      await apiFetch(`/api/creative-demands/${demand.id}/transition`, {
-        method: "POST",
-        body: JSON.stringify({
-          target_status: targetStatus,
-          comments: comments || undefined,
-        }),
+      const result = await transitionCreativeDemand(demand.id, {
+        target_status: targetStatus,
+        comments: comments || undefined,
+        version: demand.version,
       });
-      alert("操作成功");
-      loadData();
+
+      if (result.success) {
+        alert("操作成功");
+        loadData();
+      } else {
+        alert(`操作失败：${result.message}`);
+      }
     } catch (err: any) {
-      alert(`操作失败：${err.message}`);
+      if (err instanceof ApiError && err.isVersionConflict()) {
+        const conflictMsg = err.details?.error || err.message;
+        alert(`版本冲突：${conflictMsg}\n\n页面将自动刷新以获取最新数据。`);
+        loadData();
+      } else {
+        alert(`操作失败：${err.message}`);
+      }
     }
   };
 
@@ -234,6 +285,56 @@ export default function Index() {
         </div>
       )}
 
+      {recentScanRecords.length > 0 && (
+        <div className="card p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+              <span>📱</span>
+              最近扫码核验记录
+            </h3>
+            <button
+              className="text-xs text-primary-600 hover:text-primary-800"
+              onClick={loadData}
+            >
+              刷新
+            </button>
+          </div>
+          <div className="space-y-2 max-h-48 overflow-y-auto">
+            {recentScanRecords.map((record) => (
+              <div
+                key={record.id}
+                className={`flex items-center justify-between p-2 rounded text-sm ${
+                  record.scan_result === "success"
+                    ? "bg-green-50"
+                    : "bg-red-50"
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <span>{record.scan_result === "success" ? "✅" : "❌"}</span>
+                  <span className="font-mono text-xs text-gray-500">
+                    {record.creative_demand_code || record.creative_demand_id.slice(0, 8)}
+                  </span>
+                  <span className="text-gray-700">
+                    {record.user_name}
+                  </span>
+                  <span className="text-xs px-2 py-0.5 bg-gray-100 text-gray-600 rounded">
+                    {roleLabels[record.user_role] || record.user_role}
+                  </span>
+                  {record.error_code && (
+                    <span className="text-xs px-2 py-0.5 bg-red-100 text-red-700 rounded font-medium">
+                      {scanErrorCodeLabels[record.error_code] || record.error_code}
+                    </span>
+                  )}
+                </div>
+                <span className="text-xs text-gray-500">
+                  {new Date(record.scanned_at).toLocaleString()}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="flex flex-wrap gap-4 items-center">
         <div className="flex gap-2">
           <select
@@ -298,6 +399,7 @@ export default function Index() {
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
+                <th className="px-4 py-3 text-left w-8"></th>
                 <th className="px-4 py-3 text-left">
                   <input
                     type="checkbox"
@@ -322,6 +424,9 @@ export default function Index() {
                   当前处理人
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  版本
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   创建时间
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -332,76 +437,173 @@ export default function Index() {
             <tbody className="bg-white divide-y divide-gray-200">
               {demands.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-4 py-12 text-center text-gray-500">
+                  <td colSpan={10} className="px-4 py-12 text-center text-gray-500">
                     暂无数据
                   </td>
                 </tr>
               ) : (
-                demands.map((demand) => (
-                  <tr
-                    key={demand.id}
-                    className="hover:bg-gray-50 cursor-pointer transition-colors"
-                    onClick={() => navigate(`/demand/${demand.id}`)}
-                  >
-                    <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
-                      <input
-                        type="checkbox"
-                        checked={selectedIds.has(demand.id)}
-                        onChange={() => handleSelect(demand.id)}
-                        className="w-4 h-4"
-                      />
-                    </td>
-                    <td className="px-4 py-3 text-sm font-mono text-gray-900">
-                      {demand.code}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-gray-900">
-                      {demand.title}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-gray-500">
-                      {demand.client_name}
-                    </td>
-                    <td className="px-4 py-3">
-                      <span
-                        className={`px-2 py-1 text-xs font-medium rounded-full ${
-                          statusColors[demand.status]
-                        }`}
+                demands.map((demand) => {
+                  const demandScanRecords = recentScanRecords.filter(
+                    (r) => r.creative_demand_id === demand.id
+                  );
+                  const isExpanded = expandedRows.has(demand.id);
+
+                  return (
+                    <>
+                      <tr
+                        key={demand.id}
+                        className="hover:bg-gray-50 cursor-pointer transition-colors"
+                        onClick={() => navigate(`/demand/${demand.id}`)}
                       >
-                        {statusLabels[demand.status]}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-sm text-gray-500">
-                      {demand.current_handler_role === "registrar" && "登记员"}
-                      {demand.current_handler_role === "supervisor" && "主管"}
-                      {demand.current_handler_role === "reviewer" && "复核人"}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-gray-500">
-                      {new Date(demand.created_at).toLocaleString()}
-                    </td>
-                    <td className="px-4 py-3 text-sm" onClick={(e) => e.stopPropagation()}>
-                      <div className="flex gap-2">
-                        {getAvailableActions(demand.status, user?.role || "").map(
-                          (action) => (
-                            <button
-                              key={action.key}
-                              className={`text-xs px-2 py-1 rounded ${
-                                action.variant === "primary"
-                                  ? "bg-blue-100 text-blue-700 hover:bg-blue-200"
-                                  : action.variant === "warning"
-                                  ? "bg-yellow-100 text-yellow-700 hover:bg-yellow-200"
-                                  : "bg-red-100 text-red-700 hover:bg-red-200"
-                              }`}
-                              onClick={(e) =>
-                                handleQuickAction(demand, action.target, e)
-                              }
-                            >
-                              {action.label}
-                            </button>
-                          )
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))
+                        <td className="px-2 py-3" onClick={(e) => toggleRow(demand.id, e)}>
+                          <button className="text-gray-400 hover:text-gray-600">
+                            {isExpanded ? "▼" : "▶"}
+                          </button>
+                        </td>
+                        <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            checked={selectedIds.has(demand.id)}
+                            onChange={() => handleSelect(demand.id)}
+                            className="w-4 h-4"
+                          />
+                        </td>
+                        <td className="px-4 py-3 text-sm font-mono text-gray-900">
+                          {demand.code}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-900">
+                          {demand.title}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-500">
+                          {demand.client_name}
+                        </td>
+                        <td className="px-4 py-3">
+                          <span
+                            className={`px-2 py-1 text-xs font-medium rounded-full ${
+                              statusColors[demand.status]
+                            }`}
+                          >
+                            {statusLabels[demand.status]}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-500">
+                          {roleLabels[demand.current_handler_role] || demand.current_handler_role}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-500">
+                          v{demand.version}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-500">
+                          {new Date(demand.created_at).toLocaleString()}
+                        </td>
+                        <td className="px-4 py-3 text-sm" onClick={(e) => e.stopPropagation()}>
+                          <div className="flex gap-2">
+                            {getAvailableActions(demand.status, user?.role || "").map(
+                              (action) => (
+                                <button
+                                  key={action.key}
+                                  className={`text-xs px-2 py-1 rounded ${
+                                    action.variant === "primary"
+                                      ? "bg-blue-100 text-blue-700 hover:bg-blue-200"
+                                      : action.variant === "warning"
+                                      ? "bg-yellow-100 text-yellow-700 hover:bg-yellow-200"
+                                      : "bg-red-100 text-red-700 hover:bg-red-200"
+                                  }`}
+                                  onClick={(e) =>
+                                    handleQuickAction(demand, action.target, e)
+                                  }
+                                >
+                                  {action.label}
+                                </button>
+                              )
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                      {isExpanded && (
+                        <tr key={`${demand.id}-expanded`} className="bg-gray-50">
+                          <td colSpan={10} className="px-4 py-3">
+                            <div className="space-y-3">
+                              {demand.remarks && (
+                                <div>
+                                  <label className="text-xs font-medium text-gray-500">审计备注</label>
+                                  <div className="text-sm text-gray-700 bg-white px-3 py-2 rounded border mt-1">
+                                    {demand.remarks}
+                                  </div>
+                                </div>
+                              )}
+                              {demand.return_reason && (
+                                <div>
+                                  <label className="text-xs font-medium text-gray-500">退回说明</label>
+                                  <div className="text-sm text-red-700 bg-red-50 px-3 py-2 rounded border border-red-200 mt-1">
+                                    {demand.return_reason}
+                                  </div>
+                                </div>
+                              )}
+                              {demand.processing_result && (
+                                <div>
+                                  <label className="text-xs font-medium text-gray-500">处理结果</label>
+                                  <div className="text-sm text-green-700 bg-green-50 px-3 py-2 rounded border border-green-200 mt-1">
+                                    {demand.processing_result}
+                                  </div>
+                                </div>
+                              )}
+                              {demandScanRecords.length > 0 && (
+                                <div>
+                                  <label className="text-xs font-medium text-gray-500">扫码核验记录</label>
+                                  <div className="space-y-2 mt-1">
+                                    {demandScanRecords.map((record) => (
+                                      <div
+                                        key={record.id}
+                                        className={`flex items-center gap-3 p-2 rounded text-sm ${
+                                          record.scan_result === "success"
+                                            ? "bg-green-50 border border-green-200"
+                                            : "bg-red-50 border border-red-200"
+                                        }`}
+                                      >
+                                        <span>{record.scan_result === "success" ? "✅" : "❌"}</span>
+                                        <span className="font-medium text-gray-900">
+                                          {record.user_name}
+                                        </span>
+                                        <span className="text-xs px-2 py-0.5 bg-gray-100 text-gray-600 rounded">
+                                          {roleLabels[record.user_role] || record.user_role}
+                                        </span>
+                                        <span
+                                          className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                                            scanResultColors[record.scan_result]
+                                          }`}
+                                        >
+                                          {scanResultLabels[record.scan_result]}
+                                        </span>
+                                        {record.error_code && (
+                                          <span className="text-xs px-2 py-0.5 bg-red-100 text-red-700 rounded font-medium">
+                                            {scanErrorCodeLabels[record.error_code] || record.error_code}
+                                          </span>
+                                        )}
+                                        {record.error_message && (
+                                          <span className="text-sm text-red-700">
+                                            {record.error_message}
+                                          </span>
+                                        )}
+                                        <span className="text-xs text-gray-500 ml-auto">
+                                          {new Date(record.scanned_at).toLocaleString()}
+                                        </span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                              {demandScanRecords.length === 0 && (
+                                <div className="text-sm text-gray-400 italic">
+                                  暂无扫码核验记录
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </>
+                  );
+                })
               )}
             </tbody>
           </table>

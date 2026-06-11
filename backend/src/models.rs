@@ -114,12 +114,14 @@ pub struct UpdateCreativeDemandRequest {
     pub remarks: Option<String>,
     pub processing_result: Option<String>,
     pub return_reason: Option<String>,
+    pub version: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TransitionRequest {
     pub target_status: String,
     pub comments: Option<String>,
+    pub version: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -127,6 +129,7 @@ pub struct BatchTransitionRequest {
     pub ids: Vec<String>,
     pub target_status: String,
     pub comments: Option<String>,
+    pub versions: Option<Vec<i64>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -149,10 +152,33 @@ pub struct ScanRecord {
     pub id: String,
     pub creative_demand_id: String,
     pub user_id: String,
+    pub user_name: String,
     pub user_role: String,
     pub scan_result: String,
+    pub error_code: Option<String>,
     pub error_message: Option<String>,
     pub scanned_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct ScanRecordWithDetails {
+    pub id: String,
+    pub creative_demand_id: String,
+    pub creative_demand_code: Option<String>,
+    pub creative_demand_title: Option<String>,
+    pub user_id: String,
+    pub user_name: String,
+    pub user_role: String,
+    pub scan_result: String,
+    pub error_code: Option<String>,
+    pub error_message: Option<String>,
+    pub scanned_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScanRecordListResponse {
+    pub items: Vec<ScanRecordWithDetails>,
+    pub total: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]

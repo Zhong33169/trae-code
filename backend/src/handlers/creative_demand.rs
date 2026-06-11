@@ -27,6 +27,12 @@ pub struct ListQuery {
     pub page_size: Option<i64>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct ScanRecordQuery {
+    pub page: Option<i64>,
+    pub page_size: Option<i64>,
+}
+
 pub async fn list(
     State(state): State<AppState>,
     Query(query): Query<ListQuery>,
@@ -224,7 +230,24 @@ pub async fn update(
             StatusCode::FORBIDDEN,
             Json(serde_json::json!({
                 "error": "您不是当前处理人，无权修改此创意需求单",
-                "code": "PERMISSION_DENIED"
+                "code": "PERMISSION_DENIED",
+                "current_version": demand.version,
+            }))
+        ).into_response();
+    }
+
+    let client_version = req.version.unwrap_or(demand.version);
+    if client_version != demand.version {
+        return (
+            StatusCode::CONFLICT,
+            Json(serde_json::json!({
+                "error": format!(
+                    "版本冲突：您的版本={}，当前最新版本={}，请刷新后重试",
+                    client_version, demand.version
+                ),
+                "code": "VERSION_CONFLICT",
+                "current_version": demand.version,
+                "client_version": client_version,
             }))
         ).into_response();
     }
@@ -289,8 +312,13 @@ pub async fn update(
             return (
                 StatusCode::CONFLICT,
                 Json(serde_json::json!({
-                    "error": "并发冲突：该创意需求单已被其他用户修改，请刷新后重试",
-                    "code": "CONCURRENCY_CONFLICT"
+                    "error": format!(
+                        "并发冲突：该创意需求单已被其他用户修改（当前版本={}，您的版本={}），请刷新后重试",
+                        demand.version + 1, demand.version
+                    ),
+                    "code": "VERSION_CONFLICT",
+                    "current_version": demand.version + 1,
+                    "client_version": demand.version,
                 }))
             ).into_response();
         }
@@ -339,6 +367,7 @@ pub async fn scan(
         &state.pool,
         &req.code,
         &auth_user.id,
+        &auth_user.name,
         &auth_user.role,
     ).await;
 
@@ -349,6 +378,63 @@ pub async fn scan(
             Json(serde_json::json!({
                 "error": format!("扫码失败: {}", e),
                 "code": "SCAN_FAILED"
+            }))
+        ).into_response(),
+    }
+}
+
+pub async fn get_scan_records(
+    State(state): State<AppState>,
+    Query(query): Query<ScanRecordQuery>,
+    Extension(_auth_user): Extension<Arc<AuthUser>>,
+) -> Response {
+    let page = query.page.unwrap_or(1);
+    let page_size = query.page_size.unwrap_or(20);
+    let offset = (page - 1) * page_size;
+
+    let result = scan::get_scan_records(&state.pool, None, page_size, offset).await;
+
+    match result {
+        Ok(response) => Json(serde_json::json!({
+            "items": response.items,
+            "total": response.total,
+            "page": page,
+            "page_size": page_size,
+        })).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({
+                "error": format!("查询扫码记录失败: {}", e),
+                "code": "QUERY_FAILED"
+            }))
+        ).into_response(),
+    }
+}
+
+pub async fn get_scan_records_for_demand(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Query(query): Query<ScanRecordQuery>,
+    Extension(_auth_user): Extension<Arc<AuthUser>>,
+) -> Response {
+    let page = query.page.unwrap_or(1);
+    let page_size = query.page_size.unwrap_or(50);
+    let offset = (page - 1) * page_size;
+
+    let result = scan::get_scan_records(&state.pool, Some(&id), page_size, offset).await;
+
+    match result {
+        Ok(response) => Json(serde_json::json!({
+            "items": response.items,
+            "total": response.total,
+            "page": page,
+            "page_size": page_size,
+        })).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({
+                "error": format!("查询扫码记录失败: {}", e),
+                "code": "QUERY_FAILED"
             }))
         ).into_response(),
     }
@@ -378,12 +464,19 @@ pub async fn transition(
             })).into_response()
         }
         Ok(r) => {
+            let status_code = if r.error_code.as_deref() == Some("VERSION_CONFLICT") {
+                StatusCode::CONFLICT
+            } else if r.error_code.as_deref() == Some("PERMISSION_DENIED") {
+                StatusCode::FORBIDDEN
+            } else {
+                StatusCode::BAD_REQUEST
+            };
             (
-                StatusCode::BAD_REQUEST,
+                status_code,
                 Json(serde_json::json!({
                     "success": false,
                     "error": r.message,
-                    "code": "TRANSITION_FAILED",
+                    "code": r.error_code.unwrap_or("TRANSITION_FAILED".to_string()),
                     "data": r.demand
                 }))
             ).into_response()
@@ -407,10 +500,12 @@ pub async fn batch_transition(
     let mut success_count = 0;
     let mut fail_count = 0;
 
-    for id in &req.ids {
+    for (i, id) in req.ids.iter().enumerate() {
+        let version = req.versions.as_ref().and_then(|v| v.get(i).copied());
         let transition_req = TransitionRequest {
             target_status: req.target_status.clone(),
             comments: req.comments.clone(),
+            version,
         };
 
         let result = transition::validate_and_transition(
@@ -436,7 +531,8 @@ pub async fn batch_transition(
                 results.push(serde_json::json!({
                     "id": id,
                     "success": false,
-                    "error": r.message
+                    "error": r.message,
+                    "code": r.error_code
                 }));
             }
             Err(e) => {
