@@ -200,6 +200,38 @@ func seedData() error {
 			CreatedBy: "u_registrar_1", CreatedByName: "直播选品登记员-小李",
 			CreatedAt: now, UpdatedAt: now,
 		},
+		{
+			ID: "sel_batch_ok", ProductName: "电动牙刷套装", Category: "数码家电",
+			Brand: "飞利浦", Supplier: "飞利浦官方授权店",
+			Price: 399.0, Commission: 0.20,
+			Description: "爆款个人护理，附件齐全，用于批量通过成功样例",
+			Status: "pending",
+			CreatedBy: "u_registrar_1", CreatedByName: "直播选品登记员-小李",
+			CreatedAt: twoDaysAgo, UpdatedAt: twoDaysAgo,
+			Deadline: &tomorrow,
+		},
+		{
+			ID: "sel_allrej", ProductName: "无品牌数据线", Category: "数码家电",
+			Brand: "白牌", Supplier: "华强北某档口",
+			Price: 19.9, Commission: 0.50,
+			Description: "低价数据线，附件全部被驳回，禁止全驳回附件通过审核",
+			Status: "missing_attachment",
+			CreatedBy: "u_registrar_1", CreatedByName: "直播选品登记员-小李",
+			CreatedAt: twoDaysAgo, UpdatedAt: yesterday,
+			Deadline: &tomorrow,
+			RejectReason: "所有附件均被驳回，请重新上传有效的品牌授权和质检报告",
+		},
+		{
+			ID: "sel_reviewer_return", ProductName: "高端红酒礼盒", Category: "食品生鲜",
+			Brand: "拉菲", Supplier: "某进口贸易公司",
+			Price: 1280.0, Commission: 0.28,
+			Description: "复核退回后等待补正样例：审核通过后被复核负责人退回，需要重新补正材料",
+			Status: "rejected",
+			CreatedBy: "u_registrar_1", CreatedByName: "直播选品登记员-小李",
+			CreatedAt: twoDaysAgo, UpdatedAt: now.Add(-2 * time.Hour),
+			RejectReason: "复核退回：进口食品检疫证明已过期，需重新提供最新的检验检疫文件；同时品牌授权链条不完整，需要补充从酒庄到国内供应商的完整授权链",
+			ProcessResult: "初审通过，拟安排下周排期",
+		},
 	}
 
 	selStmt, err := tx.Prepare(`INSERT INTO selections (
@@ -259,6 +291,12 @@ func seedData() error {
 		{"att_approved_1", "sel_approved", "品牌授权书.pdf", "授权文件", "https://example.com/att/app_auth.pdf", "u_registrar_1", twoDaysAgo.Format(time.RFC3339), 0, "", "", ""},
 		{"att_approved_2", "sel_approved", "质检报告.pdf", "质检文件", "https://example.com/att/app_qc.pdf", "u_registrar_1", twoDaysAgo.Format(time.RFC3339), 0, "", "", ""},
 		{"att_timeout_1", "sel_timeout", "产品图片.png", "图片资料", "https://example.com/att/timeout_img.png", "u_registrar_1", twoDaysAgo.Format(time.RFC3339), 0, "", "", ""},
+		{"att_batchok_1", "sel_batch_ok", "品牌授权书.pdf", "授权文件", "https://example.com/att/batchok_auth.pdf", "u_registrar_1", twoDaysAgo.Format(time.RFC3339), 0, "", "", ""},
+		{"att_batchok_2", "sel_batch_ok", "质检报告.pdf", "质检文件", "https://example.com/att/batchok_qc.pdf", "u_registrar_1", twoDaysAgo.Format(time.RFC3339), 0, "", "", ""},
+		{"att_allrej_1", "sel_allrej", "模糊的授权书.jpg", "授权文件", "https://example.com/att/allrej_auth.jpg", "u_registrar_1", twoDaysAgo.Format(time.RFC3339), 1, "图片严重模糊，无法辨认授权方名称和印章", "u_supervisor_1", rejectedAtStr},
+		{"att_allrej_2", "sel_allrej", "无效质检扫描件.pdf", "质检文件", "https://example.com/att/allrej_qc.pdf", "u_registrar_1", twoDaysAgo.Format(time.RFC3339), 1, "质检报告已过有效期，且缺少 CMA 认证章", "u_supervisor_1", rejectedAtStr},
+		{"att_return_1", "sel_reviewer_return", "原品牌授权书.pdf", "授权文件", "https://example.com/att/return_auth.pdf", "u_registrar_1", twoDaysAgo.Format(time.RFC3339), 1, "复核发现：授权链不完整，缺少酒庄到贸易商环节", "u_reviewer_1", now.Add(-2 * time.Hour).Format(time.RFC3339)},
+		{"att_return_2", "sel_reviewer_return", "商检证明.pdf", "质检文件", "https://example.com/att/return_ciq.pdf", "u_registrar_1", twoDaysAgo.Format(time.RFC3339), 1, "复核发现：进口食品检疫证明已过期 3 个月", "u_reviewer_1", now.Add(-2 * time.Hour).Format(time.RFC3339)},
 	}
 
 	for _, a := range attachments {
@@ -299,6 +337,27 @@ func seedData() error {
 		{"audit_12", "sel_approved", "u_supervisor_1", "直播选品审核主管-王主管", "审核通过", "材料齐全，品牌授权有效，质检通过", yesterdayStr},
 		{"audit_13", "sel_timeout", "u_registrar_1", "直播选品登记员-小李", "创建选品单", "创建防晒衣选品", twoDaysAgo.Format(time.RFC3339)},
 		{"audit_14", "sel_timeout", "u_registrar_1", "直播选品登记员-小李", "提交审核", "提交审核", twoDaysAgo.Add(time.Hour).Format(time.RFC3339)},
+
+		{"audit_15", "sel_batch_ok", "u_registrar_1", "直播选品登记员-小李", "创建选品单", "创建电动牙刷选品，用于批量通过成功样例", twoDaysAgo.Format(time.RFC3339)},
+		{"audit_16", "sel_batch_ok", "u_registrar_1", "直播选品登记员-小李", "上传附件", "附件: 品牌授权书.pdf (授权文件)", twoDaysAgo.Add(30 * time.Minute).Format(time.RFC3339)},
+		{"audit_17", "sel_batch_ok", "u_registrar_1", "直播选品登记员-小李", "上传附件", "附件: 质检报告.pdf (质检文件)", twoDaysAgo.Add(45 * time.Minute).Format(time.RFC3339)},
+		{"audit_18", "sel_batch_ok", "u_registrar_1", "直播选品登记员-小李", "提交审核", "提交至审核主管", twoDaysAgo.Add(time.Hour).Format(time.RFC3339)},
+
+		{"audit_19", "sel_allrej", "u_registrar_1", "直播选品登记员-小李", "创建选品单", "创建无品牌数据线选品", twoDaysAgo.Format(time.RFC3339)},
+		{"audit_20", "sel_allrej", "u_registrar_1", "直播选品登记员-小李", "上传附件", "附件: 模糊的授权书.jpg (授权文件)", twoDaysAgo.Add(30 * time.Minute).Format(time.RFC3339)},
+		{"audit_21", "sel_allrej", "u_registrar_1", "直播选品登记员-小李", "上传附件", "附件: 无效质检扫描件.pdf (质检文件)", twoDaysAgo.Add(45 * time.Minute).Format(time.RFC3339)},
+		{"audit_22", "sel_allrej", "u_registrar_1", "直播选品登记员-小李", "提交审核", "提交至审核主管", twoDaysAgo.Add(time.Hour).Format(time.RFC3339)},
+		{"audit_23", "sel_allrej", "u_supervisor_1", "直播选品审核主管-王主管", "驳回附件", "模糊的授权书.jpg: 图片严重模糊，无法辨认授权方名称和印章; 无效质检扫描件.pdf: 质检报告已过有效期，且缺少 CMA 认证章", rejectedAtStr},
+		{"audit_24", "sel_allrej", "u_supervisor_1", "直播选品审核主管-王主管", "标记缺材料", "所有附件均被驳回，请重新上传有效的品牌授权和质检报告", rejectedAt.Add(10 * time.Minute).Format(time.RFC3339)},
+		{"audit_25", "sel_allrej", "u_registrar_1", "直播选品登记员-小李", "补正提交失败", "有效附件=0，不足2份 | 原因: 全部 2 份附件均已被驳回，请重新上传未被驳回的品牌授权书、质检报告等至少 2 份", rejectedAt.Add(30 * time.Minute).Format(time.RFC3339)},
+
+		{"audit_26", "sel_reviewer_return", "u_registrar_1", "直播选品登记员-小李", "创建选品单", "创建高端红酒礼盒选品", twoDaysAgo.Format(time.RFC3339)},
+		{"audit_27", "sel_reviewer_return", "u_registrar_1", "直播选品登记员-小李", "上传附件", "附件: 原品牌授权书.pdf (授权文件)", twoDaysAgo.Add(30 * time.Minute).Format(time.RFC3339)},
+		{"audit_28", "sel_reviewer_return", "u_registrar_1", "直播选品登记员-小李", "上传附件", "附件: 商检证明.pdf (质检文件)", twoDaysAgo.Add(45 * time.Minute).Format(time.RFC3339)},
+		{"audit_29", "sel_reviewer_return", "u_registrar_1", "直播选品登记员-小李", "提交审核", "提交至审核主管", twoDaysAgo.Add(time.Hour).Format(time.RFC3339)},
+		{"audit_30", "sel_reviewer_return", "u_supervisor_1", "直播选品审核主管-王主管", "更新处理结果/备注", "结果: 初审通过，拟安排下周排期; 备注: 材料表面齐全，建议复核时重点核查进口资质", yesterdayStr},
+		{"audit_31", "sel_reviewer_return", "u_supervisor_1", "直播选品审核主管-王主管", "审核通过", "审核通过 - 材料齐全，授权有效，建议复核重点检查进口资质", yesterday.Add(time.Hour).Format(time.RFC3339)},
+		{"audit_32", "sel_reviewer_return", "u_reviewer_1", "复核负责人-张总", "复核退回", "退回原因: 复核退回：进口食品检疫证明已过期，需重新提供最新的检验检疫文件；同时品牌授权链条不完整，需要补充从酒庄到国内供应商的完整授权链 | 退回前处理结果: 初审通过，拟安排下周排期", now.Add(-2 * time.Hour).Format(time.RFC3339)},
 	}
 
 	for _, a := range audits {

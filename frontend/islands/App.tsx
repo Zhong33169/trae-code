@@ -49,6 +49,15 @@ export default function App(_props: Props) {
   const selectedIds = useSignal<string[]>([]);
   const showCreateModal = useSignal(false);
 
+  type BatchAction = "approve" | "reject" | "return" | "archive";
+  const showBatchModal = useSignal<BatchAction | null>(null);
+  const batchResultData = useSignal<{
+    action: BatchAction;
+    success_count: number;
+    total_count: number;
+    results: Array<{ id: string; product_name?: string; success: boolean; message: string }>;
+  } | null>(null);
+
   const isExceptionView = useComputed(() => statusFilter.value === "__exception__");
 
   const currentUser = useComputed(
@@ -147,37 +156,34 @@ export default function App(_props: Props) {
     }
   };
 
-  const batchAction = async (
-    action: "approve" | "reject" | "archive",
-    reason?: string
-  ) => {
+  const openBatchModal = (action: BatchAction) => {
     if (selectedIds.value.length === 0) {
       error.value = "请先选择要处理的选品单";
       return;
     }
-    if (action === "reject" && !reason) {
-      reason = prompt("请输入批量退回原因：");
-      if (!reason) return;
-    }
+    showBatchModal.value = action;
+  };
+
+  const confirmBatchAction = async (data: {
+    reason?: string;
+    result?: string;
+    note?: string;
+  }) => {
+    const action = showBatchModal.value;
+    if (!action) return;
     try {
       const res = await api.batchProcess(currentUserId.value, {
         ids: selectedIds.value,
         action,
-        reason,
+        ...data,
       });
-      const successCount = res.results.filter((r) => r.success).length;
-      const msgs = res.results
-        .map(
-          (r) =>
-            `${r.product_name || r.id}：${r.success ? "✅ " + r.message : "❌ " + r.message}`
-        )
-        .join("\n");
-      success.value = `批量处理完成，成功 ${successCount}/${res.results.length} 条\n\n${msgs}`;
+      batchResultData.value = { action, ...res };
+      showBatchModal.value = null;
       selectedIds.value = [];
       loadSelections();
-      setTimeout(() => (success.value = ""), 8000);
     } catch (e: any) {
       error.value = e.message;
+      showBatchModal.value = null;
     }
   };
 
@@ -327,6 +333,38 @@ export default function App(_props: Props) {
                     共 {filtered.length} 条
                   </span>
                 </h2>
+                {showCheckbox && filtered.length > 0 && (
+                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    {currentUser.value?.role === "supervisor" &&
+                      stKey === "missing_attachment" && (
+                        <>
+                          <button
+                            class="btn btn-success btn-sm"
+                            onClick={() => openBatchModal("approve")}
+                          >
+                            ✅ 批量通过
+                          </button>
+                          <button
+                            class="btn btn-danger btn-sm"
+                            onClick={() => openBatchModal("reject")}
+                          >
+                            🚫 批量退回
+                          </button>
+                        </>
+                      )}
+                    {currentUser.value?.role === "reviewer" && stKey === "timeout" && (
+                      <button
+                        class="btn btn-primary btn-sm"
+                        onClick={() => openBatchModal("archive")}
+                      >
+                        📦 批量归档
+                      </button>
+                    )}
+                    <span style={{ fontSize: 12, color: "#6b7280" }}>
+                      已选 {filtered.filter((x) => selectedIds.value.includes(x.id)).length} 项
+                    </span>
+                  </div>
+                )}
               </div>
               <div class="card-body" style={{ padding: 0 }}>
                 {filtered.length === 0 ? (
@@ -592,19 +630,24 @@ export default function App(_props: Props) {
 
         {selectedIds.value.length > 0 && currentUser.value?.role === "supervisor" && (
           <>
-            <button class="btn btn-success btn-sm" onClick={() => batchAction("approve")}>
+            <button class="btn btn-success btn-sm" onClick={() => openBatchModal("approve")}>
               ✅ 批量通过 ({selectedIds.value.length})
             </button>
-            <button class="btn btn-danger btn-sm" onClick={() => batchAction("reject")}>
+            <button class="btn btn-danger btn-sm" onClick={() => openBatchModal("reject")}>
               🚫 批量退回 ({selectedIds.value.length})
             </button>
           </>
         )}
 
         {selectedIds.value.length > 0 && currentUser.value?.role === "reviewer" && (
-          <button class="btn btn-primary btn-sm" onClick={() => batchAction("archive")}>
-            📦 批量归档 ({selectedIds.value.length})
-          </button>
+          <>
+            <button class="btn btn-danger btn-sm" onClick={() => openBatchModal("return")}>
+              ↩️ 批量复核退回 ({selectedIds.value.length})
+            </button>
+            <button class="btn btn-primary btn-sm" onClick={() => openBatchModal("archive")}>
+              📦 批量归档 ({selectedIds.value.length})
+            </button>
+          </>
         )}
 
         <div class="filter-group">
@@ -654,6 +697,23 @@ export default function App(_props: Props) {
             loadSelections();
           }}
           onError={(m) => (error.value = m)}
+        />
+      )}
+
+      {showBatchModal.value && (
+        <BatchActionModal
+          action={showBatchModal.value}
+          count={selectedIds.value.length}
+          onClose={() => (showBatchModal.value = null)}
+          onConfirm={confirmBatchAction}
+          onError={(m) => (error.value = m)}
+        />
+      )}
+
+      {batchResultData.value && (
+        <BatchResultModal
+          data={batchResultData.value}
+          onClose={() => (batchResultData.value = null)}
         />
       )}
     </div>
@@ -817,6 +877,223 @@ function CreateSelectionModal(props: {
             </button>
           </div>
         </form>
+      </div>
+    </div>
+  );
+}
+
+function BatchActionModal(props: {
+  action: "approve" | "reject" | "return" | "archive";
+  count: number;
+  onClose: () => void;
+  onConfirm: (d: { reason?: string; result?: string; note?: string }) => void;
+  onError: (m: string) => void;
+}) {
+  const form = useSignal({ reason: "", result: "", note: "" });
+  const titleMap: Record<string, { title: string; icon: string; color: string }> = {
+    approve: { title: "批量审核通过", icon: "✅", color: "#059669" },
+    reject: { title: "批量退回选品单", icon: "🚫", color: "#dc2626" },
+    return: { title: "批量复核退回", icon: "↩️", color: "#d97706" },
+    archive: { title: "批量复核归档", icon: "📦", color: "#1d4ed8" },
+  };
+  const t = titleMap[props.action];
+
+  const submit = async (e: Event) => {
+    e.preventDefault();
+    if (
+      (props.action === "reject" || props.action === "return") &&
+      form.value.reason.trim() === ""
+    ) {
+      props.onError("退回原因必填");
+      return;
+    }
+    props.onConfirm({
+      reason: form.value.reason.trim() || undefined,
+      result: form.value.result.trim() || undefined,
+      note: form.value.note.trim() || undefined,
+    });
+  };
+
+  return (
+    <div class="modal-backdrop" onClick={props.onClose}>
+      <div class="modal" onClick={(e) => e.stopPropagation()}>
+        <form onSubmit={submit}>
+          <div class="modal-header">
+            <h3 style={{ color: t.color }}>
+              {t.icon} {t.title}（{props.count} 条）
+            </h3>
+            <button class="modal-close" onClick={props.onClose}>
+              ×
+            </button>
+          </div>
+          <div class="modal-body">
+            {(props.action === "reject" || props.action === "return") && (
+              <div class="form-group">
+                <label>
+                  退回原因<span class="required">*</span>
+                </label>
+                <textarea
+                  required
+                  rows={3}
+                  placeholder={
+                    props.action === "return"
+                      ? "请说明复核退回原因，例如：进口资质不全、授权链断裂等"
+                      : "请说明退回原因，例如：附件不完整、信息有误等"
+                  }
+                  value={form.value.reason}
+                  onInput={(e: Event) =>
+                    (form.value = {
+                      ...form.value,
+                      reason: (e.target as HTMLTextAreaElement).value,
+                    })
+                  }
+                />
+              </div>
+            )}
+
+            {(props.action === "approve" || props.action === "reject") && (
+              <div class="form-group">
+                <label>处理结果</label>
+                <textarea
+                  rows={2}
+                  placeholder="可选，例如：审核通过，可安排下周排期"
+                  value={form.value.result}
+                  onInput={(e: Event) =>
+                    (form.value = {
+                      ...form.value,
+                      result: (e.target as HTMLTextAreaElement).value,
+                    })
+                  }
+                />
+              </div>
+            )}
+
+            {(props.action === "approve" || props.action === "archive") && (
+              <div class="form-group">
+                <label>审计备注</label>
+                <textarea
+                  rows={2}
+                  placeholder="可选，供后续审计追溯"
+                  value={form.value.note}
+                  onInput={(e: Event) =>
+                    (form.value = {
+                      ...form.value,
+                      note: (e.target as HTMLTextAreaElement).value,
+                    })
+                  }
+                />
+              </div>
+            )}
+
+            <div class="alert alert-info">
+              💡 系统将逐条执行并返回每条的办理结果，失败原因会写明权限、状态或附件数量等具体问题，审计日志会完整记录。
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-outline" onClick={props.onClose}>
+              取消
+            </button>
+            <button type="submit" class="btn btn-primary">
+              确认批量{t.title.replace("批量", "")}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function BatchResultModal(props: {
+  data: {
+    action: "approve" | "reject" | "return" | "archive";
+    success_count: number;
+    total_count: number;
+    results: Array<{
+      id: string;
+      product_name?: string;
+      success: boolean;
+      message: string;
+    }>;
+  };
+  onClose: () => void;
+}) {
+  const { data } = props;
+  const allOk = data.success_count === data.total_count;
+  const titleMap: Record<string, { title: string; okTitle: string; failTitle: string }> = {
+    approve: { title: "批量审核通过", okTitle: "已通过", failTitle: "未通过" },
+    reject: { title: "批量退回", okTitle: "已退回", failTitle: "退回失败" },
+    return: { title: "批量复核退回", okTitle: "已退回", failTitle: "退回失败" },
+    archive: { title: "批量归档", okTitle: "已归档", failTitle: "归档失败" },
+  };
+  const t = titleMap[data.action];
+  return (
+    <div class="modal-backdrop" onClick={props.onClose}>
+      <div class="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 600 }}>
+        <div class="modal-header">
+          <h3 style={{ color: allOk ? "#059669" : "#d97706" }}>
+            📋 {t.title}办理结果：成功 {data.success_count}/{data.total_count}
+          </h3>
+          <button class="modal-close" onClick={props.onClose}>
+            ×
+          </button>
+        </div>
+        <div class="modal-body">
+          {allOk ? (
+            <div class="alert alert-success" style={{ marginTop: 0 }}>
+              ✅ 全部 {data.total_count} 条选品单均已{t.okTitle}，列表与详情状态已自动刷新。
+            </div>
+          ) : (
+            <div class="alert alert-warning" style={{ marginTop: 0 }}>
+              ⚠️ 部分成功：{data.success_count} 条{t.okTitle}，
+              {data.total_count - data.success_count} 条失败，请查看下方详情处理。
+            </div>
+          )}
+          <div style={{ marginTop: 12, maxHeight: 400, overflowY: "auto" }}>
+            {data.results.map((r) => (
+              <div
+                key={r.id}
+                style={{
+                  display: "flex",
+                  alignItems: "flex-start",
+                  gap: 10,
+                  padding: "10px 12px",
+                  borderRadius: 6,
+                  marginBottom: 8,
+                  background: r.success ? "#f0fdf4" : "#fef2f2",
+                  border: `1px solid ${r.success ? "#bbf7d0" : "#fecaca"}`,
+                }}
+              >
+                <span style={{ fontSize: 18, lineHeight: 1.3 }}>
+                  {r.success ? "✅" : "❌"}
+                </span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 600, fontSize: 14 }}>
+                    {r.product_name || r.id}
+                    <span style={{ fontSize: 11, color: "#6b7280", fontWeight: 400, marginLeft: 6 }}>
+                      {r.id}
+                    </span>
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 12,
+                      color: r.success ? "#166534" : "#991b1b",
+                      marginTop: 2,
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    {r.success ? t.okTitle + "：" : t.failTitle + "："}
+                    {r.message}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-primary" onClick={props.onClose}>
+            我知道了
+          </button>
+        </div>
       </div>
     </div>
   );

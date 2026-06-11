@@ -204,19 +204,25 @@ export const api = {
     userId: string,
     data: {
       ids: string[];
-      action: "approve" | "reject" | "archive";
+      action: "approve" | "reject" | "archive" | "return";
       reason?: string;
       result?: string;
+      note?: string;
     }
   ) {
-    return request<{ results: Array<Record<string, any>> }>(
-      "/selections/batch",
-      userId,
-      {
-        method: "POST",
-        body: JSON.stringify(data),
-      }
-    );
+    return request<{
+      success_count: number;
+      total_count: number;
+      results: Array<{
+        id: string;
+        product_name?: string;
+        success: boolean;
+        message: string;
+      }>;
+    }>("/selections/batch", userId, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
   },
   getStats(userId: string): Promise<{
     total: number;

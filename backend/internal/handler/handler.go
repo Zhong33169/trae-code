@@ -339,7 +339,14 @@ func ArchiveSelection(c echo.Context) error {
 	if err := db.UpdateSelectionStatus(id, model.StatusArchived, s.RejectReason, s.ProcessResult, note, now); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
-	addAudit(id, u, "复核归档", req.Note)
+	detail := "归档前状态: " + string(s.Status)
+	if s.ProcessResult != "" {
+		detail += " | 原处理结果: " + s.ProcessResult
+	}
+	if req.Note != "" {
+		detail += " | 归档备注: " + req.Note
+	}
+	addAudit(id, u, "复核归档", detail)
 	return c.JSON(http.StatusOK, map[string]string{"message": "已归档"})
 }
 
@@ -364,7 +371,11 @@ func ReturnSelection(c echo.Context) error {
 	if err := db.UpdateSelectionStatus(id, model.StatusRejected, req.Reason, s.ProcessResult, s.AuditNote, now); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
-	addAudit(id, u, "复核退回", req.Reason)
+	detail := "退回原因: " + req.Reason
+	if s.ProcessResult != "" {
+		detail += " | 退回前处理结果: " + s.ProcessResult
+	}
+	addAudit(id, u, "复核退回", detail)
 	return c.JSON(http.StatusOK, map[string]string{"message": "已退回"})
 }
 
@@ -411,6 +422,7 @@ func BatchProcess(c echo.Context) error {
 		Action string   `json:"action"`
 		Reason string   `json:"reason,omitempty"`
 		Result string   `json:"result,omitempty"`
+		Note   string   `json:"note,omitempty"`
 	}
 	if err := c.Bind(&body); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "参数错误"})
@@ -435,48 +447,151 @@ func BatchProcess(c echo.Context) error {
 			continue
 		}
 		item["product_name"] = s.ProductName
+		now := time.Now()
+
+		buildDetail := func(extra ...string) string {
+			parts := []string{}
+			if body.Reason != "" {
+				parts = append(parts, "原因: "+body.Reason)
+			}
+			if body.Result != "" {
+				parts = append(parts, "处理结果: "+body.Result)
+			}
+			if body.Note != "" {
+				parts = append(parts, "审计备注: "+body.Note)
+			}
+			parts = append(parts, extra...)
+			return strings.Join(parts, " | ")
+		}
+
 		switch body.Action {
 		case "approve":
 			if u.Role != model.RoleSupervisor {
 				item["success"] = false
-				item["message"] = "无权限"
+				item["message"] = "无权限：只有审核主管可批量审核通过"
 			} else if s.Status != model.StatusPending && s.Status != model.StatusMissingAttachment {
 				item["success"] = false
-				item["message"] = "状态不允许审核: " + s.Status
+				item["message"] = fmt.Sprintf("状态不允许审核：当前为 %s，仅待审核/缺材料可通过", s.Status)
 			} else {
-				now := time.Now()
-				db.UpdateSelectionStatus(id, model.StatusApproved, "", body.Reason, s.AuditNote, now)
-				addAudit(id, u, "批量审核通过", body.Reason)
-				item["success"] = true
-				item["message"] = "已通过"
+				atts, attErr := db.GetAttachments(id)
+				validCount := 0
+				rejectedCount := 0
+				if attErr == nil {
+					for _, a := range atts {
+						if a.Rejected {
+							rejectedCount++
+						} else {
+							validCount++
+						}
+					}
+				}
+				if validCount < 2 {
+					item["success"] = false
+					item["message"] = fmt.Sprintf("有效附件仅 %d 份（驳回 %d 份），至少 2 份有效附件才能通过审核", validCount, rejectedCount)
+					addAudit(id, u, "批量审核通过失败", fmt.Sprintf("有效附件=%d，不足2份 | %s", validCount, buildDetail()))
+				} else {
+					note := s.AuditNote
+					if body.Note != "" {
+						if note != "" {
+							note += "\n"
+						}
+						note += fmt.Sprintf("[%s 批量审核 %s] %s", u.Name, now.Format("2006-01-02 15:04"), body.Note)
+					}
+					updErr := db.UpdateSelectionStatus(id, model.StatusApproved, "", body.Result, note, now)
+					if updErr != nil {
+						item["success"] = false
+						item["message"] = "更新状态失败: " + updErr.Error()
+					} else {
+						addAudit(id, u, "批量审核通过", buildDetail())
+						item["success"] = true
+						msg := "已通过审核"
+						if body.Result != "" {
+							msg += "，处理结果：" + body.Result
+						}
+						item["message"] = msg
+					}
+				}
 			}
 		case "reject":
 			if u.Role != model.RoleSupervisor {
 				item["success"] = false
-				item["message"] = "无权限"
+				item["message"] = "无权限：只有审核主管可批量退回"
 			} else if s.Status != model.StatusPending && s.Status != model.StatusMissingAttachment {
 				item["success"] = false
-				item["message"] = "状态不允许退回: " + s.Status
+				item["message"] = fmt.Sprintf("状态不允许退回：当前为 %s，仅待审核/缺材料可退回", s.Status)
+			} else if body.Reason == "" {
+				item["success"] = false
+				item["message"] = "退回原因必填"
 			} else {
-				now := time.Now()
-				db.UpdateSelectionStatus(id, model.StatusRejected, body.Reason, "", s.AuditNote, now)
-				addAudit(id, u, "批量退回", body.Reason)
-				item["success"] = true
-				item["message"] = "已退回: " + body.Reason
+				note := s.AuditNote
+				if note != "" {
+					note += "\n"
+				}
+				note += fmt.Sprintf("[%s 批量退回 %s] %s", u.Name, now.Format("2006-01-02 15:04"), body.Reason)
+				updErr := db.UpdateSelectionStatus(id, model.StatusRejected, body.Reason, body.Result, note, now)
+				if updErr != nil {
+					item["success"] = false
+					item["message"] = "更新状态失败: " + updErr.Error()
+				} else {
+					addAudit(id, u, "批量退回", buildDetail())
+					item["success"] = true
+					item["message"] = "已退回：" + body.Reason
+				}
+			}
+		case "return":
+			if u.Role != model.RoleReviewer {
+				item["success"] = false
+				item["message"] = "无权限：只有复核负责人可批量复核退回"
+			} else if s.Status != model.StatusApproved {
+				item["success"] = false
+				item["message"] = fmt.Sprintf("状态不允许复核退回：当前为 %s，仅审核通过可退回", s.Status)
+			} else if body.Reason == "" {
+				item["success"] = false
+				item["message"] = "复核退回原因必填"
+			} else {
+				note := s.AuditNote
+				if note != "" {
+					note += "\n"
+				}
+				note += fmt.Sprintf("[%s 复核退回 %s] %s", u.Name, now.Format("2006-01-02 15:04"), body.Reason)
+				updErr := db.UpdateSelectionStatus(id, model.StatusRejected, body.Reason, s.ProcessResult, note, now)
+				if updErr != nil {
+					item["success"] = false
+					item["message"] = "更新状态失败: " + updErr.Error()
+				} else {
+					addAudit(id, u, "批量复核退回", buildDetail())
+					item["success"] = true
+					item["message"] = "已复核退回：" + body.Reason
+				}
 			}
 		case "archive":
 			if u.Role != model.RoleReviewer {
 				item["success"] = false
-				item["message"] = "无权限"
+				item["message"] = "无权限：只有复核负责人可批量归档"
 			} else if s.Status != model.StatusApproved && s.Status != model.StatusTimeout {
 				item["success"] = false
-				item["message"] = "状态不允许归档: " + s.Status
+				item["message"] = fmt.Sprintf("状态不允许归档：当前为 %s，仅审核通过/超时可归档", s.Status)
 			} else {
-				now := time.Now()
-				db.UpdateSelectionStatus(id, model.StatusArchived, s.RejectReason, s.ProcessResult, s.AuditNote, now)
-				addAudit(id, u, "批量归档", body.Reason)
-				item["success"] = true
-				item["message"] = "已归档"
+				note := s.AuditNote
+				if body.Note != "" {
+					if note != "" {
+						note += "\n"
+					}
+					note += fmt.Sprintf("[%s 批量归档 %s] %s", u.Name, now.Format("2006-01-02 15:04"), body.Note)
+				}
+				updErr := db.UpdateSelectionStatus(id, model.StatusArchived, s.RejectReason, s.ProcessResult, note, now)
+				if updErr != nil {
+					item["success"] = false
+					item["message"] = "更新状态失败: " + updErr.Error()
+				} else {
+					addAudit(id, u, "批量归档", buildDetail("归档前状态: "+string(s.Status)))
+					item["success"] = true
+					msg := "已归档"
+					if body.Note != "" {
+						msg += "，备注：" + body.Note
+					}
+					item["message"] = msg
+				}
 			}
 		default:
 			item["success"] = false
@@ -484,7 +599,17 @@ func BatchProcess(c echo.Context) error {
 		}
 		results = append(results, item)
 	}
-	return c.JSON(http.StatusOK, map[string]interface{}{"results": results})
+	succ := 0
+	for _, r := range results {
+		if ok, _ := r["success"].(bool); ok {
+			succ++
+		}
+	}
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"success_count": succ,
+		"total_count":   len(results),
+		"results":       results,
+	})
 }
 
 func addAudit(selID string, u *model.User, action, detail string) {
