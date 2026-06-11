@@ -360,12 +360,17 @@ func (h *CheckinHandler) Get(c echo.Context) error {
 
 func (h *CheckinHandler) Create(c echo.Context) error {
 	role, _ := middleware.GetRole(c)
+	userID, _ := middleware.GetUserID(c)
 	if !roleCanAction(role, ActionInitiate) {
+		allowedStr := strings.Join(RoleAllowedActions[role], ",")
+		writeAuditLog(0, userID, ActionInitiate, "", "", "",
+			fmt.Sprintf("创建权限拒绝：角色 %s 不允许创建记录，允许操作为 [%s]", role, allowedStr))
 		return c.JSON(http.StatusForbidden, map[string]string{"error": "角色无权创建记录"})
 	}
 
 	var r models.CheckinRecord
 	if err := c.Bind(&r); err != nil {
+		writeAuditLog(0, userID, ActionInitiate, "", "", "", "请求体解析失败: "+err.Error())
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 	}
 
@@ -386,18 +391,24 @@ func (h *CheckinHandler) Create(c echo.Context) error {
 		validationErrs = append(validationErrs, models.ValidationError{Field: "id_card_no", Message: "身份证号必填"})
 	}
 	if len(validationErrs) > 0 {
+		msgs := make([]string, 0, len(validationErrs))
+		for _, ve := range validationErrs {
+			msgs = append(msgs, ve.Field+": "+ve.Message)
+		}
+		writeAuditLog(0, userID, ActionInitiate, "", "", "",
+			"创建记录字段校验失败："+strings.Join(msgs, "; "))
 		return c.JSON(http.StatusBadRequest, map[string]interface{}{"error": "validation failed", "details": validationErrs})
 	}
 
 	issues := []models.ConsistencyIssue{}
 	dupIssues, err := detectDuplicates(r.BatchNo, r.IDCardNo, 0)
 	if err != nil {
+		writeAuditLog(0, userID, ActionInitiate, "", "", "", "重复批次检测失败: "+err.Error())
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
 	issues = append(issues, dupIssues...)
 
 	now := time.Now().Format("2006-01-02 15:04:05")
-	userID, _ := middleware.GetUserID(c)
 
 	result, err := database.DB.Exec(`
 		INSERT INTO checkin_records
@@ -410,6 +421,7 @@ func (h *CheckinHandler) Create(c echo.Context) error {
 		r.MaterialComplete, r.IsOvertime, len(issues) > 0, r.AbnormalReason,
 		userID, now, now, now)
 	if err != nil {
+		writeAuditLog(0, userID, ActionInitiate, "", "processing", "", "数据库插入失败: "+err.Error())
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
 
@@ -439,7 +451,12 @@ func (h *CheckinHandler) HandleAction(c echo.Context) error {
 
 	action := c.Param("action")
 	role, _ := middleware.GetRole(c)
+	userID, _ := middleware.GetUserID(c)
+
 	if !roleCanAction(role, action) {
+		allowedStr := strings.Join(RoleAllowedActions[role], ",")
+		writeAuditLog(id, userID, action, "", "",
+			"", fmt.Sprintf("权限拒绝：角色 %s 不允许执行 %s 操作，允许操作为 [%s]", role, action, allowedStr))
 		return c.JSON(http.StatusForbidden, map[string]interface{}{
 			"error":          "角色无权执行该操作",
 			"current_role":   role,
@@ -462,18 +479,24 @@ func (h *CheckinHandler) HandleAction(c echo.Context) error {
 		"SELECT status, batch_no, id_card_no, source FROM checkin_records WHERE id = ?", id,
 	).Scan(&oldStatus, &batchNo, &idCardNo, &source)
 	if err == sql.ErrNoRows {
+		writeAuditLog(id, userID, action, "", "", "", fmt.Sprintf("记录 #%d 不存在", id))
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "record not found"})
 	}
 	if err != nil {
+		writeAuditLog(id, userID, action, "", "", "", "查询记录失败: "+err.Error())
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
 
 	newStatus, err := actionToStatus(action)
 	if err != nil {
+		writeAuditLog(id, userID, action, oldStatus, "", "", "未知动作: "+action)
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
 
 	if oldStatus != newStatus && !canTransition(oldStatus, newStatus) {
+		allowedStr := strings.Join(StatusTransitions[oldStatus], ",")
+		writeAuditLog(id, userID, action, oldStatus, newStatus, "",
+			fmt.Sprintf("状态流转拒绝：不能从 %s 转为 %s，允许流转为 [%s]", oldStatus, newStatus, allowedStr))
 		return c.JSON(http.StatusBadRequest, map[string]interface{}{
 			"error":         "invalid status transition",
 			"current_status": oldStatus,
@@ -493,6 +516,9 @@ func (h *CheckinHandler) HandleAction(c echo.Context) error {
 			for _, iss := range issues {
 				msgs = append(msgs, iss.Message)
 			}
+			detail := strings.Join(msgs, "；")
+			writeAuditLog(id, userID, action, oldStatus, newStatus, detail,
+				fmt.Sprintf("归档/复核拦截：存在 %d 个数据一致性问题：%s", len(issues), detail))
 			return c.JSON(http.StatusBadRequest, map[string]interface{}{
 				"error":              "存在数据一致性问题，无法继续操作",
 				"consistency_issues": issues,
@@ -502,7 +528,6 @@ func (h *CheckinHandler) HandleAction(c echo.Context) error {
 	}
 
 	now := time.Now().Format("2006-01-02 15:04:05")
-	userID, _ := middleware.GetUserID(c)
 
 	var updateSQL string
 	var args []interface{}
@@ -520,6 +545,7 @@ func (h *CheckinHandler) HandleAction(c echo.Context) error {
 		args = []interface{}{newStatus, userID, now, body.AuditRemark, isAbnormal, now, id}
 	case ActionReturn:
 		if body.ReturnReason == "" {
+			writeAuditLog(id, userID, action, oldStatus, newStatus, "", "退回原因缺失：执行退回操作但未填写退回原因")
 			return c.JSON(http.StatusBadRequest, map[string]string{"error": "退回原因必填"})
 		}
 		if role == "reviewer" {
@@ -535,7 +561,7 @@ func (h *CheckinHandler) HandleAction(c echo.Context) error {
 	}
 
 	if _, err := database.DB.Exec(updateSQL, args...); err != nil {
-		writeAuditLog(id, userID, action, oldStatus, newStatus, body.Remark, err.Error())
+		writeAuditLog(id, userID, action, oldStatus, newStatus, body.Remark, "数据库更新失败: "+err.Error())
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
 
@@ -570,7 +596,13 @@ func (h *CheckinHandler) BatchHandle(c echo.Context) error {
 	}
 
 	role, _ := middleware.GetRole(c)
+	userID, _ := middleware.GetUserID(c)
 	if !roleCanAction(role, req.Action) {
+		allowedStr := strings.Join(RoleAllowedActions[role], ",")
+		reason := fmt.Sprintf("批量权限拒绝：角色 %s 不允许执行 %s 操作，允许操作为 [%s]", role, req.Action, allowedStr)
+		for _, id := range req.IDs {
+			writeAuditLog(id, userID, req.Action, "", "", req.Remark, reason)
+		}
 		return c.JSON(http.StatusForbidden, map[string]interface{}{
 			"error":          "角色无权执行该操作",
 			"current_role":   role,
@@ -579,7 +611,7 @@ func (h *CheckinHandler) BatchHandle(c echo.Context) error {
 		})
 	}
 
-	userID, _ := middleware.GetUserID(c)
+	userID, _ = middleware.GetUserID(c)
 	results := []models.BatchResultItem{}
 	successCount := 0
 	failCount := 0
