@@ -54,6 +54,32 @@ export default function BatchActionModal({ action, orderIds, role, meta, onClose
     return m;
   }, [preview]);
 
+  const versionStatusMap = useMemo(() => {
+    const m = {};
+    if (preview?.orders) {
+      for (const o of preview.orders) {
+        if (!o.orderId) continue;
+        const v = o.version;
+        if (v === null || v === undefined) {
+          m[o.orderId] = { ok: false, label: '缺失', type: 'missing' };
+        } else if (typeof v !== 'number' || !Number.isFinite(v) || v < 0) {
+          m[o.orderId] = { ok: false, label: '格式错', type: 'format' };
+        } else {
+          m[o.orderId] = { ok: true, label: `v${v}`, type: 'ok' };
+        }
+      }
+    }
+    return m;
+  }, [preview]);
+
+  const versionErrorCount = useMemo(() => {
+    let c = 0;
+    for (const v of Object.values(versionStatusMap)) {
+      if (!v.ok) c++;
+    }
+    return c;
+  }, [versionStatusMap]);
+
   const mixedSubmit = preview?.summary?.mixedSubmitStatuses;
   const canProcessCount = preview?.summary?.canProcess ?? 0;
   const blockedCount = preview?.summary?.blocked ?? 0;
@@ -64,6 +90,7 @@ export default function BatchActionModal({ action, orderIds, role, meta, onClose
   function canConfirm() {
     if (loading || !preview) return false;
     if (mixedSubmit) return false;
+    if (versionErrorCount > 0) return false;
     if (!opinion.trim() || opinion.trim().length < 5) return false;
     if (canProcessCount === 0) return false;
     return true;
@@ -88,9 +115,16 @@ export default function BatchActionModal({ action, orderIds, role, meta, onClose
     return map[status] || 'gray';
   }
 
+  function versionTag(type) {
+    if (type === 'ok') return 'stat-chip success';
+    if (type === 'missing') return 'stat-chip danger';
+    if (type === 'format') return 'stat-chip warning';
+    return 'stat-chip';
+  }
+
   return (
     <div className="modal-mask" onClick={(e) => { if (e.target === e.currentTarget) onClose?.(); }}>
-      <div className="modal" style={{ width: 920, maxWidth: '95vw' }}>
+      <div className="modal" style={{ width: 960, maxWidth: '95vw' }}>
         <div className="modal-header">
           <h3>
             {isApprove && '✅ '}{isReject && '⚠ '}{isSubmitLike && '📋 '}
@@ -121,6 +155,16 @@ export default function BatchActionModal({ action, orderIds, role, meta, onClose
                 </div>
               )}
 
+              {versionErrorCount > 0 && (
+                <div className="alert danger" style={{ marginBottom: 12 }}>
+                  <strong>❌ 版本号异常，无法提交</strong>
+                  <div style={{ marginTop: 6 }}>
+                    共 <strong>{versionErrorCount}</strong> 张单据版本号缺失或格式错误，批量提交必须携带每张单据的有效版本号。
+                    请刷新列表或重新打开弹窗获取最新版本。
+                  </div>
+                </div>
+              )}
+
               <div className="batch-summary-row">
                 <div className="stat-chip primary">共 {orderIds.length} 张</div>
                 <div className="stat-chip success">可推进 {canProcessCount}</div>
@@ -128,6 +172,7 @@ export default function BatchActionModal({ action, orderIds, role, meta, onClose
                 {overdueCount > 0 && <div className="stat-chip warning">⏰ 逾期 {overdueCount}</div>}
                 {missingMatCount > 0 && <div className="stat-chip warning">📎 缺材料 {missingMatCount}</div>}
                 {permissionCount > 0 && <div className="stat-chip danger">🚫 无权 {permissionCount}</div>}
+                {versionErrorCount > 0 && <div className="stat-chip danger">🔢 版本异常 {versionErrorCount}</div>}
               </div>
 
               {preview && preview.summary.statusDistribution && (
@@ -148,87 +193,98 @@ export default function BatchActionModal({ action, orderIds, role, meta, onClose
                 <table className="preview-table">
                   <thead>
                     <tr>
-                      <th style={{ width: 40 }}></th>
+                      <th style={{ width: 36 }}></th>
                       <th>单号 / 标题</th>
-                      <th style={{ width: 80 }}>当前状态</th>
-                      <th style={{ width: 60 }}>版本</th>
+                      <th style={{ width: 80 }}>状态</th>
+                      <th style={{ width: 70 }}>版本</th>
                       <th style={{ width: 120 }}>将执行动作 → 目标</th>
                       <th style={{ width: 110 }}>材料</th>
                       <th style={{ width: 110 }}>时限</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {preview?.orders?.map(o => (
-                      <tr key={o.orderId} className={o.canProcess ? '' : 'blocked-row'}>
-                        <td style={{ textAlign: 'center' }}>
-                          {o.canProcess ? <span style={{ color: 'var(--success)' }}>✅</span> : <span style={{ color: 'var(--danger)' }}>❌</span>}
-                        </td>
-                        <td>
-                          <div style={{ fontWeight: 600 }}>{o.orderNo || '不存在'}</div>
-                          <div style={{ fontSize: 12, color: 'var(--gray-600)' }}>{o.title || '-'}</div>
-                          <div style={{ fontSize: 11, color: 'var(--gray-500)' }}>{o.store || ''}</div>
-                          {!o.canProcess && o.blockReasons && o.blockReasons.length > 0 && (
-                            <div className="block-reasons" style={{ marginTop: 4 }}>
-                              {o.blockReasons.map((r, i) => (
-                                <div key={i} style={{ fontSize: 11, color: 'var(--danger)' }}>• {r}</div>
-                              ))}
-                            </div>
-                          )}
-                        </td>
-                        <td>
-                          {o.status ? (
-                            <span className={`tag ${statusColor(o.status)}`}>{o.statusName}</span>
-                          ) : <span className="tag gray">-</span>}
-                        </td>
-                        <td>
-                          <span style={{ fontSize: 12, fontFamily: 'monospace', color: 'var(--gray-600)' }}>
-                            v{o.version ?? '-'}
-                          </span>
-                        </td>
-                        <td>
-                          {o.canProcess ? (
-                            <>
-                              <div style={{ fontSize: 12, fontWeight: 600 }}>{o.effectiveActionName}</div>
-                              <div style={{ fontSize: 11, color: 'var(--gray-500)' }}>
-                                → <span className={`tag ${statusColor(o.nextStatus)}`} style={{ marginTop: 2 }}>{o.nextStatusName}</span>
+                    {preview?.orders?.map(o => {
+                      const vs = versionStatusMap[o.orderId] || { ok: false, label: '-', type: 'unknown' };
+                      const rowBlocked = !o.canProcess || !vs.ok;
+                      return (
+                        <tr key={o.orderId} className={rowBlocked ? 'blocked-row' : ''}>
+                          <td style={{ textAlign: 'center' }}>
+                            {rowBlocked
+                              ? <span style={{ color: 'var(--danger)' }}>❌</span>
+                              : <span style={{ color: 'var(--success)' }}>✅</span>}
+                          </td>
+                          <td>
+                            <div style={{ fontWeight: 600 }}>{o.orderNo || '不存在'}</div>
+                            <div style={{ fontSize: 12, color: 'var(--gray-600)' }}>{o.title || '-'}</div>
+                            <div style={{ fontSize: 11, color: 'var(--gray-500)' }}>{o.store || ''}</div>
+                            {(!o.canProcess || !vs.ok) && (
+                              <div className="block-reasons" style={{ marginTop: 4 }}>
+                                {!vs.ok && (
+                                  <div style={{ fontSize: 11, color: 'var(--danger)' }}>
+                                    • 版本号{vs.type === 'missing' ? '缺失' : '格式错误'}，无法提交
+                                  </div>
+                                )}
+                                {o.canProcess === false && o.blockReasons && o.blockReasons.map((r, i) => (
+                                  <div key={i} style={{ fontSize: 11, color: 'var(--danger)' }}>• {r}</div>
+                                ))}
                               </div>
-                            </>
-                          ) : (
-                            <span style={{ fontSize: 12, color: 'var(--gray-500)' }}>不执行</span>
-                          )}
-                        </td>
-                        <td>
-                          {o.missingMaterials && o.missingMaterials.length > 0 ? (
-                            <>
-                              <div style={{ color: 'var(--warning)', fontSize: 12, fontWeight: 600 }}>
-                                ❌ 缺 {o.missingMaterials.length} 项
-                              </div>
-                              <div style={{ fontSize: 11, color: 'var(--gray-600)', lineHeight: 1.4 }}>
-                                {o.missingMaterials.join('、')}
-                              </div>
-                            </>
-                          ) : o.canProcess ? (
-                            <span style={{ color: 'var(--success)', fontSize: 12 }}>✅ 齐全</span>
-                          ) : (
-                            <span style={{ color: 'var(--gray-400)', fontSize: 12 }}>-</span>
-                          )}
-                        </td>
-                        <td>
-                          {o.overdue ? (
-                            <>
-                              <div style={{ color: 'var(--danger)', fontSize: 12, fontWeight: 600 }}>⏰ 已逾期</div>
-                              <div style={{ fontSize: 11, color: 'var(--gray-600)', lineHeight: 1.4 }}>
-                                {o.overdueReason?.slice(0, 40)}{o.overdueReason?.length > 40 ? '...' : ''}
-                              </div>
-                            </>
-                          ) : o.canProcess ? (
-                            <span style={{ color: 'var(--success)', fontSize: 12 }}>✅ 正常</span>
-                          ) : (
-                            <span style={{ color: 'var(--gray-400)', fontSize: 12 }}>-</span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
+                            )}
+                          </td>
+                          <td>
+                            {o.status ? (
+                              <span className={`tag ${statusColor(o.status)}`}>{o.statusName}</span>
+                            ) : <span className="tag gray">-</span>}
+                          </td>
+                          <td>
+                            <span className={versionTag(vs.type)} style={{ fontSize: 11, padding: '2px 6px' }}>
+                              {vs.label}
+                            </span>
+                          </td>
+                          <td>
+                            {o.canProcess && vs.ok ? (
+                              <>
+                                <div style={{ fontSize: 12, fontWeight: 600 }}>{o.effectiveActionName}</div>
+                                <div style={{ fontSize: 11, color: 'var(--gray-500)' }}>
+                                  → <span className={`tag ${statusColor(o.nextStatus)}`} style={{ marginTop: 2 }}>{o.nextStatusName}</span>
+                                </div>
+                              </>
+                            ) : (
+                              <span style={{ fontSize: 12, color: 'var(--gray-500)' }}>不执行</span>
+                            )}
+                          </td>
+                          <td>
+                            {o.missingMaterials && o.missingMaterials.length > 0 ? (
+                              <>
+                                <div style={{ color: 'var(--warning)', fontSize: 12, fontWeight: 600 }}>
+                                  ❌ 缺 {o.missingMaterials.length} 项
+                                </div>
+                                <div style={{ fontSize: 11, color: 'var(--gray-600)', lineHeight: 1.4 }}>
+                                  {o.missingMaterials.join('、')}
+                                </div>
+                              </>
+                            ) : o.canProcess && vs.ok ? (
+                              <span style={{ color: 'var(--success)', fontSize: 12 }}>✅ 齐全</span>
+                            ) : (
+                              <span style={{ color: 'var(--gray-400)', fontSize: 12 }}>-</span>
+                            )}
+                          </td>
+                          <td>
+                            {o.overdue ? (
+                              <>
+                                <div style={{ color: 'var(--danger)', fontSize: 12, fontWeight: 600 }}>⏰ 已逾期</div>
+                                <div style={{ fontSize: 11, color: 'var(--gray-600)', lineHeight: 1.4 }}>
+                                  {o.overdueReason?.slice(0, 40)}{o.overdueReason?.length > 40 ? '...' : ''}
+                                </div>
+                              </>
+                            ) : o.canProcess && vs.ok ? (
+                              <span style={{ color: 'var(--success)', fontSize: 12 }}>✅ 正常</span>
+                            ) : (
+                              <span style={{ color: 'var(--gray-400)', fontSize: 12 }}>-</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -250,8 +306,8 @@ export default function BatchActionModal({ action, orderIds, role, meta, onClose
               <div className="alert info" style={{ marginTop: 12, fontSize: 12 }}>
                 <strong>📌 执行说明：</strong>
                 <ul style={{ margin: '6px 0 0 18px', padding: 0, lineHeight: 1.6 }}>
-                  <li>每张单据独立校验：角色权限、状态顺序、材料完整性、时限逾期、<strong>版本乐观锁</strong>、操作锁token</li>
-                  <li>提交时携带每张单的版本号（如上表 v 列），若版本不一致则该单被阻断，不影响其余单据</li>
+                  <li>每张单据独立校验：角色权限、状态顺序、材料完整性、时限逾期、<strong>版本乐观锁（强制）</strong>、操作锁token</li>
+                  <li>提交时必须携带每张单的版本号（如上表 版本 列），缺失、格式错或不一致则该单被阻断</li>
                   <li>版本冲突说明单据已被他人修改，请刷新列表获取最新版本后重试</li>
                   <li>草稿与核验退回单必须分开批量（动作语义不同：初次提交 vs 补正重提交）</li>
                 </ul>
@@ -270,9 +326,11 @@ export default function BatchActionModal({ action, orderIds, role, meta, onClose
               ? '批量处理中...'
               : mixedSubmit
                 ? '状态混用，不可执行'
-                : canProcessCount === 0
-                  ? '无可推进单据'
-                  : `确认${actionLabel}（${canProcessCount}张）`}
+                : versionErrorCount > 0
+                  ? '版本异常，不可执行'
+                  : canProcessCount === 0
+                    ? '无可推进单据'
+                    : `确认${actionLabel}（${canProcessCount}张）`}
           </button>
         </div>
       </div>

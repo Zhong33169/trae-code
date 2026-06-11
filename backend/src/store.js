@@ -584,6 +584,8 @@ class DataStore {
         attempted: 0,
         successCount: 0,
         failedCount: 0,
+        versionMissingCount: 0,
+        versionFormatErrorCount: 0,
         versionConflictCount: 0,
       },
     };
@@ -661,7 +663,46 @@ class DataStore {
       const orderNo = order.orderNo;
       const oldStatus = order.status;
 
-      if (expectedVersion !== undefined && expectedVersion !== null && order.version !== expectedVersion) {
+      if (expectedVersion === undefined || expectedVersion === null) {
+        const reason = '版本号缺失：批量提交必须携带每张单据的版本号';
+        results.failed.push({
+          orderId: id,
+          orderNo,
+          reason,
+          failureType: 'version_missing',
+          status: order.status,
+          statusName: this.getStatusName(order.status),
+          currentVersion: order.version,
+          versionError: true,
+          versionSubtype: 'missing',
+        });
+        logAudit({ ok: false, reason, oldStatus, newStatus: oldStatus, expectedVer: null, currentVer: order.version });
+        results.summary.failedCount++;
+        results.summary.versionMissingCount++;
+        continue;
+      }
+
+      if (typeof expectedVersion !== 'number' || !Number.isFinite(expectedVersion) || expectedVersion < 0) {
+        const reason = `版本号格式错误：期望正整数，实际为「${expectedVersion}」`;
+        results.failed.push({
+          orderId: id,
+          orderNo,
+          reason,
+          failureType: 'version_format',
+          status: order.status,
+          statusName: this.getStatusName(order.status),
+          expectedVersionRaw: expectedVersion,
+          currentVersion: order.version,
+          versionError: true,
+          versionSubtype: 'format',
+        });
+        logAudit({ ok: false, reason, oldStatus, newStatus: oldStatus, expectedVer: expectedVersion, currentVer: order.version });
+        results.summary.failedCount++;
+        results.summary.versionFormatErrorCount++;
+        continue;
+      }
+
+      if (order.version !== expectedVersion) {
         const reason = `版本冲突：期望版本 v${expectedVersion}，当前版本 v${order.version}，单据已被他人修改`;
         results.failed.push({
           orderId: id,
@@ -673,6 +714,7 @@ class DataStore {
           status: order.status,
           statusName: this.getStatusName(order.status),
           versionError: true,
+          versionSubtype: 'conflict',
         });
         logAudit({ ok: false, reason, oldStatus, newStatus: oldStatus, expectedVer: expectedVersion, currentVer: order.version });
         results.summary.failedCount++;

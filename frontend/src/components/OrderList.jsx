@@ -144,21 +144,43 @@ export default function OrderList({ meta, user, navigate, showToast }) {
         showToast(`批量${action.startsWith('approve') ? '通过' : action.startsWith('reject') ? '退回' : '提交'} ${res.success.length} 条成功`, 'success');
       }
       if (res.failed.length > 0) {
+        const versionMissings = res.failed.filter(f => f.failureType === 'version_missing');
+        const versionFormats = res.failed.filter(f => f.failureType === 'version_format');
         const versionConflicts = res.failed.filter(f => f.failureType === 'version');
-        const otherFails = res.failed.filter(f => f.failureType !== 'version');
+        const otherFails = res.failed.filter(f =>
+          f.failureType !== 'version_missing' && f.failureType !== 'version_format' && f.failureType !== 'version'
+        );
+        if (versionMissings.length > 0) {
+          const names = versionMissings.map(f => f.orderNo || f.orderId?.slice(0, 8)).join('、');
+          showToast(`版本缺失 ${versionMissings.length} 条：${names}，请刷新后重试`, 'error');
+        }
+        if (versionFormats.length > 0) {
+          const names = versionFormats.map(f => `${f.orderNo || f.orderId?.slice(0,8)}(${f.expectedVersionRaw})`).join('、');
+          showToast(`版本格式错误 ${versionFormats.length} 条：${names}`, 'error');
+        }
         if (versionConflicts.length > 0) {
-          const vcNames = versionConflicts.map(f => `${f.orderNo}（v${f.expectedVersion}→v${f.currentVersion}）`).join('、');
-          showToast(`版本冲突 ${versionConflicts.length} 条：${vcNames}，请刷新后重试`, 'error');
+          const names = versionConflicts.map(f => `${f.orderNo}（v${f.expectedVersion}→v${f.currentVersion}）`).join('、');
+          showToast(`版本冲突 ${versionConflicts.length} 条：${names}，请刷新后重试`, 'error');
         }
         if (otherFails.length > 0) {
           const reasons = otherFails.slice(0, 3).map(f => `${f.orderNo || f.orderId?.slice(0,8)}：${f.reason}`).join('；');
           showToast(`失败 ${otherFails.length} 条：${reasons}${otherFails.length > 3 ? '...' : ''}`, 'error');
         }
       }
-      setSelected(new Set());
-      setShowBatch(false);
-      setBatchAction(null);
-      setRefreshKey(k => k + 1);
+      const allVersionFailed = res.failed.length > 0 && res.success.length === 0 &&
+        res.failed.every(f =>
+          f.failureType === 'version_missing' || f.failureType === 'version_format' || f.failureType === 'version'
+        );
+      if (allVersionFailed) {
+        setShowBatch(false);
+        setBatchAction(null);
+        setRefreshKey(k => k + 1);
+      } else {
+        setSelected(new Set());
+        setShowBatch(false);
+        setBatchAction(null);
+        setRefreshKey(k => k + 1);
+      }
     } catch (e) {
       showToast(e.message, 'error');
     }
