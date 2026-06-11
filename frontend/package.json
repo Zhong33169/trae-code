@@ -1,0 +1,18 @@
+{
+  "name": "water-office-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "水务营业厅跨班组交接确认开户申请系统前端",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview --port 3002"
+  },
+  "dependencies": {
+    "lit": "^3.1.2"
+  },
+  "devDependencies": {
+    "vite": "^5.1.6"
+  }
+}
