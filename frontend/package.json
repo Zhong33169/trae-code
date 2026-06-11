@@ -1,0 +1,28 @@
+{
+  "name": "transport-order-frontend",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "ng serve --port 3003",
+    "build": "ng build",
+    "preview": "ng serve --port 3003"
+  },
+  "dependencies": {
+    "@angular/animations": "^17.3.0",
+    "@angular/common": "^17.3.0",
+    "@angular/compiler": "^17.3.0",
+    "@angular/core": "^17.3.0",
+    "@angular/forms": "^17.3.0",
+    "@angular/platform-browser": "^17.3.0",
+    "@angular/platform-browser-dynamic": "^17.3.0",
+    "@angular/router": "^17.3.0",
+    "rxjs": "^7.8.1",
+    "zone.js": "^0.14.4"
+  },
+  "devDependencies": {
+    "@angular-devkit/build-angular": "^17.3.17",
+    "@angular/cli": "^17.3.17",
+    "@angular/compiler-cli": "^17.3.12",
+    "typescript": "~5.3.3"
+  }
+}

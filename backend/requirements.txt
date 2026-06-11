@@ -1,0 +1,7 @@
+litestar==2.9.0
+sqlalchemy>=2.0
+pydantic>=2.6
+pydantic-settings>=2.2
+uvicorn>=0.27
+python-multipart==0.0.12
+msgspec>=0.18
