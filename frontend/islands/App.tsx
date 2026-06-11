@@ -51,6 +51,7 @@ export default function App(_props: Props) {
 
   type BatchAction = "approve" | "reject" | "return" | "archive";
   const showBatchModal = useSignal<BatchAction | null>(null);
+  const batchScopeStatus = useSignal<SelectionStatus | null>(null);
   const batchResultData = useSignal<{
     action: BatchAction;
     success_count: number;
@@ -156,11 +157,27 @@ export default function App(_props: Props) {
     }
   };
 
-  const openBatchModal = (action: BatchAction) => {
-    if (selectedIds.value.length === 0) {
+  const getScopedIds = (scope: SelectionStatus | null): string[] => {
+    if (scope === null) return selectedIds.value;
+    let idsInScope: string[] = [];
+    if (isExceptionView.value && stats.value) {
+      idsInScope = (stats.value.exception_by_status[scope] || []).map((s) => s.id);
+    } else {
+      idsInScope = selections.value
+        .filter((s) => s.status === scope)
+        .map((s) => s.id);
+    }
+    return selectedIds.value.filter((id) => idsInScope.includes(id));
+  };
+
+  const openBatchModal = (action: BatchAction, scope?: SelectionStatus) => {
+    const effectiveScope = scope ?? null;
+    const ids = effectiveScope ? getScopedIds(effectiveScope) : selectedIds.value;
+    if (ids.length === 0) {
       error.value = "请先选择要处理的选品单";
       return;
     }
+    batchScopeStatus.value = effectiveScope;
     showBatchModal.value = action;
   };
 
@@ -172,18 +189,26 @@ export default function App(_props: Props) {
     const action = showBatchModal.value;
     if (!action) return;
     try {
+      const scope = batchScopeStatus.value;
+      const submitIds = scope ? getScopedIds(scope) : selectedIds.value;
+      if (submitIds.length === 0) {
+        error.value = "当前分组没有选中的选品单";
+        return;
+      }
       const res = await api.batchProcess(currentUserId.value, {
-        ids: selectedIds.value,
+        ids: submitIds,
         action,
         ...data,
       });
       batchResultData.value = { action, ...res };
       showBatchModal.value = null;
-      selectedIds.value = [];
+      batchScopeStatus.value = null;
+      selectedIds.value = selectedIds.value.filter((id) => !submitIds.includes(id));
       loadSelections();
     } catch (e: any) {
       error.value = e.message;
       showBatchModal.value = null;
+      batchScopeStatus.value = null;
     }
   };
 
@@ -340,13 +365,13 @@ export default function App(_props: Props) {
                         <>
                           <button
                             class="btn btn-success btn-sm"
-                            onClick={() => openBatchModal("approve")}
+                            onClick={() => openBatchModal("approve", stKey)}
                           >
                             ✅ 批量通过
                           </button>
                           <button
                             class="btn btn-danger btn-sm"
-                            onClick={() => openBatchModal("reject")}
+                            onClick={() => openBatchModal("reject", stKey)}
                           >
                             🚫 批量退回
                           </button>
@@ -355,13 +380,13 @@ export default function App(_props: Props) {
                     {currentUser.value?.role === "reviewer" && stKey === "timeout" && (
                       <button
                         class="btn btn-primary btn-sm"
-                        onClick={() => openBatchModal("archive")}
+                        onClick={() => openBatchModal("archive", stKey)}
                       >
                         📦 批量归档
                       </button>
                     )}
                     <span style={{ fontSize: 12, color: "#6b7280" }}>
-                      已选 {filtered.filter((x) => selectedIds.value.includes(x.id)).length} 项
+                      本组已选 {filtered.filter((x) => selectedIds.value.includes(x.id)).length} 项
                     </span>
                   </div>
                 )}
@@ -703,8 +728,15 @@ export default function App(_props: Props) {
       {showBatchModal.value && (
         <BatchActionModal
           action={showBatchModal.value}
-          count={selectedIds.value.length}
-          onClose={() => (showBatchModal.value = null)}
+          count={
+            batchScopeStatus.value
+              ? getScopedIds(batchScopeStatus.value).length
+              : selectedIds.value.length
+          }
+          onClose={() => {
+            showBatchModal.value = null;
+            batchScopeStatus.value = null;
+          }}
           onConfirm={confirmBatchAction}
           onError={(m) => (error.value = m)}
         />

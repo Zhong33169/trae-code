@@ -97,6 +97,16 @@ func createTables() error {
 }
 
 func seedData() error {
+	if err := seedUsers(); err != nil {
+		return err
+	}
+	if err := seedDemoSelections(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func seedUsers() error {
 	var count int
 	err := DB.QueryRow("SELECT COUNT(*) FROM users").Scan(&count)
 	if err != nil {
@@ -105,30 +115,59 @@ func seedData() error {
 	if count > 0 {
 		return nil
 	}
-
-	tx, err := DB.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	_, err = tx.Exec(`
+	_, err = DB.Exec(`
 		INSERT INTO users (id, username, role, name) VALUES
 		('u_registrar_1', 'registrar1', 'registrar', '直播选品登记员-小李'),
 		('u_supervisor_1', 'supervisor1', 'supervisor', '直播选品审核主管-王主管'),
 		('u_reviewer_1', 'reviewer1', 'reviewer', '复核负责人-张总');
 	`)
-	if err != nil {
-		return err
-	}
+	return err
+}
 
+func existsSelection(id string) (bool, error) {
+	var n int
+	err := DB.QueryRow("SELECT 1 FROM selections WHERE id = ? LIMIT 1", id).Scan(&n)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func existsAttachment(id string) (bool, error) {
+	var n int
+	err := DB.QueryRow("SELECT 1 FROM attachments WHERE id = ? LIMIT 1", id).Scan(&n)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func existsAudit(id string) (bool, error) {
+	var n int
+	err := DB.QueryRow("SELECT 1 FROM audit_logs WHERE id = ? LIMIT 1", id).Scan(&n)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func seedDemoSelections() error {
 	now := time.Now()
 	yesterday := now.Add(-24 * time.Hour)
 	twoDaysAgo := now.Add(-48 * time.Hour)
 	tomorrow := now.Add(24 * time.Hour)
 	pastDeadline := now.Add(-2 * time.Hour)
 
-	selections := []struct {
+	baseSelections := []struct {
 		ID, ProductName, Category, Brand, Supplier string
 		Price, Commission                          float64
 		PlannedDate                                *time.Time
@@ -234,51 +273,20 @@ func seedData() error {
 		},
 	}
 
-	selStmt, err := tx.Prepare(`INSERT INTO selections (
-		id, product_name, product_category, brand, supplier,
-		estimated_price, commission_rate, planned_live_date, description,
-		status, created_by, created_by_name, created_at, updated_at,
-		deadline, reject_reason, process_result
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-	if err != nil {
-		return err
-	}
-	defer selStmt.Close()
-
-	for _, s := range selections {
-		var plannedStr, deadlineStr sql.NullString
-		if s.PlannedDate != nil {
-			plannedStr = sql.NullString{String: s.PlannedDate.Format(time.RFC3339), Valid: true}
-		}
-		if s.Deadline != nil {
-			deadlineStr = sql.NullString{String: s.Deadline.Format(time.RFC3339), Valid: true}
-		}
-		_, err = selStmt.Exec(
-			s.ID, s.ProductName, s.Category, s.Brand, s.Supplier,
-			s.Price, s.Commission, plannedStr, s.Description,
-			s.Status, s.CreatedBy, s.CreatedByName,
-			s.CreatedAt.Format(time.RFC3339), s.UpdatedAt.Format(time.RFC3339),
-			deadlineStr, s.RejectReason, s.ProcessResult,
-		)
+	existingSel := map[string]bool{}
+	for _, s := range baseSelections {
+		ex, err := existsSelection(s.ID)
 		if err != nil {
-			return fmt.Errorf("insert selection %s: %w", s.ID, err)
+			return err
 		}
+		existingSel[s.ID] = ex
 	}
-
-	attachStmt, err := tx.Prepare(`INSERT INTO attachments (
-		id, selection_id, name, type, url, uploaded_by, uploaded_at,
-		rejected, reject_reason, rejected_by, rejected_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-	if err != nil {
-		return err
-	}
-	defer attachStmt.Close()
 
 	yesterdayStr := yesterday.Format(time.RFC3339)
 	rejectedAt := yesterday.Add(2 * time.Hour)
 	rejectedAtStr := rejectedAt.Format(time.RFC3339)
 
-	attachments := []struct {
+	baseAttachments := []struct {
 		ID, SelID, Name, Type, URL, Uploader, UploadedAt string
 		Rejected                                         int
 		RejectReason, RejectedBy, RejectedAt             string
@@ -299,28 +307,16 @@ func seedData() error {
 		{"att_return_2", "sel_reviewer_return", "商检证明.pdf", "质检文件", "https://example.com/att/return_ciq.pdf", "u_registrar_1", twoDaysAgo.Format(time.RFC3339), 1, "复核发现：进口食品检疫证明已过期 3 个月", "u_reviewer_1", now.Add(-2 * time.Hour).Format(time.RFC3339)},
 	}
 
-	for _, a := range attachments {
-		var rr, rb, rat sql.NullString
-		if a.Rejected == 1 {
-			rr = sql.NullString{String: a.RejectReason, Valid: true}
-			rb = sql.NullString{String: a.RejectedBy, Valid: true}
-			rat = sql.NullString{String: a.RejectedAt, Valid: true}
-		}
-		_, err = attachStmt.Exec(a.ID, a.SelID, a.Name, a.Type, a.URL, a.Uploader, a.UploadedAt, a.Rejected, rr, rb, rat)
+	existingAttach := map[string]bool{}
+	for _, a := range baseAttachments {
+		ex, err := existsAttachment(a.ID)
 		if err != nil {
-			return fmt.Errorf("insert attachment %s: %w", a.ID, err)
+			return err
 		}
+		existingAttach[a.ID] = ex
 	}
 
-	auditStmt, err := tx.Prepare(`INSERT INTO audit_logs (
-		id, selection_id, user_id, user_name, action, detail, created_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?)`)
-	if err != nil {
-		return err
-	}
-	defer auditStmt.Close()
-
-	audits := []struct {
+	baseAudits := []struct {
 		ID, SelID, UID, UName, Action, Detail, CreatedAt string
 	}{
 		{"audit_1", "sel_normal", "u_registrar_1", "直播选品登记员-小李", "创建选品单", "填写完整选品信息并上传2份附件", yesterdayStr},
@@ -360,14 +356,108 @@ func seedData() error {
 		{"audit_32", "sel_reviewer_return", "u_reviewer_1", "复核负责人-张总", "复核退回", "退回原因: 复核退回：进口食品检疫证明已过期，需重新提供最新的检验检疫文件；同时品牌授权链条不完整，需要补充从酒庄到国内供应商的完整授权链 | 退回前处理结果: 初审通过，拟安排下周排期", now.Add(-2 * time.Hour).Format(time.RFC3339)},
 	}
 
-	for _, a := range audits {
+	existingAudit := map[string]bool{}
+	for _, a := range baseAudits {
+		ex, err := existsAudit(a.ID)
+		if err != nil {
+			return err
+		}
+		existingAudit[a.ID] = ex
+	}
+
+	tx, err := DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	selStmt, err := tx.Prepare(`INSERT INTO selections (
+		id, product_name, product_category, brand, supplier,
+		estimated_price, commission_rate, planned_live_date, description,
+		status, created_by, created_by_name, created_at, updated_at,
+		deadline, reject_reason, process_result
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+	if err != nil {
+		return err
+	}
+	defer selStmt.Close()
+
+	selCreatedCount := 0
+	for _, s := range baseSelections {
+		if existingSel[s.ID] {
+			continue
+		}
+		var plannedStr, deadlineStr sql.NullString
+		if s.PlannedDate != nil {
+			plannedStr = sql.NullString{String: s.PlannedDate.Format(time.RFC3339), Valid: true}
+		}
+		if s.Deadline != nil {
+			deadlineStr = sql.NullString{String: s.Deadline.Format(time.RFC3339), Valid: true}
+		}
+		_, err = selStmt.Exec(
+			s.ID, s.ProductName, s.Category, s.Brand, s.Supplier,
+			s.Price, s.Commission, plannedStr, s.Description,
+			s.Status, s.CreatedBy, s.CreatedByName,
+			s.CreatedAt.Format(time.RFC3339), s.UpdatedAt.Format(time.RFC3339),
+			deadlineStr, s.RejectReason, s.ProcessResult,
+		)
+		if err != nil {
+			return fmt.Errorf("insert selection %s: %w", s.ID, err)
+		}
+		selCreatedCount++
+	}
+
+	attachStmt, err := tx.Prepare(`INSERT INTO attachments (
+		id, selection_id, name, type, url, uploaded_by, uploaded_at,
+		rejected, reject_reason, rejected_by, rejected_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+	if err != nil {
+		return err
+	}
+	defer attachStmt.Close()
+
+	for _, a := range baseAttachments {
+		if existingAttach[a.ID] {
+			continue
+		}
+		var rr, rb, rat sql.NullString
+		if a.Rejected == 1 {
+			rr = sql.NullString{String: a.RejectReason, Valid: true}
+			rb = sql.NullString{String: a.RejectedBy, Valid: true}
+			rat = sql.NullString{String: a.RejectedAt, Valid: true}
+		}
+		_, err = attachStmt.Exec(a.ID, a.SelID, a.Name, a.Type, a.URL, a.Uploader, a.UploadedAt, a.Rejected, rr, rb, rat)
+		if err != nil {
+			return fmt.Errorf("insert attachment %s: %w", a.ID, err)
+		}
+	}
+
+	auditStmt, err := tx.Prepare(`INSERT INTO audit_logs (
+		id, selection_id, user_id, user_name, action, detail, created_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+	if err != nil {
+		return err
+	}
+	defer auditStmt.Close()
+
+	for _, a := range baseAudits {
+		if existingAudit[a.ID] {
+			continue
+		}
 		_, err = auditStmt.Exec(a.ID, a.SelID, a.UID, a.UName, a.Action, a.Detail, a.CreatedAt)
 		if err != nil {
 			return fmt.Errorf("insert audit %s: %w", a.ID, err)
 		}
 	}
 
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+
+	if selCreatedCount > 0 {
+		log.Printf("已补齐 %d 张样例选品单（含附件与审计日志），使用存在判断避免覆盖已有办理数据", selCreatedCount)
+	}
+	return nil
 }
 
 func Close() {
