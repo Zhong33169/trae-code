@@ -1,4 +1,4 @@
-from typing import Optional, Tuple, List
+from typing import Optional, Tuple, List, Dict
 from ..database import get_sqlite_conn
 from ..schemas.models import OperationSubmitRequest
 
@@ -12,6 +12,14 @@ ROLE_STAGE_PERMISSIONS = {
 STAGE_TRANSITION_ORDER = ["开户预约", "资料审核", "账户启用"]
 
 VALID_STATUSES = ["待签收", "异常回传", "签收完成"]
+
+
+def _row_to_dict(cursor, row) -> Dict:
+    """通过 cursor.description 将 tuple 转为 {列名: 值}"""
+    if row is None:
+        return {}
+    columns = [desc[0] for desc in cursor.description]
+    return dict(zip(columns, row))
 
 
 def validate_role_and_stage(role: str, current_stage: str) -> Tuple[bool, str]:
@@ -47,17 +55,17 @@ def validate_version(application_id: int, provided_version: int) -> Tuple[bool, 
         row = cursor.fetchone()
         if not row:
             return False, "申请不存在", {}
-        current_version = row[1]
+        d = _row_to_dict(cursor, row)
+        current_version = d.get("version")
         if current_version != provided_version:
             return False, f"版本冲突：当前版本为{current_version}，提交版本为{provided_version}", {}
-        app_data = {
-            "id": row[0],
-            "version": row[1],
-            "status": row[2],
-            "stage": row[3],
-            "risk_level": row[4],
+        return True, "", {
+            "id": d.get("id"),
+            "version": current_version,
+            "status": d.get("status"),
+            "stage": d.get("stage"),
+            "risk_level": d.get("risk_level"),
         }
-        return True, "", app_data
     finally:
         conn.close()
 
@@ -70,16 +78,18 @@ def validate_required_evidences(application_id: int) -> Tuple[bool, str, List[di
             "FROM evidence_items WHERE application_id = ?",
             (application_id,)
         )
-        evidences = [
-            {
-                "id": row[0],
-                "evidence_type": row[1],
-                "evidence_name": row[2],
-                "is_provided": row[3],
-                "is_required": row[4],
-            }
-            for row in cursor.fetchall()
-        ]
+        rows = cursor.fetchall()
+        columns = [desc[0] for desc in cursor.description]
+        evidences = []
+        for row in rows:
+            d = dict(zip(columns, row))
+            evidences.append({
+                "id": d.get("id"),
+                "evidence_type": d.get("evidence_type"),
+                "evidence_name": d.get("evidence_name"),
+                "is_provided": d.get("is_provided", 0),
+                "is_required": d.get("is_required", 0),
+            })
         missing_required = [e for e in evidences if e["is_required"] == 1 and e["is_provided"] == 0]
         if missing_required:
             names = ", ".join([e["evidence_name"] for e in missing_required])
@@ -99,15 +109,16 @@ def validate_operator(operator_id: int, operator_role: str) -> Tuple[bool, str, 
         row = cursor.fetchone()
         if not row:
             return False, "处理人不存在", {}
-        if row[3] != operator_role:
-            return False, f"处理人角色不匹配：用户角色为{row[3]}，提交角色为{operator_role}", {}
-        user_data = {
-            "id": row[0],
-            "username": row[1],
-            "name": row[2],
-            "role": row[3],
+        d = _row_to_dict(cursor, row)
+        actual_role = d.get("role")
+        if actual_role != operator_role:
+            return False, f"处理人角色不匹配：用户角色为{actual_role}，提交角色为{operator_role}", {}
+        return True, "", {
+            "id": d.get("id"),
+            "username": d.get("username"),
+            "name": d.get("name"),
+            "role": actual_role,
         }
-        return True, "", user_data
     finally:
         conn.close()
 

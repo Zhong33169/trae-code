@@ -54,7 +54,7 @@ export interface OperationRecord {
   operator_role: UserRole;
   operator_name?: string;
   operation_type: string;
-  is_success: number;
+  is_success?: number;  // 兼容旧库升级后可能为 NULL，前端兜底：0=失败，1/undefined=成功
   from_stage?: ApplicationStage;
   to_stage?: ApplicationStage;
   from_status?: ApplicationStatus;

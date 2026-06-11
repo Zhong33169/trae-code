@@ -352,23 +352,39 @@ trae-code-2/
 A: 见上文「端口配置」章节，修改 .env 和 package.json 即可。
 
 ### Q: 如何重置数据库？
-A: 删除 `backend/data/*.db` 文件，重新运行 `python scripts/init_db.py` 和 `python scripts/seed_data.py`。
+A: **只删除 `backend/data/zhong33169.db`**（不要使用 `*.db` 通配），重新运行 `python scripts/init_db.py` 和 `python scripts/seed_data.py`。
+   > 注意：`data/test_migrations_*.db` 是迁移验证脚本的临时测试库，会自动清理，不影响主库。
 
 ### Q: 旧库如何升级到最新表结构？
-A: 直接运行 `python scripts/init_db.py`，系统会自动检测缺失的迁移并执行：
+A: 直接运行 `python scripts/init_db.py`，系统会自动检测缺失的迁移并执行，**演示数据完全保留**：
    - V001: 为旧库补齐 operation_records 表的 is_success 字段
    - 自动回填历史数据（operation_type='操作失败' 的记录 is_success=0，其余=1）
-   - 已应用的迁移不会重复执行
+   - 后端所有查询已改为按列名映射，不再依赖字段顺序，旧库升级后字段顺序不影响读取
 
 ### Q: 迁移脚本如何新增？
 A: 在 `backend/app/migrations/` 目录下按 `V<版本号>_<描述>.py` 格式创建文件，
-   实现 `def up(cursor)` 函数即可。系统会按版本号顺序自动执行未应用的迁移。
+   实现 `def up(cursor)` 函数即可。系统会按版本号顺序自动执行未应用的迁移，幂等不会重复。
 
 ### Q: 如何添加新的样例数据？
 A: 编辑 `backend/scripts/seed_data.py` 中的 samples 数组，然后重新运行脚本。
+   运行 seed_data.py 会先**检测是否已有演示数据**，避免重复插入。
+
+### Q: 后端返回数据契约是什么？
+A: 所有接口返回格式为 `{code: 0/1, message: "xxx", data: ...}`：
+   - **AccountApplication（申请）**：id, application_no, stage, status, risk_level, version, current_handler_name, current_handler_role, deadline, is_overdue, is_returned, evidences[], created_at, updated_at
+   - **OperationRecord（操作记录）**：id, operation_type, is_success(0/1), operator_name, operator_role, from_stage/to_stage, from_status/to_status, from_risk_level/to_risk_level, remark, evidence_checked, version_before/version_after, created_at
+   - **RiskLevelLog（风险日志）**：id, operator_name, operator_role, from_level, to_level, change_reason, created_at
+   - 所有时间字段统一序列化为 ISO 8601 字符串（如 `2024-01-15T10:30:00`）
 
 ### Q: 操作提交失败怎么办？
-A: 查看详情页的「操作记录」标签页，失败的操作也会被记录，包含具体失败原因。
+A: 查看详情页的「操作记录」标签页，失败的操作也会被记录（红色背景 + ❌ 失败标签），包含具体失败原因和版本号（原版本不变）。
+
+### Q: 如何验证迁移正确性？
+A: 运行 `python scripts/verify_migrations.py`，使用独立测试库验证三种场景：
+   1. 新库初始化（建表 + 用户 + 迁移）
+   2. 旧库升级（补齐 is_success 并正确回填）
+   3. 幂等性（重复执行不重复插入数据）
+   验证完成后自动清理测试库，**主库演示数据不受影响**。
 
 ---
 

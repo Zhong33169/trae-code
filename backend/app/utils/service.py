@@ -31,44 +31,128 @@ def _isoformat(value: Any) -> Optional[str]:
     return str(value)
 
 
-def _dict_to_evidence(ev: tuple) -> Dict:
+def _row_to_dict(cursor, row: tuple) -> Dict:
+    """通过 cursor.description 将 tuple 转为 {列名: 值} 的字典，不依赖列顺序"""
+    if row is None:
+        return {}
+    columns = [desc[0] for desc in cursor.description]
+    return dict(zip(columns, row))
+
+
+def _rows_to_dicts(cursor, rows: List[tuple]) -> List[Dict]:
+    """批量转换行列表为字典列表"""
+    if not rows:
+        return []
+    columns = [desc[0] for desc in cursor.description]
+    return [dict(zip(columns, row)) for row in rows]
+
+
+APPLICATION_COLUMNS = """
+    a.id, a.application_no, a.applicant_name, a.applicant_id_card, a.applicant_phone,
+    a.account_type, a.risk_level, a.risk_reason, a.stage, a.status,
+    a.current_handler_id, a.version, a.deadline, a.is_overdue, a.is_evidence_missing,
+    a.is_returned, a.returned_reason, a.created_at, a.updated_at,
+    u.name AS handler_name, u.role AS handler_role
+"""
+
+EVIDENCE_COLUMNS = """
+    id, application_id, evidence_type, evidence_name,
+    is_provided, is_required, verified_at, verified_by, created_at
+"""
+
+OPERATION_COLUMNS = """
+    o.id, o.application_id, o.operator_id, o.operator_role, o.operation_type,
+    o.is_success, o.from_stage, o.to_stage, o.from_status, o.to_status,
+    o.from_risk_level, o.to_risk_level, o.remark, o.evidence_checked,
+    o.version_before, o.version_after, o.created_at,
+    u.name AS operator_name
+"""
+
+RISK_LOG_COLUMNS = """
+    r.id, r.application_id, r.operator_id, r.operator_role,
+    r.from_level, r.to_level, r.change_reason, r.created_at,
+    u.name AS operator_name
+"""
+
+
+def _map_application(d: Dict, evidences: Optional[List] = None) -> Dict:
     return {
-        "id": ev[0],
-        "application_id": ev[1],
-        "evidence_type": ev[2],
-        "evidence_name": ev[3],
-        "is_provided": ev[4],
-        "is_required": ev[5],
-        "verified_at": _isoformat(ev[6]),
-        "verified_by": ev[7],
-        "created_at": _isoformat(ev[8]),
+        "id": d.get("id"),
+        "application_no": d.get("application_no"),
+        "applicant_name": d.get("applicant_name"),
+        "applicant_id_card": d.get("applicant_id_card"),
+        "applicant_phone": d.get("applicant_phone"),
+        "account_type": d.get("account_type"),
+        "risk_level": d.get("risk_level"),
+        "risk_reason": d.get("risk_reason"),
+        "stage": d.get("stage"),
+        "status": d.get("status"),
+        "current_handler_id": d.get("current_handler_id"),
+        "current_handler_name": d.get("handler_name"),
+        "current_handler_role": d.get("handler_role"),
+        "version": d.get("version"),
+        "deadline": _isoformat(d.get("deadline")),
+        "is_overdue": d.get("is_overdue", 0),
+        "is_evidence_missing": d.get("is_evidence_missing", 0),
+        "is_returned": d.get("is_returned", 0),
+        "returned_reason": d.get("returned_reason"),
+        "created_at": _isoformat(d.get("created_at")),
+        "updated_at": _isoformat(d.get("updated_at")),
+        "evidences": evidences,
     }
 
 
-def _dict_to_application(row: tuple, evidences: Optional[List] = None) -> Dict:
+def _map_evidence(d: Dict) -> Dict:
     return {
-        "id": row[0],
-        "application_no": row[1],
-        "applicant_name": row[2],
-        "applicant_id_card": row[3],
-        "applicant_phone": row[4],
-        "account_type": row[5],
-        "risk_level": row[6],
-        "risk_reason": row[7],
-        "stage": row[8],
-        "status": row[9],
-        "current_handler_id": row[10],
-        "current_handler_name": row[19] if len(row) > 19 and row[19] else None,
-        "current_handler_role": row[20] if len(row) > 20 and row[20] else None,
-        "version": row[11],
-        "deadline": _isoformat(row[12]),
-        "is_overdue": row[13],
-        "is_evidence_missing": row[14],
-        "is_returned": row[15],
-        "returned_reason": row[16],
-        "created_at": _isoformat(row[17]),
-        "updated_at": _isoformat(row[18]),
-        "evidences": evidences,
+        "id": d.get("id"),
+        "application_id": d.get("application_id"),
+        "evidence_type": d.get("evidence_type"),
+        "evidence_name": d.get("evidence_name"),
+        "is_provided": d.get("is_provided", 0),
+        "is_required": d.get("is_required", 0),
+        "verified_at": _isoformat(d.get("verified_at")),
+        "verified_by": d.get("verified_by"),
+        "created_at": _isoformat(d.get("created_at")),
+    }
+
+
+def _map_operation(d: Dict) -> Dict:
+    is_success = d.get("is_success")
+    if is_success is None:
+        is_success = 0 if d.get("operation_type") == "操作失败" else 1
+    return {
+        "id": d.get("id"),
+        "application_id": d.get("application_id"),
+        "operator_id": d.get("operator_id"),
+        "operator_role": d.get("operator_role"),
+        "operation_type": d.get("operation_type"),
+        "is_success": is_success,
+        "from_stage": d.get("from_stage"),
+        "to_stage": d.get("to_stage"),
+        "from_status": d.get("from_status"),
+        "to_status": d.get("to_status"),
+        "from_risk_level": d.get("from_risk_level"),
+        "to_risk_level": d.get("to_risk_level"),
+        "remark": d.get("remark"),
+        "evidence_checked": d.get("evidence_checked"),
+        "version_before": d.get("version_before"),
+        "version_after": d.get("version_after"),
+        "created_at": _isoformat(d.get("created_at")),
+        "operator_name": d.get("operator_name"),
+    }
+
+
+def _map_risk_log(d: Dict) -> Dict:
+    return {
+        "id": d.get("id"),
+        "application_id": d.get("application_id"),
+        "operator_id": d.get("operator_id"),
+        "operator_role": d.get("operator_role"),
+        "from_level": d.get("from_level"),
+        "to_level": d.get("to_level"),
+        "change_reason": d.get("change_reason"),
+        "created_at": _isoformat(d.get("created_at")),
+        "operator_name": d.get("operator_name"),
     }
 
 
@@ -80,8 +164,8 @@ def get_application_list(
 ) -> List[Dict]:
     conn = get_sqlite_conn()
     try:
-        sql = """
-            SELECT a.*, u.name as handler_name, u.role as handler_role
+        sql = f"""
+            SELECT {APPLICATION_COLUMNS}
             FROM account_applications a
             LEFT JOIN users u ON a.current_handler_id = u.id
             WHERE 1=1
@@ -102,18 +186,20 @@ def get_application_list(
         sql += " ORDER BY a.created_at DESC"
 
         cursor = conn.execute(sql, params)
-        rows = cursor.fetchall()
+        app_rows = cursor.fetchall()
+        app_dicts = _rows_to_dicts(cursor, app_rows)
 
         result = []
-        for row in rows:
-            app = _dict_to_application(row)
+        for app_dict in app_dicts:
+            app_id = app_dict.get("id")
             ev_cursor = conn.execute(
-                "SELECT * FROM evidence_items WHERE application_id = ? ORDER BY id",
-                (row[0],)
+                f"SELECT {EVIDENCE_COLUMNS} FROM evidence_items WHERE application_id = ? ORDER BY id",
+                (app_id,)
             )
             ev_rows = ev_cursor.fetchall()
-            app["evidences"] = [_dict_to_evidence(ev) for ev in ev_rows]
-            result.append(app)
+            ev_dicts = _rows_to_dicts(ev_cursor, ev_rows)
+            evidences = [_map_evidence(ev) for ev in ev_dicts]
+            result.append(_map_application(app_dict, evidences))
         return result
     finally:
         conn.close()
@@ -123,8 +209,8 @@ def get_application_detail(application_id: int) -> Optional[Dict]:
     conn = get_sqlite_conn()
     try:
         cursor = conn.execute(
-            """
-            SELECT a.*, u.name as handler_name, u.role as handler_role
+            f"""
+            SELECT {APPLICATION_COLUMNS}
             FROM account_applications a
             LEFT JOIN users u ON a.current_handler_id = u.id
             WHERE a.id = ?
@@ -134,47 +220,26 @@ def get_application_detail(application_id: int) -> Optional[Dict]:
         row = cursor.fetchone()
         if not row:
             return None
+        app_dict = _row_to_dict(cursor, row)
 
         ev_cursor = conn.execute(
-            "SELECT * FROM evidence_items WHERE application_id = ? ORDER BY id",
+            f"SELECT {EVIDENCE_COLUMNS} FROM evidence_items WHERE application_id = ? ORDER BY id",
             (application_id,)
         )
         ev_rows = ev_cursor.fetchall()
-        evidences = [_dict_to_evidence(ev) for ev in ev_rows]
-        return _dict_to_application(row, evidences)
+        ev_dicts = _rows_to_dicts(ev_cursor, ev_rows)
+        evidences = [_map_evidence(ev) for ev in ev_dicts]
+        return _map_application(app_dict, evidences)
     finally:
         conn.close()
-
-
-def _dict_to_operation(r: tuple) -> Dict:
-    return {
-        "id": r[0],
-        "application_id": r[1],
-        "operator_id": r[2],
-        "operator_role": r[3],
-        "operation_type": r[4],
-        "is_success": r[5],
-        "from_stage": r[6],
-        "to_stage": r[7],
-        "from_status": r[8],
-        "to_status": r[9],
-        "from_risk_level": r[10],
-        "to_risk_level": r[11],
-        "remark": r[12],
-        "evidence_checked": r[13],
-        "version_before": r[14],
-        "version_after": r[15],
-        "created_at": _isoformat(r[16]),
-        "operator_name": r[17] if len(r) > 17 else None,
-    }
 
 
 def get_operation_records(application_id: int) -> List[Dict]:
     conn = get_sqlite_conn()
     try:
         cursor = conn.execute(
-            """
-            SELECT o.*, u.name as operator_name
+            f"""
+            SELECT {OPERATION_COLUMNS}
             FROM operation_records o
             LEFT JOIN users u ON o.operator_id = u.id
             WHERE o.application_id = ?
@@ -183,31 +248,18 @@ def get_operation_records(application_id: int) -> List[Dict]:
             (application_id,)
         )
         rows = cursor.fetchall()
-        return [_dict_to_operation(r) for r in rows]
+        dicts = _rows_to_dicts(cursor, rows)
+        return [_map_operation(d) for d in dicts]
     finally:
         conn.close()
-
-
-def _dict_to_risk_log(r: tuple) -> Dict:
-    return {
-        "id": r[0],
-        "application_id": r[1],
-        "operator_id": r[2],
-        "operator_role": r[3],
-        "from_level": r[4],
-        "to_level": r[5],
-        "change_reason": r[6],
-        "created_at": _isoformat(r[7]),
-        "operator_name": r[9] if len(r) > 9 else None,
-    }
 
 
 def get_risk_level_logs(application_id: int) -> List[Dict]:
     conn = get_sqlite_conn()
     try:
         cursor = conn.execute(
-            """
-            SELECT r.*, u.name as operator_name
+            f"""
+            SELECT {RISK_LOG_COLUMNS}
             FROM risk_level_logs r
             LEFT JOIN users u ON r.operator_id = u.id
             WHERE r.application_id = ?
@@ -216,7 +268,8 @@ def get_risk_level_logs(application_id: int) -> List[Dict]:
             (application_id,)
         )
         rows = cursor.fetchall()
-        return [_dict_to_risk_log(r) for r in rows]
+        dicts = _rows_to_dicts(cursor, rows)
+        return [_map_risk_log(d) for d in dicts]
     finally:
         conn.close()
 
@@ -259,10 +312,19 @@ def get_statistics() -> Dict:
 def get_users() -> List[Dict]:
     conn = get_sqlite_conn()
     try:
-        cursor = conn.execute("SELECT id, username, name, role FROM users ORDER BY id")
+        cursor = conn.execute(
+            "SELECT id, username, name, role FROM users ORDER BY id"
+        )
+        rows = cursor.fetchall()
+        dicts = _rows_to_dicts(cursor, rows)
         return [
-            {"id": r[0], "username": r[1], "name": r[2], "role": r[3]}
-            for r in cursor.fetchall()
+            {
+                "id": d.get("id"),
+                "username": d.get("username"),
+                "name": d.get("name"),
+                "role": d.get("role"),
+            }
+            for d in dicts
         ]
     finally:
         conn.close()

@@ -20,12 +20,16 @@ def seed_sample_data():
 
         cursor.execute("SELECT COUNT(*) FROM account_applications")
         app_count = cursor.fetchone()[0]
-        if app_count > 0:
-            print(f"\nℹ 已存在 {app_count} 条开户申请，是否清空并重新加载？(y/n): ", end="")
-            choice = "y"
-            if choice.lower() != "y":
-                print("已取消加载样例数据")
-                return
+        force_reset = os.getenv("SEED_FORCE_RESET", "").lower() in ("1", "true", "yes")
+
+        if app_count > 0 and not force_reset:
+            print(f"\nℹ 已存在 {app_count} 条开户申请，跳过加载样例数据")
+            print(f"  如需强制重置并重新加载，请设置环境变量：SEED_FORCE_RESET=1 python scripts/seed_data.py")
+            print(f"  或手动删除 data/zhong33169.db 后重新运行")
+            return
+
+        if app_count > 0 and force_reset:
+            print(f"\n⚠ 已存在 {app_count} 条开户申请，SEED_FORCE_RESET=1，强制清空并重新加载...")
             cursor.execute("DELETE FROM operation_records")
             cursor.execute("DELETE FROM evidence_items")
             cursor.execute("DELETE FROM risk_level_logs")

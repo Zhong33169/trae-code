@@ -21,9 +21,16 @@ function isOperationEvent(event: TimelineEvent): event is OperationEvent {
   return event.type === 'operation';
 }
 
+function resolveIsSuccess(event: OperationEvent): number {
+  if (event.is_success === 0 || event.is_success === 1) {
+    return event.is_success;
+  }
+  return event.operation_type === '操作失败' ? 0 : 1;
+}
+
 function isFailedEvent(event: TimelineEvent): boolean {
   if (!isOperationEvent(event)) return false;
-  return event.is_success === 0 || event.operation_type === '操作失败';
+  return resolveIsSuccess(event) === 0;
 }
 
 function getRiskLevelLabel(level: string): string {
