@@ -1,0 +1,16 @@
+{
+  "name": "store-order-warning-backend",
+  "version": "1.0.0",
+  "description": "餐饮连锁总部到期预警处理门店订货单系统 - 后端",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node -r dotenv/config src/server.js",
+    "dev": "node -r dotenv/config src/server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "uuid": "^9.0.1"
+  }
+}
