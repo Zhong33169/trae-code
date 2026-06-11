@@ -154,7 +154,9 @@ func CreateHandover(w http.ResponseWriter, r *http.Request) {
 	}
 	handoverID, _ := res.LastInsertId()
 
-	opDetail := "发起交接至 [" + toUserName + "](" + toUserRole.DisplayName() + "/" + req.ToShift + ")，交接说明：" + req.Remark
+	opDetail := "【发起交接】交出人：" + user.RealName + "（" + user.Role.DisplayName() + "/" + user.Shift + "）→ 接收人：" + toUserName + "（" + toUserRole.DisplayName() + "/" + req.ToShift + "）"
+	opDetail += "，交接说明：" + req.Remark
+	opDetail += "，申请当前状态：【" + models.ApplicationStatus(appStatus).DisplayName() + "】"
 	writeOpLog(tx, req.ApplicationID, appNo, user,
 		"发起交接", opDetail, appStatus, appStatus, r.RemoteAddr)
 
@@ -186,7 +188,8 @@ func ConfirmHandover(w http.ResponseWriter, r *http.Request) {
 	var fromUserID int64
 	var fromShift string
 	var toShift string
-	var oldStatus string
+	var handoverStatus string
+	var appStatus string
 	var handoverRemark string
 	var fromUserName, toUserName string
 	err := db.DB.QueryRow(`
@@ -200,7 +203,7 @@ func ConfirmHandover(w http.ResponseWriter, r *http.Request) {
 		JOIN users tu ON h.to_user_id = tu.id
 		WHERE h.id=?`, id).
 		Scan(&appID, &toUserID, &fromUserID, &fromShift, &toShift,
-			&oldStatus, &handoverRemark, &appNo, &applicantName, &oldStatus,
+			&handoverStatus, &handoverRemark, &appNo, &applicantName, &appStatus,
 			&fromUserName, &toUserName)
 	if err == sql.ErrNoRows {
 		w.Header().Set("Content-Type", "application/json")
@@ -208,11 +211,18 @@ func ConfirmHandover(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(utils.Fail(404, "交接单不存在"))
 		return
 	}
-	if oldStatus != string(models.HandoverPending) {
+	if handoverStatus != string(models.HandoverPending) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(utils.Fail(utils.CodeHandoverStatusError,
-			"当前交接状态为【"+models.HandoverStatus(oldStatus).DisplayName()+"】，不能重复确认"))
+			"当前交接状态为【"+models.HandoverStatus(handoverStatus).DisplayName()+"】，不能重复确认"))
+		return
+	}
+	if appStatus == string(models.StatusArchived) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(utils.Fail(utils.CodeHandoverStatusError,
+			"关联的开户申请已归档（状态：【"+models.ApplicationStatus(appStatus).DisplayName()+"】），无法确认交接"))
 		return
 	}
 	if toUserID != user.ID {
@@ -252,17 +262,23 @@ func ConfirmHandover(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		opDetail := "【交接确认-接收】交出人：" + fromUserName + "（" + fromShift + "）→ 接收人：" + toUserName + "（" + toShift + "），交接说明：" + handoverRemark
+		opDetail := "【交接确认-接收】交出人：" + fromUserName + "（" + fromShift + "）→ 接收人：" + toUserName + "（" + toShift + "）"
+		opDetail += "，交接说明：" + handoverRemark
 		if req.Remark != "" {
 			opDetail += "，接收备注：" + req.Remark
 		}
-		opDetail += "，处理人已变更为：" + user.RealName
+		opDetail += "，申请当前状态：【" + models.ApplicationStatus(appStatus).DisplayName() + "】"
+		opDetail += "，处理人已变更为：" + user.RealName + "（" + user.Shift + "）"
 		writeOpLog(tx, appID, appNo, user,
-			"接收交接", opDetail, "", "", r.RemoteAddr)
+			"接收交接", opDetail, appStatus, appStatus, r.RemoteAddr)
 	} else {
-		opDetail := "【交接确认-拒绝】交出人：" + fromUserName + "（" + fromShift + "）→ 接收人：" + toUserName + "（" + toShift + "），交接说明：" + handoverRemark + "，拒绝原因：" + req.Remark + "，原处理人保持不变"
+		opDetail := "【交接确认-拒绝】交出人：" + fromUserName + "（" + fromShift + "）→ 接收人：" + toUserName + "（" + toShift + "）"
+		opDetail += "，交接说明：" + handoverRemark
+		opDetail += "，拒绝原因：" + req.Remark
+		opDetail += "，申请当前状态：【" + models.ApplicationStatus(appStatus).DisplayName() + "】"
+		opDetail += "，原处理人保持不变"
 		writeOpLog(tx, appID, appNo, user,
-			"拒绝交接", opDetail, "", "", r.RemoteAddr)
+			"拒绝交接", opDetail, appStatus, appStatus, r.RemoteAddr)
 	}
 
 	tx.Commit()

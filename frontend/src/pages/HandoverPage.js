@@ -246,6 +246,13 @@ class HandoverPage extends LitElement {
                   <div style="grid-column:span 2;">
                     <strong>关联申请：</strong>${this.currentHandover.applicationNo} - ${this.currentHandover.applicantName}
                   </div>
+                  <div style="grid-column:span 2;">
+                    <span>交接状态：<span class="tag ${handoverStatusClass(this.currentHandover.status)}">${this.currentHandover.statusDisplay}</span></span>
+                    <span style="margin-left:16px;">申请状态：<span class="tag ${statusClass(this.currentHandover.appStatus)}">${this.currentHandover.appStatusDisplay}</span></span>
+                  </div>
+                  <div style="grid-column:span 2;">
+                    当前处理人：<strong>${this.currentHandover.currentHandlerName}</strong>（${this.currentHandover.currentHandlerRole}）
+                  </div>
                 </div>
                 <div class="remark-box"><strong>交接说明：</strong>${this.currentHandover.handoverRemark}</div>
                 ${!this.accepted ? html`
@@ -267,10 +274,10 @@ class HandoverPage extends LitElement {
                     ></textarea>
                   </div>
                 `}
-                <div class="reject-box" style="${this.accepted ? 'background:#f6ffed;border-color:#b7eb8f;color:#389e0d;border-left-color:#52c41a;' : ''}">
+                <div style="padding:10px 14px;border-radius:6px;border-left:3px solid ${this.accepted ? '#52c41a' : '#f5222d'};background:${this.accepted ? '#f6ffed' : '#fff1f0'};color:${this.accepted ? '#389e0d' : '#cf1322'};font-size:13px;line-height:1.6;">
                   ${this.accepted
-                    ? '✅ 确认接收后，该申请的当前处理人将变更为您，您需负责后续处理。'
-                    : '⚠️ 拒绝接收后，申请处理人不变，仍由交出方继续负责。'}
+                    ? html`✅ 确认接收后，该申请的当前处理人将由 <strong>${this.currentHandover.currentHandlerName}</strong> 变更为 <strong>${this.currentHandover.toUserName}</strong>（您），您需负责后续处理。`
+                    : html`⚠️ 拒绝接收后，申请处理人不变，仍由 <strong>${this.currentHandover.currentHandlerName}</strong> 继续负责。`}
                 </div>
               ` : ''}
             </div>

@@ -356,6 +356,10 @@ class ApplicationDetailPage extends LitElement {
                   <div class="shift">${h.toShift}</div>
                 </div>
                 <div style="flex:1;padding-left:16px;font-size:12px;color:#666;">
+                  <div style="margin-bottom:4px;">
+                    <span>交接状态：<span class="tag ${handoverStatusClass(h.status)}" style="margin:0;">${h.statusDisplay}</span></span>
+                    <span style="margin-left:12px;">申请状态：<span class="tag ${statusClass(h.appStatus)}" style="margin:0;">${h.appStatusDisplay}</span></span>
+                  </div>
                   <div><strong>交接说明：</strong>${h.handoverRemark}</div>
                   ${h.acceptRemark ? html`
                     <div style="margin-top:4px;">
@@ -364,17 +368,17 @@ class ApplicationDetailPage extends LitElement {
                   ` : ''}
                   ${h.status === 'ACCEPTED' ? html`
                     <div style="margin-top:4px;color:#52c41a;font-weight:500;">
-                      ✅ 确认接收后，当前处理人已变更为：${h.toUserName}（${h.toUserRole} · ${h.toShift}）
+                      ✅ 确认接收，当前处理人已变更为：${h.toUserName}（${h.toUserRole} · ${h.toShift}）
                     </div>
                   ` : ''}
                   ${h.status === 'REJECTED' ? html`
                     <div style="margin-top:4px;color:#f5222d;font-weight:500;">
-                      ❌ 已拒绝接收，处理人保持为原交出人
+                      ❌ 已拒绝接收，处理人保持为：${h.fromUserName}（${h.fromUserRole} · ${h.fromShift}）
                     </div>
                   ` : ''}
                   ${h.status === 'PENDING' ? html`
                     <div style="margin-top:4px;color:#1890ff;font-weight:500;">
-                      ⏳ 等待 ${h.toUserName} 确认接收...
+                      ⏳ 等待 ${h.toUserName}（${h.toUserRole} · ${h.toShift}）确认接收...
                     </div>
                   ` : ''}
                   <div style="color:#999;margin-top:4px;">
