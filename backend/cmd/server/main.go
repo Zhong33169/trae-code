@@ -45,6 +45,7 @@ func main() {
 	selections := auth.Group("/selections")
 	{
 		selections.GET("", handler.ListSelections)
+		selections.GET("/stats", handler.GetStats)
 		selections.GET("/:id", handler.GetSelection)
 		selections.POST("", handler.CreateSelection, middleware.RequireRole(model.RoleRegistrar))
 		selections.POST("/:id/submit", handler.SubmitForReview, middleware.RequireRole(model.RoleRegistrar))

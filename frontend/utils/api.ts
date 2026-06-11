@@ -218,4 +218,12 @@ export const api = {
       }
     );
   },
+  getStats(userId: string): Promise<{
+    total: number;
+    exception_total: number;
+    status_count: Record<string, number>;
+    exception_by_status: Record<string, Selection[]>;
+  }> {
+    return request("/selections/stats", userId);
+  },
 };

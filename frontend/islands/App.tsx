@@ -10,7 +10,30 @@ import {
   ROLE_LABELS,
 } from "../utils/api.ts";
 
+interface Stats {
+  total: number;
+  exception_total: number;
+  status_count: Record<string, number>;
+  exception_by_status: Record<string, Selection[]>;
+}
+
 interface Props {}
+
+const EXCEPTION_STATUSES: SelectionStatus[] = [
+  "missing_attachment",
+  "rejected",
+  "timeout",
+];
+
+const EXCEPTION_LABELS: Record<SelectionStatus, string> = {
+  missing_attachment: "📎 缺材料待补正",
+  rejected: "🚫 已退回",
+  timeout: "⏰ 超时未处理",
+  draft: "",
+  pending: "",
+  approved: "",
+  archived: "",
+};
 
 export default function App(_props: Props) {
   const users = useSignal<User[]>([]);
@@ -19,11 +42,14 @@ export default function App(_props: Props) {
   const statusFilter = useSignal<string>("all");
   const keyword = useSignal<string>("");
   const selections = useSignal<Selection[]>([]);
+  const stats = useSignal<Stats | null>(null);
   const loading = useSignal(false);
   const error = useSignal("");
   const success = useSignal("");
   const selectedIds = useSignal<string[]>([]);
   const showCreateModal = useSignal(false);
+
+  const isExceptionView = useComputed(() => statusFilter.value === "__exception__");
 
   const currentUser = useComputed(
     () => users.value.find((u) => u.id === currentUserId.value)
@@ -31,6 +57,14 @@ export default function App(_props: Props) {
 
   const filteredSelections = useComputed(() => {
     let list = selections.value;
+    if (isExceptionView.value && stats.value) {
+      const merged: Selection[] = [];
+      for (const st of EXCEPTION_STATUSES) {
+        const items = stats.value.exception_by_status[st] || [];
+        merged.push(...items);
+      }
+      list = merged;
+    }
     const kw = keyword.value.trim().toLowerCase();
     if (kw) {
       list = list.filter(
@@ -43,20 +77,25 @@ export default function App(_props: Props) {
     return list;
   });
 
-  const hasException = (s: Selection) =>
-    s.status === "missing_attachment" ||
-    s.status === "rejected" ||
-    s.status === "timeout";
-
   const loadSelections = async () => {
     loading.value = true;
     error.value = "";
     try {
-      const data = await api.listSelections(
-        currentUserId.value,
-        statusFilter.value === "all" ? "" : statusFilter.value
-      );
-      selections.value = data;
+      if (isExceptionView.value) {
+        const [listData, statsData] = await Promise.all([
+          api.listSelections(currentUserId.value, ""),
+          api.getStats(currentUserId.value),
+        ]);
+        selections.value = listData;
+        stats.value = statsData;
+      } else {
+        const data = await api.listSelections(
+          currentUserId.value,
+          statusFilter.value === "all" ? "" : statusFilter.value
+        );
+        selections.value = data;
+        stats.value = null;
+      }
     } catch (e: any) {
       error.value = e.message;
     } finally {
@@ -81,7 +120,7 @@ export default function App(_props: Props) {
   }, []);
 
   useEffect(() => {
-    if (currentUserId.value) {
+    if (currentUserId.value && usersLoaded.value) {
       loadSelections();
     }
   }, [currentUserId.value, statusFilter.value, usersLoaded.value]);
@@ -140,6 +179,372 @@ export default function App(_props: Props) {
     } catch (e: any) {
       error.value = e.message;
     }
+  };
+
+  const renderSelectionRow = (s: Selection, showCheckbox: boolean) => (
+    <tr key={s.id}>
+      {showCheckbox && (
+        <td>
+          <input
+            type="checkbox"
+            checked={selectedIds.value.includes(s.id)}
+            onInput={() => toggleSelect(s.id)}
+          />
+        </td>
+      )}
+      <td>
+        <code style={{ fontSize: 12 }}>{s.id}</code>
+      </td>
+      <td>
+        <a href={`/selections/${s.id}`} class="link">
+          <strong>{s.product_name}</strong>
+        </a>
+        <span
+          style={{
+            marginLeft: 6,
+            fontSize: 11,
+            color: "#ef4444",
+          }}
+        >
+          ⚠️
+        </span>
+      </td>
+      <td>
+        {s.brand}
+        <div style={{ fontSize: 12, color: "#6b7280" }}>{s.product_category}</div>
+      </td>
+      <td>
+        <span class="price">¥{s.estimated_price.toFixed(2)}</span>
+        <div style={{ fontSize: 12, color: "#6b7280" }}>
+          佣金 {Math.round(s.commission_rate * 100)}%
+        </div>
+      </td>
+      <td>
+        <span
+          class="status-badge"
+          style={{
+            background: STATUS_COLORS[s.status as SelectionStatus],
+          }}
+        >
+          {STATUS_LABELS[s.status as SelectionStatus]}
+        </span>
+        {s.reject_reason && (
+          <div
+            style={{
+              fontSize: 11,
+              color: "#b91c1c",
+              marginTop: 4,
+              maxWidth: 220,
+            }}
+            title={s.reject_reason}
+          >
+            {s.reject_reason.length > 28
+              ? s.reject_reason.slice(0, 28) + "..."
+              : s.reject_reason}
+          </div>
+        )}
+      </td>
+      <td style={{ fontSize: 12 }}>{s.created_by_name}</td>
+      <td style={{ fontSize: 12, color: "#6b7280" }}>
+        {new Date(s.created_at).toLocaleString("zh-CN", {
+          hour12: false,
+        })}
+      </td>
+      <td>
+        <a href={`/selections/${s.id}`} class="btn btn-outline btn-sm">
+          立即处理
+        </a>
+      </td>
+    </tr>
+  );
+
+  const renderExceptionWorkbench = () => {
+    const st = stats.value;
+    if (!st) {
+      return <div class="empty">加载异常工作台...</div>;
+    }
+    const showCheckbox = currentUser.value?.role !== "registrar";
+    return (
+      <div>
+        <div class="grid-3" style={{ marginBottom: 20 }}>
+          {EXCEPTION_STATUSES.map((stKey) => {
+            const count = st.exception_by_status[stKey]?.length || 0;
+            return (
+              <div
+                key={stKey}
+                class="card"
+                style={{ margin: 0, borderLeft: `4px solid ${STATUS_COLORS[stKey]}` }}
+              >
+                <div class="card-body" style={{ padding: "16px 20px" }}>
+                  <div style={{ fontSize: 13, color: "#6b7280" }}>
+                    {EXCEPTION_LABELS[stKey]}
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 32,
+                      fontWeight: 700,
+                      color: STATUS_COLORS[stKey],
+                      marginTop: 4,
+                    }}
+                  >
+                    {count}
+                  </div>
+                  <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 4 }}>
+                    {stKey === "missing_attachment" && "等待登记员补齐附件"}
+                    {stKey === "rejected" && "等待登记员修改后重提"}
+                    {stKey === "timeout" && "超过截止时间未处理"}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {EXCEPTION_STATUSES.map((stKey) => {
+          const items = st.exception_by_status[stKey] || [];
+          const kw = keyword.value.trim().toLowerCase();
+          const filtered = kw
+            ? items.filter(
+                (s) =>
+                  s.product_name.toLowerCase().includes(kw) ||
+                  s.brand.toLowerCase().includes(kw) ||
+                  s.id.toLowerCase().includes(kw)
+              )
+            : items;
+          return (
+            <div class="card" key={stKey} style={{ marginBottom: 20 }}>
+              <div class="card-header">
+                <h2 style={{ color: STATUS_COLORS[stKey] }}>
+                  {EXCEPTION_LABELS[stKey]}
+                  <span
+                    style={{
+                      fontWeight: 400,
+                      fontSize: 13,
+                      color: "#6b7280",
+                      marginLeft: 8,
+                    }}
+                  >
+                    共 {filtered.length} 条
+                  </span>
+                </h2>
+              </div>
+              <div class="card-body" style={{ padding: 0 }}>
+                {filtered.length === 0 ? (
+                  <div class="empty">暂无此类型异常</div>
+                ) : (
+                  <table>
+                    <thead>
+                      <tr>
+                        {showCheckbox && (
+                          <th style={{ width: 40 }}>
+                            <input
+                              type="checkbox"
+                              checked={
+                                selectedIds.value.length === filtered.length &&
+                                filtered.length > 0 &&
+                                filtered.every((x) => selectedIds.value.includes(x.id))
+                              }
+                              onInput={() => {
+                                if (
+                                  filtered.every((x) =>
+                                    selectedIds.value.includes(x.id)
+                                  )
+                                ) {
+                                  selectedIds.value = selectedIds.value.filter(
+                                    (x) => !filtered.some((f) => f.id === x)
+                                  );
+                                } else {
+                                  const add = filtered
+                                    .filter((x) => !selectedIds.value.includes(x.id))
+                                    .map((x) => x.id);
+                                  selectedIds.value = [
+                                    ...selectedIds.value,
+                                    ...add,
+                                  ];
+                                }
+                              }}
+                            />
+                          </th>
+                        )}
+                        <th>编号</th>
+                        <th>商品名称</th>
+                        <th>品牌/分类</th>
+                        <th>价格/佣金</th>
+                        <th>异常详情</th>
+                        <th>创建人</th>
+                        <th>创建时间</th>
+                        <th>操作</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filtered.map((s) => renderSelectionRow(s, showCheckbox))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  const renderNormalList = () => {
+    const showCheckbox = currentUser.value?.role !== "registrar";
+    return (
+      <div class="card">
+        <div class="card-header">
+          <h2>
+            直播选品单列表
+            <span
+              style={{
+                color: "#6b7280",
+                fontWeight: 400,
+                fontSize: 13,
+                marginLeft: 8,
+              }}
+            >
+              共 {filteredSelections.value.length} 条
+              {currentUser.value && (
+                <> ｜ 当前视角：{ROLE_LABELS[currentUser.value.role]}</>
+              )}
+            </span>
+          </h2>
+        </div>
+        <div class="card-body" style={{ padding: 0 }}>
+          {loading.value ? (
+            <div class="empty">加载中...</div>
+          ) : (
+            <table>
+              <thead>
+                <tr>
+                  {showCheckbox && (
+                    <th style={{ width: 40 }}>
+                      <input
+                        type="checkbox"
+                        checked={
+                          selectedIds.value.length ===
+                            filteredSelections.value.length &&
+                          filteredSelections.value.length > 0
+                        }
+                        onInput={toggleSelectAll}
+                      />
+                    </th>
+                  )}
+                  <th>编号</th>
+                  <th>商品名称</th>
+                  <th>品牌/分类</th>
+                  <th>价格/佣金</th>
+                  <th>状态</th>
+                  <th>创建人</th>
+                  <th>创建时间</th>
+                  <th>处理</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredSelections.value.length === 0 ? (
+                  <tr>
+                    <td colSpan={showCheckbox ? 9 : 8}>
+                      <div class="empty">暂无选品单数据</div>
+                    </td>
+                  </tr>
+                ) : (
+                  filteredSelections.value.map((s) => {
+                    const isException =
+                      s.status === "missing_attachment" ||
+                      s.status === "rejected" ||
+                      s.status === "timeout";
+                    return (
+                      <tr key={s.id}>
+                        {showCheckbox && (
+                          <td>
+                            <input
+                              type="checkbox"
+                              checked={selectedIds.value.includes(s.id)}
+                              onInput={() => toggleSelect(s.id)}
+                            />
+                          </td>
+                        )}
+                        <td>
+                          <code style={{ fontSize: 12 }}>{s.id}</code>
+                        </td>
+                        <td>
+                          <a href={`/selections/${s.id}`} class="link">
+                            <strong>{s.product_name}</strong>
+                          </a>
+                          {isException && (
+                            <span
+                              style={{
+                                marginLeft: 6,
+                                fontSize: 11,
+                                color: "#ef4444",
+                              }}
+                            >
+                              ⚠️
+                            </span>
+                          )}
+                        </td>
+                        <td>
+                          {s.brand}
+                          <div style={{ fontSize: 12, color: "#6b7280" }}>
+                            {s.product_category}
+                          </div>
+                        </td>
+                        <td>
+                          <span class="price">¥{s.estimated_price.toFixed(2)}</span>
+                          <div style={{ fontSize: 12, color: "#6b7280" }}>
+                            佣金 {Math.round(s.commission_rate * 100)}%
+                          </div>
+                        </td>
+                        <td>
+                          <span
+                            class="status-badge"
+                            style={{
+                              background: STATUS_COLORS[s.status as SelectionStatus],
+                            }}
+                          >
+                            {STATUS_LABELS[s.status as SelectionStatus]}
+                          </span>
+                          {s.reject_reason && (
+                            <div
+                              style={{
+                                fontSize: 11,
+                                color: "#b91c1c",
+                                marginTop: 4,
+                                maxWidth: 200,
+                              }}
+                              title={s.reject_reason}
+                            >
+                              {s.reject_reason.length > 25
+                                ? s.reject_reason.slice(0, 25) + "..."
+                                : s.reject_reason}
+                            </div>
+                          )}
+                        </td>
+                        <td style={{ fontSize: 12 }}>{s.created_by_name}</td>
+                        <td style={{ fontSize: 12, color: "#6b7280" }}>
+                          {new Date(s.created_at).toLocaleString("zh-CN", {
+                            hour12: false,
+                          })}
+                        </td>
+                        <td>
+                          <a
+                            href={`/selections/${s.id}`}
+                            class="btn btn-outline btn-sm"
+                          >
+                            详情
+                          </a>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -212,14 +617,15 @@ export default function App(_props: Props) {
               (keyword.value = (e.target as HTMLInputElement).value)
             }
           />
-          <label>状态：</label>
+          <label>视图：</label>
           <select
             value={statusFilter.value}
             onChange={(e: Event) =>
               (statusFilter.value = (e.target as HTMLSelectElement).value)
             }
           >
-            <option value="all">全部状态</option>
+            <option value="all">📋 全部选品单</option>
+            <option value="__exception__">🚨 异常工作台</option>
             <option value="draft">草稿</option>
             <option value="pending">待审核</option>
             <option value="missing_attachment">缺材料待补正</option>
@@ -227,154 +633,17 @@ export default function App(_props: Props) {
             <option value="approved">审核通过</option>
             <option value="archived">已归档</option>
             <option value="timeout">超时</option>
-            <option value="__exception__">🔴 仅异常</option>
           </select>
         </div>
       </div>
 
-      <div class="card">
-        <div class="card-header">
-          <h2>
-            直播选品单列表
-            <span style={{ color: "#6b7280", fontWeight: 400, fontSize: 13, marginLeft: 8 }}>
-              共 {filteredSelections.value.length} 条
-              {currentUser.value && (
-                <> ｜ 当前视角：{ROLE_LABELS[currentUser.value.role]}</>
-              )}
-            </span>
-          </h2>
-        </div>
-        <div class="card-body" style={{ padding: 0 }}>
-          {loading.value ? (
-            <div class="empty">加载中...</div>
-          ) : (
-            <table>
-              <thead>
-                <tr>
-                  {currentUser.value?.role !== "registrar" && (
-                    <th style={{ width: 40 }}>
-                      <input
-                        type="checkbox"
-                        checked={
-                          selectedIds.value.length === filteredSelections.value.length &&
-                          filteredSelections.value.length > 0
-                        }
-                        onInput={toggleSelectAll}
-                      />
-                    </th>
-                  )}
-                  <th>编号</th>
-                  <th>商品名称</th>
-                  <th>品牌/分类</th>
-                  <th>价格/佣金</th>
-                  <th>状态</th>
-                  <th>创建人</th>
-                  <th>创建时间</th>
-                  <th>处理</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredSelections.value.length === 0 ? (
-                  <tr>
-                    <td colSpan={currentUser.value?.role === "registrar" ? 8 : 9}>
-                      <div class="empty">暂无选品单数据</div>
-                    </td>
-                  </tr>
-                ) : (
-                  filteredSelections.value.map((s) => {
-                    if (
-                      statusFilter.value === "__exception__" &&
-                      !hasException(s)
-                    ) {
-                      return null;
-                    }
-                    return (
-                      <tr key={s.id}>
-                        {currentUser.value?.role !== "registrar" && (
-                          <td>
-                            <input
-                              type="checkbox"
-                              checked={selectedIds.value.includes(s.id)}
-                              onInput={() => toggleSelect(s.id)}
-                            />
-                          </td>
-                        )}
-                        <td>
-                          <code style={{ fontSize: 12 }}>{s.id}</code>
-                        </td>
-                        <td>
-                          <a href={`/selections/${s.id}`} class="link">
-                            <strong>{s.product_name}</strong>
-                          </a>
-                          {hasException(s) && (
-                            <span
-                              style={{
-                                marginLeft: 6,
-                                fontSize: 11,
-                                color: "#ef4444",
-                              }}
-                            >
-                              ⚠️
-                            </span>
-                          )}
-                        </td>
-                        <td>
-                          {s.brand}
-                          <div style={{ fontSize: 12, color: "#6b7280" }}>
-                            {s.product_category}
-                          </div>
-                        </td>
-                        <td>
-                          <span class="price">¥{s.estimated_price.toFixed(2)}</span>
-                          <div style={{ fontSize: 12, color: "#6b7280" }}>
-                            佣金 {Math.round(s.commission_rate * 100)}%
-                          </div>
-                        </td>
-                        <td>
-                          <span
-                            class="status-badge"
-                            style={{
-                              background: STATUS_COLORS[s.status as SelectionStatus],
-                            }}
-                          >
-                            {STATUS_LABELS[s.status as SelectionStatus]}
-                          </span>
-                          {s.reject_reason && (
-                            <div
-                              style={{
-                                fontSize: 11,
-                                color: "#b91c1c",
-                                marginTop: 4,
-                                maxWidth: 200,
-                              }}
-                              title={s.reject_reason}
-                            >
-                              {s.reject_reason.length > 25
-                                ? s.reject_reason.slice(0, 25) + "..."
-                                : s.reject_reason}
-                            </div>
-                          )}
-                        </td>
-                        <td style={{ fontSize: 12 }}>{s.created_by_name}</td>
-                        <td style={{ fontSize: 12, color: "#6b7280" }}>
-                          {new Date(s.created_at).toLocaleString("zh-CN", {
-                            hour12: false,
-                          })}
-                        </td>
-                        <td>
-                          <a href={`/selections/${s.id}`} class="btn btn-outline btn-sm">
-                            详情
-                          </a>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          )}
-        </div>
-      </div>
+      {loading.value ? (
+        <div class="empty">加载中...</div>
+      ) : isExceptionView.value ? (
+        renderExceptionWorkbench()
+      ) : (
+        renderNormalList()
+      )}
 
       {showCreateModal.value && (
         <CreateSelectionModal

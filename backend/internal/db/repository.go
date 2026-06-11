@@ -80,28 +80,45 @@ func scanSelection(rows *sql.Rows) (*model.Selection, error) {
 	return &s, nil
 }
 
-func GetSelections(status, role, userID string) ([]model.Selection, error) {
+func GetSelections(status, role, userID string, exceptionOnly bool) ([]model.Selection, error) {
 	query := `SELECT id, product_name, product_category, brand, supplier,
 		estimated_price, commission_rate, planned_live_date, description,
 		status, created_by, created_by_name, created_at, updated_at,
 		deadline, reject_reason, audit_note, process_result FROM selections WHERE 1=1`
 	args := []interface{}{}
-	if status != "" && status != "all" {
-		query += " AND status = ?"
-		args = append(args, status)
+	if exceptionOnly {
+		switch role {
+		case string(model.RoleRegistrar):
+			query += " AND status IN (?, ?, ?) AND created_by = ?"
+			args = append(args, model.StatusMissingAttachment, model.StatusRejected, model.StatusTimeout, userID)
+		case string(model.RoleSupervisor):
+			query += " AND status IN (?, ?, ?)"
+			args = append(args, model.StatusMissingAttachment, model.StatusRejected, model.StatusTimeout)
+		case string(model.RoleReviewer):
+			query += " AND status = ?"
+			args = append(args, model.StatusTimeout)
+		default:
+			query += " AND status IN (?, ?, ?)"
+			args = append(args, model.StatusMissingAttachment, model.StatusRejected, model.StatusTimeout)
+		}
+	} else {
+		if status != "" && status != "all" {
+			query += " AND status = ?"
+			args = append(args, status)
+		}
+		switch role {
+		case string(model.RoleRegistrar):
+			query += " AND created_by = ?"
+			args = append(args, userID)
+		case string(model.RoleSupervisor):
+			query += " AND status IN (?, ?, ?, ?)"
+			args = append(args, model.StatusPending, model.StatusMissingAttachment, model.StatusRejected, model.StatusApproved)
+		case string(model.RoleReviewer):
+			query += " AND status IN (?, ?, ?)"
+			args = append(args, model.StatusApproved, model.StatusArchived, model.StatusTimeout)
+		}
 	}
-	switch role {
-	case string(model.RoleRegistrar):
-		query += " AND created_by = ?"
-		args = append(args, userID)
-	case string(model.RoleSupervisor):
-		query += " AND status IN (?, ?, ?, ?)"
-		args = append(args, model.StatusPending, model.StatusMissingAttachment, model.StatusRejected, model.StatusApproved)
-	case string(model.RoleReviewer):
-		query += " AND status IN (?, ?, ?)"
-		args = append(args, model.StatusApproved, model.StatusArchived, model.StatusTimeout)
-	}
-	query += " ORDER BY created_at DESC"
+	query += " ORDER BY status, created_at DESC"
 	rows, err := DB.Query(query, args...)
 	if err != nil {
 		return nil, err

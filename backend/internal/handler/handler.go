@@ -29,12 +29,40 @@ func CurrentUser(c echo.Context) error {
 
 func ListSelections(c echo.Context) error {
 	status := c.QueryParam("status")
+	exception := c.QueryParam("exception") == "1"
 	u := middleware.GetCurrentUser(c)
-	list, err := db.GetSelections(status, string(u.Role), u.ID)
+	list, err := db.GetSelections(status, string(u.Role), u.ID, exception)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
 	return c.JSON(http.StatusOK, list)
+}
+
+func GetStats(c echo.Context) error {
+	u := middleware.GetCurrentUser(c)
+	all, err := db.GetSelections("", string(u.Role), u.ID, false)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+	exceptionList, err := db.GetSelections("", string(u.Role), u.ID, true)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+	statusCount := map[string]int{}
+	for _, s := range all {
+		statusCount[string(s.Status)]++
+	}
+	byStatus := map[string][]model.Selection{}
+	for _, s := range exceptionList {
+		key := string(s.Status)
+		byStatus[key] = append(byStatus[key], s)
+	}
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"total":            len(all),
+		"exception_total":  len(exceptionList),
+		"status_count":     statusCount,
+		"exception_by_status": byStatus,
+	})
 }
 
 func GetSelection(c echo.Context) error {
@@ -107,27 +135,68 @@ func SubmitForReview(c echo.Context) error {
 	if s.Status != model.StatusDraft && s.Status != model.StatusMissingAttachment && s.Status != model.StatusRejected {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "当前状态不允许提交审核"})
 	}
-	if s.Status == model.StatusMissingAttachment {
-		atts, err := db.GetAttachments(id)
-		if err != nil {
-			return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		}
-		valid := 0
-		for _, a := range atts {
-			if !a.Rejected {
-				valid++
-			}
-		}
-		if valid < 2 {
-			return c.JSON(http.StatusBadRequest, map[string]string{"error": "至少需要 2 份有效附件（品牌授权书、质检报告等），补齐后才能回到处理队列"})
+
+	atts, err := db.GetAttachments(id)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+	total := len(atts)
+	validCount := 0
+	rejectedCount := 0
+	for _, a := range atts {
+		if a.Rejected {
+			rejectedCount++
+		} else {
+			validCount++
 		}
 	}
+
+	var failReason string
+	switch {
+	case total == 0:
+		failReason = "未上传任何附件，至少需要 2 份有效附件（品牌授权书、质检报告等）"
+	case validCount == 0:
+		failReason = fmt.Sprintf("全部 %d 份附件均已被驳回（%d 份驳回/0 份有效），请重新上传有效附件后再提交", rejectedCount, rejectedCount)
+	case validCount < 2:
+		failReason = fmt.Sprintf("有效附件仅 %d 份，至少需要 2 份有效附件才能回到处理队列（当前：%d 份有效 / %d 份驳回）", validCount, validCount, rejectedCount)
+	}
+	if failReason != "" {
+		now := time.Now()
+		note := s.AuditNote
+		appendNote := fmt.Sprintf("[补正提交失败 %s] %s", now.Format("2006-01-02 15:04"), failReason)
+		if note != "" {
+			note = note + "\n" + appendNote
+		} else {
+			note = appendNote
+		}
+		if err := db.UpdateSelectionStatus(id, s.Status, s.RejectReason, s.ProcessResult, note, now); err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		}
+		addAudit(id, u, "补正提交失败", failReason)
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error":        failReason,
+			"valid_count":  fmt.Sprintf("%d", validCount),
+			"total_count":  fmt.Sprintf("%d", total),
+			"rejected_count": fmt.Sprintf("%d", rejectedCount),
+		})
+	}
+
 	now := time.Now()
+	detail := fmt.Sprintf("选品单提交至审核主管处理（有效附件 %d 份 / 驳回 %d 份）", validCount, rejectedCount)
+	if s.Status == model.StatusMissingAttachment {
+		detail = "补正完成，" + detail
+	} else if s.Status == model.StatusRejected {
+		detail = "重新提交，" + detail
+	}
 	if err := db.UpdateSelectionStatus(id, model.StatusPending, "", s.ProcessResult, s.AuditNote, now); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
-	addAudit(id, u, "提交审核", "选品单提交至审核主管处理")
-	return c.JSON(http.StatusOK, map[string]string{"message": "已提交审核"})
+	addAudit(id, u, "提交审核", detail)
+	return c.JSON(http.StatusOK, map[string]string{
+		"message":       "已提交审核",
+		"valid_count":   fmt.Sprintf("%d", validCount),
+		"rejected_count": fmt.Sprintf("%d", rejectedCount),
+	})
 }
 
 func ReviewSelection(c echo.Context) error {

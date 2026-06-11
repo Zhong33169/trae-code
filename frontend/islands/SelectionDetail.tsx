@@ -176,7 +176,212 @@ export default function SelectionDetail(props: Props) {
 
   const s = selection.value;
   const cu = currentUser.value;
+  const totalAttCount = s.attachments?.length || 0;
   const validAttCount = s.attachments?.filter((a) => !a.rejected).length || 0;
+  const rejectedAttCount = totalAttCount - validAttCount;
+  const REQUIRED_ATT = 2;
+  const needMore = Math.max(0, REQUIRED_ATT - validAttCount);
+  const canSubmit = validAttCount >= REQUIRED_ATT;
+  const isRemediationStatus =
+    s.status === "missing_attachment" ||
+    s.status === "rejected" ||
+    s.status === "draft";
+
+  const renderRemediationPanel = () => {
+    if (!isRemediationStatus) return null;
+    const titleMap: Record<string, string> = {
+      missing_attachment: "📎 附件缺失补正",
+      rejected: "↩️ 退回补正",
+      draft: "📝 草稿完善",
+    };
+    const hintMap: Record<string, string> = {
+      missing_attachment: "审核主管标记缺材料，需补齐附件后重新提交",
+      rejected: `审核主管已退回：${s.reject_reason || "请查看审计日志了解详情"}，请补正后重新提交`,
+      draft: "草稿未提交，请补充材料后提交审核",
+    };
+    const progress = Math.min(100, Math.round((validAttCount / REQUIRED_ATT) * 100));
+    return (
+      <div
+        class="card"
+        style={{
+          borderLeft: `4px solid ${
+            canSubmit ? "#10b981" : "#ef4444"
+          }`,
+          marginBottom: 16,
+        }}
+      >
+        <div class="card-header">
+          <h2 style={{ color: canSubmit ? "#059669" : "#dc2626" }}>
+            {titleMap[s.status]} - 补正进度
+          </h2>
+          {canSubmit ? (
+            <span
+              class="status-badge"
+              style={{ background: "#10b981" }}
+            >
+              ✅ 材料已满足，可提交审核
+            </span>
+          ) : (
+            <span
+              class="status-badge"
+              style={{ background: "#ef4444" }}
+            >
+              ⚠️ 还需补齐 {needMore} 份有效附件
+            </span>
+          )}
+        </div>
+        <div class="card-body">
+          <div style={{ fontSize: 13, color: "#374151", marginBottom: 12 }}>
+            {hintMap[s.status]}
+          </div>
+
+          <div class="grid-3" style={{ marginBottom: 16 }}>
+            <div
+              style={{
+                padding: "12px 14px",
+                borderRadius: 8,
+                background: canSubmit ? "#ecfdf5" : "#fef2f2",
+                border: `1px solid ${canSubmit ? "#a7f3d0" : "#fecaca"}`,
+              }}
+            >
+              <div style={{ fontSize: 12, color: "#6b7280" }}>
+                ✅ 有效附件
+              </div>
+              <div
+                style={{
+                  fontSize: 26,
+                  fontWeight: 700,
+                  color: canSubmit ? "#059669" : "#dc2626",
+                }}
+              >
+                {validAttCount}
+                <span style={{ fontSize: 13, fontWeight: 400, color: "#6b7280" }}>
+                  {" "}
+                  / 需 {REQUIRED_ATT} 份
+                </span>
+              </div>
+            </div>
+            <div
+              style={{
+                padding: "12px 14px",
+                borderRadius: 8,
+                background: rejectedAttCount > 0 ? "#fef2f2" : "#f9fafb",
+                border: `1px solid ${rejectedAttCount > 0 ? "#fecaca" : "#e5e7eb"}`,
+              }}
+            >
+              <div style={{ fontSize: 12, color: "#6b7280" }}>🚫 已驳回附件</div>
+              <div
+                style={{
+                  fontSize: 26,
+                  fontWeight: 700,
+                  color: rejectedAttCount > 0 ? "#b91c1c" : "#6b7280",
+                }}
+              >
+                {rejectedAttCount}
+                <span style={{ fontSize: 13, fontWeight: 400, color: "#6b7280" }}>
+                  {" "}
+                  份
+                </span>
+              </div>
+            </div>
+            <div
+              style={{
+                padding: "12px 14px",
+                borderRadius: 8,
+                background: "#eff6ff",
+                border: "1px solid #bfdbfe",
+              }}
+            >
+              <div style={{ fontSize: 12, color: "#6b7280" }}>📎 合计附件</div>
+              <div
+                style={{
+                  fontSize: 26,
+                  fontWeight: 700,
+                  color: "#1d4ed8",
+                }}
+              >
+                {totalAttCount}
+                <span style={{ fontSize: 13, fontWeight: 400, color: "#6b7280" }}>
+                  {" "}
+                  份
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div style={{ marginBottom: 10 }}>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                fontSize: 12,
+                color: "#6b7280",
+                marginBottom: 4,
+              }}
+            >
+              <span>补正进度</span>
+              <span>
+                {validAttCount} / {REQUIRED_ATT} 份有效附件（{progress}%）
+              </span>
+            </div>
+            <div
+              style={{
+                width: "100%",
+                height: 10,
+                background: "#f3f4f6",
+                borderRadius: 999,
+                overflow: "hidden",
+              }}
+            >
+              <div
+                style={{
+                  width: `${progress}%`,
+                  height: "100%",
+                  background: canSubmit
+                    ? "linear-gradient(90deg,#10b981,#059669)"
+                    : "linear-gradient(90deg,#ef4444,#dc2626)",
+                  transition: "width 0.3s",
+                }}
+              />
+            </div>
+          </div>
+
+          <div
+            style={{
+              fontSize: 13,
+              marginTop: 10,
+              padding: "10px 12px",
+              borderRadius: 6,
+              background: canSubmit ? "#ecfdf5" : "#fffbeb",
+              color: canSubmit ? "#065f46" : "#92400e",
+              border: `1px solid ${canSubmit ? "#a7f3d0" : "#fde68a"}`,
+            }}
+          >
+            {canSubmit
+              ? "✅ 已满足可提交条件：有效附件 ≥ 2 份。可以点击上方「提交审核」将选品单送回处理队列。"
+              : `⚠️ 可提交条件：至少 2 份有效附件（未被驳回的品牌授权书、质检报告等）。当前还差 ${needMore} 份，请点击「上传附件」补齐。`}
+          </div>
+
+          {s.status === "rejected" && s.reject_reason && (
+            <div
+              style={{
+                marginTop: 10,
+                padding: "10px 12px",
+                borderRadius: 6,
+                background: "#fef2f2",
+                color: "#991b1b",
+                border: "1px solid #fecaca",
+                fontSize: 13,
+              }}
+            >
+              <strong>退回原因：</strong>
+              {s.reject_reason}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div class="container">
@@ -217,6 +422,8 @@ export default function SelectionDetail(props: Props) {
           ✅ {success.value}
         </div>
       )}
+
+      {renderRemediationPanel()}
 
       <div class="card">
         <div class="card-header">
@@ -425,9 +632,21 @@ export default function SelectionDetail(props: Props) {
                 <AttachmentItem key={a.id} att={a} />
               ))
             )}
-            {validAttCount < 2 && (s.status !== "archived") && (
+            {validAttCount < 2 && s.status !== "archived" && (
               <div class="alert alert-warning" style={{ marginTop: 12 }}>
-                ⚠️ 有效附件不足 2 份，补齐后才能回到处理队列
+                <div style={{ fontWeight: 600, marginBottom: 4 }}>
+                  ⚠️ 补正要求：有效附件不足 2 份，补齐后才能回到处理队列
+                </div>
+                <div style={{ fontSize: 12 }}>
+                  当前：{validAttCount} 份有效 / {rejectedAttCount} 份驳回 / {totalAttCount} 份合计。
+                  请上传 <strong>品牌授权书</strong>、<strong>质检报告</strong> 等至少 2 份未被驳回的附件。
+                  被驳回的附件不会计入有效数量，需要重新上传。
+                </div>
+              </div>
+            )}
+            {validAttCount >= 2 && isRemediationStatus && (
+              <div class="alert alert-success" style={{ marginTop: 12 }}>
+                ✅ 补正完成：有效附件 {validAttCount} 份，已满足 ≥2 份的要求，可以点击上方「提交审核」。
               </div>
             )}
           </div>
