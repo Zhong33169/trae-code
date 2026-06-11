@@ -38,16 +38,6 @@ export default function Statistics() {
   const currentRole = () => authStore.user()?.role || "";
   const currentRoleName = () => roleNames[currentRole()] || "";
 
-  const getMyTodoCount = () => {
-    const s = stats();
-    if (!s) return 0;
-    const role = currentRole();
-    if (role === "registrar") return s.pendingRegistration + s.auditRejected;
-    if (role === "auditor") return s.registered + s.reviewRejected;
-    if (role === "reviewer") return s.auditPassed;
-    return 0;
-  };
-
   return (
     <Layout>
       <div class="card">
@@ -66,25 +56,37 @@ export default function Statistics() {
           <>
             <div class="stat-grid">
               <div class="stat-card">
-                <div class="stat-value">{stats().total}</div>
-                <div class="stat-label">任务总数</div>
-              </div>
-
-              <div class="stat-card">
-                <div class="stat-value" style="color: #52c41a;">
-                  {getMyTodoCount()}
-                </div>
+                <div class="stat-value">{stats().todoTotal}</div>
                 <div class="stat-label">我的待办</div>
+                {stats().todoTimeoutCount > 0 && (
+                  <div style="margin-top: 6px; font-size: 12px; color: #ff4d4f;">
+                    其中超时 {stats().todoTimeoutCount} 条
+                  </div>
+                )}
               </div>
 
               <div class="stat-card">
-                <div class="stat-value warning">{stats().timeoutCount}</div>
-                <div class="stat-label">超时任务数</div>
+                <div class="stat-value" style="color: #1890ff;">
+                  {stats().viewableTotal}
+                </div>
+                <div class="stat-label">可浏览全部任务</div>
+                {stats().viewableTimeoutCount > 0 && (
+                  <div style="margin-top: 6px; font-size: 12px; color: #ff4d4f;">
+                    其中超时 {stats().viewableTimeoutCount} 条
+                  </div>
+                )}
               </div>
 
               <div class="stat-card">
                 <div class="stat-value">{stats().archived}</div>
                 <div class="stat-label">已归档任务</div>
+              </div>
+
+              <div class="stat-card">
+                <div class="stat-value danger">
+                  {stats().auditRejected + stats().reviewRejected}
+                </div>
+                <div class="stat-label">已驳回任务</div>
               </div>
             </div>
 

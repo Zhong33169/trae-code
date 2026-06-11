@@ -497,9 +497,18 @@ export class TaskService {
   }
 
   async getTaskList(query: TaskQueryDto, userRole: UserRole) {
-    const page = query.page || 1;
-    const pageSize = query.pageSize || 10;
+    const page = Math.max(1, parseInt(String(query.page ?? '1'), 10) || 1);
+    const pageSize = Math.min(100, Math.max(1, parseInt(String(query.pageSize ?? '10'), 10) || 10));
     const skip = (page - 1) * pageSize;
+
+    let hasTimeoutFilter: boolean | undefined = undefined;
+    if (query.hasTimeout !== undefined && query.hasTimeout !== null) {
+      if (typeof query.hasTimeout === 'boolean') {
+        hasTimeoutFilter = query.hasTimeout;
+      } else {
+        hasTimeoutFilter = String(query.hasTimeout) === 'true';
+      }
+    }
 
     const viewableStatuses = this.getRoleViewableStatuses(userRole);
     const defaultTodoStatuses = this.getRoleDefaultStatuses(userRole);
@@ -518,8 +527,8 @@ export class TaskService {
       where.status = In(defaultTodoStatuses);
     }
 
-    if (query.keyword) {
-      where.taskName = Like(`%${query.keyword}%`);
+    if (query.keyword && query.keyword.trim()) {
+      where.taskName = Like(`%${query.keyword.trim()}%`);
     }
 
     const allTasks = await this.taskRepository.find({
@@ -528,22 +537,15 @@ export class TaskService {
     });
 
     const taskIds = allTasks.map(t => t.id);
-    const allNodes = await this.nodeRepository.find({ where: { taskId: In(taskIds) } });
+    const allNodes = taskIds.length > 0
+      ? await this.nodeRepository.find({ where: { taskId: In(taskIds) } })
+      : [];
 
     let tasksWithTimeout = allTasks.map(task => {
       const nodes = allNodes.filter(n => n.taskId === task.id);
       const processedNodes = this.processTaskNodes(nodes);
       return this.enrichTaskWithTimeout(task, processedNodes);
     });
-
-    let hasTimeoutFilter: boolean | undefined = undefined;
-    if (query.hasTimeout !== undefined && query.hasTimeout !== null) {
-      if (typeof query.hasTimeout === 'boolean') {
-        hasTimeoutFilter = query.hasTimeout;
-      } else if (typeof query.hasTimeout === 'string') {
-        hasTimeoutFilter = query.hasTimeout === 'true';
-      }
-    }
 
     if (hasTimeoutFilter !== undefined) {
       tasksWithTimeout = tasksWithTimeout.filter(t => t.hasTimeout === hasTimeoutFilter);
@@ -595,42 +597,69 @@ export class TaskService {
   }
 
   async getStatistics(userRole?: UserRole) {
-    const where: any = {};
+    const viewableWhere: any = {};
+    const todoWhere: any = {};
 
     if (userRole) {
       const viewableStatuses = this.getRoleViewableStatuses(userRole);
+      const defaultTodoStatuses = this.getRoleDefaultStatuses(userRole);
       if (viewableStatuses.length > 0) {
-        where.status = In(viewableStatuses);
+        viewableWhere.status = In(viewableStatuses);
+      }
+      if (defaultTodoStatuses.length > 0) {
+        todoWhere.status = In(defaultTodoStatuses);
       }
     }
 
-    const tasks = await this.taskRepository.find({ where });
-    const totalTasks = tasks.length;
+    const viewableTasks = await this.taskRepository.find({ where: viewableWhere });
+    const viewableTotal = viewableTasks.length;
+    const todoTotal = userRole ? await this.taskRepository.count({ where: todoWhere }) : viewableTotal;
 
     const statusMap: Record<string, number> = {};
-    tasks.forEach(task => {
+    viewableTasks.forEach(task => {
       statusMap[task.status] = (statusMap[task.status] || 0) + 1;
     });
 
-    const taskIds = tasks.map(t => t.id);
-    const allNodes = await this.nodeRepository.find({ where: { taskId: In(taskIds) } });
+    const taskIds = viewableTasks.map(t => t.id);
+    const allNodes = taskIds.length > 0
+      ? await this.nodeRepository.find({ where: { taskId: In(taskIds) } })
+      : [];
 
-    let timeoutCount = 0;
-    const timeoutTaskIds = new Set<number>();
-    for (const task of tasks) {
+    let viewableTimeoutCount = 0;
+    for (const task of viewableTasks) {
       const nodes = allNodes.filter(n => n.taskId === task.id);
       const processedNodes = this.processTaskNodes(nodes);
       const enrichedTask = this.enrichTaskWithTimeout(task, processedNodes);
       if (enrichedTask.hasTimeout) {
-        timeoutCount++;
-        timeoutTaskIds.add(task.id);
+        viewableTimeoutCount++;
+      }
+    }
+
+    let todoTimeoutCount = 0;
+    if (userRole) {
+      const todoTasks = await this.taskRepository.find({ where: todoWhere });
+      const todoTaskIds = todoTasks.map(t => t.id);
+      const todoNodes = todoTaskIds.length > 0
+        ? await this.nodeRepository.find({ where: { taskId: In(todoTaskIds) } })
+        : [];
+      for (const task of todoTasks) {
+        const nodes = todoNodes.filter(n => n.taskId === task.id);
+        const processedNodes = this.processTaskNodes(nodes);
+        const enrichedTask = this.enrichTaskWithTimeout(task, processedNodes);
+        if (enrichedTask.hasTimeout) {
+          todoTimeoutCount++;
+        }
       }
     }
 
     return {
-      total: totalTasks,
+      viewableTotal,
+      todoTotal,
+      viewableTimeoutCount,
+      todoTimeoutCount,
+      total: viewableTotal,
+      timeoutCount: viewableTimeoutCount,
       statusCounts: statusMap,
-      timeoutCount,
       pendingRegistration: statusMap['pending_registration'] || 0,
       registered: statusMap['registered'] || 0,
       auditRejected: statusMap['audit_rejected'] || 0,
