@@ -171,6 +171,13 @@ async def _load_operator(db, operator_id):
         return None
 
 
+def _normalize_evidence(raw):
+    if not raw or not isinstance(raw, list):
+        return []
+    cleaned = [s.strip() for s in raw if isinstance(s, str)]
+    return [s for s in cleaned if s]
+
+
 async def create_order(request: Request):
     body = await request.json()
     required = ["title", "description", "enterprise_name", "contact_person",
@@ -182,11 +189,8 @@ async def create_order(request: Request):
     db = await get_db()
     order_no = await _generate_order_no(db)
 
-    evidence = body.get("evidence_descriptions", [])
-    if isinstance(evidence, list):
-        evidence_json = json.dumps(evidence, ensure_ascii=False)
-    else:
-        evidence_json = json.dumps([], ensure_ascii=False)
+    evidence = _normalize_evidence(body.get("evidence_descriptions"))
+    evidence_json = json.dumps(evidence, ensure_ascii=False)
 
     cursor = await db.execute(
         """INSERT INTO repair_orders
@@ -253,6 +257,12 @@ async def update_order(request: Request):
     if not has_update:
         errors.append("没有需要更新的字段")
 
+    normalized_evidence = None
+    if "evidence_descriptions" in body:
+        normalized_evidence = _normalize_evidence(body.get("evidence_descriptions"))
+        if not normalized_evidence:
+            errors.append("证据描述不能为空")
+
     if errors:
         await _write_validation_failed(db, order_id, operator_id, user, errors,
                                         order["status"], order["version"])
@@ -262,10 +272,10 @@ async def update_order(request: Request):
     params = []
     for field in updatable:
         if field in body:
-            value = body[field]
             if field == "evidence_descriptions":
-                if isinstance(value, list):
-                    value = json.dumps(value, ensure_ascii=False)
+                value = json.dumps(normalized_evidence, ensure_ascii=False)
+            else:
+                value = body[field]
             sets.append(f"{field} = ?")
             params.append(value)
 
@@ -325,13 +335,18 @@ async def submit_order(request: Request):
         errors.append("版本冲突，请刷新后重试")
     if not opinion or not opinion.strip():
         errors.append("提交意见为必填项")
-    if order["status"] == "returned":
-        try:
-            evidence = json.loads(order["evidence_descriptions"]) if order["evidence_descriptions"] else []
-        except (json.JSONDecodeError, TypeError):
-            evidence = []
-        if not evidence:
+
+    try:
+        evidence = _normalize_evidence(
+            json.loads(order["evidence_descriptions"]) if order["evidence_descriptions"] else []
+        )
+    except (json.JSONDecodeError, TypeError):
+        evidence = []
+    if not evidence:
+        if order["status"] == "returned":
             errors.append("退回工单必须补充证据描述后才能提交")
+        else:
+            errors.append("证据描述为必填项")
 
     if errors:
         await _write_validation_failed(db, order_id, operator_id, user, errors,

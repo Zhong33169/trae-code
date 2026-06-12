@@ -156,8 +156,8 @@ async def seed():
                 {
                     "action": "validation_failed", "operator_id": 1, "operator_name": "张登记",
                     "operator_role": "clerk", "from_status": "returned", "to_status": "returned",
-                    "reason": "退回工单必须补充证据描述后才能提交", "result": "failed",
-                    "created_at": "2026-06-09 14:20:00",
+                    "reason": "证据描述不能为空", "result": "failed",
+                    "created_at": "2026-06-09 13:30:00",
                 },
             ],
         },
@@ -361,6 +361,12 @@ async def seed():
                     "action": "create", "operator_id": 1, "operator_name": "张登记",
                     "operator_role": "clerk", "from_status": None, "to_status": "draft",
                     "created_at": "2026-06-11 16:45:00",
+                },
+                {
+                    "action": "validation_failed", "operator_id": 1, "operator_name": "张登记",
+                    "operator_role": "clerk", "from_status": "draft", "to_status": "draft",
+                    "reason": "证据描述为必填项; 提交意见为必填项", "result": "failed",
+                    "created_at": "2026-06-11 16:50:00",
                 },
             ],
         },

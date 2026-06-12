@@ -66,8 +66,9 @@ export default function NewOrderPage() {
         try {
           await submitOrder(result.id, { operator_id: user.id, opinion: form.submit_opinion || '提交审核', version: 1 });
         } catch (submitErr: unknown) {
-          setError(`工单已创建为草稿，但提交失败：${submitErr instanceof Error ? submitErr.message : '未知错误'}`);
-          router.push(`/orders/${result.id}`);
+          const msg = submitErr instanceof Error ? submitErr.message : '提交失败';
+          setError(msg);
+          setSubmitting(false);
           return;
         }
       }
