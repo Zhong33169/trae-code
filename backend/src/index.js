@@ -583,32 +583,45 @@ app.post('/api/clue-orders/batch-review', async (c) => {
     const { order_no, clientVersion } = item;
     const order = queryOne('SELECT * FROM clue_orders WHERE order_no = ?', [order_no]);
     if (!order) {
-      addLog(order_no, user, '批量复核-拦截', '失败原因：线索单不存在');
-      results.push({ order_no, success: false, error: 'ORDER_NOT_FOUND', message: '线索单不存在' });
+      addLog(order_no, user, '批量复核-拦截',
+        `【结构化|NOT_FOUND】客户端提交clientVersion=${JSON.stringify(clientVersion)}，服务端版本=不存在`);
+      results.push({ order_no, success: false, error: 'ORDER_NOT_FOUND', message: '线索单不存在',
+        clientVersion: clientVersion ?? null, serverVersion: null });
       continue;
     }
     if (order.current_stage !== 'REVIEW_ARCHIVE' || !['HANDLED', 'REVIEWED'].includes(order.status)) {
       addLog(order_no, user, '批量复核-拦截',
-        `失败原因：阶段/状态不符(阶段${order.current_stage} 状态${order.status})，仅REVIEW_ARCHIVE阶段/HANDLED-REVIEWED状态可归档`);
-      results.push({ order_no, success: false, error: 'NOT_REVIEWABLE', message: `当前阶段${order.current_stage}状态${order.status}不可复核` });
+        `【结构化|STATUS_MISMATCH】客户端v=${clientVersion ?? 'NULL'}，服务端v=${order.version}，阶段=${order.current_stage}，状态=${order.status}`);
+      results.push({ order_no, success: false, error: 'NOT_REVIEWABLE',
+        message: `当前阶段${order.current_stage}状态${order.status}不可复核，需REVIEW_ARCHIVE阶段+HANDLED/REVIEWED状态`,
+        clientVersion: clientVersion ?? null, serverVersion: order.version,
+        current_stage: order.current_stage, current_status: order.status });
       continue;
     }
     if (clientVersion === undefined || clientVersion === null) {
-      addLog(order_no, user, '批量复核-拦截', '失败原因：缺少clientVersion版本标记');
-      results.push({ order_no, success: false, error: 'CLIENT_VERSION_REQUIRED', message: '缺少版本号，该单跳过' });
+      addLog(order_no, user, '批量复核-拦截',
+        `【结构化|CLIENT_VERSION_REQUIRED】客户端未提交clientVersion，服务端v=${order.version}，请前端刷新列表后再提交`);
+      results.push({ order_no, success: false, error: 'CLIENT_VERSION_REQUIRED',
+        message: `缺少clientVersion（当前服务端v${order.version}），请刷新列表获取最新版本号后再重试`,
+        clientVersion: null, serverVersion: order.version });
       continue;
     }
     if (clientVersion !== order.version) {
       addLog(order_no, user, '批量复核-拦截',
-        `失败原因：版本冲突(客户端${clientVersion}/服务端${order.version})，该单已被更新`);
-      results.push({ order_no, success: false, error: 'VERSION_CONFLICT', message: `版本冲突，服务端已为v${order.version}`, clientVersion, serverVersion: order.version });
+        `【结构化|VERSION_CONFLICT】客户端v=${clientVersion}≠服务端v=${order.version}，该单已被他人更新，请前端刷新`);
+      results.push({ order_no, success: false, error: 'VERSION_CONFLICT',
+        message: `版本冲突，客户端v${clientVersion}≠服务端v${order.version}，请刷新列表后重试`,
+        clientVersion, serverVersion: order.version });
       continue;
     }
     const evidence = checkEvidence(order.clue_no);
     const missing = validateEvidenceForStage('REVIEW_ARCHIVE', evidence);
     if (missing.length > 0) {
-      addLog(order_no, user, '批量复核-拦截', `失败原因：证据不齐全，缺少${missing.map(e => e.name).join('、')}`);
-      results.push({ order_no, success: false, error: 'INSUFFICIENT_EVIDENCE', message: `缺少：${missing.map(e => e.name).join('、')}`, missing });
+      addLog(order_no, user, '批量复核-拦截',
+        `【结构化|INSUFFICIENT_EVIDENCE】版本一致v=${order.version}，但证据不全：缺${missing.map(e => e.name).join('、')}`);
+      results.push({ order_no, success: false, error: 'INSUFFICIENT_EVIDENCE',
+        message: `缺少：${missing.map(e => e.name).join('、')}`,
+        missing, clientVersion, serverVersion: order.version });
       continue;
     }
     try {
@@ -618,18 +631,29 @@ app.post('/api/clue-orders/batch-review', async (c) => {
           version = version + 1, updated_at = CURRENT_TIMESTAMP
         WHERE order_no = ?
       `, [user.id, user.name, new Date().toISOString(), order_no]);
-      addLog(order_no, user, '批量复核归档', '单条批量复核通过，证据齐全');
-      results.push({ order_no, success: true, message: '已归档', newVersion: order.version + 1 });
+      addLog(order_no, user, '批量复核归档',
+        `【结构化|SUCCESS】版本v${order.version}→v${order.version + 1}，证据齐全成功归档`);
+      results.push({ order_no, success: true, message: '已归档',
+        clientVersion, serverVersion: order.version, newVersion: order.version + 1 });
     } catch (e) {
-      addLog(order_no, user, '批量复核-拦截', `失败原因：DB异常 - ${e.message}`);
-      results.push({ order_no, success: false, error: 'DB_ERROR', message: e.message });
+      addLog(order_no, user, '批量复核-拦截',
+        `【结构化|DB_ERROR】版本v=${order.version}，客户端v=${clientVersion}，DB异常：${e.message}`);
+      results.push({ order_no, success: false, error: 'DB_ERROR', message: e.message,
+        clientVersion, serverVersion: order.version });
     }
   }
 
   const successCount = results.filter(r => r.success).length;
-  const failedNos = results.filter(r => !r.success).map(r => r.order_no).join(',');
+  const missingVerCount = results.filter(r => !r.success && r.error === 'CLIENT_VERSION_REQUIRED').length;
+  const conflictVerCount = results.filter(r => !r.success && r.error === 'VERSION_CONFLICT').length;
+  const statusMismatchCount = results.filter(r => !r.success && r.error === 'NOT_REVIEWABLE').length;
+  const evidenceCount = results.filter(r => !r.success && r.error === 'INSUFFICIENT_EVIDENCE').length;
+  const successNos = results.filter(r => r.success).map(r => `${r.order_no}(v${r.clientVersion}→v${r.newVersion})`).join('、');
+  const missingVerNos = results.filter(r => !r.success && r.error === 'CLIENT_VERSION_REQUIRED').map(r => r.order_no).join('、');
+  const conflictNos = results.filter(r => !r.success && r.error === 'VERSION_CONFLICT').map(r => `${r.order_no}(c${r.clientVersion}≠s${r.serverVersion})`).join('、');
+
   addLog(orders[0]?.order_no || 'BATCH', user, '【批量复核汇总】',
-    `共${results.length}条，成功${successCount}条，失败${results.length - successCount}条。失败单号：${failedNos || '无'}`);
+    `【结构化】总${results.length}条|成功${successCount}条(${successNos || '无'})|缺版本${missingVerCount}条(${missingVerNos || '无'})|版本冲突${conflictVerCount}条(${conflictNos || '无'})|状态不符${statusMismatchCount}条|证据不全${evidenceCount}条`);
 
   return c.json({
     success: true,

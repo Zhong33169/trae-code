@@ -42,14 +42,17 @@
             只看我的
           </label>
           <div style="flex:1"></div>
+          <button class="btn" style="padding:6px 12px;font-size:13px;" @click="onRefresh">⟳ 刷新列表</button>
           <button v-if="canInitiate" class="btn btn-primary" @click="showCreateModal = true">＋ 发起线索单</button>
-          <button v-if="canBatchReview && selectedOrderNos.length > 0" class="btn btn-success" @click="batchReview">
+          <button v-if="canBatchReview && selectedOrderNos.length > 0" class="btn btn-success" @click="batchReview"
+            :title="selectedOrderNos.some(n => { const o = orders.value.find(x=>x.order_no===n); return !o?.version; }) ? '部分选中项缺少版本号，将被跳过' : ''">
             ✓ 批量复核归档 ({{ selectedOrderNos.length }})
           </button>
         </div>
 
-        <div v-if="alert" class="alert" :class="'alert-' + alert.type" style="margin:12px 16px 0;">
-          {{ alert.message }}
+        <div v-if="alert" class="alert" :class="'alert-' + alert.type" style="margin:12px 16px 0;white-space:pre-wrap;">
+          <div v-if="alert.title" style="font-weight:600;margin-bottom:4px;">{{ alert.title }}</div>
+          <div>{{ alert.message }}</div>
         </div>
 
         <div class="table-wrap" style="flex:1;overflow:auto;">
@@ -67,19 +70,21 @@
                 <th>阶段</th>
                 <th>状态</th>
                 <th>证据</th>
-                <th>负责人</th>
+                <th>版本/负责人</th>
                 <th>创建时间</th>
                 <th>操作</th>
               </tr>
             </thead>
             <tbody>
               <tr v-for="o in orders" :key="o.order_no"
-                :class="{ 'row-active': previewDetail?.order?.order_no === o.order_no }"
+                :class="{ 'row-active': previewDetail?.order?.order_no === o.order_no, 'row-version-stale': !o.version }"
                 @click="selectPreview(o)">
                 <td @click.stop>
                   <input v-if="canReview(o)" type="checkbox" class="checkbox"
                     :checked="selectedOrderNos.includes(o.order_no)"
-                    @change="onToggleOne(o.order_no)" />
+                    :disabled="!o.version"
+                    :title="!o.version ? '该单缺少版本号，请刷新列表后再勾选' : ''"
+                    @change="onToggleOne(o)" />
                 </td>
                 <td><span class="link" @click.stop="goDetail(o)">{{ o.order_no }}</span></td>
                 <td>{{ o.title }}</td>
@@ -95,9 +100,13 @@
                   <span class="evidence-dot" :class="o.has_signing_evidence ? 'ok' : 'miss'">签</span>
                 </td>
                 <td>
-                  {{ o.current_stage === 'HANDLE' ? (o.handler_name || '待指派') :
-                     o.current_stage === 'REVIEW_ARCHIVE' ? (o.reviewer_name || o.handler_name || '-') :
-                     o.initiator_name }}
+                  <span v-if="!o.version" style="color:#dc2626;font-weight:600;">⚠ 缺版本</span>
+                  <span v-else style="color:#6b7280;font-size:12px;">v{{ o.version }}</span>
+                  <div style="font-size:11px;color:#6b7280;">
+                    {{ o.current_stage === 'HANDLE' ? (o.handler_name || '待指派') :
+                       o.current_stage === 'REVIEW_ARCHIVE' ? (o.reviewer_name || o.handler_name || '-') :
+                       o.initiator_name }}
+                  </div>
                 </td>
                 <td>{{ o.created_at?.slice(0, 16).replace('T', ' ') }}</td>
                 <td @click.stop>
@@ -288,7 +297,7 @@ const allChecked = computed(() =>
 const availableLeads = computed(() => enterpriseLeads.value.filter(l => !l.active_order_count));
 
 function canReview(o) {
-  return canReviewAny.value && o.current_stage === 'REVIEW_ARCHIVE' && ['HANDLED', 'REVIEWED'].includes(o.status);
+  return canReviewAny.value && o.current_stage === 'REVIEW_ARCHIVE' && ['HANDLED', 'REVIEWED'].includes(o.status) && !!o.version;
 }
 
 function onToggleAll(e) {
@@ -299,12 +308,16 @@ function onToggleAll(e) {
   }
 }
 
-function onToggleOne(orderNo) {
-  const idx = selectedOrderNos.value.indexOf(orderNo);
+function onToggleOne(o) {
+  if (!o.version) {
+    showAlert('error', `线索单【${o.order_no}】缺少版本号，请刷新列表后再勾选`);
+    return;
+  }
+  const idx = selectedOrderNos.value.indexOf(o.order_no);
   if (idx >= 0) {
     selectedOrderNos.value.splice(idx, 1);
   } else {
-    selectedOrderNos.value.push(orderNo);
+    selectedOrderNos.value.push(o.order_no);
   }
 }
 
@@ -385,9 +398,17 @@ function goDetail(order) {
   router.push('/queue/' + order.order_no);
 }
 
-function showAlert(type, message) {
-  alert.value = { type, message };
-  setTimeout(() => { alert.value = null; }, 5000);
+function showAlert(type, message, title) {
+  alert.value = { type, message, title };
+  setTimeout(() => { alert.value = null; }, 9000);
+}
+
+async function onRefresh() {
+  previewDetail.value = null;
+  selectedOrderNos.value = [];
+  await loadOrders();
+  await loadStats();
+  showAlert('success', '列表已刷新，已获取各条线索单的最新版本号');
 }
 
 async function submitCreate() {
@@ -425,30 +446,55 @@ async function submitCreate() {
 async function batchReview() {
   if (!confirm(`确认批量复核归档 ${selectedOrderNos.value.length} 条线索单吗？\n\n注意：版本过期或证据不全的将被逐条拦截并返回具体原因。`)) return;
 
-  const orderObjs = selectedOrderNos.value.map(no => {
+  const orderObjs = [];
+  const missingVersionNos = [];
+  for (const no of selectedOrderNos.value) {
     const o = orders.value.find(x => x.order_no === no);
-    return { order_no: no, clientVersion: o?.version || 1 };
-  });
-  const missingVersions = orderObjs.filter(o => !o.clientVersion || o.clientVersion === undefined).length;
-  if (missingVersions > 0) {
-    showAlert('warning', `${missingVersions} 条线索单缺少版本号，已自动填充 v1，请先刷新后再操作`);
+    if (!o || !o.version) {
+      missingVersionNos.push(no);
+      continue;
+    }
+    orderObjs.push({ order_no: no, clientVersion: o.version });
+  }
+
+  if (missingVersionNos.length > 0) {
+    if (!confirm(`⚠ 有 ${missingVersionNos.length} 条线索单缺少版本号，将跳过并无法批量归档：\n  ${missingVersionNos.join('、')}\n\n是否只对有版本号的 ${orderObjs.length} 条继续？（建议先点"刷新列表"后再重试）`)) {
+      return;
+    }
+    showAlert('warning', `${missingVersionNos.length} 条缺版本的单被跳过：${missingVersionNos.join('、')}，请刷新列表后重试`);
+    if (orderObjs.length === 0) {
+      await loadOrders();
+      return;
+    }
   }
 
   const res = await api.post('/clue-orders/batch-review', { orders: orderObjs });
   if (res.success) {
     showAlert(res.data.failed > 0 ? 'warning' : 'success', res.message);
     if (res.data.results && res.data.results.length > 0) {
-      const failed = res.data.results.filter(d => !d.success);
       const success = res.data.results.filter(d => d.success);
-      let detailMsg = '';
-      if (success.length) detailMsg += `✅ 成功归档 ${success.length} 条: ${success.map(s => s.order_no + '(v' + s.newVersion + ')').join(', ')}`;
-      if (failed.length) {
-        const versionFail = failed.filter(f => f.error === 'VERSION_CONFLICT' || f.error === 'CLIENT_VERSION_REQUIRED');
-        const otherFail = failed.filter(f => f.error !== 'VERSION_CONFLICT' && f.error !== 'CLIENT_VERSION_REQUIRED');
-        if (versionFail.length) detailMsg += (detailMsg ? '\n' : '') + `🔴 版本冲突/缺失 ${versionFail.length} 条: ` + versionFail.map(f => `${f.order_no}(${f.error}: ${f.message})`).join('; ');
-        if (otherFail.length) detailMsg += (detailMsg ? '\n' : '') + `❌ 其他拦截 ${otherFail.length} 条: ` + otherFail.map(f => `${f.order_no}(${f.error}): ${f.message}`).join('; ');
+      const missingVer = res.data.results.filter(d => !d.success && d.error === 'CLIENT_VERSION_REQUIRED');
+      const staleVer = res.data.results.filter(d => !d.success && d.error === 'VERSION_CONFLICT');
+      const statusMismatch = res.data.results.filter(d => !d.success && ['NOT_REVIEWABLE', 'WRONG_STAGE', 'WRONG_STATUS'].includes(d.error));
+      const evidenceFail = res.data.results.filter(d => !d.success && d.error === 'INSUFFICIENT_EVIDENCE');
+      const otherFail = res.data.results.filter(d => !d.success &&
+        !['CLIENT_VERSION_REQUIRED', 'VERSION_CONFLICT', 'NOT_REVIEWABLE', 'WRONG_STAGE', 'WRONG_STATUS', 'INSUFFICIENT_EVIDENCE'].includes(d.error));
+      const lines = [];
+      if (success.length) lines.push(`✅ 成功归档 ${success.length} 条：${success.map(s => s.order_no + '(→v' + s.newVersion + ')').join('、')}`);
+      if (missingVer.length) lines.push(`🔴 [缺版本凭证] ${missingVer.length} 条（未提交 clientVersion，请刷新列表）：${missingVer.map(f => f.order_no).join('、')}`);
+      if (staleVer.length) lines.push(`🔴 [版本冲突/过期] ${staleVer.length} 条（本地版本≠服务端，请刷新列表）：${staleVer.map(f => f.order_no + '（客户端v' + f.clientVersion + '≠服务端v' + f.serverVersion + '）').join('、')}`);
+      if (statusMismatch.length) lines.push(`🟡 [状态/阶段不符] ${statusMismatch.length} 条（需处于REVIEW_ARCHIVE阶段+HANDLED状态）：${statusMismatch.map(f => f.order_no).join('、')}`);
+      if (evidenceFail.length) lines.push(`🟠 [证据不全] ${evidenceFail.length} 条：${evidenceFail.map(f => f.order_no + '（缺' + (f.missing || []).map(m => m.name).join('/') + '）').join('、')}`);
+      if (otherFail.length) lines.push(`⚫ [其他失败] ${otherFail.length} 条：${otherFail.map(f => f.order_no + '(' + f.error + '):' + f.message).join('; ')}`);
+      if (staleVer.length || missingVer.length) {
+        lines.push('');
+        lines.push('💡 提示：红色拦截项请点击"刷新列表"获取最新版本号后再勾选重试');
       }
-      setTimeout(() => showAlert(failed.length ? 'error' : 'success', detailMsg, '批量复核明细'), 100);
+      setTimeout(() => showAlert(
+        res.data.failed > 0 ? 'error' : 'success',
+        lines.join('\n'),
+        '批量复核详细结果'
+      ), 100);
     }
     selectedOrderNos.value = [];
     await loadOrders();
@@ -466,5 +512,12 @@ async function batchReview() {
 }
 .row-active td {
   font-weight: 500;
+}
+.row-version-stale {
+  background: #fef2f2 !important;
+}
+.row-version-stale td:first-child input {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 </style>
