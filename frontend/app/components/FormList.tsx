@@ -1,20 +1,29 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { MerchantOnboardingForm, FormStatus, statusLabels } from '../types';
+import { MerchantOnboardingForm, FormStatus, statusLabels, ActionType } from '../types';
 import { getForms, getCurrentUser, batchProcess } from '../lib/api';
 import Link from 'next/link';
 
-interface FormListProps {
-  statusFilter?: string;
+interface TabConfig {
+  title: string;
+  description: string;
+  roles: string[];
+  statuses: string[];
 }
 
-export default function FormList({ statusFilter }: FormListProps) {
+interface FormListProps {
+  tabKey: string;
+  tabConfig: TabConfig;
+}
+
+export default function FormList({ tabKey, tabConfig }: FormListProps) {
   const [forms, setForms] = useState<MerchantOnboardingForm[]>([]);
   const [loading, setLoading] = useState(true);
   const [currentUser, setCurrentUser] = useState<any>(null);
+  const [viewMode, setViewMode] = useState<'queue' | 'all'>('queue');
   const [filters, setFilters] = useState({
-    status: statusFilter || 'ALL',
+    status: 'ALL',
     hasException: false,
     isOverdue: false,
     keyword: '',
@@ -37,20 +46,26 @@ export default function FormList({ statusFilter }: FormListProps) {
     ARCHIVED: 'archived',
   };
 
-  const availableBatchActions = [
-    { value: 'SUBMIT', label: '批量提交审核', roles: ['CLERK'] },
-    { value: 'START_REVIEW', label: '批量开始审核', roles: ['SUPERVISOR'] },
-    { value: 'REQUEST_MATERIALS', label: '批量退回补正', roles: ['SUPERVISOR'] },
-    { value: 'APPROVE_QUALIFICATION', label: '批量通过资质', roles: ['SUPERVISOR'] },
-    { value: 'REJECT', label: '批量驳回', roles: ['SUPERVISOR'] },
-    { value: 'RESUBMIT', label: '批量补正重提', roles: ['CLERK'] },
-    { value: 'OPEN_STORE', label: '批量开通店铺', roles: ['REVIEWER'] },
-    { value: 'ARCHIVE', label: '批量复核归档', roles: ['REVIEWER'] },
-  ];
+  const batchActionsByTab: Record<string, Array<{ value: string; label: string; roles: string[] }>> = {
+    onboarding: [
+      { value: 'SUBMIT', label: '批量提交审核', roles: ['CLERK'] },
+      { value: 'RESUBMIT', label: '批量补正重提', roles: ['CLERK'] },
+    ],
+    review: [
+      { value: 'START_REVIEW', label: '批量开始审核', roles: ['SUPERVISOR'] },
+      { value: 'REQUEST_MATERIALS', label: '批量退回补正', roles: ['SUPERVISOR'] },
+      { value: 'APPROVE_QUALIFICATION', label: '批量通过资质', roles: ['SUPERVISOR'] },
+      { value: 'REJECT', label: '批量驳回', roles: ['SUPERVISOR'] },
+    ],
+    store: [
+      { value: 'OPEN_STORE', label: '批量开通店铺', roles: ['REVIEWER'] },
+      { value: 'ARCHIVE', label: '批量复核归档', roles: ['REVIEWER'] },
+    ],
+  };
 
   useEffect(() => {
     loadData();
-  }, [filters]);
+  }, [filters, viewMode, tabKey]);
 
   useEffect(() => {
     getCurrentUser().then((res) => {
@@ -61,14 +76,42 @@ export default function FormList({ statusFilter }: FormListProps) {
   async function loadData() {
     setLoading(true);
     try {
-      const res = await getForms({
-        status: filters.status,
-        hasException: filters.hasException,
-        isOverdue: filters.isOverdue,
+      const params: any = {
         keyword: filters.keyword || undefined,
-      });
+      };
+
+      if (filters.status !== 'ALL') {
+        params.status = filters.status;
+      }
+
+      if (filters.hasException) {
+        params.hasException = true;
+      }
+      if (filters.isOverdue) {
+        params.isOverdue = true;
+      }
+
+      const res = await getForms(params);
       if (res.success) {
-        setForms(res.data.items);
+        let allForms = res.data.items;
+
+        if (viewMode === 'queue' && currentUser) {
+          allForms = allForms.filter((f: any) =>
+            f.currentRole === currentUser.role || f.hasException
+          );
+        }
+
+        allForms = allForms.filter((f: any) =>
+          tabConfig.statuses.includes(f.status) || f.hasException
+        );
+
+        allForms.sort((a: any, b: any) => {
+          if (a.hasException !== b.hasException) return a.hasException ? -1 : 1;
+          if (a.isOverdue !== b.isOverdue) return a.isOverdue ? -1 : 1;
+          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        });
+
+        setForms(allForms);
       }
     } catch (err) {
       console.error('Failed to load forms:', err);
@@ -89,7 +132,10 @@ export default function FormList({ statusFilter }: FormListProps) {
 
   function handleSelectAll(checked: boolean) {
     if (checked) {
-      setSelectedIds(new Set(forms.filter((f) => !f.hasException).map((f) => f.id)));
+      setSelectedIds(new Set(
+        forms.filter((f) => !f.hasException && tabConfig.roles.includes(currentUser?.role) && f.currentRole === currentUser?.role)
+          .map((f) => f.id)
+      ));
     } else {
       setSelectedIds(new Set());
     }
@@ -125,14 +171,59 @@ export default function FormList({ statusFilter }: FormListProps) {
     }
   }
 
-  const filteredActions = availableBatchActions.filter((a) =>
+  const filteredBatchActions = (batchActionsByTab[tabKey] || []).filter((a) =>
     currentUser?.role ? a.roles.includes(currentUser.role) : false
   );
 
   const selectedForms = forms.filter((f) => selectedIds.has(f.id));
 
+  const queueCount = forms.filter((f) => currentUser && f.currentRole === currentUser.role).length;
+  const exceptionCount = forms.filter((f) => f.hasException).length;
+  const overdueCount = forms.filter((f) => f.isOverdue).length;
+
   return (
     <div>
+      <div className="page-header">
+        <div>
+          <h1 style={{ fontSize: '20px', margin: 0, color: '#111827' }}>{tabConfig.title}</h1>
+          <p style={{ margin: '4px 0 0', fontSize: '13px', color: '#6b7280' }}>{tabConfig.description}</p>
+        </div>
+        <div className="view-toggle">
+          <button
+            className={`toggle-btn ${viewMode === 'queue' ? 'active' : ''}`}
+            onClick={() => setViewMode('queue')}
+          >
+            待办队列
+            {queueCount > 0 && <span className="toggle-badge">{queueCount}</span>}
+          </button>
+          <button
+            className={`toggle-btn ${viewMode === 'all' ? 'active' : ''}`}
+            onClick={() => setViewMode('all')}
+          >
+            全部单据
+          </button>
+        </div>
+      </div>
+
+      <div className="stats-row">
+        <div className="stat-card stat-primary">
+          <div className="stat-count">{queueCount}</div>
+          <div className="stat-label">待我处理</div>
+        </div>
+        <div className="stat-card stat-warning">
+          <div className="stat-count">{overdueCount}</div>
+          <div className="stat-label">已超时</div>
+        </div>
+        <div className="stat-card stat-danger">
+          <div className="stat-count">{exceptionCount}</div>
+          <div className="stat-label">异常单</div>
+        </div>
+        <div className="stat-card stat-neutral">
+          <div className="stat-count">{forms.length}</div>
+          <div className="stat-label">本页签总计</div>
+        </div>
+      </div>
+
       <div className="filter-bar">
         <div className="filter-item">
           <label>状态：</label>
@@ -141,14 +232,11 @@ export default function FormList({ statusFilter }: FormListProps) {
             onChange={(e) => setFilters({ ...filters, status: e.target.value })}
           >
             <option value="ALL">全部状态</option>
-            <option value="DRAFT">草稿</option>
-            <option value="SUBMITTED">已提交待审核</option>
-            <option value="UNDER_REVIEW">审核中</option>
-            <option value="MATERIALS_MISSING">待补正材料</option>
-            <option value="QUALIFIED">资质审核通过</option>
-            <option value="REJECTED">已驳回</option>
-            <option value="STORE_OPENED">店铺已开通</option>
-            <option value="ARCHIVED">已归档</option>
+            {tabConfig.statuses.map((s) => (
+              <option key={s} value={s}>
+                {statusLabels[s as FormStatus]}
+              </option>
+            ))}
           </select>
         </div>
 
@@ -184,13 +272,13 @@ export default function FormList({ statusFilter }: FormListProps) {
           刷新
         </button>
 
-        {currentUser?.role === 'CLERK' && (
+        {tabKey === 'onboarding' && currentUser?.role === 'CLERK' && (
           <Link href="/create" className="btn btn-primary">
             新建入驻单
           </Link>
         )}
 
-        {selectedIds.size > 0 && filteredActions.length > 0 && (
+        {selectedIds.size > 0 && filteredBatchActions.length > 0 && (
           <button className="btn btn-success" onClick={() => setShowBatchModal(true)}>
             批量处理 ({selectedIds.size})
           </button>
@@ -211,8 +299,10 @@ export default function FormList({ statusFilter }: FormListProps) {
 
       <div className="queue-header">
         <div className="queue-title">
-          待处理队列
-          {currentUser && <span className="queue-count">{currentUser.roleLabel}</span>}
+          {viewMode === 'queue' ? '待处理队列' : '全部单据'}
+          {currentUser && viewMode === 'queue' && (
+            <span className="queue-count">{currentUser.roleLabel}</span>
+          )}
         </div>
         <div style={{ fontSize: '13px', color: '#6b7280' }}>
           共 {forms.length} 条记录
@@ -225,7 +315,7 @@ export default function FormList({ statusFilter }: FormListProps) {
       ) : forms.length === 0 ? (
         <div className="empty-state">
           <div className="empty-state-icon">📋</div>
-          <div>暂无待处理的入驻单</div>
+          <div>暂无{viewMode === 'queue' ? '待处理的' : ''}入驻单</div>
         </div>
       ) : (
         <div className="queue-table">
@@ -235,7 +325,18 @@ export default function FormList({ statusFilter }: FormListProps) {
                 <th style={{ width: '40px' }}>
                   <input
                     type="checkbox"
-                    checked={selectedIds.size === forms.filter((f) => !f.hasException).length && forms.filter((f) => !f.hasException).length > 0}
+                    checked={
+                      selectedIds.size === forms.filter((f) =>
+                        !f.hasException && currentUser &&
+                        tabConfig.roles.includes(currentUser.role) &&
+                        f.currentRole === currentUser.role
+                      ).length &&
+                      forms.filter((f) =>
+                        !f.hasException && currentUser &&
+                        tabConfig.roles.includes(currentUser.role) &&
+                        f.currentRole === currentUser.role
+                      ).length > 0
+                    }
                     onChange={(e) => handleSelectAll(e.target.checked)}
                   />
                 </th>
@@ -261,7 +362,7 @@ export default function FormList({ statusFilter }: FormListProps) {
                       type="checkbox"
                       checked={selectedIds.has(form.id)}
                       onChange={(e) => handleSelect(form.id, e.target.checked)}
-                      disabled={form.hasException}
+                      disabled={form.hasException || form.currentRole !== currentUser?.role}
                     />
                   </td>
                   <td>
@@ -277,12 +378,16 @@ export default function FormList({ statusFilter }: FormListProps) {
                       {statusLabels[form.status]}
                     </span>
                   </td>
-                  <td>{form.currentRoleLabel}</td>
+                  <td>{(form as any).currentRoleLabel || form.currentRole}</td>
                   <td>{new Date(form.createdAt).toLocaleDateString('zh-CN')}</td>
                   <td>{form.deadline ? new Date(form.deadline).toLocaleDateString('zh-CN') : '-'}</td>
                   <td>
-                    <Link href={`/forms/${form.id}`} className="btn btn-primary" style={{ padding: '4px 12px', fontSize: '12px' }}>
-                      处理
+                    <Link
+                      href={`/forms/${form.id}`}
+                      className="btn btn-primary"
+                      style={{ padding: '4px 12px', fontSize: '12px' }}
+                    >
+                      {form.hasException ? '查看/处理异常' : '处理'}
                     </Link>
                   </td>
                 </tr>
@@ -304,7 +409,7 @@ export default function FormList({ statusFilter }: FormListProps) {
               <label>选择操作</label>
               <select value={batchAction} onChange={(e) => setBatchAction(e.target.value)}>
                 <option value="">请选择操作</option>
-                {filteredActions.map((a) => (
+                {filteredBatchActions.map((a) => (
                   <option key={a.value} value={a.value}>
                     {a.label}
                   </option>

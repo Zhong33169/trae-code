@@ -29,6 +29,10 @@ export enum ActionType {
   REMOVE_ATTACHMENT = 'REMOVE_ATTACHMENT',
   ADD_AUDIT_NOTE = 'ADD_AUDIT_NOTE',
   BATCH_IMPORT = 'BATCH_IMPORT',
+  CORRECT_OFFLINE_STATUS = 'CORRECT_OFFLINE_STATUS',
+  RESOLVE_EXCEPTION = 'RESOLVE_EXCEPTION',
+  DETECT_EXCEPTION = 'DETECT_EXCEPTION',
+  BATCH_FAILED = 'BATCH_FAILED',
 }
 
 export interface User {
@@ -147,4 +151,8 @@ export const actionLabels: Record<ActionType, string> = {
   [ActionType.REMOVE_ATTACHMENT]: '删除附件',
   [ActionType.ADD_AUDIT_NOTE]: '添加审计备注',
   [ActionType.BATCH_IMPORT]: '批量导入',
+  [ActionType.CORRECT_OFFLINE_STATUS]: '更正离线台账状态',
+  [ActionType.RESOLVE_EXCEPTION]: '解除异常标记',
+  [ActionType.DETECT_EXCEPTION]: '异常检测',
+  [ActionType.BATCH_FAILED]: '批量处理失败',
 };

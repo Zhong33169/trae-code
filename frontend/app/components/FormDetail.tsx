@@ -24,6 +24,8 @@ export default function FormDetail({ formId }: FormDetailProps) {
   const [showAttachmentModal, setShowAttachmentModal] = useState(false);
   const [newAttachment, setNewAttachment] = useState({ fileName: '', fileType: 'application/pdf', remark: '' });
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
+  const [offlineStatusInput, setOfflineStatusInput] = useState('');
+  const [resolveReason, setResolveReason] = useState('');
 
   useEffect(() => {
     loadData();
@@ -44,6 +46,7 @@ export default function FormDetail({ formId }: FormDetailProps) {
         setAttachments(res.data.attachments);
         setAuditLogs(res.data.auditLogs);
         setFormData(res.data.form);
+        setOfflineStatusInput(res.data.form.offlineStatus || '');
 
         const valRes = await validateForm(formId);
         if (valRes.success && valRes.data.errors.length > 0) {
@@ -64,15 +67,25 @@ export default function FormDetail({ formId }: FormDetailProps) {
   function getAvailableActions(): Array<{ action: ActionType; label: string; type: string; reasonRequired?: boolean }> {
     if (!form || !currentUser) return [];
 
+    const actions: Array<{ action: ActionType; label: string; type: string; reasonRequired?: boolean }> = [];
+
     if (form.hasException) {
-      return [{ action: ActionType.ADD_AUDIT_NOTE, label: '添加审计备注', type: 'secondary' }];
+      actions.push({ action: ActionType.ADD_AUDIT_NOTE, label: '添加审计备注', type: 'secondary' });
+
+      if (currentUser.role === 'CLERK' || currentUser.role === 'SUPERVISOR' || currentUser.role === 'REVIEWER') {
+        actions.push({ action: ActionType.CORRECT_OFFLINE_STATUS, label: '更正离线台账状态', type: 'warning' });
+      }
+
+      if (currentUser.role === 'SUPERVISOR') {
+        actions.push({ action: ActionType.RESOLVE_EXCEPTION, label: '解除异常标记', type: 'success', reasonRequired: true });
+      }
+
+      return actions;
     }
 
     if (form.currentRole !== currentUser.role && form.status !== FormStatus.ARCHIVED) {
       return [{ action: ActionType.ADD_AUDIT_NOTE, label: '添加审计备注', type: 'secondary' }];
     }
-
-    const actions: Array<{ action: ActionType; label: string; type: string; reasonRequired?: boolean }> = [];
 
     switch (form.status) {
       case FormStatus.DRAFT:
@@ -114,15 +127,23 @@ export default function FormDetail({ formId }: FormDetailProps) {
       actions.push({ action: ActionType.ADD_AUDIT_NOTE, label: '添加审计备注', type: 'secondary' });
     }
 
+    if (form.offlineStatus && form.offlineStatus !== (form as any).statusLabel) {
+      actions.push({ action: ActionType.CORRECT_OFFLINE_STATUS, label: '更正离线台账状态', type: 'warning' });
+    }
+
     return actions;
   }
 
   async function handleAction(action: ActionType) {
     try {
       const data: any = {
-        reason: actionReason || undefined,
+        reason: actionReason || resolveReason || undefined,
         remark: actionRemark || undefined,
       };
+
+      if (action === ActionType.CORRECT_OFFLINE_STATUS) {
+        data.formData = { offlineStatus: offlineStatusInput };
+      }
 
       if (editMode && (action === ActionType.RESUBMIT || action === ActionType.SUBMIT)) {
         data.formData = formData;
@@ -134,6 +155,7 @@ export default function FormDetail({ formId }: FormDetailProps) {
         setShowActionModal(null);
         setActionReason('');
         setActionRemark('');
+        setResolveReason('');
         setEditMode(false);
         loadData();
       } else {
@@ -186,6 +208,7 @@ export default function FormDetail({ formId }: FormDetailProps) {
   }
 
   const canEdit = currentUser?.role === 'CLERK' &&
+    !form.hasException &&
     (form.status === FormStatus.DRAFT || form.status === FormStatus.MATERIALS_MISSING || form.status === FormStatus.REJECTED);
 
   const needsReason = availableActions.find((a) => a.action === showActionModal)?.reasonRequired;
@@ -193,7 +216,7 @@ export default function FormDetail({ formId }: FormDetailProps) {
   return (
     <div>
       <div className="breadcrumb">
-        <Link href="/">待处理队列</Link>
+        <Link href="/">返回队列</Link>
         <span className="separator">/</span>
         <span>{form.merchantName}</span>
       </div>
@@ -211,24 +234,37 @@ export default function FormDetail({ formId }: FormDetailProps) {
       )}
 
       {form.hasException && (
-        <div className="alert alert-error">
-          <strong>⚠️ 数据异常，无法继续处理</strong>
-          <div style={{ marginTop: '8px' }}>{form.exceptionMessage}</div>
-          {validationErrors.length > 0 && (
-            <div style={{ marginTop: '8px' }}>
-              {validationErrors.map((err, i) => (
-                <div key={i}>• {err}</div>
-              ))}
+        <div className="alert alert-error exception-alert">
+          <div className="exception-header">
+            <strong>⚠️ 数据异常，禁止流转</strong>
+            <span className="exception-tag">异常单</span>
+          </div>
+          <div className="exception-content">
+            <p style={{ margin: '8px 0' }}>{form.exceptionMessage}</p>
+            {validationErrors.length > 0 && (
+              <div className="validation-errors">
+                {validationErrors.map((err, i) => (
+                  <div key={i} className="error-item">• {err}</div>
+                ))}
+              </div>
+            )}
+            <div className="exception-tip">
+              <strong>处理方式：</strong>
+              <ul style={{ margin: '6px 0 0', paddingLeft: '20px' }}>
+                <li>所有角色均可查看详情并添加审计备注</li>
+                <li>所有角色均可更正离线台账状态，系统自动重新校验</li>
+                <li>审核主管确认问题解决后，可解除异常标记恢复流转</li>
+              </ul>
             </div>
-          )}
+          </div>
         </div>
       )}
 
-      {form.offlineStatus && form.offlineStatus !== form.statusLabel && (
+      {form.offlineStatus && form.offlineStatus !== (form as any).statusLabel && !form.hasException && (
         <div className="alert alert-warning">
           <strong>⚠️ 状态不一致提醒</strong>
           <div style={{ marginTop: '4px' }}>
-            线上状态：<strong>{form.statusLabel}</strong>
+            线上状态：<strong>{(form as any).statusLabel}</strong>
             <span style={{ margin: '0 12px' }}>|</span>
             离线台账状态：<strong>{form.offlineStatus}</strong>
           </div>
@@ -259,7 +295,7 @@ export default function FormDetail({ formId }: FormDetailProps) {
         <div className="alert alert-info">
           <strong>ℹ️ 角色提醒</strong>
           <div style={{ marginTop: '4px' }}>
-            当前单据应由 <strong>{form.currentRoleLabel}</strong> 处理，
+            当前单据应由 <strong>{(form as any).currentRoleLabel}</strong> 处理，
             您当前角色为 <strong>{currentUser?.roleLabel}</strong>，仅可查看和添加审计备注。
           </div>
         </div>
@@ -270,16 +306,21 @@ export default function FormDetail({ formId }: FormDetailProps) {
           <div className="detail-card">
             <div className="section-header">
               <h2 style={{ margin: 0, border: 'none', padding: 0 }}>商家入驻单详情</h2>
-              {canEdit && !editMode && (
-                <button className="btn btn-secondary" onClick={() => setEditMode(true)}>
-                  编辑信息
-                </button>
-              )}
-              {editMode && (
-                <button className="btn btn-secondary" onClick={() => { setEditMode(false); setFormData(form); }}>
-                  取消编辑
-                </button>
-              )}
+              <div className="detail-actions">
+                {canEdit && !editMode && (
+                  <button className="btn btn-secondary" onClick={() => setEditMode(true)}>
+                    编辑信息
+                  </button>
+                )}
+                {editMode && (
+                  <button className="btn btn-secondary" onClick={() => { setEditMode(false); setFormData(form); }}>
+                    取消编辑
+                  </button>
+                )}
+                {form.hasException && currentUser?.role === 'SUPERVISOR' && (
+                  <span className="hint-text">审核主管可解除异常</span>
+                )}
+              </div>
             </div>
 
             <div className="form-grid">
@@ -290,23 +331,23 @@ export default function FormDetail({ formId }: FormDetailProps) {
               <div className="form-item">
                 <label>当前状态</label>
                 <div className="value">
-                  <span className={`status-badge ${form.status}`} style={{ textTransform: 'lowercase' }}>
-                    {form.statusLabel}
+                  <span className={`status-badge ${form.status.toLowerCase()}`}>
+                    {(form as any).statusLabel}
                   </span>
                 </div>
               </div>
               <div className="form-item">
                 <label>处理角色</label>
-                <div className="value">{form.currentRoleLabel}</div>
+                <div className="value">{(form as any).currentRoleLabel}</div>
               </div>
               <div className="form-item">
                 <label>离线台账状态</label>
-                {editMode ? (
+                {showActionModal === ActionType.CORRECT_OFFLINE_STATUS ? (
                   <input
                     type="text"
-                    value={formData.offlineStatus || ''}
-                    onChange={(e) => setFormData({ ...formData, offlineStatus: e.target.value })}
-                    placeholder="请输入离线台账状态"
+                    value={offlineStatusInput}
+                    onChange={(e) => setOfflineStatusInput(e.target.value)}
+                    placeholder="请输入正确的离线台账状态"
                   />
                 ) : (
                   <div className="value">{form.offlineStatus || '-'}</div>
@@ -502,6 +543,11 @@ export default function FormDetail({ formId }: FormDetailProps) {
           {availableActions.length > 0 && (
             <div className="detail-card">
               <h2>处理操作</h2>
+              {form.hasException && (
+                <p style={{ fontSize: '13px', color: '#dc2626', marginBottom: '12px' }}>
+                  异常单禁止流转操作，仅可添加备注、更正离线状态或由审核主管解除异常
+                </p>
+              )}
               <div className="action-bar">
                 {availableActions.map((a) => (
                   <button
@@ -511,6 +557,8 @@ export default function FormDetail({ formId }: FormDetailProps) {
                       setShowActionModal(a.action);
                       setActionReason('');
                       setActionRemark('');
+                      setResolveReason('');
+                      setOfflineStatusInput(form?.offlineStatus || '');
                     }}
                   >
                     {a.label}
@@ -573,8 +621,13 @@ export default function FormDetail({ formId }: FormDetailProps) {
             ) : (
               <div className="audit-timeline">
                 {auditLogs.map((log) => (
-                  <div key={log.id} className="audit-item">
-                    <div className="audit-action">{log.actionLabel}</div>
+                  <div key={log.id} className={`audit-item audit-${log.action.toLowerCase().replace(/_/g, '-')}`}>
+                    <div className="audit-action">
+                      {log.actionLabel}
+                      {(log.action === ActionType.DETECT_EXCEPTION || log.action === ActionType.BATCH_FAILED) && (
+                        <span className="audit-tag alert-tag">异常</span>
+                      )}
+                    </div>
                     <div className="audit-operator">
                       {log.operatorName} · {log.operatorRoleLabel}
                     </div>
@@ -608,10 +661,46 @@ export default function FormDetail({ formId }: FormDetailProps) {
             <div style={{ marginBottom: '16px', fontSize: '13px', color: '#374151' }}>
               商家：<strong>{form.merchantName}</strong>
               <br />
-              当前状态：<strong>{form.statusLabel}</strong>
+              当前状态：<strong>{(form as any).statusLabel}</strong>
+              {form.hasException && (
+                <>
+                  <br />
+                  <span style={{ color: '#dc2626' }}>异常状态：{form.exceptionMessage}</span>
+                </>
+              )}
             </div>
 
-            {needsReason && (
+            {showActionModal === ActionType.CORRECT_OFFLINE_STATUS && (
+              <div className="form-item">
+                <label>离线台账状态 <span style={{ color: '#ef4444' }}>*</span></label>
+                <input
+                  type="text"
+                  value={offlineStatusInput}
+                  onChange={(e) => setOfflineStatusInput(e.target.value)}
+                  placeholder="请输入正确的离线台账状态，如：审核中、已通过等"
+                />
+                <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '4px' }}>
+                  更正后系统将自动重新校验状态一致性
+                </div>
+              </div>
+            )}
+
+            {showActionModal === ActionType.RESOLVE_EXCEPTION && (
+              <div className="form-item">
+                <label>解除原因 <span style={{ color: '#ef4444' }}>*</span></label>
+                <textarea
+                  value={resolveReason}
+                  onChange={(e) => setResolveReason(e.target.value)}
+                  placeholder="请说明异常解除的原因和依据..."
+                  rows={4}
+                />
+                <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '4px' }}>
+                  解除异常后单据将恢复正常流转，请确认问题已解决
+                </div>
+              </div>
+            )}
+
+            {needsReason && showActionModal !== ActionType.RESOLVE_EXCEPTION && showActionModal !== ActionType.CORRECT_OFFLINE_STATUS && (
               <div className="form-item">
                 <label>原因说明 <span style={{ color: '#ef4444' }}>*</span></label>
                 <textarea
@@ -623,14 +712,16 @@ export default function FormDetail({ formId }: FormDetailProps) {
               </div>
             )}
 
-            <div className="form-item" style={{ marginTop: '12px' }}>
-              <label>备注（可选）</label>
-              <textarea
-                value={actionRemark}
-                onChange={(e) => setActionRemark(e.target.value)}
-                placeholder="请输入备注..."
-              />
-            </div>
+            {showActionModal !== ActionType.RESOLVE_EXCEPTION && (
+              <div className="form-item" style={{ marginTop: '12px' }}>
+                <label>备注（可选）</label>
+                <textarea
+                  value={actionRemark}
+                  onChange={(e) => setActionRemark(e.target.value)}
+                  placeholder="请输入备注..."
+                />
+              </div>
+            )}
 
             <div className="modal-actions">
               <button className="btn btn-secondary" onClick={() => setShowActionModal(null)}>
@@ -639,7 +730,11 @@ export default function FormDetail({ formId }: FormDetailProps) {
               <button
                 className="btn btn-primary"
                 onClick={() => handleAction(showActionModal)}
-                disabled={needsReason && !actionReason}
+                disabled={
+                  (needsReason && !actionReason && !resolveReason) ||
+                  (showActionModal === ActionType.CORRECT_OFFLINE_STATUS && !offlineStatusInput.trim()) ||
+                  (showActionModal === ActionType.RESOLVE_EXCEPTION && !resolveReason.trim())
+                }
               >
                 确认
               </button>

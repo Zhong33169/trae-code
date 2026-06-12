@@ -165,7 +165,15 @@ function validateStatusConsistency(form: MerchantOnboardingForm): { valid: boole
 }
 
 function checkRolePermission(userRole: Role, form: MerchantOnboardingForm, action: ActionType): boolean {
-  if (form.currentRole !== userRole && action !== ActionType.ADD_AUDIT_NOTE && action !== ActionType.CREATE) {
+  if (action === ActionType.ADD_AUDIT_NOTE) {
+    return true;
+  }
+
+  if (form.hasException && action !== ActionType.CORRECT_OFFLINE_STATUS && action !== ActionType.RESOLVE_EXCEPTION) {
+    return false;
+  }
+
+  if (form.currentRole !== userRole && action !== ActionType.CREATE && action !== ActionType.RESOLVE_EXCEPTION && action !== ActionType.CORRECT_OFFLINE_STATUS) {
     return false;
   }
 
@@ -177,6 +185,7 @@ function checkRolePermission(userRole: Role, form: MerchantOnboardingForm, actio
       ActionType.ADD_ATTACHMENT,
       ActionType.REMOVE_ATTACHMENT,
       ActionType.ADD_AUDIT_NOTE,
+      ActionType.CORRECT_OFFLINE_STATUS,
     ],
     [Role.SUPERVISOR]: [
       ActionType.START_REVIEW,
@@ -186,6 +195,8 @@ function checkRolePermission(userRole: Role, form: MerchantOnboardingForm, actio
       ActionType.ADD_ATTACHMENT,
       ActionType.REMOVE_ATTACHMENT,
       ActionType.ADD_AUDIT_NOTE,
+      ActionType.CORRECT_OFFLINE_STATUS,
+      ActionType.RESOLVE_EXCEPTION,
     ],
     [Role.REVIEWER]: [
       ActionType.OPEN_STORE,
@@ -193,6 +204,7 @@ function checkRolePermission(userRole: Role, form: MerchantOnboardingForm, actio
       ActionType.ADD_ATTACHMENT,
       ActionType.REMOVE_ATTACHMENT,
       ActionType.ADD_AUDIT_NOTE,
+      ActionType.CORRECT_OFFLINE_STATUS,
     ],
   };
 
@@ -459,6 +471,13 @@ server.post('/api/forms', async (request, reply) => {
     remark: '创建商家入驻单',
   });
 
+  if (formData.hasException) {
+    await createAuditLog(formId, user.id, user.role, ActionType.DETECT_EXCEPTION, {
+      reason: formData.exceptionMessage,
+      remark: '创建时检测到数据异常，已标记为异常单，禁止流转',
+    });
+  }
+
   return { success: true, data: { id: formId, hasException: formData.hasException, exceptionMessage: formData.exceptionMessage } };
 });
 
@@ -488,20 +507,24 @@ server.post('/api/forms/:id/action', async (request, reply) => {
 
   const form = rowToForm(row);
 
-  if (form.hasException) {
-    reply.code(400);
-    return {
-      success: false,
-      error: `入驻单存在异常，无法处理：${form.exceptionMessage}`,
-      exceptionMessage: form.exceptionMessage,
-    };
-  }
-
   if (!checkRolePermission(user.role, form, action)) {
     reply.code(403);
     return {
       success: false,
       error: `当前角色【${roleLabels[user.role]}】无权执行此操作【${actionLabels[action]}】，当前单据应由【${roleLabels[form.currentRole]}】处理`,
+    };
+  }
+
+  if (form.hasException && action !== ActionType.ADD_AUDIT_NOTE && action !== ActionType.CORRECT_OFFLINE_STATUS && action !== ActionType.RESOLVE_EXCEPTION) {
+    await createAuditLog(id, user.id, user.role, ActionType.ADD_AUDIT_NOTE, {
+      reason: `尝试操作【${actionLabels[action]}】被拦截`,
+      remark: `单据存在异常：${form.exceptionMessage}，禁止流转操作`,
+    });
+    reply.code(400);
+    return {
+      success: false,
+      error: `入驻单存在异常，无法处理：${form.exceptionMessage}`,
+      exceptionMessage: form.exceptionMessage,
     };
   }
 
@@ -511,6 +534,8 @@ server.post('/api/forms/:id/action', async (request, reply) => {
     ActionType.ADD_ATTACHMENT,
     ActionType.REMOVE_ATTACHMENT,
     ActionType.ADD_AUDIT_NOTE,
+    ActionType.CORRECT_OFFLINE_STATUS,
+    ActionType.RESOLVE_EXCEPTION,
   ];
 
   if (!transition.valid && !actionsWithoutTransition.includes(action)) {
@@ -627,6 +652,38 @@ server.post('/api/forms/:id/action', async (request, reply) => {
     const newRemark = currentRemark + `\n[${dayjs().format('YYYY-MM-DD HH:mm')}] ${user.name}: ${remark}`;
     updates.push('audit_remark = ?');
     params.push(newRemark);
+  }
+
+  if (action === ActionType.CORRECT_OFFLINE_STATUS && formData?.offlineStatus !== undefined) {
+    updates.push('offline_status = ?');
+    params.push(formData.offlineStatus);
+
+    const batchCheck = await validateBatchNo(form.batchNo, form.id);
+    const tempForm = { ...form, offlineStatus: formData.offlineStatus };
+    const statusCheck = validateStatusConsistency(tempForm as MerchantOnboardingForm);
+
+    const newErrors: string[] = [];
+    if (!batchCheck.valid) newErrors.push(batchCheck.message!);
+    if (!statusCheck.valid) newErrors.push(statusCheck.message!);
+
+    if (newErrors.length > 0) {
+      updates.push('has_exception = ?');
+      params.push(1);
+      updates.push('exception_message = ?');
+      params.push(newErrors.join('；'));
+    } else {
+      updates.push('has_exception = ?');
+      params.push(0);
+      updates.push('exception_message = ?');
+      params.push(null);
+    }
+  }
+
+  if (action === ActionType.RESOLVE_EXCEPTION) {
+    updates.push('has_exception = ?');
+    params.push(0);
+    updates.push('exception_message = ?');
+    params.push(null);
   }
 
   if (updates.length > 0) {
@@ -804,6 +861,10 @@ server.post('/api/batch/process', async (request, reply) => {
           success: false,
           message: `存在异常：${form.exceptionMessage}`,
         });
+        await createAuditLog(formItem.id, user.id, user.role, ActionType.BATCH_FAILED, {
+          reason: form.exceptionMessage,
+          remark: `批量${actionLabels[action]}失败：单据存在异常，禁止流转`,
+        });
         continue;
       }
 
@@ -813,6 +874,10 @@ server.post('/api/batch/process', async (request, reply) => {
           merchantName: form.merchantName,
           success: false,
           message: `权限不足：当前角色【${roleLabels[user.role]}】无权处理应由【${roleLabels[form.currentRole]}】处理的单据`,
+        });
+        await createAuditLog(formItem.id, user.id, user.role, ActionType.BATCH_FAILED, {
+          reason: `角色权限不匹配，当前角色${roleLabels[user.role]}，单据处理角色${roleLabels[form.currentRole]}`,
+          remark: `批量${actionLabels[action]}失败：权限不足`,
         });
         continue;
       }
@@ -824,6 +889,10 @@ server.post('/api/batch/process', async (request, reply) => {
           merchantName: form.merchantName,
           success: false,
           message: `状态不允许：当前状态【${statusLabels[form.status]}】无法执行【${actionLabels[action]}】`,
+        });
+        await createAuditLog(formItem.id, user.id, user.role, ActionType.BATCH_FAILED, {
+          reason: `当前状态${statusLabels[form.status]}不允许执行${actionLabels[action]}`,
+          remark: `批量${actionLabels[action]}失败：状态流转不允许`,
         });
         continue;
       }
@@ -885,6 +954,14 @@ server.post('/api/batch/process', async (request, reply) => {
         success: false,
         message: `处理失败：${err.message}`,
       });
+      try {
+        await createAuditLog(formItem.id, user.id, user.role, ActionType.BATCH_FAILED, {
+          reason: err.message,
+          remark: `批量${actionLabels[action]}失败：系统异常`,
+        });
+      } catch (e) {
+        console.error('Failed to create batch failed audit log:', e);
+      }
     }
   }
 

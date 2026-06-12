@@ -31,6 +31,10 @@ export enum ActionType {
   REMOVE_ATTACHMENT = 'REMOVE_ATTACHMENT',
   ADD_AUDIT_NOTE = 'ADD_AUDIT_NOTE',
   BATCH_IMPORT = 'BATCH_IMPORT',
+  CORRECT_OFFLINE_STATUS = 'CORRECT_OFFLINE_STATUS',
+  RESOLVE_EXCEPTION = 'RESOLVE_EXCEPTION',
+  DETECT_EXCEPTION = 'DETECT_EXCEPTION',
+  BATCH_FAILED = 'BATCH_FAILED',
 }
 
 export interface User {
@@ -143,7 +147,7 @@ export const statusLabels: Record<FormStatus, string> = {
   ARCHIVED: '已归档',
 };
 
-export const actionLabels: Record<ActionType, string> = {
+export const actionLabels: Record<ActionType | string, string> = {
   CREATE: '创建入驻单',
   SUBMIT: '提交审核',
   START_REVIEW: '开始审核',
@@ -157,6 +161,10 @@ export const actionLabels: Record<ActionType, string> = {
   REMOVE_ATTACHMENT: '删除附件',
   ADD_AUDIT_NOTE: '添加审计备注',
   BATCH_IMPORT: '批量导入',
+  CORRECT_OFFLINE_STATUS: '更正离线台账状态',
+  RESOLVE_EXCEPTION: '解除异常标记',
+  DETECT_EXCEPTION: '异常检测',
+  BATCH_FAILED: '批量处理失败',
 };
 
 export const statusColorMap: Record<FormStatus, string> = {

@@ -412,10 +412,14 @@ async function runSeed() {
     { formId: formIds[5], operator: supervisor.id, operatorRole: Role.SUPERVISOR, action: ActionType.REQUEST_MATERIALS, oldStatus: FormStatus.UNDER_REVIEW, newStatus: FormStatus.MATERIALS_MISSING, reason: '缺少组织机构代码证扫描件、法定代表人身份证明', remark: '需要补充材料' },
     { formId: formIds[6], operator: supervisor.id, operatorRole: Role.SUPERVISOR, action: ActionType.REJECT, oldStatus: FormStatus.UNDER_REVIEW, newStatus: FormStatus.REJECTED, reason: '食品生产许可证已过期，需重新办理后提交', remark: '审核不通过' },
     { formId: formIds[9], operator: supervisor.id, operatorRole: Role.SUPERVISOR, action: ActionType.ADD_AUDIT_NOTE, oldStatus: null, newStatus: null, reason: null, remark: '注意：离线台账显示已通过，但线上仍在审核中，需要核实状态' },
+    { formId: formIds[2], operator: 'system', operatorRole: Role.SUPERVISOR, action: ActionType.DETECT_EXCEPTION, oldStatus: null, newStatus: null, reason: '批次号BATCH-2026-003重复', remark: '系统检测到异常：批次号重复，系统中已存在该批次的入驻单：广州惠民食品有限公司（另一份）' },
+    { formId: formIds[3], operator: 'system', operatorRole: Role.SUPERVISOR, action: ActionType.DETECT_EXCEPTION, oldStatus: null, newStatus: null, reason: '批次号BATCH-2026-003重复', remark: '系统检测到异常：批次号重复，系统中已存在该批次的入驻单：广州惠民食品有限公司' },
+    { formId: formIds[9], operator: 'system', operatorRole: Role.SUPERVISOR, action: ActionType.DETECT_EXCEPTION, oldStatus: null, newStatus: null, reason: '状态不一致', remark: '系统检测到异常：线上状态为【审核中】，离线台账状态为【已通过】' },
   ];
 
   for (const log of auditLogs) {
     const user = [clerk, supervisor, reviewer].find((u) => u.id === log.operator);
+    const operatorName = log.operator === 'system' ? '系统' : user?.name || '未知';
     const logId = uuidv4();
     await prepare(`
       INSERT INTO audit_logs (
@@ -423,7 +427,7 @@ async function runSeed() {
         old_status, new_status, reason, remark, created_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
-      logId, log.formId, log.operator, log.operatorRole, user?.name || '未知',
+      logId, log.formId, log.operator, log.operatorRole, operatorName,
       log.action, log.oldStatus, log.newStatus, log.reason, log.remark,
       now.subtract(Math.floor(Math.random() * 30), 'day').format()
     );
@@ -444,7 +448,7 @@ async function runSeed() {
   console.log('     ⏰ Overdue (超时): 2 (BATCH-2026-004, BATCH-2026-010)');
   console.log('     ❌ Rejected (退回): 1 (BATCH-2026-006)');
   console.log('   Attachments: 6');
-  console.log('   Audit Logs: 12');
+  console.log('   Audit Logs: 15');
   console.log('');
   console.log('👤 Test Users:');
   console.log(`   ${clerk.name} (${clerk.username}) - ${Role.CLERK} - ID: ${clerk.id}`);
@@ -453,12 +457,12 @@ async function runSeed() {
   console.log('');
   console.log('🔍 Sample Forms for Testing:');
   console.log('   BATCH-2026-001: 已归档正常单（完整流程）');
-  console.log('   BATCH-2026-003: 重复批次异常单（两份）');
-  console.log('   BATCH-2026-004: 超时单（审核中超时）');
-  console.log('   BATCH-2026-005: 缺材料单（需补充后重提）');
-  console.log('   BATCH-2026-006: 退回单（许可证过期）');
-  console.log('   BATCH-2026-009: 状态不一致单（线上/线下不符）');
-  console.log('   BATCH-2026-010: 超时草稿单（材料不全）');
+  console.log('   BATCH-2026-003: 重复批次异常单（两份，店铺开通页签）');
+  console.log('   BATCH-2026-004: 超时单（资质审核页签，审核中超时）');
+  console.log('   BATCH-2026-005: 缺材料单（商家入驻页签，需补充后重提）');
+  console.log('   BATCH-2026-006: 退回单（商家入驻页签，审核不通过）');
+  console.log('   BATCH-2026-009: 状态不一致异常单（资质审核页签，线上审核中/离线已通过）');
+  console.log('   BATCH-2026-010: 超时草稿单（商家入驻页签，材料不全）');
   console.log('');
 }
 
