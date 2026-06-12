@@ -340,8 +340,10 @@ server.get('/api/forms', async (request, reply) => {
       sql += ` AND (status IN (${statuses.map(() => '?').join(',')}) OR has_exception = 1)`;
       params.push(...statuses);
     }
-  } else if (status && status !== 'ALL') {
-    sql += ' AND status = ?';
+  }
+
+  if (status && status !== 'ALL') {
+    sql += ' AND (status = ? OR has_exception = 1)';
     params.push(status);
   }
 
