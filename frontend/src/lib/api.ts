@@ -2,6 +2,16 @@ import { User, RepairOrder, Stats, OperationRecord } from './types';
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8009/api';
 
+export class ApiError extends Error {
+  currentVersion?: number;
+  currentStatus?: string;
+  constructor(message: string, currentVersion?: number, currentStatus?: string) {
+    super(message);
+    this.currentVersion = currentVersion;
+    this.currentStatus = currentStatus;
+  }
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE_URL}${path}`, {
     headers: {
@@ -13,7 +23,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
     const msg = (data as any).error || (data as any).detail || (data as any).message || `请求失败: ${res.status}`;
-    throw new Error(msg);
+    throw new ApiError(msg, (data as any).current_version, (data as any).current_status);
   }
   return res.json();
 }

@@ -149,6 +149,14 @@ async def _write_validation_failed(db, order_id, operator_id, user, errors, from
             pass
 
 
+def _validation_error(errors, current_status, current_version):
+    return JSONResponse({
+        "error": "; ".join(errors),
+        "current_status": current_status,
+        "current_version": current_version,
+    }, status_code=400)
+
+
 async def _write_success_record(db, order_id, action, operator_id, user, from_status, to_status,
                                 from_version, to_version, opinion=None, reason=None, result=None):
     await db.execute(
@@ -266,7 +274,7 @@ async def update_order(request: Request):
     if errors:
         await _write_validation_failed(db, order_id, operator_id, user, errors,
                                         order["status"], order["version"])
-        return JSONResponse({"error": "; ".join(errors)}, status_code=400)
+        return _validation_error(errors, order["status"], order["version"])
 
     sets = []
     params = []
@@ -351,7 +359,7 @@ async def submit_order(request: Request):
     if errors:
         await _write_validation_failed(db, order_id, operator_id, user, errors,
                                         order["status"], order["version"])
-        return JSONResponse({"error": "; ".join(errors)}, status_code=400)
+        return _validation_error(errors, order["status"], order["version"])
 
     from_ver = order["version"]
     to_ver = from_ver + 1
@@ -408,7 +416,7 @@ async def accept_review(request: Request):
     if errors:
         await _write_validation_failed(db, order_id, operator_id, user, errors,
                                         order["status"], order["version"])
-        return JSONResponse({"error": "; ".join(errors)}, status_code=400)
+        return _validation_error(errors, order["status"], order["version"])
 
     from_ver = order["version"]
     to_ver = from_ver + 1
@@ -473,7 +481,7 @@ async def review_order(request: Request):
     if errors:
         await _write_validation_failed(db, order_id, operator_id, user, errors,
                                         order["status"], order["version"])
-        return JSONResponse({"error": "; ".join(errors)}, status_code=400)
+        return _validation_error(errors, order["status"], order["version"])
 
     status_map = {
         "approve": ("review_approved", "rechecker"),
@@ -547,7 +555,7 @@ async def accept_recheck(request: Request):
     if errors:
         await _write_validation_failed(db, order_id, operator_id, user, errors,
                                         order["status"], order["version"])
-        return JSONResponse({"error": "; ".join(errors)}, status_code=400)
+        return _validation_error(errors, order["status"], order["version"])
 
     from_ver = order["version"]
     to_ver = from_ver + 1
@@ -612,7 +620,7 @@ async def recheck_order(request: Request):
     if errors:
         await _write_validation_failed(db, order_id, operator_id, user, errors,
                                         order["status"], order["version"])
-        return JSONResponse({"error": "; ".join(errors)}, status_code=400)
+        return _validation_error(errors, order["status"], order["version"])
 
     if result == "archive":
         new_status = "archived"

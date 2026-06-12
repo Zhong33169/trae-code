@@ -67,8 +67,7 @@ export default function NewOrderPage() {
           await submitOrder(result.id, { operator_id: user.id, opinion: form.submit_opinion || '提交审核', version: 1 });
         } catch (submitErr: unknown) {
           const msg = submitErr instanceof Error ? submitErr.message : '提交失败';
-          setError(msg);
-          setSubmitting(false);
+          router.push(`/orders/${result.id}`);
           return;
         }
       }
@@ -219,7 +218,10 @@ export default function NewOrderPage() {
         </div>
 
         <div>
-          <label className="label-field">证据描述</label>
+          <label className="label-field">证据描述 <span className="text-red-500">*</span></label>
+          {form.evidence_descriptions.filter((ev) => ev.trim()).length === 0 && (
+            <div className="text-red-500 text-xs mt-1 mb-2">证据描述为必填项，提交前请补充</div>
+          )}
           {form.evidence_descriptions.map((ev, idx) => (
             <div key={idx} className="flex gap-2 mb-2">
               <input

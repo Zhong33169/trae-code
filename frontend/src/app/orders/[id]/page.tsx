@@ -4,7 +4,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { RepairOrder, OperationRecord } from '@/lib/types';
-import { fetchOrder, submitOrder, acceptReview, reviewOrder, acceptRecheck, recheckOrder, updateOrder } from '@/lib/api';
+import { fetchOrder, submitOrder, acceptReview, reviewOrder, acceptRecheck, recheckOrder, updateOrder, ApiError } from '@/lib/api';
 import { useCurrentUser } from '@/lib/user-context';
 
 const STATUS_LABELS: Record<string, string> = {
@@ -255,15 +255,134 @@ function ActionForm({
 
   if (isClerk) {
     if (order.status === 'draft') {
-      actions = (
-        <button
-          onClick={() => handleAction(() => submitOrder(order.id, { operator_id: user.id, opinion, version: v }))}
-          disabled={submitting}
-          className="btn-primary"
-        >
-          提交
-        </button>
-      );
+      if (!editMode) {
+        actions = (
+          <div className="flex gap-3">
+            <button onClick={() => setEditMode(true)} className="btn-secondary">编辑</button>
+            <button
+              onClick={() => handleAction(() => submitOrder(order.id, { operator_id: user.id, opinion, version: v }))}
+              disabled={submitting}
+              className="btn-primary"
+            >
+              提交
+            </button>
+          </div>
+        );
+      } else {
+        actions = (
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="label-field">标题</label>
+                <input className="input-field" value={editData.title} onChange={(e) => setEditData({ ...editData, title: e.target.value })} />
+              </div>
+              <div>
+                <label className="label-field">企业名称</label>
+                <input className="input-field" value={editData.enterprise_name} onChange={(e) => setEditData({ ...editData, enterprise_name: e.target.value })} />
+              </div>
+              <div>
+                <label className="label-field">联系人</label>
+                <input className="input-field" value={editData.contact_person} onChange={(e) => setEditData({ ...editData, contact_person: e.target.value })} />
+              </div>
+              <div>
+                <label className="label-field">联系电话</label>
+                <input className="input-field" value={editData.contact_phone} onChange={(e) => setEditData({ ...editData, contact_phone: e.target.value })} />
+              </div>
+              <div>
+                <label className="label-field">报修类型</label>
+                <input className="input-field" value={editData.repair_type} onChange={(e) => setEditData({ ...editData, repair_type: e.target.value })} />
+              </div>
+              <div>
+                <label className="label-field">紧急程度</label>
+                <select className="input-field" value={editData.urgency} onChange={(e) => setEditData({ ...editData, urgency: e.target.value as RepairOrder['urgency'] })}>
+                  <option value="low">一般</option>
+                  <option value="medium">中等</option>
+                  <option value="high">紧急</option>
+                  <option value="urgent">特急</option>
+                </select>
+              </div>
+              <div>
+                <label className="label-field">位置</label>
+                <input className="input-field" value={editData.location} onChange={(e) => setEditData({ ...editData, location: e.target.value })} />
+              </div>
+            </div>
+            <div>
+              <label className="label-field">描述</label>
+              <textarea className="input-field" rows={3} value={editData.description} onChange={(e) => setEditData({ ...editData, description: e.target.value })} />
+            </div>
+            <div>
+              <label className="label-field">证据描述 <span className="text-red-500">*</span></label>
+              {editData.evidence_descriptions.length === 0 && (
+                <div className="text-red-500 text-xs mt-1 mb-2">证据描述为必填项，提交前请补充</div>
+              )}
+              {editData.evidence_descriptions.map((ev, idx) => (
+                <div key={idx} className="flex gap-2 mb-2">
+                  <input
+                    className="input-field flex-1"
+                    value={ev}
+                    onChange={(e) => {
+                      const newEv = [...editData.evidence_descriptions];
+                      newEv[idx] = e.target.value;
+                      setEditData({ ...editData, evidence_descriptions: newEv });
+                    }}
+                    placeholder={`证据描述 ${idx + 1}`}
+                  />
+                  <button
+                    onClick={() => {
+                      const newEv = editData.evidence_descriptions.filter((_, i) => i !== idx);
+                      setEditData({ ...editData, evidence_descriptions: newEv });
+                    }}
+                    className="btn-danger text-xs px-2"
+                  >
+                    删除
+                  </button>
+                </div>
+              ))}
+              <button
+                onClick={() => setEditData({ ...editData, evidence_descriptions: [...editData.evidence_descriptions, ''] })}
+                className="btn-secondary text-xs"
+              >
+                + 添加证据
+              </button>
+            </div>
+            <div>
+              <label className="label-field">提交意见 <span className="text-red-500">*</span></label>
+              <textarea className="input-field" rows={2} value={opinion} onChange={(e) => setOpinion(e.target.value)} placeholder="请输入提交意见" />
+            </div>
+            <div className="flex gap-3">
+              <button onClick={handleEditAndSubmit} disabled={submitting} className="btn-primary">保存并提交</button>
+              <button
+                onClick={async () => {
+                  setSubmitting(true);
+                  setError('');
+                  try {
+                    await updateOrder(order.id, {
+                      ...editData,
+                      operator_id: user.id,
+                      version: v,
+                      opinion: opinion || '保存草稿',
+                    });
+                    setEditMode(false);
+                    onAction();
+                    try { window.dispatchEvent(new Event('order-state-changed')); } catch {}
+                  } catch (e: unknown) {
+                    setError(e instanceof Error ? e.message : '保存失败');
+                    onAction();
+                    try { window.dispatchEvent(new Event('order-state-changed')); } catch {}
+                  } finally {
+                    setSubmitting(false);
+                  }
+                }}
+                disabled={submitting}
+                className="btn-secondary"
+              >
+                保存草稿
+              </button>
+              <button onClick={() => setEditMode(false)} className="btn-secondary">取消</button>
+            </div>
+          </div>
+        );
+      }
     } else if (order.status === 'returned') {
       if (!editMode) {
         actions = (
@@ -314,7 +433,10 @@ function ActionForm({
               <textarea className="input-field" rows={3} value={editData.description} onChange={(e) => setEditData({ ...editData, description: e.target.value })} />
             </div>
             <div>
-              <label className="label-field">证据描述</label>
+              <label className="label-field">证据描述 <span className="text-red-500">*</span></label>
+              {editData.evidence_descriptions.filter((ev) => ev.trim()).length === 0 && (
+                <div className="text-red-500 text-xs mt-1 mb-2">退回工单必须补充证据描述后才能提交</div>
+              )}
               {editData.evidence_descriptions.map((ev, idx) => (
                 <div key={idx} className="flex gap-2 mb-2">
                   <input
@@ -325,6 +447,7 @@ function ActionForm({
                       newEv[idx] = e.target.value;
                       setEditData({ ...editData, evidence_descriptions: newEv });
                     }}
+                    placeholder={`证据描述 ${idx + 1}`}
                   />
                   <button
                     onClick={() => {
@@ -546,15 +669,17 @@ export default function OrderDetailPage() {
             <InfoRow label="版本">v{order.version}</InfoRow>
             <InfoRow label="创建时间">{new Date(order.created_at).toLocaleString('zh-CN')}</InfoRow>
             <InfoRow label="更新时间">{new Date(order.updated_at).toLocaleString('zh-CN')}</InfoRow>
-            {order.evidence_descriptions.length > 0 && (
-              <InfoRow label="证据描述">
+            <InfoRow label="证据描述">
+              {order.evidence_descriptions.length > 0 ? (
                 <ul className="list-disc list-inside space-y-1">
                   {order.evidence_descriptions.map((ev, idx) => (
                     <li key={idx} className="text-sm text-slate-700">{ev}</li>
                   ))}
                 </ul>
-              </InfoRow>
-            )}
+              ) : (
+                <span className="text-red-500 text-sm">未填写（提交时必填）</span>
+              )}
+            </InfoRow>
           </dl>
         </div>
       </div>
