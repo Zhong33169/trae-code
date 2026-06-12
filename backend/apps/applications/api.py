@@ -94,16 +94,24 @@ def list_applications(request, status: str = None):
 
     if user.role == "community_worker":
         qs = qs.filter(creator=user)
+        if status:
+            qs = qs.filter(status=status)
     elif user.role == "clerk":
+        allowed = {"pending_verify", "pending_approve", "approved", "rejected"}
         if status:
+            if status not in allowed:
+                return []
             qs = qs.filter(status=status)
         else:
-            qs = qs.filter(status__in=["pending_verify", "pending_approve", "approved", "rejected"])
+            qs = qs.filter(status__in=allowed)
     elif user.role == "leader":
+        allowed = {"pending_approve", "approved", "rejected", "pending_verify"}
         if status:
+            if status not in allowed:
+                return []
             qs = qs.filter(status=status)
         else:
-            qs = qs.filter(status__in=["pending_approve", "approved", "rejected", "pending_verify"])
+            qs = qs.filter(status__in=allowed)
 
     qs = qs.order_by("-created_at")
     return [_app_to_out(app, user) for app in qs]
@@ -158,7 +166,7 @@ def advance_application(request, application_id: int, payload: AdvanceRequest):
         action=payload.action,
         opinion=payload.opinion,
         materials=[m.model_dump() for m in payload.materials],
-        version=app.version,
+        version=payload.version,
     )
 
     if not result["success"]:
@@ -231,7 +239,8 @@ def list_batch_failures(request, batch_id: str = None):
             id=b.id, batch_id=b.batch_id,
             application_id=b.application_id, application_no=b.application_no,
             operator_name=b.operator.display_name,
-            action=b.action, error=b.error, suggestion=b.suggestion,
+            action=b.action, from_status=b.from_status,
+            error=b.error, suggestion=b.suggestion,
             created_at=b.created_at,
         ) for b in qs[:100]
     ]

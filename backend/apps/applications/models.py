@@ -117,6 +117,7 @@ class BatchFailRecord(models.Model):
         User, on_delete=models.CASCADE, related_name="batch_failures"
     )
     action = models.CharField(max_length=50)
+    from_status = models.CharField(max_length=20, blank=True, default="")
     error = models.TextField()
     suggestion = models.TextField(blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)

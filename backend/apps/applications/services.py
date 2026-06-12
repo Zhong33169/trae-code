@@ -297,9 +297,11 @@ class BatchService:
         results = []
         for item in items:
             app_no = ""
+            from_status = ""
             try:
                 app = Application.objects.get(id=item["application_id"])
                 app_no = app.application_no
+                from_status = app.status
             except Application.DoesNotExist:
                 pass
 
@@ -316,6 +318,7 @@ class BatchService:
                 "application_id": item["application_id"],
                 "application_no": app_no,
                 "success": result["success"],
+                "from_status": from_status,
                 "error": result.get("error", ""),
                 "suggestion": result.get("suggestion", ""),
             }
@@ -328,6 +331,7 @@ class BatchService:
                     application_no=app_no,
                     operator=user,
                     action=item["action"],
+                    from_status=from_status,
                     error=result.get("error", ""),
                     suggestion=result.get("suggestion", ""),
                 )

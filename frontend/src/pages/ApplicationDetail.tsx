@@ -207,6 +207,7 @@ export default function ApplicationDetail() {
         action,
         opinion: opinion(),
         materials: pendingMaterials(),
+        version: app()!.version,
       };
       await apiFetch(`/api/applications/${params.id}/advance`, {
         method: 'POST',
@@ -217,7 +218,9 @@ export default function ApplicationDetail() {
       setOpinion('');
       setPendingMaterials([]);
     } catch (err: any) {
-      setError(err.detail || err.message || '操作失败');
+      const msg = err.detail || err.message || '操作失败';
+      const appNo = app()?.application_no || '';
+      setError(appNo ? `[${appNo}] ${msg}` : msg);
     } finally {
       setLoading(false);
     }

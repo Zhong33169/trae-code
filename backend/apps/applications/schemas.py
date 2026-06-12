@@ -84,6 +84,7 @@ class AdvanceRequest(Schema):
     action: str
     opinion: str = ""
     materials: List[MaterialCreate] = []
+    version: int = 0
 
 
 class AdvanceResponse(Schema):
@@ -108,6 +109,7 @@ class BatchAdvanceItemResult(Schema):
     application_id: int
     application_no: str = ""
     success: bool
+    from_status: str = ""
     error: str = ""
     suggestion: str = ""
 
@@ -124,6 +126,7 @@ class BatchFailRecordOut(Schema):
     application_no: str
     operator_name: str
     action: str
+    from_status: str = ""
     error: str
     suggestion: str
     created_at: datetime
