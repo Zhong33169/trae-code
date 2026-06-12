@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback } from 'preact/hooks';
 import { api } from '../utils/api';
 import {
   STATUS_TEXT, NODE_TEXT, HAZARD_LEVEL_TEXT, RECHECK_RESULT_TEXT,
-  formatTime, formatDate, getDeadlineRemain, ROLE_TEXT,
+  formatTime, formatDate, getDeadlineRemain, ROLE_TEXT, canDo, actionDisabledReason,
 } from '../utils/format';
 import Modal from '../components/Modal';
 import { showToast } from '../components/Toast';
@@ -26,6 +26,14 @@ function NodeSteps({ currentNode, isTimeout }) {
       })}
     </div>
   );
+}
+
+function isActionAllowed(data, action) {
+  return Array.isArray(data?.allowed_actions) && data.allowed_actions.includes(action);
+}
+
+function getDenialReason(data, action) {
+  return data?.action_denial_reasons?.[action] || '';
 }
 
 export default function OrderDetail({ user, orderId, onBack }) {
@@ -86,25 +94,33 @@ export default function OrderDetail({ user, orderId, onBack }) {
     }
   };
 
-  const canAssign = user.role === 'supervisor' && data?.order?.status === 'pending';
-  const canRectify = user.role === 'supervisor' && data?.order?.status === 'assigned' && data?.order?.current_node === 'rectify';
-  const canRecheck = user.role === 'station_chief' && data?.order?.status === 'assigned' && data?.order?.current_node === 'recheck';
-  const canConfirm = user.role === 'station_chief' && data?.order?.status === 'revisited';
-  const canHandleTimeout = data?.order?.is_timeout;
+  const tryOpenAction = (action, setter) => {
+    if (isActionAllowed(data, action)) {
+      setter(true);
+      return;
+    }
+    const reason = getDenialReason(data, action) || actionDisabledReason(user, data?.order || {}, action);
+    showToast(reason || '当前无法执行该操作', 'error');
+  };
 
   if (loading) return <div class="page-card"><div class="empty-state">加载中...</div></div>;
   if (!data) return <div class="page-card"><div class="empty-state">加载失败</div></div>;
 
   const o = data.order;
+
+  const showSupervisorFields = user.role === 'supervisor' || user.role === 'station_chief';
+  const showChiefFields = user.role === 'station_chief';
+  const showClerkProgress = user.role === 'clerk';
+
   const tabs = [
-    { key: 'base', label: '基本信息' },
-    { key: 'report', label: `隐患上报 (${data.reports?.length || 0})` },
-    { key: 'notice', label: `整改通知 (${data.rectification_notices?.length || 0})` },
-    { key: 'rectify', label: `整改记录 (${data.rectification_records?.length || 0})` },
-    { key: 'recheck', label: `复查销项 (${data.recheck_records?.length || 0})` },
-    { key: 'timeout', label: `超时记录 (${data.timeout_records?.length || 0})` },
-    { key: 'logs', label: `操作记录 (${data.operation_logs?.length || 0})` },
-  ];
+    { key: 'base', label: '基本信息', role: ['clerk', 'supervisor', 'station_chief'] },
+    { key: 'report', label: `隐患上报 (${data.reports?.length || 0})`, role: ['clerk', 'supervisor', 'station_chief'] },
+    { key: 'notice', label: `整改通知 (${data.rectification_notices?.length || 0})`, role: ['supervisor', 'station_chief'] },
+    { key: 'rectify', label: `整改记录 (${data.rectification_records?.length || 0})`, role: ['supervisor', 'station_chief'] },
+    { key: 'recheck', label: `复查销项 (${data.recheck_records?.length || 0})`, role: ['station_chief', 'supervisor'] },
+    { key: 'timeout', label: `超时记录 (${data.timeout_records?.length || 0})`, role: ['clerk', 'supervisor', 'station_chief'] },
+    { key: 'logs', label: `操作记录 (${data.operation_logs?.length || 0})`, role: ['clerk', 'supervisor', 'station_chief'] },
+  ].filter((t) => t.role.includes(user.role));
 
   return (
     <div>
@@ -113,6 +129,7 @@ export default function OrderDetail({ user, orderId, onBack }) {
       <div class="page-card" style={{ marginBottom: 16 }}>
         <div class="toolbar">
           <div class="toolbar-left">
+            <button class="btn-default" onClick={onBack} style={{ marginRight: 8 }}>← 返回列表</button>
             <span style={{ fontSize: 16, fontWeight: 600 }}>
               {o.order_no} - {o.title}
             </span>
@@ -121,23 +138,76 @@ export default function OrderDetail({ user, orderId, onBack }) {
             </span>
             <span class={`level-${o.hazard_level}`}>[{HAZARD_LEVEL_TEXT[o.hazard_level]}]</span>
             {o.is_timeout && <span class="timeout-tag">节点超时</span>}
+            <span style={{ marginLeft: 12, fontSize: 12, color: '#999' }}>
+              视角：<b style={{ color: '#1890ff' }}>{ROLE_TEXT[user.role] || user.role}</b>
+            </span>
           </div>
           <div class="toolbar-right">
             <button class="btn-default" onClick={fetchDetail}>刷新</button>
-            {canHandleTimeout && (
+            {isActionAllowed(data, 'handle_timeout') ? (
               <button class="btn-warn" onClick={() => setShowTimeout(true)}>处理超时</button>
+            ) : (
+              <button
+                class="btn-warn"
+                disabled
+                title={getDenialReason(data, 'handle_timeout')}
+                onClick={() => showToast(getDenialReason(data, 'handle_timeout') || '当前无需处理超时', 'error')}
+                style={{ opacity: 0.45, cursor: 'not-allowed' }}
+              >
+                处理超时
+              </button>
             )}
-            {canAssign && (
+            {isActionAllowed(data, 'assign') ? (
               <button class="btn-primary" onClick={() => setShowAssign(true)}>转办分派</button>
+            ) : (
+              <button
+                class="btn-primary"
+                disabled
+                title={getDenialReason(data, 'assign')}
+                onClick={() => tryOpenAction('assign', setShowAssign)}
+                style={{ opacity: 0.45, cursor: 'not-allowed' }}
+              >
+                转办分派
+              </button>
             )}
-            {canRectify && (
+            {isActionAllowed(data, 'rectify') ? (
               <button class="btn-primary" onClick={() => setShowRectify(true)}>提交整改</button>
+            ) : (
+              <button
+                class="btn-primary"
+                disabled
+                title={getDenialReason(data, 'rectify')}
+                onClick={() => tryOpenAction('rectify', setShowRectify)}
+                style={{ opacity: 0.45, cursor: 'not-allowed' }}
+              >
+                提交整改
+              </button>
             )}
-            {canRecheck && (
+            {isActionAllowed(data, 'recheck') ? (
               <button class="btn-success" onClick={() => setShowRecheck(true)}>复查回访</button>
+            ) : (
+              <button
+                class="btn-success"
+                disabled
+                title={getDenialReason(data, 'recheck')}
+                onClick={() => tryOpenAction('recheck', setShowRecheck)}
+                style={{ opacity: 0.45, cursor: 'not-allowed' }}
+              >
+                复查回访
+              </button>
             )}
-            {canConfirm && (
+            {isActionAllowed(data, 'confirm') ? (
               <button class="btn-success" onClick={() => setShowConfirm(true)}>确认完成</button>
+            ) : (
+              <button
+                class="btn-success"
+                disabled
+                title={getDenialReason(data, 'confirm')}
+                onClick={() => tryOpenAction('confirm', setShowConfirm)}
+                style={{ opacity: 0.45, cursor: 'not-allowed' }}
+              >
+                确认完成
+              </button>
             )}
           </div>
         </div>
@@ -152,18 +222,37 @@ export default function OrderDetail({ user, orderId, onBack }) {
             </span>
           </div>
           <div class="detail-item"><span class="label">上报人</span><span class="value">{o.reporter_name}</span></div>
-          <div class="detail-item"><span class="label">防火监督员</span><span class="value">{o.supervisor_name || '未分派'}</span></div>
-          <div class="detail-item"><span class="label">站点负责人</span><span class="value">{o.station_chief_name || '未确认'}</span></div>
-          <div class="detail-item"><span class="label">整改截止</span>
-            <span class="value">
-              {o.rectify_deadline ? `${formatDate(o.rectify_deadline)}（${getDeadlineRemain(o.rectify_deadline)}）` : '-'}
-            </span>
-          </div>
-          <div class="detail-item"><span class="label">复查截止</span>
-            <span class="value">
-              {o.recheck_deadline ? `${formatDate(o.recheck_deadline)}（${getDeadlineRemain(o.recheck_deadline)}）` : '-'}
-            </span>
-          </div>
+          {showSupervisorFields && (
+            <div class="detail-item"><span class="label">防火监督员</span><span class="value">{o.supervisor_name || '未分派'}</span></div>
+          )}
+          {showChiefFields && (
+            <div class="detail-item"><span class="label">站点负责人</span><span class="value">{o.station_chief_name || '未确认'}</span></div>
+          )}
+          {showSupervisorFields && (
+            <div class="detail-item"><span class="label">整改截止</span>
+              <span class="value">
+                {o.rectify_deadline ? `${formatDate(o.rectify_deadline)}（${getDeadlineRemain(o.rectify_deadline)}）` : '-'}
+              </span>
+            </div>
+          )}
+          {showChiefFields && (
+            <div class="detail-item"><span class="label">复查截止</span>
+              <span class="value">
+                {o.recheck_deadline ? `${formatDate(o.recheck_deadline)}（${getDeadlineRemain(o.recheck_deadline)}）` : '-'}
+              </span>
+            </div>
+          )}
+          {showClerkProgress && (
+            <div class="detail-item"><span class="label">处理进度</span>
+              <span class="value">
+                {o.status === 'pending' && <span style={{ color: '#fa8c16' }}>等待监督员转办</span>}
+                {o.status === 'assigned' && o.current_node === 'rectify' && <span style={{ color: '#1890ff' }}>监督员整改中</span>}
+                {o.status === 'assigned' && o.current_node === 'recheck' && <span style={{ color: '#1890ff' }}>等待负责人复查</span>}
+                {o.status === 'revisited' && <span style={{ color: '#52c41a' }}>已回访，确认中</span>}
+                {o.is_timeout && <div><span class="timeout-tag">节点超时</span></div>}
+              </span>
+            </div>
+          )}
           <div class="detail-item"><span class="label">创建时间</span><span class="value">{formatTime(o.created_at)}</span></div>
         </div>
 
@@ -198,25 +287,33 @@ export default function OrderDetail({ user, orderId, onBack }) {
                   <div class="timeline-time">时限：24小时 · 操作人：{o.reporter_name}</div>
                   <div>创建时间：{formatTime(o.created_at)}</div>
                 </div>
-                <div class="timeline-item">
-                  <div class="timeline-title">2. 分派转办节点</div>
-                  <div class="timeline-time">时限：24小时 · 操作人：防火监督员</div>
-                  <div>{o.supervisor_name ? `已分派给 ${o.supervisor_name}` : '待分派'}</div>
-                </div>
-                <div class="timeline-item">
-                  <div class="timeline-title">3. 整改通知节点</div>
-                  <div class="timeline-time">时限：72小时</div>
-                  <div>整改截止：{o.rectify_deadline ? formatDate(o.rectify_deadline) : '-'}</div>
-                </div>
-                <div class="timeline-item">
-                  <div class="timeline-title">4. 复查销项节点</div>
-                  <div class="timeline-time">时限：48小时 · 操作人：站点负责人</div>
-                  <div>复查截止：{o.recheck_deadline ? formatDate(o.recheck_deadline) : '-'}</div>
-                </div>
-                <div class="timeline-item">
-                  <div class="timeline-title">5. 确认完成节点</div>
-                  <div class="timeline-time">时限：24小时 · 操作人：站点负责人</div>
-                </div>
+                {showSupervisorFields && (
+                  <div class="timeline-item">
+                    <div class="timeline-title">2. 分派转办节点</div>
+                    <div class="timeline-time">时限：24小时 · 操作人：防火监督员</div>
+                    <div>{o.supervisor_name ? `已分派给 ${o.supervisor_name}` : '待分派'}</div>
+                  </div>
+                )}
+                {showSupervisorFields && (
+                  <div class="timeline-item">
+                    <div class="timeline-title">3. 整改通知节点</div>
+                    <div class="timeline-time">时限：72小时</div>
+                    <div>整改截止：{o.rectify_deadline ? formatDate(o.rectify_deadline) : '-'}</div>
+                  </div>
+                )}
+                {showChiefFields && (
+                  <div class="timeline-item">
+                    <div class="timeline-title">4. 复查销项节点</div>
+                    <div class="timeline-time">时限：48小时 · 操作人：站点负责人</div>
+                    <div>复查截止：{o.recheck_deadline ? formatDate(o.recheck_deadline) : '-'}</div>
+                  </div>
+                )}
+                {showChiefFields && (
+                  <div class="timeline-item">
+                    <div class="timeline-title">5. 确认完成节点</div>
+                    <div class="timeline-time">时限：24小时 · 操作人：站点负责人</div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -231,7 +328,7 @@ export default function OrderDetail({ user, orderId, onBack }) {
                 <div class="log-item" key={r.id}>
                   <div class="log-header">
                     <span class="log-action">隐患上报</span>
-                    <span>节点截止：{formatTime(r.node_deadline)}</span>
+                    {showSupervisorFields && <span>节点截止：{formatTime(r.node_deadline)}</span>}
                   </div>
                   <div class="log-remark">{r.content}</div>
                   <div style={{ color: '#999', fontSize: 12, marginTop: 6 }}>
@@ -256,7 +353,8 @@ export default function OrderDetail({ user, orderId, onBack }) {
                   </div>
                   <div class="log-remark">{n.content}</div>
                   <div style={{ color: '#999', fontSize: 12, marginTop: 6 }}>
-                    节点截止：{formatTime(n.node_deadline)} · 下发时间：{formatTime(n.created_at)}
+                    {showSupervisorFields && <span>节点截止：{formatTime(n.node_deadline)} · </span>}
+                    下发时间：{formatTime(n.created_at)}
                   </div>
                 </div>
               ))
@@ -299,9 +397,11 @@ export default function OrderDetail({ user, orderId, onBack }) {
                     <span>复查时间：{formatTime(r.checked_at)}</span>
                   </div>
                   <div class="log-remark">{r.content}</div>
-                  <div style={{ color: '#999', fontSize: 12, marginTop: 6 }}>
-                    节点截止：{formatTime(r.node_deadline)}
-                  </div>
+                  {showChiefFields && (
+                    <div style={{ color: '#999', fontSize: 12, marginTop: 6 }}>
+                      节点截止：{formatTime(r.node_deadline)}
+                    </div>
+                  )}
                 </div>
               ))
             )}
@@ -324,8 +424,8 @@ export default function OrderDetail({ user, orderId, onBack }) {
                   <div style={{ marginTop: 6 }}>
                     <div><b>超时原因：</b>{t.timeout_reason}</div>
                     <div><b>处理措施：</b>{t.handle_action}</div>
-                    <div><b>原截止时间：</b>{formatTime(t.original_deadline)}</div>
-                    {t.new_deadline && <div><b>新截止时间：</b>{formatTime(t.new_deadline)}</div>}
+                    {showSupervisorFields && <div><b>原截止时间：</b>{formatTime(t.original_deadline)}</div>}
+                    {showSupervisorFields && t.new_deadline && <div><b>新截止时间：</b>{formatTime(t.new_deadline)}</div>}
                   </div>
                   <div style={{ color: '#999', fontSize: 12, marginTop: 6 }}>
                     处理时间：{formatTime(t.created_at)}

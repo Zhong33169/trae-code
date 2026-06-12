@@ -68,3 +68,56 @@ export function getDeadlineRemain(deadline) {
   if (hours > 24) return `剩余 ${Math.floor(hours / 24)} 天 ${hours % 24} 小时`;
   return `剩余 ${hours} 小时`;
 }
+
+export function canDo(user, order, action) {
+  const status = order.status;
+  const node = order.current_node;
+  const isTimeout = order.is_timeout;
+
+  switch (action) {
+    case 'assign':
+      return user.role === 'supervisor' && status === 'pending' && node === 'report';
+    case 'rectify':
+      return user.role === 'supervisor' && status === 'assigned' && node === 'rectify';
+    case 'recheck':
+      return user.role === 'station_chief' && status === 'assigned' && node === 'recheck';
+    case 'confirm':
+      return user.role === 'station_chief' && status === 'revisited';
+    case 'handle_timeout':
+      return isTimeout;
+    default:
+      return false;
+  }
+}
+
+export function actionDisabledReason(user, order, action) {
+  const roleText = ROLE_TEXT[user.role] || user.role;
+  const statusText = STATUS_TEXT[order.status] || order.status;
+  const nodeText = NODE_TEXT[order.current_node] || order.current_node;
+
+  switch (action) {
+    case 'assign':
+      if (user.role !== 'supervisor') return `仅防火监督员可转办（当前岗位：${roleText}）`;
+      if (order.status !== 'pending') return `仅「待分派」可转办（当前状态：${statusText}）`;
+      return '';
+    case 'rectify':
+      if (user.role !== 'supervisor') return `仅防火监督员可提交整改（当前岗位：${roleText}）`;
+      if (order.status !== 'assigned' || order.current_node !== 'rectify')
+        return `仅「已转办-整改通知」可整改（当前：${statusText}-${nodeText}）`;
+      return '';
+    case 'recheck':
+      if (user.role !== 'station_chief') return `仅站点负责人可复查（当前岗位：${roleText}）`;
+      if (order.status !== 'assigned' || order.current_node !== 'recheck')
+        return `仅「已转办-复查销项」可复查（当前：${statusText}-${nodeText}）`;
+      return '';
+    case 'confirm':
+      if (user.role !== 'station_chief') return `仅站点负责人可确认（当前岗位：${roleText}）`;
+      if (order.status !== 'revisited') return `仅「已回访」可确认（当前状态：${statusText}）`;
+      return '';
+    case 'handle_timeout':
+      if (!order.is_timeout) return '该单据当前节点未超时，无需处理';
+      return '';
+    default:
+      return '';
+  }
+}
