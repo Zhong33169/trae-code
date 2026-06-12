@@ -23,10 +23,10 @@ export class OrderRepository {
     order.updatedAt = new Date().toISOString();
     order.updateTimeLimit();
 
-    db.run('BEGIN');
+    db.runRaw('BEGIN');
 
     try {
-      db.run(
+      db.runRaw(
         `INSERT INTO orders (
           id, order_no, qr_code, venue_name, venue_type, booking_date, booking_time,
           applicant_name, applicant_phone, applicant_id_card, status,
@@ -89,8 +89,8 @@ export class OrderRepository {
       );
 
       for (const log of order.auditLogs) {
-        db.run(
-          `INSERT INTO audit_logs (
+        db.runRaw(
+          `INSERT OR IGNORE INTO audit_logs (
             id, order_id, action, operator_id, operator_name, operator_role,
             timestamp, comment, old_status, new_status, ip_address
           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -110,9 +110,10 @@ export class OrderRepository {
         );
       }
 
-      db.run('COMMIT');
+      db.runRaw('COMMIT');
+      db.save();
     } catch (err) {
-      db.run('ROLLBACK');
+      try { db.runRaw('ROLLBACK'); } catch (_) {}
       throw err;
     }
 

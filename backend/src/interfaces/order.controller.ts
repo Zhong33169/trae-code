@@ -46,7 +46,7 @@ export class OrderController {
       }
     }
 
-    if (handlerRole) {
+    if (handlerRole && handlerRole !== 'all') {
       filters.handlerRole = handlerRole as Role;
     }
 

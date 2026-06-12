@@ -19,6 +19,10 @@ export class DatabaseHelper {
     this.save();
   }
 
+  runRaw(sql: string, params?: any[]): void {
+    this.db.run(sql, params);
+  }
+
   get(sql: string, params?: any[]): any | undefined {
     const stmt = this.db.prepare(sql);
     if (params) stmt.bind(params);

@@ -248,7 +248,7 @@ const OrderListPage: React.FC = () => {
               value={filterHandlerRole}
               onChange={(e) => setFilterHandlerRole(e.target.value)}
             >
-              <option value="">全部岗位</option>
+              <option value="all">全部岗位</option>
               <option value={Role.REGISTRAR}>{RoleLabels[Role.REGISTRAR]}</option>
               <option value={Role.SUPERVISOR}>{RoleLabels[Role.SUPERVISOR]}</option>
               <option value={Role.REVIEWER}>{RoleLabels[Role.REVIEWER]}</option>
