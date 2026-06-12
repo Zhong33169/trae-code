@@ -75,15 +75,15 @@
 - Node.js >= 18
 - SQLite（go-sqlite3 驱动内置，无需额外安装）
 
-### 1. 启动后端（端口 80010）
+### 1. 启动后端（端口 18010）
 
 ```bash
 cd backend
 go mod tidy          # 首次执行，下载依赖
-go run .             # 启动服务，默认端口 80010
+go run .             # 启动服务，默认端口 18010
 
 # 或自定义端口与数据库路径
-go run . -port 80010 -db ./data/fire_hazard.db
+go run . -port 18010 -db ./data/fire_hazard.db
 ```
 
 首次启动会自动：
@@ -101,7 +101,7 @@ npm run dev          # 启动 Vite 开发服务器，端口 30010
 
 浏览器访问：**http://localhost:30010**
 
-前端已配置 `/api` 代理到后端 `http://localhost:80010`。
+前端已配置 `/api` 代理到后端 `http://localhost:18010`。
 
 ## 测试账号
 

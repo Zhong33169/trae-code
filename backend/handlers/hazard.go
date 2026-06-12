@@ -24,6 +24,20 @@ const (
 	NodeDeadlineConfirm = 24 * time.Hour
 )
 
+var STATUS_TEXT = map[models.HazardStatus]string{
+	models.StatusPending:   "待分派",
+	models.StatusAssigned:  "已转办",
+	models.StatusRevisited: "已回访",
+}
+
+var NODE_TEXT = map[models.NodeType]string{
+	models.NodeReport:  "隐患上报",
+	models.NodeAssign:  "分派转办",
+	models.NodeRectify: "整改通知",
+	models.NodeRecheck: "复查销项",
+	models.NodeConfirm: "确认完成",
+}
+
 type Action string
 
 const (
@@ -314,9 +328,8 @@ func ListHazardOrders(w http.ResponseWriter, r *http.Request) {
 	orders := make([]*models.HazardOrder, 0)
 	for rows.Next() {
 		o := &models.HazardOrder{}
-		var sid, scid sql.NullInt64
-		var rd, rcd sql.NullTime
-		if _, _, _, _, err := scanOrder(rows, o); err != nil {
+		sid, scid, rd, rcd, err := scanOrder(rows, o)
+		if err != nil {
 			continue
 		}
 		applyNullsToOrder(o, sid, scid, rd, rcd)
@@ -845,15 +858,54 @@ func SubmitRecheck(w http.ResponseWriter, r *http.Request) {
 
 	nodeDeadline := getNodeDeadline(models.NodeConfirm)
 
-	_, err = tx.Exec(`
-		UPDATE hazard_orders SET 
-			status = 'revisited', current_node = 'confirm',
-			station_chief_id = ?, station_chief_name = ?, updated_at = ?
-		WHERE id = ?
-	`, user.ID, user.Name, time.Now(), id)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "更新隐患单状态失败", err.Error())
-		return
+	var newStatus models.HazardStatus
+	var newNode models.NodeType
+	var resultText string
+
+	if req.Result == "pass" {
+		newStatus = models.StatusRevisited
+		newNode = models.NodeConfirm
+		resultText = "复查通过"
+
+		_, err = tx.Exec(`
+			UPDATE hazard_orders SET 
+				status = 'revisited', current_node = 'confirm',
+				station_chief_id = ?, station_chief_name = ?, updated_at = ?
+			WHERE id = ?
+		`, user.ID, user.Name, time.Now(), id)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "更新隐患单状态失败", err.Error())
+			return
+		}
+	} else {
+		newStatus = models.StatusAssigned
+		newNode = models.NodeRectify
+		resultText = "复查不通过，退回整改"
+
+		rectifyDeadline := time.Now().Add(72 * time.Hour)
+		_, err = tx.Exec(`
+			UPDATE hazard_orders SET 
+				status = 'assigned', current_node = 'rectify',
+				station_chief_id = ?, station_chief_name = ?,
+				rectify_deadline = ?, updated_at = ?
+			WHERE id = ?
+		`, user.ID, user.Name, rectifyDeadline, time.Now(), id)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "更新隐患单状态失败（退回整改）", err.Error())
+			return
+		}
+
+		_, err = tx.Exec(`
+			INSERT INTO rectification_notices (order_id, issuer_id, content, deadline, node_deadline, created_at)
+			VALUES (?, ?, ?, ?, ?, ?)
+		`, id, user.ID,
+			fmt.Sprintf("复查不通过，需重新整改。原因：%s", req.Content),
+			rectifyDeadline, nodeDeadline, time.Now(),
+		)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "生成新整改通知失败", err.Error())
+			return
+		}
 	}
 
 	_, err = tx.Exec(`
@@ -865,13 +917,12 @@ func SubmitRecheck(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resultText := map[string]string{"pass": "复查通过", "fail": "复查不通过，需重新整改"}[req.Result]
 	fullRemark := resultText
 	if req.Remark != "" {
 		fullRemark += "；" + req.Remark
 	}
-	if err = addOperationLog(tx, id, user, "复查回访", models.StatusAssigned, models.StatusRevisited,
-		models.NodeRecheck, models.NodeConfirm, fullRemark); err != nil {
+	if err = addOperationLog(tx, id, user, "复查回访", models.StatusAssigned, newStatus,
+		models.NodeRecheck, newNode, fullRemark); err != nil {
 		writeError(w, http.StatusInternalServerError, "记录操作日志失败", err.Error())
 		return
 	}
@@ -882,12 +933,12 @@ func SubmitRecheck(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"id":         id,
-		"order_no":   orderNo,
-		"status":     "revisited",
-		"node":       "confirm",
-		"recheck_result": req.Result,
-		"message":    fmt.Sprintf("回访完成，状态已更新为已回访（复查结果：%s）", resultText),
+		"id":              id,
+		"order_no":        orderNo,
+		"status":          newStatus,
+		"node":            newNode,
+		"recheck_result":  req.Result,
+		"message":         fmt.Sprintf("回访完成（复查结果：%s），当前：%s-%s", resultText, STATUS_TEXT[newStatus], NODE_TEXT[newNode]),
 	})
 }
 
