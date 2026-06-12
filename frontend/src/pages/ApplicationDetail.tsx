@@ -124,7 +124,7 @@ const MATERIAL_TYPES: Record<string, string[]> = {
   approval: ['审批意见', '会议纪要', '公示截图'],
 };
 
-const OPINION_REQUIRED_ACTIONS = new Set(['verify', 'approve', 'reject']);
+const OPINION_REQUIRED_ACTIONS = new Set(['submit', 'verify', 'approve', 'reject']);
 const OVERDUE_REQUIRED_ACTIONS = new Set(['submit', 'verify', 'approve', 'reject']);
 
 export default function ApplicationDetail() {
@@ -226,7 +226,7 @@ export default function ApplicationDetail() {
 
   const validateBeforeSubmit = (action: string): string | null => {
     if (requireOpinion(action) && !opinion().trim()) {
-      const stageLabel = action === 'verify' ? '入户核实' : action === 'approve' ? '救助确认' : '驳回';
+      const stageLabel = action === 'submit' ? '困难帮扶提交' : action === 'verify' ? '入户核实' : action === 'approve' ? '救助确认' : '驳回';
       return `${stageLabel}必须填写处理意见`;
     }
     if (requireOverdueReason(action) && !overdueReason().trim()) {
@@ -476,6 +476,26 @@ export default function ApplicationDetail() {
                     <div style={{ fontSize: '14px' }}>
                       <span style={{ color: 'var(--text-light)' }}>困难说明:</span> {a.difficulty_description}
                     </div>
+
+                    <label style={{ fontSize: '13px', color: 'var(--text-light)', display: 'block' }}>
+                      提交意见 <span style={{ color: 'var(--danger)' }}>*</span>
+                      <textarea
+                        value={opinion()}
+                        onInput={(e) => setOpinion(e.currentTarget.value)}
+                        rows={3}
+                        placeholder="请填写困难帮扶提交意见..."
+                        style={{
+                          display: 'block',
+                          width: '100%',
+                          padding: '8px 12px',
+                          border: '1px solid var(--border)',
+                          borderRadius: 'var(--radius)',
+                          marginTop: '4px',
+                          fontSize: '14px',
+                          resize: 'vertical',
+                        }}
+                      />
+                    </label>
 
                     <Show when={requireOverdueReason('submit')}>
                       <label style={{ fontSize: '13px', color: 'var(--text-light)', display: 'block' }}>
@@ -900,6 +920,7 @@ export default function ApplicationDetail() {
                       <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 600, color: 'var(--text-light)' }}>动作</th>
                       <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 600, color: 'var(--text-light)' }}>状态变更</th>
                       <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 600, color: 'var(--text-light)' }}>时限检查</th>
+                      <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 600, color: 'var(--text-light)' }}>版本</th>
                       <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 600, color: 'var(--text-light)' }}>意见</th>
                       <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 600, color: 'var(--text-light)' }}>失败原因</th>
                       <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 600, color: 'var(--text-light)' }}>时间</th>
@@ -924,6 +945,9 @@ export default function ApplicationDetail() {
                               }}>
                                 {entry.deadline_check || '-'}
                               </span>
+                            </td>
+                            <td style={{ padding: '8px 12px', fontSize: '12px', color: 'var(--text-light)' }}>
+                              v{entry.client_version || 0}
                             </td>
                             <td style={{ padding: '8px 12px' }}>{entry.opinion || '-'}</td>
                             <td style={{ padding: '8px 12px', fontSize: '12px', color: 'var(--danger)' }}>{entry.failure_reason || '-'}</td>

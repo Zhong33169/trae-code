@@ -128,7 +128,21 @@ class Command(BaseCommand):
                 "deadline": now - timedelta(days=5),
                 "opinion_text": "",
             },
+            {
+                "application_no": "BF20260008",
+                "creator": users["community_worker"],
+                "applicant_name": "陈婆婆",
+                "applicant_id_card": "110101194008088901",
+                "difficulty_type": "medical",
+                "difficulty_description": "高血压合并肾功能不全，透析费用高昂",
+                "assistance_amount": 7000.00,
+                "status": "draft",
+                "deadline": now - timedelta(days=3),
+                "opinion_text": "",
+            },
         ]
+
+        ROLE_LABELS = {"community_worker": "社区专干", "clerk": "街道科员", "leader": "分管领导"}
 
         for app_data in applications_data:
             app, created = Application.objects.get_or_create(
@@ -156,7 +170,7 @@ class Command(BaseCommand):
                         material_type="核验报告",
                     )
 
-                if app.application_no in ("BF20260006", "BF20260007"):
+                if app.application_no in ("BF20260006", "BF20260007", "BF20260008"):
                     ApplicationMaterial.objects.create(
                         application=app,
                         stage="application",
@@ -190,6 +204,10 @@ class Command(BaseCommand):
                         from_status="",
                         to_status="draft",
                         opinion="创建申请",
+                        operator_role=app.creator.role,
+                        client_version=0,
+                        deadline_check="",
+                        failure_reason="",
                     )
                 elif app.status == "pending_verify":
                     AuditLog.objects.create(
@@ -198,7 +216,11 @@ class Command(BaseCommand):
                         action="submit",
                         from_status="draft",
                         to_status="pending_verify",
-                        opinion="提交申请",
+                        opinion="提交帮扶申请",
+                        operator_role=app.creator.role,
+                        client_version=1,
+                        deadline_check="on_time",
+                        failure_reason="",
                     )
                 elif app.status == "pending_approve":
                     AuditLog.objects.create(
@@ -207,7 +229,11 @@ class Command(BaseCommand):
                         action="submit",
                         from_status="draft",
                         to_status="pending_verify",
-                        opinion="提交申请",
+                        opinion="提交帮扶申请",
+                        operator_role=app.creator.role,
+                        client_version=1,
+                        deadline_check="on_time",
+                        failure_reason="",
                     )
                     AuditLog.objects.create(
                         application=app,
@@ -216,6 +242,10 @@ class Command(BaseCommand):
                         from_status="pending_verify",
                         to_status="pending_approve",
                         opinion="材料齐全，情况属实，建议通过",
+                        operator_role=users["clerk"].role,
+                        client_version=2,
+                        deadline_check="overdue_with_reason" if app.deadline and app.deadline < now else "on_time",
+                        failure_reason="",
                     )
                 elif app.status == "approved":
                     AuditLog.objects.create(
@@ -224,7 +254,11 @@ class Command(BaseCommand):
                         action="submit",
                         from_status="draft",
                         to_status="pending_verify",
-                        opinion="提交申请",
+                        opinion="提交帮扶申请",
+                        operator_role=app.creator.role,
+                        client_version=1,
+                        deadline_check="on_time",
+                        failure_reason="",
                     )
                     AuditLog.objects.create(
                         application=app,
@@ -233,6 +267,10 @@ class Command(BaseCommand):
                         from_status="pending_verify",
                         to_status="pending_approve",
                         opinion="材料齐全，情况属实",
+                        operator_role=users["clerk"].role,
+                        client_version=2,
+                        deadline_check="on_time",
+                        failure_reason="",
                     )
                     AuditLog.objects.create(
                         application=app,
@@ -241,6 +279,10 @@ class Command(BaseCommand):
                         from_status="pending_approve",
                         to_status="approved",
                         opinion="同意帮扶",
+                        operator_role=users["leader"].role,
+                        client_version=3,
+                        deadline_check="overdue_with_reason" if app.deadline and app.deadline < now else "on_time",
+                        failure_reason="",
                     )
                 elif app.status == "rejected":
                     AuditLog.objects.create(
@@ -249,7 +291,11 @@ class Command(BaseCommand):
                         action="submit",
                         from_status="draft",
                         to_status="pending_verify",
-                        opinion="提交申请",
+                        opinion="提交帮扶申请",
+                        operator_role=app.creator.role,
+                        client_version=1,
+                        deadline_check="on_time",
+                        failure_reason="",
                     )
                     AuditLog.objects.create(
                         application=app,
@@ -258,6 +304,10 @@ class Command(BaseCommand):
                         from_status="pending_verify",
                         to_status="pending_approve",
                         opinion="核验通过",
+                        operator_role=users["clerk"].role,
+                        client_version=2,
+                        deadline_check="on_time",
+                        failure_reason="",
                     )
                     AuditLog.objects.create(
                         application=app,
@@ -266,7 +316,38 @@ class Command(BaseCommand):
                         from_status="pending_approve",
                         to_status="rejected",
                         opinion="不符合帮扶条件",
+                        operator_role=users["leader"].role,
+                        client_version=3,
+                        deadline_check="overdue_with_reason" if app.deadline and app.deadline < now else "on_time",
+                        failure_reason="",
                     )
+
+                if app.application_no == "BF20260008":
+                    AuditLog.objects.create(
+                        application=app,
+                        operator=app.creator,
+                        action="submit",
+                        from_status="draft",
+                        to_status="",
+                        opinion="",
+                        operator_role=app.creator.role,
+                        client_version=1,
+                        deadline_check="overdue_missing_reason",
+                        failure_reason="困难帮扶提交必须填写处理意见",
+                    )
+                    AuditLog.objects.create(
+                        application=app,
+                        operator=app.creator,
+                        action="submit",
+                        from_status="draft",
+                        to_status="",
+                        opinion="提交帮扶申请",
+                        operator_role=app.creator.role,
+                        client_version=1,
+                        deadline_check="overdue_missing_reason",
+                        failure_reason="申请已逾期3天，必须填写逾期说明",
+                    )
+
             else:
                 self.stdout.write(f"  申请已存在: {app.application_no}")
 

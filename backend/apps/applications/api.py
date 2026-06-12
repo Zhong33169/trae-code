@@ -72,8 +72,11 @@ def _app_to_detail(app, user=None):
         AuditLogOut(
             id=a.id, application_id=a.application_id,
             operator_id=a.operator_id, operator_name=a.operator.display_name,
-            action=a.action, from_status=a.from_status, to_status=a.to_status,
-            opinion=a.opinion, extra_data=a.extra_data, created_at=a.created_at,
+            operator_role=a.operator_role, action=a.action,
+            from_status=a.from_status, to_status=a.to_status,
+            opinion=a.opinion, client_version=a.client_version,
+            deadline_check=a.deadline_check, failure_reason=a.failure_reason,
+            extra_data=a.extra_data, created_at=a.created_at,
         ) for a in app.audit_logs.all()
     ]
     base = _app_to_out(app, user)

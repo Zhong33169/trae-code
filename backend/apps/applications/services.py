@@ -162,9 +162,10 @@ class ApplicationService:
 
     @staticmethod
     def validate_opinion(action: str, opinion: str) -> dict:
-        require_opinion = {"verify", "approve", "reject"}
+        require_opinion = {"submit", "verify", "approve", "reject"}
         if action in require_opinion and (not opinion or not opinion.strip()):
             stage_display = {
+                "submit": "困难帮扶提交",
                 "verify": "入户核实",
                 "approve": "救助确认",
                 "reject": "驳回",
