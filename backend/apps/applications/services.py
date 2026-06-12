@@ -1,8 +1,9 @@
 from datetime import timedelta, timezone, datetime
 from django.db import transaction
 from django.utils import timezone as dj_timezone
+import uuid
 
-from .models import Application, ApplicationMaterial, ScanRecord, AuditLog
+from .models import Application, ApplicationMaterial, ScanRecord, AuditLog, BatchFailRecord
 from apps.auth.models import User
 
 STATUS_FLOW = {
@@ -53,13 +54,41 @@ class ApplicationService:
     @staticmethod
     def _resolve_flow(user: User, action: str):
         if action == "reject":
-            key = f"reject_{user.role}"
             if user.role == "clerk":
                 return STATUS_FLOW["reject_verify"]
             elif user.role == "leader":
                 return STATUS_FLOW["reject_approve"]
             return None
         return STATUS_FLOW.get(action)
+
+    @staticmethod
+    def get_available_actions(user: User, application: Application) -> list:
+        actions = []
+        status = application.status
+        role = user.role
+
+        if status == "draft":
+            if role == "community_worker" and application.creator_id == user.id:
+                actions.append("submit")
+        elif status == "pending_verify":
+            if role == "clerk":
+                actions.append("verify")
+                actions.append("reject")
+        elif status == "pending_approve":
+            if role == "leader":
+                actions.append("approve")
+                actions.append("reject")
+        return actions
+
+    @staticmethod
+    def can_view(user: User, application: Application) -> bool:
+        if user.role == "leader":
+            return True
+        if user.role == "clerk":
+            return application.status in ["pending_verify", "pending_approve", "approved", "rejected"]
+        if user.role == "community_worker":
+            return application.creator_id == user.id
+        return False
 
     @staticmethod
     def validate_role_for_status(user: User, action: str) -> dict:
@@ -263,7 +292,8 @@ class ScanService:
 
 class BatchService:
     @staticmethod
-    def batch_advance(user: User, items: list) -> list:
+    def batch_advance(user: User, items: list) -> dict:
+        batch_id = f"BATCH-{dj_timezone.now().strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:6]}"
         results = []
         for item in items:
             app_no = ""
@@ -281,14 +311,28 @@ class BatchService:
                 materials=item.get("materials", []),
                 version=item.get("version", 1),
             )
-            results.append({
+
+            r = {
                 "application_id": item["application_id"],
                 "application_no": app_no,
                 "success": result["success"],
                 "error": result.get("error", ""),
                 "suggestion": result.get("suggestion", ""),
-            })
-        return results
+            }
+            results.append(r)
+
+            if not result["success"]:
+                BatchFailRecord.objects.create(
+                    batch_id=batch_id,
+                    application_id=item["application_id"],
+                    application_no=app_no,
+                    operator=user,
+                    action=item["action"],
+                    error=result.get("error", ""),
+                    suggestion=result.get("suggestion", ""),
+                )
+
+        return {"batch_id": batch_id, "results": results}
 
 
 class AuditService:
@@ -307,9 +351,13 @@ class AuditService:
         )
 
     @staticmethod
-    def get_logs(application_id: int = None, operator_id: int = None,
+    def get_logs(user: User, application_id: int = None, operator_id: int = None,
                  action: str = None, limit: int = 50) -> list:
         qs = AuditLog.objects.all()
+
+        if user.role == "community_worker":
+            qs = qs.filter(application__creator=user)
+
         if application_id:
             qs = qs.filter(application_id=application_id)
         if operator_id:

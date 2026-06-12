@@ -30,6 +30,7 @@ class ApplicationOut(Schema):
     verified_at: Optional[datetime]
     approved_at: Optional[datetime]
     opinion_text: str
+    available_actions: List[str] = []
 
 
 class ApplicationDetailOut(ApplicationOut):
@@ -59,6 +60,7 @@ class ScanRecordOut(Schema):
     id: int
     application_id: Optional[int]
     scanner_id: int
+    scanner_name: str = ""
     code: str
     credential_no: str
     result: str
@@ -112,6 +114,19 @@ class BatchAdvanceItemResult(Schema):
 
 class BatchAdvanceResponse(Schema):
     results: List[BatchAdvanceItemResult]
+    batch_id: str = ""
+
+
+class BatchFailRecordOut(Schema):
+    id: int
+    batch_id: str
+    application_id: int
+    application_no: str
+    operator_name: str
+    action: str
+    error: str
+    suggestion: str
+    created_at: datetime
 
 
 class ScanVerifyRequest(Schema):

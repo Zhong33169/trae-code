@@ -26,6 +26,14 @@ const DIFFICULTY_TYPES = [
   { value: 'other', label: '其他' },
 ];
 
+const DIFFICULTY_LABELS: Record<string, string> = {
+  medical: '医疗困难',
+  disaster: '灾害',
+  disability: '残疾',
+  low_income: '低收入',
+  other: '其他',
+};
+
 interface AppItem {
   id: number;
   application_no: string;
@@ -205,7 +213,7 @@ export default function Queue() {
                   {item.applicant_name}
                 </span>
                 <span style={{ fontSize: '13px', color: 'var(--text-light)', width: '100px' }}>
-                  {item.difficulty_type}
+                  {DIFFICULTY_LABELS[item.difficulty_type] || item.difficulty_type}
                 </span>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>

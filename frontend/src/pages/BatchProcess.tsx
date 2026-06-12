@@ -19,6 +19,14 @@ interface BatchResult {
   suggestion: string;
 }
 
+const DIFFICULTY_LABELS: Record<string, string> = {
+  medical: '医疗困难',
+  disaster: '灾害',
+  disability: '残疾',
+  low_income: '低收入',
+  other: '其他',
+};
+
 const STAGE_MATERIAL: Record<string, string> = {
   verify: 'verification',
   approve: 'approval',
@@ -41,6 +49,7 @@ export default function BatchProcess() {
   const [opinion, setOpinion] = createSignal('');
   const [loading, setLoading] = createSignal(false);
   const [results, setResults] = createSignal<BatchResult[]>([]);
+  const [batchId, setBatchId] = createSignal('');
   const [showResults, setShowResults] = createSignal(false);
 
   const fetchData = async () => {
@@ -87,6 +96,7 @@ export default function BatchProcess() {
         body: JSON.stringify({ items: batchItems }),
       });
       setResults(data.results || []);
+      setBatchId(data.batch_id || '');
       setShowResults(true);
       fetchData();
     } catch {} finally {
@@ -186,7 +196,15 @@ export default function BatchProcess() {
                   {item.application_no}
                 </span>
                 <span style={{ width: '80px', fontWeight: 500 }}>{item.applicant_name}</span>
-                <span style={{ color: 'var(--text-light)' }}>{item.difficulty_type}</span>
+                <span style={{
+                  padding: '2px 8px',
+                  borderRadius: '4px',
+                  fontSize: '12px',
+                  background: 'var(--bg)',
+                  color: 'var(--text-light)',
+                }}>
+                  {DIFFICULTY_LABELS[item.difficulty_type] || item.difficulty_type}
+                </span>
               </div>
             )}
           </For>
@@ -249,7 +267,14 @@ export default function BatchProcess() {
             justifyContent: 'space-between',
             alignItems: 'center',
           }}>
-            <span style={{ fontSize: '15px', fontWeight: 600 }}>批量处理结果</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <span style={{ fontSize: '15px', fontWeight: 600 }}>批量处理结果</span>
+              <Show when={batchId()}>
+                <span style={{ fontSize: '12px', color: 'var(--text-light)' }}>
+                  批次号: {batchId()}
+                </span>
+              </Show>
+            </div>
             <button
               onClick={() => setShowResults(false)}
               style={{

@@ -107,3 +107,21 @@ class AuditLog(models.Model):
         app_label = "applications"
         db_table = "applications_auditlog"
         ordering = ["-created_at"]
+
+
+class BatchFailRecord(models.Model):
+    batch_id = models.CharField(max_length=50)
+    application_id = models.IntegerField()
+    application_no = models.CharField(max_length=20, blank=True, default="")
+    operator = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="batch_failures"
+    )
+    action = models.CharField(max_length=50)
+    error = models.TextField()
+    suggestion = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        app_label = "applications"
+        db_table = "applications_batchfailrecord"
+        ordering = ["-created_at"]

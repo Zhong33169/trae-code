@@ -4,12 +4,12 @@ from django.http import HttpResponse
 from django.utils import timezone
 
 from apps.auth.api import get_user_from_token
-from .models import Application, ApplicationMaterial, ScanRecord, AuditLog
+from .models import Application, ApplicationMaterial, ScanRecord, AuditLog, BatchFailRecord
 from .schemas import (
     ApplicationCreate, ApplicationOut, ApplicationDetailOut,
-    MaterialOut, ScanRecordOut, AuditLogOut,
+    MaterialOut, ScanRecordOut, AuditLogOut, BatchFailRecordOut,
     AdvanceRequest, AdvanceResponse,
-    BatchAdvanceRequest, BatchAdvanceResponse, BatchAdvanceItemResult,
+    BatchAdvanceRequest, BatchAdvanceResponse,
     ScanVerifyRequest, ScanVerifyResponse,
     StatsSummary,
 )
@@ -25,7 +25,10 @@ def _require_auth(request):
     return user, None
 
 
-def _app_to_out(app):
+def _app_to_out(app, user=None):
+    actions = []
+    if user:
+        actions = ApplicationService.get_available_actions(user, app)
     return ApplicationOut(
         id=app.id,
         application_no=app.application_no,
@@ -44,10 +47,11 @@ def _app_to_out(app):
         verified_at=app.verified_at,
         approved_at=app.approved_at,
         opinion_text=app.opinion_text,
+        available_actions=actions,
     )
 
 
-def _app_to_detail(app):
+def _app_to_detail(app, user=None):
     materials = [
         MaterialOut(
             id=m.id, application_id=m.application_id, stage=m.stage,
@@ -58,6 +62,7 @@ def _app_to_detail(app):
     scan_records = [
         ScanRecordOut(
             id=s.id, application_id=s.application_id, scanner_id=s.scanner_id,
+            scanner_name=s.scanner.display_name,
             code=s.code, credential_no=s.credential_no,
             result=s.result, scan_time=s.scan_time,
         ) for s in app.scan_records.all()
@@ -70,7 +75,7 @@ def _app_to_detail(app):
             opinion=a.opinion, extra_data=a.extra_data, created_at=a.created_at,
         ) for a in app.audit_logs.all()
     ]
-    base = _app_to_out(app)
+    base = _app_to_out(app, user)
     return ApplicationDetailOut(
         **base.model_dump(),
         materials=materials,
@@ -86,24 +91,22 @@ def list_applications(request, status: str = None):
         return err
 
     qs = Application.objects.all()
-    if status:
-        qs = qs.filter(status=status)
 
     if user.role == "community_worker":
         qs = qs.filter(creator=user)
     elif user.role == "clerk":
-        if not status:
-            qs = qs.filter(status="pending_verify")
-        elif status:
+        if status:
             qs = qs.filter(status=status)
+        else:
+            qs = qs.filter(status__in=["pending_verify", "pending_approve", "approved", "rejected"])
     elif user.role == "leader":
-        if not status:
-            qs = qs.filter(status__in=["pending_approve", "approved", "rejected"])
-        elif status:
+        if status:
             qs = qs.filter(status=status)
+        else:
+            qs = qs.filter(status__in=["pending_approve", "approved", "rejected", "pending_verify"])
 
     qs = qs.order_by("-created_at")
-    return [_app_to_out(app) for app in qs]
+    return [_app_to_out(app, user) for app in qs]
 
 
 @router.post("/applications", response=ApplicationOut)
@@ -116,7 +119,7 @@ def create_application(request, payload: ApplicationCreate):
         return HttpResponse("只有社区专干可以创建申请", status=403)
 
     app = ApplicationService.create(user, payload.model_dump())
-    return _app_to_out(app)
+    return _app_to_out(app, user)
 
 
 @router.get("/applications/{application_id}", response=ApplicationDetailOut)
@@ -132,7 +135,10 @@ def get_application(request, application_id: int):
     except Application.DoesNotExist:
         return HttpResponse("申请不存在", status=404)
 
-    return _app_to_detail(app)
+    if not ApplicationService.can_view(user, app):
+        return HttpResponse("无权查看此申请", status=403)
+
+    return _app_to_detail(app, user)
 
 
 @router.post("/applications/{application_id}/advance", response=AdvanceResponse)
@@ -159,14 +165,14 @@ def advance_application(request, application_id: int, payload: AdvanceRequest):
         status_code = 403
         if "已被其他人修改" in result.get("error", ""):
             status_code = 409
-        elif "缺少" in result.get("error", ""):
+        elif "缺少" in result.get("error", "") or "顺序" in result.get("error", ""):
             status_code = 422
         return HttpResponse(result["error"], status=status_code)
 
     return AdvanceResponse(
         success=True,
         message="操作成功",
-        application=_app_to_out(Application.objects.get(id=application_id)),
+        application=_app_to_out(Application.objects.get(id=application_id), user),
     )
 
 
@@ -179,7 +185,7 @@ def scan_verify(request, payload: ScanVerifyRequest):
     result = ScanService.verify_code(user, payload.code, payload.credential_no)
     app_out = None
     if result.get("application"):
-        app_out = _app_to_out(result["application"])
+        app_out = _app_to_out(result["application"], user)
 
     return ScanVerifyResponse(
         result=result["result"],
@@ -197,11 +203,38 @@ def batch_advance(request, payload: BatchAdvanceRequest):
         return err
 
     items = [item.model_dump() for item in payload.items]
-    results = BatchService.batch_advance(user, items)
+    batch_result = BatchService.batch_advance(user, items)
 
     return BatchAdvanceResponse(
-        results=[BatchAdvanceItemResult(**r) for r in results]
+        results=batch_result["results"],
+        batch_id=batch_result["batch_id"],
     )
+
+
+@router.get("/batch/failures", response=list[BatchFailRecordOut])
+def list_batch_failures(request, batch_id: str = None):
+    user, err = _require_auth(request)
+    if err:
+        return err
+
+    if user.role == "community_worker":
+        return HttpResponse("无权查看批量失败记录", status=403)
+
+    qs = BatchFailRecord.objects.all()
+    if user.role == "clerk":
+        qs = qs.filter(operator=user)
+    if batch_id:
+        qs = qs.filter(batch_id=batch_id)
+
+    return [
+        BatchFailRecordOut(
+            id=b.id, batch_id=b.batch_id,
+            application_id=b.application_id, application_no=b.application_no,
+            operator_name=b.operator.display_name,
+            action=b.action, error=b.error, suggestion=b.suggestion,
+            created_at=b.created_at,
+        ) for b in qs[:100]
+    ]
 
 
 @router.get("/audit/logs", response=list[AuditLogOut])
@@ -212,6 +245,7 @@ def list_audit_logs(request, application_id: int = None,
         return err
 
     logs = AuditService.get_logs(
+        user=user,
         application_id=application_id,
         operator_id=operator_id,
         action=action,
@@ -236,14 +270,28 @@ def stats_summary(request):
     qs = Application.objects.all()
     if user.role == "community_worker":
         qs = qs.filter(creator=user)
+    elif user.role == "clerk":
+        pass
 
-    pending_count = qs.filter(status__in=["pending_verify", "pending_approve"]).count()
+    pending_statuses = []
+    if user.role == "community_worker":
+        pending_statuses = ["draft"]
+    elif user.role == "clerk":
+        pending_statuses = ["pending_verify"]
+    elif user.role == "leader":
+        pending_statuses = ["pending_approve"]
+
+    pending_count = qs.filter(status__in=pending_statuses).count() if pending_statuses else 0
     done_count = qs.filter(status="approved").count()
     overdue_count = qs.filter(
         deadline__lt=timezone.now(),
         status__in=["draft", "pending_verify", "pending_approve"],
     ).count()
-    today_scan_count = ScanRecord.objects.filter(
+
+    scan_qs = ScanRecord.objects.all()
+    if user.role != "leader":
+        scan_qs = scan_qs.filter(scanner=user)
+    today_scan_count = scan_qs.filter(
         scan_time__date=timezone.now().date()
     ).count()
 
