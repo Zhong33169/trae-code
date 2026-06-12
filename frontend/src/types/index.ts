@@ -157,6 +157,13 @@ export interface OrderDetail extends OrderSummary {
   version: number;
 }
 
+export interface DrilldownInfo {
+  status: string | null;
+  handlerRole: string | null;
+  myTasks: boolean;
+  label: string;
+}
+
 export interface Statistics {
   stats: {
     total: number;
@@ -167,6 +174,15 @@ export interface Statistics {
     rejected: number;
     myTasks: number;
     overdue: number;
+  };
+  drilldown: {
+    pendingCorrection: DrilldownInfo;
+    pendingReview: DrilldownInfo;
+    pendingFinalReview: DrilldownInfo;
+    archived: DrilldownInfo;
+    rejected: DrilldownInfo;
+    myTasks: DrilldownInfo;
+    overdue: DrilldownInfo;
   };
   role: Role;
   roleName: string;

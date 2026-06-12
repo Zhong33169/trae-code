@@ -307,27 +307,88 @@ export class OrderService {
       throw new ForbiddenException('操作人不存在');
     }
 
-    const allOrders = await this.orderRepository.findAll();
+    const total = (await this.orderRepository.findAll()).length;
+    const pendingCorrection = (
+      await this.orderRepository.findAll({ status: [OrderStatus.PENDING_CORRECTION] })
+    ).length;
+    const pendingReview = (
+      await this.orderRepository.findAll({ status: [OrderStatus.PENDING_REVIEW] })
+    ).length;
+    const pendingFinalReview = (
+      await this.orderRepository.findAll({ status: [OrderStatus.PENDING_FINAL_REVIEW] })
+    ).length;
+    const archived = (
+      await this.orderRepository.findAll({ status: [OrderStatus.ARCHIVED] })
+    ).length;
+    const rejected = (
+      await this.orderRepository.findAll({ status: [OrderStatus.REJECTED] })
+    ).length;
+    const myTasks = (
+      await this.orderRepository.findAll({ handlerId: operatorId })
+    ).length;
+    const overdue = (await this.orderRepository.findAll()).filter((o) =>
+      o.isOverdue(),
+    ).length;
 
     const stats = {
-      total: allOrders.length,
-      pendingCorrection: allOrders.filter(
-        (o) => o.status === OrderStatus.PENDING_CORRECTION,
-      ).length,
-      pendingReview: allOrders.filter(
-        (o) => o.status === OrderStatus.PENDING_REVIEW,
-      ).length,
-      pendingFinalReview: allOrders.filter(
-        (o) => o.status === OrderStatus.PENDING_FINAL_REVIEW,
-      ).length,
-      archived: allOrders.filter((o) => o.status === OrderStatus.ARCHIVED).length,
-      rejected: allOrders.filter((o) => o.status === OrderStatus.REJECTED).length,
-      myTasks: allOrders.filter((o) => o.currentHandlerId === operatorId).length,
-      overdue: allOrders.filter((o) => o.isOverdue()).length,
+      total,
+      pendingCorrection,
+      pendingReview,
+      pendingFinalReview,
+      archived,
+      rejected,
+      myTasks,
+      overdue,
+    };
+
+    const drilldown = {
+      pendingCorrection: {
+        status: OrderStatus.PENDING_CORRECTION as OrderStatus,
+        handlerRole: Role.REGISTRAR as Role,
+        myTasks: false,
+        label: '待补正',
+      },
+      pendingReview: {
+        status: OrderStatus.PENDING_REVIEW as OrderStatus,
+        handlerRole: Role.SUPERVISOR as Role,
+        myTasks: false,
+        label: '待审核',
+      },
+      pendingFinalReview: {
+        status: OrderStatus.PENDING_FINAL_REVIEW as OrderStatus,
+        handlerRole: Role.REVIEWER as Role,
+        myTasks: false,
+        label: '待复核',
+      },
+      archived: {
+        status: OrderStatus.ARCHIVED as OrderStatus,
+        handlerRole: null as Role | null,
+        myTasks: false,
+        label: '已归档',
+      },
+      rejected: {
+        status: OrderStatus.REJECTED as OrderStatus,
+        handlerRole: null as Role | null,
+        myTasks: false,
+        label: '已驳回',
+      },
+      myTasks: {
+        status: null as OrderStatus | null,
+        handlerRole: null as Role | null,
+        myTasks: true,
+        label: '我的待办',
+      },
+      overdue: {
+        status: null as OrderStatus | null,
+        handlerRole: null as Role | null,
+        myTasks: false,
+        label: '已逾期',
+      },
     };
 
     return {
       stats,
+      drilldown,
       role: operator.role,
       roleName: this.getRoleLabel(operator.role),
     };

@@ -53,11 +53,13 @@ export const api = {
       orders: {
         getList: (params?: {
           status?: string;
+          handlerRole?: string;
           myTasks?: boolean;
         }): Promise<AxiosResponse<{ total: number; items: OrderSummary[] }>> =>
           client.get('/api/orders', {
             params: {
               status: params?.status,
+              handlerRole: params?.handlerRole,
               myTasks: params?.myTasks,
             },
           }),

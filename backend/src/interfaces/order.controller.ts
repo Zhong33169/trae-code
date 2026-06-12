@@ -26,6 +26,7 @@ export class OrderController {
     @Headers('x-operator-id') operatorId: string,
     @Query('status') status?: string,
     @Query('myTasks') myTasks?: string,
+    @Query('handlerRole') handlerRole?: string,
   ) {
     if (!operatorId) {
       throw new BadRequestException('缺少操作人标识 x-operator-id');
@@ -45,9 +46,13 @@ export class OrderController {
       }
     }
 
+    if (handlerRole) {
+      filters.handlerRole = handlerRole as Role;
+    }
+
     if (myTasks === 'true') {
       filters.handlerId = operatorId;
-    } else {
+    } else if (!handlerRole) {
       filters.handlerRole = operator.role;
     }
 

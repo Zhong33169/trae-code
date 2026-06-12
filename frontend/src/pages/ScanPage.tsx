@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '../store/appStore';
 import { api, extractError } from '../services/api';
-import { Statistics } from '../types';
+import { Statistics, DrilldownInfo } from '../types';
 
 const ScanPage: React.FC = () => {
   const { currentUser } = useAppStore();
@@ -66,8 +66,13 @@ const ScanPage: React.FC = () => {
     navigate(`/orders/${orderId}`);
   };
 
-  const handleStatClick = (filter: string) => {
-    navigate(`/orders?status=${filter}`);
+  const handleStatClick = (drilldown: DrilldownInfo) => {
+    const params = new URLSearchParams();
+    if (drilldown.status) params.set('status', drilldown.status);
+    if (drilldown.handlerRole) params.set('handlerRole', drilldown.handlerRole);
+    if (drilldown.myTasks) params.set('myTasks', 'true');
+    const qs = params.toString();
+    navigate(qs ? `/orders?${qs}` : '/orders');
   };
 
   const renderErrorDetails = (details: any) => {
@@ -184,7 +189,7 @@ const ScanPage: React.FC = () => {
         <div className="stats-grid">
           <div
             className="stat-card warning"
-            onClick={() => handleStatClick('pending_correction')}
+            onClick={() => handleStatClick(statistics.drilldown.pendingCorrection)}
             title="点击查看待补正订单列表"
           >
             <div className="stat-label">待补正</div>
@@ -192,7 +197,7 @@ const ScanPage: React.FC = () => {
           </div>
           <div
             className="stat-card purple"
-            onClick={() => handleStatClick('pending_review')}
+            onClick={() => handleStatClick(statistics.drilldown.pendingReview)}
             title="点击查看待审核订单列表"
           >
             <div className="stat-label">待审核</div>
@@ -200,7 +205,7 @@ const ScanPage: React.FC = () => {
           </div>
           <div
             className="stat-card pink"
-            onClick={() => handleStatClick('pending_final_review')}
+            onClick={() => handleStatClick(statistics.drilldown.pendingFinalReview)}
             title="点击查看待复核订单列表"
           >
             <div className="stat-label">待复核</div>
@@ -208,7 +213,7 @@ const ScanPage: React.FC = () => {
           </div>
           <div
             className="stat-card success"
-            onClick={() => handleStatClick('archived')}
+            onClick={() => handleStatClick(statistics.drilldown.archived)}
             title="点击查看已归档订单列表"
           >
             <div className="stat-label">已归档</div>
@@ -216,7 +221,7 @@ const ScanPage: React.FC = () => {
           </div>
           <div
             className="stat-card primary"
-            onClick={() => handleStatClick('')}
+            onClick={() => handleStatClick(statistics.drilldown.myTasks)}
             title="点击查看我的待办"
           >
             <div className="stat-label">我的待办</div>
@@ -224,7 +229,7 @@ const ScanPage: React.FC = () => {
           </div>
           <div
             className="stat-card error"
-            onClick={() => handleStatClick('rejected')}
+            onClick={() => handleStatClick(statistics.drilldown.rejected)}
             title="点击查看已驳回订单"
           >
             <div className="stat-label">已驳回</div>

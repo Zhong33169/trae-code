@@ -8,6 +8,7 @@ import {
   OrderStatusLabels,
   OrderAction,
   Role,
+  RoleLabels,
 } from '../types';
 
 const OrderListPage: React.FC = () => {
@@ -20,6 +21,9 @@ const OrderListPage: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [filterStatus, setFilterStatus] = useState<string>(searchParams.get('status') || '');
+  const [filterHandlerRole, setFilterHandlerRole] = useState<string>(
+    searchParams.get('handlerRole') || '',
+  );
   const [filterMyTasks, setFilterMyTasks] = useState<boolean>(
     searchParams.get('myTasks') === 'true',
   );
@@ -35,7 +39,17 @@ const OrderListPage: React.FC = () => {
     if (currentUser) {
       loadOrders();
     }
-  }, [currentUser, filterStatus, filterMyTasks]);
+  }, [currentUser, filterStatus, filterHandlerRole, filterMyTasks]);
+
+  useEffect(() => {
+    const statusFromUrl = searchParams.get('status') || '';
+    const handlerRoleFromUrl = searchParams.get('handlerRole') || '';
+    const myTasksFromUrl = searchParams.get('myTasks') === 'true';
+
+    if (statusFromUrl !== filterStatus) setFilterStatus(statusFromUrl);
+    if (handlerRoleFromUrl !== filterHandlerRole) setFilterHandlerRole(handlerRoleFromUrl);
+    if (myTasksFromUrl !== filterMyTasks) setFilterMyTasks(myTasksFromUrl);
+  }, [searchParams]);
 
   const loadOrders = async () => {
     if (!currentUser) return;
@@ -44,8 +58,9 @@ const OrderListPage: React.FC = () => {
     setError(null);
 
     try {
-      const params: { status?: string; myTasks?: boolean } = {};
+      const params: { status?: string; handlerRole?: string; myTasks?: boolean } = {};
       if (filterStatus) params.status = filterStatus;
+      if (filterHandlerRole) params.handlerRole = filterHandlerRole;
       if (filterMyTasks) params.myTasks = true;
 
       const response = await api
@@ -56,6 +71,7 @@ const OrderListPage: React.FC = () => {
 
       const urlParams: any = {};
       if (filterStatus) urlParams.status = filterStatus;
+      if (filterHandlerRole) urlParams.handlerRole = filterHandlerRole;
       if (filterMyTasks) urlParams.myTasks = 'true';
       setSearchParams(urlParams);
     } catch (err) {
@@ -223,6 +239,19 @@ const OrderListPage: React.FC = () => {
                   {opt.label}
                 </option>
               ))}
+            </select>
+          </div>
+
+          <div className="filter-group">
+            <label className="filter-label">岗位筛选：</label>
+            <select
+              value={filterHandlerRole}
+              onChange={(e) => setFilterHandlerRole(e.target.value)}
+            >
+              <option value="">全部岗位</option>
+              <option value={Role.REGISTRAR}>{RoleLabels[Role.REGISTRAR]}</option>
+              <option value={Role.SUPERVISOR}>{RoleLabels[Role.SUPERVISOR]}</option>
+              <option value={Role.REVIEWER}>{RoleLabels[Role.REVIEWER]}</option>
             </select>
           </div>
 

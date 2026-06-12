@@ -17,34 +17,86 @@ export class ScanService {
   ) {}
 
   async validateQrCode(qrCode: string, operatorId: string) {
+    const scanRecordBase = {
+      qrCode,
+      operatorId,
+      operatorName: '',
+      operatorRole: '',
+    };
+
     if (!qrCode || !qrCode.startsWith('QR-V-')) {
-      throw new BadRequestException({
+      const error = {
         error: ScanCodeError.INVALID_CODE,
         message: ScanCodeErrorMessages[ScanCodeError.INVALID_CODE],
         details: '二维码格式不正确，正确格式应为 QR-V-YYYYMMNNN',
+      };
+      await this.orderRepository.saveScanRecord({
+        ...scanRecordBase,
+        result: ScanCodeError.INVALID_CODE,
+        message: error.message,
+        details: error.details,
       });
+      throw new BadRequestException(error);
     }
 
     const order = await this.orderRepository.findByQrCode(qrCode);
     if (!order) {
-      throw new BadRequestException({
+      const error = {
         error: ScanCodeError.ORDER_NOT_FOUND,
         message: ScanCodeErrorMessages[ScanCodeError.ORDER_NOT_FOUND],
         details: `未找到二维码 ${qrCode} 对应的订单`,
+      };
+      await this.orderRepository.saveScanRecord({
+        ...scanRecordBase,
+        result: ScanCodeError.ORDER_NOT_FOUND,
+        message: error.message,
+        details: error.details,
       });
+      throw new BadRequestException(error);
+    }
+
+    if (order.status === OrderStatus.ARCHIVED || order.status === OrderStatus.REJECTED) {
+      const error = {
+        error: ScanCodeError.DUPLICATE_CODE,
+        message: ScanCodeErrorMessages[ScanCodeError.DUPLICATE_CODE],
+        details: {
+          orderNo: order.orderNo,
+          currentStatus: order.status,
+          statusLabel: this.getStatusLabel(order.status),
+          archivedAt: order.status === OrderStatus.ARCHIVED ? order.updatedAt : null,
+        },
+      };
+      await this.orderRepository.saveScanRecord({
+        ...scanRecordBase,
+        orderId: order.id,
+        result: ScanCodeError.DUPLICATE_CODE,
+        message: error.message,
+        details: error.details,
+      });
+      throw new BadRequestException(error);
     }
 
     const operator = await this.userRepository.findById(operatorId);
     if (!operator) {
-      throw new ForbiddenException({
+      const error = {
         error: ScanCodeError.UNAUTHORIZED_ROLE,
         message: '操作人不存在',
+      };
+      await this.orderRepository.saveScanRecord({
+        ...scanRecordBase,
+        orderId: order.id,
+        result: ScanCodeError.UNAUTHORIZED_ROLE,
+        message: error.message,
       });
+      throw new ForbiddenException(error);
     }
+
+    scanRecordBase.operatorName = operator.name;
+    scanRecordBase.operatorRole = operator.role;
 
     const allowedStatuses = RoleStatusPermissions[operator.role];
     if (!allowedStatuses.includes(order.status)) {
-      throw new ForbiddenException({
+      const error = {
         error: ScanCodeError.UNAUTHORIZED_ROLE,
         message: ScanCodeErrorMessages[ScanCodeError.UNAUTHORIZED_ROLE],
         details: {
@@ -54,11 +106,19 @@ export class ScanService {
           orderStatusLabel: this.getStatusLabel(order.status),
           allowedRolesForStatus: this.getAllowedRolesForStatus(order.status),
         },
+      };
+      await this.orderRepository.saveScanRecord({
+        ...scanRecordBase,
+        orderId: order.id,
+        result: ScanCodeError.UNAUTHORIZED_ROLE,
+        message: error.message,
+        details: error.details,
       });
+      throw new ForbiddenException(error);
     }
 
     if (order.currentHandlerId !== operatorId) {
-      throw new ForbiddenException({
+      const error = {
         error: ScanCodeError.NOT_CURRENT_HANDLER,
         message: ScanCodeErrorMessages[ScanCodeError.NOT_CURRENT_HANDLER],
         details: {
@@ -69,39 +129,42 @@ export class ScanService {
           yourId: operatorId,
           yourName: operator.name,
         },
+      };
+      await this.orderRepository.saveScanRecord({
+        ...scanRecordBase,
+        orderId: order.id,
+        result: ScanCodeError.NOT_CURRENT_HANDLER,
+        message: error.message,
+        details: error.details,
       });
-    }
-
-    if (order.status === OrderStatus.ARCHIVED || order.status === OrderStatus.REJECTED) {
-      throw new BadRequestException({
-        error: ScanCodeError.DUPLICATE_CODE,
-        message: ScanCodeErrorMessages[ScanCodeError.DUPLICATE_CODE],
-        details: {
-          orderNo: order.orderNo,
-          currentStatus: order.status,
-          statusLabel: this.getStatusLabel(order.status),
-          archivedAt: order.status === OrderStatus.ARCHIVED ? order.updatedAt : null,
-        },
-      });
+      throw new ForbiddenException(error);
     }
 
     const isLocked = await this.orderRepository.isLocked(order.id);
     if (isLocked) {
       const lockHolder = await this.orderRepository.getLockHolder(order.id);
       const holderUser = lockHolder ? await this.userRepository.findById(lockHolder) : null;
-      throw new BadRequestException({
+      const error = {
         error: ScanCodeError.CONCURRENT_MODIFICATION,
         message: ScanCodeErrorMessages[ScanCodeError.CONCURRENT_MODIFICATION],
         details: {
           lockHolder: holderUser?.name || '未知用户',
           lockHolderRole: holderUser?.role || 'unknown',
         },
+      };
+      await this.orderRepository.saveScanRecord({
+        ...scanRecordBase,
+        orderId: order.id,
+        result: ScanCodeError.CONCURRENT_MODIFICATION,
+        message: error.message,
+        details: error.details,
       });
+      throw new BadRequestException(error);
     }
 
     if (!order.hasAllRequiredMaterials()) {
       const missing = order.getMissingMaterials();
-      throw new BadRequestException({
+      const error = {
         error: ScanCodeError.EVIDENCE_MISSING,
         message: ScanCodeErrorMessages[ScanCodeError.EVIDENCE_MISSING],
         details: {
@@ -110,8 +173,23 @@ export class ScanService {
             type: m.type,
           })),
         },
+      };
+      await this.orderRepository.saveScanRecord({
+        ...scanRecordBase,
+        orderId: order.id,
+        result: ScanCodeError.EVIDENCE_MISSING,
+        message: error.message,
+        details: error.details,
       });
+      throw new BadRequestException(error);
     }
+
+    await this.orderRepository.saveScanRecord({
+      ...scanRecordBase,
+      orderId: order.id,
+      result: 'success',
+      message: '扫码验证通过',
+    });
 
     return {
       success: true,

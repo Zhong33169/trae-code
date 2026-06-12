@@ -1,246 +1,20 @@
 import { Injectable } from '@nestjs/common';
+import { v4 as uuidv4 } from 'uuid';
 import { VenueOrder } from '../domain/venue-order.entity';
-import { OrderStatus, Role } from '../types';
+import { OrderStatus, Role, AuditLog } from '../types';
+import { getDatabase } from './database';
 
 @Injectable()
 export class OrderRepository {
-  private orders: Map<string, VenueOrder> = new Map();
-  private qrCodeIndex: Map<string, string> = new Map();
   private locks: Map<string, string> = new Map();
 
-  constructor() {
-    this.initializeMockData();
-  }
-
-  private initializeMockData(): void {
-    const now = new Date();
-
-    const mockOrders: VenueOrder[] = [
-      new VenueOrder({
-        orderNo: 'VD202506001',
-        qrCode: 'QR-V-202506001',
-        venueName: '主体育场',
-        venueType: '田径场',
-        bookingDate: '2025-06-15',
-        bookingTime: '09:00-11:00',
-        applicantName: '张三',
-        applicantPhone: '13800138001',
-        applicantIdCard: '110101199001011234',
-        status: OrderStatus.PENDING_REGISTRATION,
-        currentHandlerRole: Role.REGISTRAR,
-        currentHandlerId: 'reg1',
-        currentHandlerName: '李登记',
-        materials: [
-          {
-            id: 'm1',
-            name: '身份证复印件',
-            type: 'id_card',
-            uploaded: false,
-            required: true,
-          },
-          {
-            id: 'm2',
-            name: '场地使用申请书',
-            type: 'application',
-            uploaded: false,
-            required: true,
-          },
-          {
-            id: 'm3',
-            name: '活动方案',
-            type: 'plan',
-            uploaded: false,
-            required: false,
-          },
-        ],
-        timeLimit: {
-          deadline: new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString(),
-          remainingHours: 24,
-          isOverdue: false,
-        },
-      }),
-      new VenueOrder({
-        orderNo: 'VD202506002',
-        qrCode: 'QR-V-202506002',
-        venueName: '篮球馆',
-        venueType: '篮球',
-        bookingDate: '2025-06-16',
-        bookingTime: '14:00-16:00',
-        applicantName: '李四',
-        applicantPhone: '13800138002',
-        applicantIdCard: '110101199002022345',
-        status: OrderStatus.PENDING_CORRECTION,
-        currentHandlerRole: Role.REGISTRAR,
-        currentHandlerId: 'reg1',
-        currentHandlerName: '李登记',
-        correctionRequest: '请补充身份证正反面复印件',
-        materials: [
-          {
-            id: 'm1',
-            name: '身份证复印件',
-            type: 'id_card',
-            uploaded: true,
-            required: true,
-          },
-          {
-            id: 'm2',
-            name: '场地使用申请书',
-            type: 'application',
-            uploaded: true,
-            required: true,
-          },
-          {
-            id: 'm3',
-            name: '单位介绍信',
-            type: 'introduction',
-            uploaded: false,
-            required: true,
-          },
-        ],
-        timeLimit: {
-          deadline: new Date(now.getTime() + 12 * 60 * 60 * 1000).toISOString(),
-          remainingHours: 12,
-          isOverdue: false,
-        },
-      }),
-      new VenueOrder({
-        orderNo: 'VD202506003',
-        qrCode: 'QR-V-202506003',
-        venueName: '游泳馆',
-        venueType: '游泳',
-        bookingDate: '2025-06-17',
-        bookingTime: '10:00-12:00',
-        applicantName: '王五',
-        applicantPhone: '13800138003',
-        applicantIdCard: '110101199003033456',
-        status: OrderStatus.PENDING_REVIEW,
-        currentHandlerRole: Role.SUPERVISOR,
-        currentHandlerId: 'sup1',
-        currentHandlerName: '王主管',
-        registrationOpinion: '材料齐全，符合场地使用规定',
-        materials: [
-          {
-            id: 'm1',
-            name: '身份证复印件',
-            type: 'id_card',
-            uploaded: true,
-            required: true,
-          },
-          {
-            id: 'm2',
-            name: '场地使用申请书',
-            type: 'application',
-            uploaded: true,
-            required: true,
-          },
-          {
-            id: 'm3',
-            name: '健康证明',
-            type: 'health',
-            uploaded: true,
-            required: true,
-          },
-        ],
-        timeLimit: {
-          deadline: new Date(now.getTime() + 48 * 60 * 60 * 1000).toISOString(),
-          remainingHours: 48,
-          isOverdue: false,
-        },
-      }),
-      new VenueOrder({
-        orderNo: 'VD202506004',
-        qrCode: 'QR-V-202506004',
-        venueName: '网球馆',
-        venueType: '网球',
-        bookingDate: '2025-06-18',
-        bookingTime: '15:00-17:00',
-        applicantName: '赵六',
-        applicantPhone: '13800138004',
-        applicantIdCard: '110101199004044567',
-        status: OrderStatus.PENDING_FINAL_REVIEW,
-        currentHandlerRole: Role.REVIEWER,
-        currentHandlerId: 'rev1',
-        currentHandlerName: '陈复核',
-        registrationOpinion: '材料齐全',
-        reviewOpinion: '审核通过，符合使用规范',
-        materials: [
-          {
-            id: 'm1',
-            name: '身份证复印件',
-            type: 'id_card',
-            uploaded: true,
-            required: true,
-          },
-          {
-            id: 'm2',
-            name: '场地使用申请书',
-            type: 'application',
-            uploaded: true,
-            required: true,
-          },
-          {
-            id: 'm3',
-            name: '缴费凭证',
-            type: 'payment',
-            uploaded: true,
-            required: true,
-          },
-        ],
-        timeLimit: {
-          deadline: new Date(now.getTime() + 72 * 60 * 60 * 1000).toISOString(),
-          remainingHours: 72,
-          isOverdue: false,
-        },
-      }),
-      new VenueOrder({
-        orderNo: 'VD202506005',
-        qrCode: 'QR-V-202506005',
-        venueName: '羽毛球馆',
-        venueType: '羽毛球',
-        bookingDate: '2025-06-10',
-        bookingTime: '08:00-10:00',
-        applicantName: '钱七',
-        applicantPhone: '13800138005',
-        applicantIdCard: '110101199005055678',
-        status: OrderStatus.ARCHIVED,
-        currentHandlerRole: Role.REVIEWER,
-        currentHandlerId: 'rev1',
-        currentHandlerName: '陈复核',
-        registrationOpinion: '材料齐全',
-        reviewOpinion: '审核通过',
-        finalReviewOpinion: '复核通过，已归档',
-        materials: [
-          {
-            id: 'm1',
-            name: '身份证复印件',
-            type: 'id_card',
-            uploaded: true,
-            required: true,
-          },
-          {
-            id: 'm2',
-            name: '场地使用申请书',
-            type: 'application',
-            uploaded: true,
-            required: true,
-          },
-        ],
-        timeLimit: {
-          deadline: new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString(),
-          remainingHours: 0,
-          isOverdue: true,
-        },
-      }),
-    ];
-
-    mockOrders.forEach((order) => {
-      this.orders.set(order.id, order);
-      this.qrCodeIndex.set(order.qrCode, order.id);
-    });
-  }
-
   async save(order: VenueOrder): Promise<VenueOrder> {
-    const existing = this.orders.get(order.id);
+    const db = await getDatabase();
+
+    const existing = db.get('SELECT version FROM orders WHERE id = ?', [order.id]) as
+      | { version: number }
+      | undefined;
+
     if (existing && existing.version !== order.version) {
       throw new Error('CONCURRENT_MODIFICATION');
     }
@@ -249,23 +23,122 @@ export class OrderRepository {
     order.updatedAt = new Date().toISOString();
     order.updateTimeLimit();
 
-    this.orders.set(order.id, order);
-    if (order.qrCode) {
-      this.qrCodeIndex.set(order.qrCode, order.id);
+    db.run('BEGIN');
+
+    try {
+      db.run(
+        `INSERT INTO orders (
+          id, order_no, qr_code, venue_name, venue_type, booking_date, booking_time,
+          applicant_name, applicant_phone, applicant_id_card, status,
+          current_handler_role, current_handler_id, current_handler_name,
+          materials, time_limit, registration_opinion, review_opinion,
+          final_review_opinion, correction_request, scanned_at, scanned_by,
+          version, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          order_no = excluded.order_no,
+          qr_code = excluded.qr_code,
+          venue_name = excluded.venue_name,
+          venue_type = excluded.venue_type,
+          booking_date = excluded.booking_date,
+          booking_time = excluded.booking_time,
+          applicant_name = excluded.applicant_name,
+          applicant_phone = excluded.applicant_phone,
+          applicant_id_card = excluded.applicant_id_card,
+          status = excluded.status,
+          current_handler_role = excluded.current_handler_role,
+          current_handler_id = excluded.current_handler_id,
+          current_handler_name = excluded.current_handler_name,
+          materials = excluded.materials,
+          time_limit = excluded.time_limit,
+          registration_opinion = excluded.registration_opinion,
+          review_opinion = excluded.review_opinion,
+          final_review_opinion = excluded.final_review_opinion,
+          correction_request = excluded.correction_request,
+          scanned_at = excluded.scanned_at,
+          scanned_by = excluded.scanned_by,
+          version = excluded.version,
+          updated_at = excluded.updated_at`,
+        [
+          order.id,
+          order.orderNo,
+          order.qrCode,
+          order.venueName,
+          order.venueType,
+          order.bookingDate,
+          order.bookingTime,
+          order.applicantName,
+          order.applicantPhone,
+          order.applicantIdCard,
+          order.status,
+          order.currentHandlerRole,
+          order.currentHandlerId,
+          order.currentHandlerName,
+          JSON.stringify(order.materials),
+          JSON.stringify(order.timeLimit),
+          order.registrationOpinion || null,
+          order.reviewOpinion || null,
+          order.finalReviewOpinion || null,
+          order.correctionRequest || null,
+          order.scannedAt || null,
+          order.scannedBy || null,
+          order.version,
+          order.createdAt,
+          order.updatedAt,
+        ],
+      );
+
+      for (const log of order.auditLogs) {
+        db.run(
+          `INSERT INTO audit_logs (
+            id, order_id, action, operator_id, operator_name, operator_role,
+            timestamp, comment, old_status, new_status, ip_address
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            log.id,
+            log.orderId,
+            log.action,
+            log.operatorId,
+            log.operatorName,
+            log.operatorRole,
+            log.timestamp,
+            log.comment || null,
+            log.oldStatus || null,
+            log.newStatus || null,
+            log.ipAddress || null,
+          ],
+        );
+      }
+
+      db.run('COMMIT');
+    } catch (err) {
+      db.run('ROLLBACK');
+      throw err;
     }
 
     return new VenueOrder({ ...order });
   }
 
   async findById(id: string): Promise<VenueOrder | null> {
-    const order = this.orders.get(id);
-    return order ? new VenueOrder({ ...order }) : null;
+    const db = await getDatabase();
+
+    const row = db.get('SELECT * FROM orders WHERE id = ?', [id]) as any;
+    if (!row) return null;
+
+    const logs = db.all('SELECT * FROM audit_logs WHERE order_id = ? ORDER BY timestamp ASC', [id]);
+
+    return this.rowToVenueOrder(row, logs);
   }
 
   async findByQrCode(qrCode: string): Promise<VenueOrder | null> {
-    const orderId = this.qrCodeIndex.get(qrCode);
-    if (!orderId) return null;
-    return this.findById(orderId);
+    const db = await getDatabase();
+
+    const row = db.get('SELECT * FROM orders WHERE qr_code = ?', [qrCode]) as any;
+    if (!row) return null;
+
+    const logs = db.all('SELECT * FROM audit_logs WHERE order_id = ? ORDER BY timestamp ASC', [row.id]);
+
+    return this.rowToVenueOrder(row, logs);
   }
 
   async findAll(filters?: {
@@ -273,28 +146,52 @@ export class OrderRepository {
     handlerRole?: Role;
     handlerId?: string;
   }): Promise<VenueOrder[]> {
-    let result = Array.from(this.orders.values());
+    const db = await getDatabase();
+
+    let sql = 'SELECT * FROM orders WHERE 1=1';
+    const params: any[] = [];
 
     if (filters?.status?.length) {
-      result = result.filter((o) => filters.status.includes(o.status));
+      const placeholders = filters.status.map(() => '?').join(',');
+      sql += ` AND status IN (${placeholders})`;
+      params.push(...filters.status);
     }
     if (filters?.handlerRole) {
-      result = result.filter((o) => o.currentHandlerRole === filters.handlerRole);
+      sql += ' AND current_handler_role = ?';
+      params.push(filters.handlerRole);
     }
     if (filters?.handlerId) {
-      result = result.filter((o) => o.currentHandlerId === filters.handlerId);
+      sql += ' AND current_handler_id = ?';
+      params.push(filters.handlerId);
     }
 
-    return result
-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-      .map((o) => new VenueOrder({ ...o }));
+    sql += ' ORDER BY created_at DESC';
+
+    const rows = db.all(sql, params);
+
+    const result: VenueOrder[] = [];
+    for (const row of rows) {
+      const logs = db.all('SELECT * FROM audit_logs WHERE order_id = ? ORDER BY timestamp ASC', [row.id]);
+      result.push(this.rowToVenueOrder(row, logs));
+    }
+
+    return result;
   }
 
   async findByIds(ids: string[]): Promise<VenueOrder[]> {
-    return ids
-      .map((id) => this.orders.get(id))
-      .filter(Boolean)
-      .map((o) => new VenueOrder({ ...o! }));
+    if (ids.length === 0) return [];
+
+    const db = await getDatabase();
+    const placeholders = ids.map(() => '?').join(',');
+    const rows = db.all(`SELECT * FROM orders WHERE id IN (${placeholders})`, ids);
+
+    const result: VenueOrder[] = [];
+    for (const row of rows) {
+      const logs = db.all('SELECT * FROM audit_logs WHERE order_id = ? ORDER BY timestamp ASC', [row.id]);
+      result.push(this.rowToVenueOrder(row, logs));
+    }
+
+    return result;
   }
 
   async acquireLock(orderId: string, operatorId: string): Promise<boolean> {
@@ -315,5 +212,91 @@ export class OrderRepository {
 
   async getLockHolder(orderId: string): Promise<string | null> {
     return this.locks.get(orderId) || null;
+  }
+
+  async saveScanRecord(record: {
+    orderId?: string;
+    qrCode: string;
+    operatorId: string;
+    operatorName: string;
+    operatorRole: string;
+    result: string;
+    message?: string;
+    details?: any;
+  }): Promise<void> {
+    const db = await getDatabase();
+
+    db.run(
+      `INSERT INTO scan_records (
+        id, order_id, qr_code, operator_id, operator_name, operator_role,
+        result, message, details, timestamp
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        uuidv4(),
+        record.orderId || null,
+        record.qrCode,
+        record.operatorId,
+        record.operatorName,
+        record.operatorRole,
+        record.result,
+        record.message || null,
+        record.details ? JSON.stringify(record.details) : null,
+        new Date().toISOString(),
+      ],
+    );
+  }
+
+  async getScanRecords(orderId: string): Promise<any[]> {
+    const db = await getDatabase();
+
+    const rows = db.all('SELECT * FROM scan_records WHERE order_id = ? ORDER BY timestamp DESC', [orderId]);
+
+    return rows.map((row: any) => ({
+      ...row,
+      details: row.details ? JSON.parse(row.details) : null,
+    }));
+  }
+
+  private rowToVenueOrder(row: any, logs: any[]): VenueOrder {
+    return new VenueOrder({
+      id: row.id,
+      orderNo: row.order_no,
+      qrCode: row.qr_code,
+      venueName: row.venue_name,
+      venueType: row.venue_type,
+      bookingDate: row.booking_date,
+      bookingTime: row.booking_time,
+      applicantName: row.applicant_name,
+      applicantPhone: row.applicant_phone,
+      applicantIdCard: row.applicant_id_card,
+      status: row.status,
+      currentHandlerRole: row.current_handler_role,
+      currentHandlerId: row.current_handler_id,
+      currentHandlerName: row.current_handler_name,
+      materials: JSON.parse(row.materials || '[]'),
+      timeLimit: row.time_limit ? JSON.parse(row.time_limit) : undefined,
+      registrationOpinion: row.registration_opinion || undefined,
+      reviewOpinion: row.review_opinion || undefined,
+      finalReviewOpinion: row.final_review_opinion || undefined,
+      correctionRequest: row.correction_request || undefined,
+      scannedAt: row.scanned_at || undefined,
+      scannedBy: row.scanned_by || undefined,
+      version: row.version,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      auditLogs: logs.map((log) => ({
+        id: log.id,
+        orderId: log.order_id,
+        action: log.action,
+        operatorId: log.operator_id,
+        operatorName: log.operator_name,
+        operatorRole: log.operator_role,
+        timestamp: log.timestamp,
+        comment: log.comment,
+        oldStatus: log.old_status,
+        newStatus: log.new_status,
+        ipAddress: log.ip_address || undefined,
+      })) as AuditLog[],
+    });
   }
 }
