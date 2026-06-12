@@ -1,0 +1,15 @@
+{
+  "name": "zhaoshang-backend",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch src/index.js",
+    "start": "node src/index.js",
+    "init": "node src/init-db.js"
+  },
+  "dependencies": {
+    "sql.js": "^1.10.3",
+    "hono": "^4.6.0",
+    "@hono/node-server": "^1.13.0"
+  }
+}
