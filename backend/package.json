@@ -1,0 +1,28 @@
+{
+  "name": "merchant-onboarding-backend",
+  "version": "1.0.0",
+  "description": "B2B批发平台商家入驻单系统后端",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/main.js",
+    "dev": "ts-node-dev src/main.ts",
+    "seed": "ts-node src/seed.ts",
+    "init-db": "ts-node src/init-db.ts"
+  },
+  "dependencies": {
+    "@fastify/cors": "^8.5.0",
+    "dayjs": "^1.11.10",
+    "fastify": "^4.26.0",
+    "sql.js": "^1.10.3",
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.16",
+    "@types/sql.js": "^1.4.11",
+    "@types/uuid": "^9.0.8",
+    "ts-node": "^10.9.2",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.3.3"
+  }
+}
