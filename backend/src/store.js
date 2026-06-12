@@ -514,10 +514,12 @@ class DataStore {
       createdAt: now,
     };
 
+    const versionBefore = order.version;
     if (action === ACTIONS.APPROVE_REVIEW) {
       order.archivedAt = now;
     }
 
+    const oldStatus = order.status;
     order.status = nextStatus;
     order.currentStage = nextStageName;
     order.stageEnteredAt = now;
@@ -537,8 +539,14 @@ class DataStore {
       operatorRole: user.role,
       details: `[${currentStage}] → [${nextStageName}]：${opinion || ''}`,
       createdAt: now,
-      oldStatus: order.status,
+      oldStatus,
       newStatus: nextStatus,
+      expectedVersion: version,
+      currentVersion: versionBefore,
+      versionAfter: order.version,
+      success: true,
+      failureType: null,
+      versionSubtype: null,
     });
 
     return { order: JSON.parse(JSON.stringify(order)) };
@@ -554,6 +562,7 @@ class DataStore {
       return { error: '请说明延期理由（至少5个字符）' };
     }
     const now = new Date().toISOString();
+    const versionBefore = order.version;
     order.stageEnteredAt = new Date(Date.now() - (STAGE_TIMEOUT_HOURS[order.status] / 2) * 60 * 60 * 1000).toISOString();
     order.overdue = false;
     order.overdueReason = null;
@@ -568,6 +577,14 @@ class DataStore {
       operatorRole: user.role,
       details: `延期${extendHours}小时处理，理由：${opinion}`,
       createdAt: now,
+      oldStatus: order.status,
+      newStatus: order.status,
+      expectedVersion: null,
+      currentVersion: versionBefore,
+      versionAfter: order.version,
+      success: true,
+      failureType: null,
+      versionSubtype: null,
     });
     return { order: JSON.parse(JSON.stringify(order)) };
   }
@@ -625,7 +642,7 @@ class DataStore {
       const order = this.orders.find(o => o.id === id);
       const now = new Date().toISOString();
 
-      const logAudit = ({ ok, reason, oldStatus, newStatus, detail, expectedVer, currentVer }) => {
+      const logAudit = ({ ok, reason, oldStatus, newStatus, detail, expectedVer, currentVer, failureType, versionSubtype, versionAfter }) => {
         const payload = {
           orderId: id,
           orderNo: order?.orderNo || 'unknown',
@@ -637,12 +654,14 @@ class DataStore {
           createdAt: now,
           batch: true,
           success: ok,
+          failureType: failureType || null,
+          versionSubtype: versionSubtype || null,
           failureReason: reason || null,
           oldStatus: oldStatus || (order ? order.status : null),
           newStatus: newStatus || (order ? order.status : null),
           expectedVersion: expectedVer !== undefined ? expectedVer : (expectedVersion !== undefined ? expectedVersion : null),
-          currentVersion: order ? order.version : null,
-          versionAfter: order ? order.version : null,
+          currentVersion: currentVer !== undefined ? currentVer : (order ? order.version : null),
+          versionAfter: versionAfter !== undefined ? versionAfter : (order ? order.version : null),
         };
         this._addAuditLog(payload);
       };
@@ -655,7 +674,7 @@ class DataStore {
           reason,
           failureType: 'not_found',
         });
-        logAudit({ ok: false, reason, expectedVer: expectedVersion, currentVer: null });
+        logAudit({ ok: false, reason, expectedVer: expectedVersion, currentVer: null, failureType: 'not_found' });
         results.summary.failedCount++;
         continue;
       }
@@ -676,7 +695,7 @@ class DataStore {
           versionError: true,
           versionSubtype: 'missing',
         });
-        logAudit({ ok: false, reason, oldStatus, newStatus: oldStatus, expectedVer: null, currentVer: order.version });
+        logAudit({ ok: false, reason, oldStatus, newStatus: oldStatus, expectedVer: null, currentVer: order.version, failureType: 'version_missing', versionSubtype: 'missing', versionAfter: order.version });
         results.summary.failedCount++;
         results.summary.versionMissingCount++;
         continue;
@@ -696,7 +715,7 @@ class DataStore {
           versionError: true,
           versionSubtype: 'format',
         });
-        logAudit({ ok: false, reason, oldStatus, newStatus: oldStatus, expectedVer: expectedVersion, currentVer: order.version });
+        logAudit({ ok: false, reason, oldStatus, newStatus: oldStatus, expectedVer: expectedVersion, currentVer: order.version, failureType: 'version_format', versionSubtype: 'format', versionAfter: order.version });
         results.summary.failedCount++;
         results.summary.versionFormatErrorCount++;
         continue;
@@ -716,7 +735,7 @@ class DataStore {
           versionError: true,
           versionSubtype: 'conflict',
         });
-        logAudit({ ok: false, reason, oldStatus, newStatus: oldStatus, expectedVer: expectedVersion, currentVer: order.version });
+        logAudit({ ok: false, reason, oldStatus, newStatus: oldStatus, expectedVer: expectedVersion, currentVer: order.version, failureType: 'version', versionSubtype: 'conflict', versionAfter: order.version });
         results.summary.failedCount++;
         results.summary.versionConflictCount++;
         continue;
@@ -742,7 +761,7 @@ class DataStore {
           status: order.status,
           statusName: this.getStatusName(order.status),
         });
-        logAudit({ ok: false, reason, oldStatus, newStatus: oldStatus, expectedVer: expectedVersion, currentVer: order.version });
+        logAudit({ ok: false, reason, oldStatus, newStatus: oldStatus, expectedVer: expectedVersion, currentVer: order.version, failureType: 'permission', versionAfter: order.version });
         results.summary.failedCount++;
         continue;
       }
@@ -757,7 +776,7 @@ class DataStore {
           overdue: true,
           overdueReason: order.overdueReason,
         });
-        logAudit({ ok: false, reason, oldStatus, newStatus: oldStatus, expectedVer: expectedVersion, currentVer: order.version });
+        logAudit({ ok: false, reason, oldStatus, newStatus: oldStatus, expectedVer: expectedVersion, currentVer: order.version, failureType: 'overdue', versionAfter: order.version });
         results.summary.failedCount++;
         continue;
       }
@@ -770,7 +789,7 @@ class DataStore {
           reason,
           failureType: 'lock',
         });
-        logAudit({ ok: false, reason, oldStatus, newStatus: oldStatus, expectedVer: expectedVersion, currentVer: order.version });
+        logAudit({ ok: false, reason, oldStatus, newStatus: oldStatus, expectedVer: expectedVersion, currentVer: order.version, failureType: 'lock', versionAfter: order.version });
         results.summary.failedCount++;
         continue;
       }
@@ -791,7 +810,7 @@ class DataStore {
             requiredMaterials: check.required,
             stage: STAGE_NAMES.REGISTRATION,
           });
-          logAudit({ ok: false, reason, oldStatus, newStatus: oldStatus, detail: `材料缺失：${check.missing.join('、')}`, expectedVer: expectedVersion, currentVer: order.version });
+          logAudit({ ok: false, reason, oldStatus, newStatus: oldStatus, detail: `材料缺失：${check.missing.join('、')}`, expectedVer: expectedVersion, currentVer: order.version, failureType: 'materials', versionAfter: order.version });
           results.summary.failedCount++;
           continue;
         }
@@ -811,7 +830,7 @@ class DataStore {
             requiredMaterials: check.required,
             stage: STAGE_NAMES.VERIFICATION,
           });
-          logAudit({ ok: false, reason, oldStatus, newStatus: oldStatus, detail: reason, expectedVer: expectedVersion, currentVer: order.version });
+          logAudit({ ok: false, reason, oldStatus, newStatus: oldStatus, detail: reason, expectedVer: expectedVersion, currentVer: order.version, failureType: 'materials', versionAfter: order.version });
           results.summary.failedCount++;
           continue;
         }
@@ -831,7 +850,7 @@ class DataStore {
             requiredMaterials: check.required,
             stage: STAGE_NAMES.REVIEW,
           });
-          logAudit({ ok: false, reason, oldStatus, newStatus: oldStatus, detail: reason, expectedVer: expectedVersion, currentVer: order.version });
+          logAudit({ ok: false, reason, oldStatus, newStatus: oldStatus, detail: reason, expectedVer: expectedVersion, currentVer: order.version, failureType: 'materials', versionAfter: order.version });
           results.summary.failedCount++;
           continue;
         }
@@ -846,7 +865,7 @@ class DataStore {
           reason,
           failureType: 'opinion',
         });
-        logAudit({ ok: false, reason, oldStatus, newStatus: oldStatus, expectedVer: expectedVersion, currentVer: order.version });
+        logAudit({ ok: false, reason, oldStatus, newStatus: oldStatus, expectedVer: expectedVersion, currentVer: order.version, failureType: 'opinion', versionAfter: order.version });
         results.summary.failedCount++;
         continue;
       }
@@ -917,7 +936,8 @@ class DataStore {
         newStatus: nextStatus,
         detail: `[${this.getStatusName(oldStatus)}] → [${this.getStatusName(nextStatus)}]：${opinion}（批量）`,
         expectedVer: expectedVersion,
-        currentVer: order.version,
+        currentVer: order.version - 1,
+        versionAfter: order.version,
       });
 
       const stages = [STAGE_NAMES.REGISTRATION, STAGE_NAMES.VERIFICATION, STAGE_NAMES.REVIEW];
@@ -1091,10 +1111,35 @@ class DataStore {
   }
 
   _addAuditLog(entry) {
-    this.auditLogs.unshift({
+    const normalized = {
       id: uuidv4(),
+      orderId: null,
+      orderNo: null,
+      action: null,
+      actionName: null,
+      operator: null,
+      operatorRole: null,
+      details: '',
+      createdAt: new Date().toISOString(),
+      batch: false,
+      success: null,
+      failureReason: null,
+      failureType: null,
+      versionSubtype: null,
+      oldStatus: null,
+      newStatus: null,
+      expectedVersion: null,
+      currentVersion: null,
+      versionAfter: null,
       ...entry,
-    });
+    };
+    if (normalized.success === null) {
+      normalized.success = normalized.failureType ? false : true;
+    }
+    if (normalized.failureType === null && normalized.failureReason) {
+      normalized.failureType = 'unknown';
+    }
+    this.auditLogs.unshift(normalized);
   }
 
   getReference() {

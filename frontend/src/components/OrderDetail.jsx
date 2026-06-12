@@ -2,6 +2,26 @@ import { useState, useEffect } from 'preact/hooks';
 import { api } from '../api.js';
 import ActionModal from './ActionModal.jsx';
 
+const FAILURE_TYPE_LABELS = {
+  version_missing: { label: '缺版本', color: 'red' },
+  version_format:  { label: '版本格式错', color: 'orange' },
+  version:         { label: '版本冲突', color: 'orange' },
+  materials:       { label: '缺材料', color: 'orange' },
+  permission:      { label: '越权', color: 'red' },
+  lock:            { label: '锁失效', color: 'red' },
+  overdue:         { label: '逾期', color: 'red' },
+  opinion:         { label: '意见过短', color: 'orange' },
+  reject:          { label: '退回', color: 'orange' },
+  not_found:       { label: '不存在', color: 'red' },
+  unknown:         { label: '失败', color: 'red' },
+};
+
+const VERSION_SUBTYPE_LABELS = {
+  missing: '缺版本',
+  format: '格式错',
+  conflict: '版本冲突',
+};
+
 function formatAmount(n) {
   return '¥' + Number(n || 0).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
@@ -536,31 +556,98 @@ export default function OrderDetail({ id, meta, user, navigate, showToast }) {
           <table className="audit-table" style={{ marginTop: 8 }}>
             <thead>
               <tr>
-                <th style={{ width: 80 }}>时间</th>
-                <th style={{ width: 140 }}>操作人 / 角色</th>
-                <th style={{ width: 120 }}>动作</th>
-                <th>详情</th>
+                <th style={{ width: 150 }}>时间</th>
+                <th style={{ width: 120 }}>操作人 / 角色</th>
+                <th style={{ width: 110 }}>动作 / 批量</th>
+                <th style={{ width: 90 }}>结果</th>
+                <th style={{ width: 110 }}>状态变更</th>
+                <th style={{ width: 130 }}>版本（期望→当前→后）</th>
+                <th>详情 / 失败原因</th>
               </tr>
             </thead>
             <tbody>
               {auditLogs.length === 0 && (
-                <tr><td colSpan="4" className="empty">暂无日志</td></tr>
+                <tr><td colSpan="7" className="empty">暂无日志</td></tr>
               )}
-              {auditLogs.map(l => (
-                <tr key={l.id}>
-                  <td style={{ whiteSpace: 'nowrap', fontSize: 11 }}>{formatTime(l.createdAt)}</td>
-                  <td>
-                    <div>{l.operator}</div>
-                    <div style={{ fontSize: 11, color: 'var(--gray-500)' }}>
-                      {meta?.roleNames?.[l.operatorRole] || l.operatorRole}
-                    </div>
-                  </td>
-                  <td>
-                    <span className="tag blue">{meta?.actionNames?.[l.action] || l.actionName || l.action}</span>
-                  </td>
-                  <td style={{ lineHeight: 1.6 }}>{l.details}</td>
-                </tr>
-              ))}
+              {auditLogs.map(l => {
+                const ft = l.failureType ? FAILURE_TYPE_LABELS[l.failureType] : null;
+                const vst = l.versionSubtype ? VERSION_SUBTYPE_LABELS[l.versionSubtype] : null;
+                return (
+                  <tr key={l.id}>
+                    <td style={{ whiteSpace: 'nowrap', fontSize: 11 }}>{formatTime(l.createdAt)}</td>
+                    <td>
+                      <div style={{ fontWeight: 500 }}>{l.operator || '-'}</div>
+                      <div style={{ fontSize: 11, color: 'var(--gray-500)' }}>
+                        {meta?.roleNames?.[l.operatorRole] || l.operatorRole || '-'}
+                      </div>
+                    </td>
+                    <td>
+                      <div>
+                        <span className="tag blue" style={{ fontSize: 11 }}>
+                          {meta?.actionNames?.[l.action] || l.actionName || l.action}
+                        </span>
+                      </div>
+                      {l.batch && (
+                        <div style={{ marginTop: 3 }}>
+                          <span className="tag purple" style={{ fontSize: 10 }}>📦 批量</span>
+                        </div>
+                      )}
+                    </td>
+                    <td>
+                      {l.success !== false ? (
+                        <span className="tag green" style={{ fontSize: 11 }}>✅ 成功</span>
+                      ) : (
+                        <>
+                          <div><span className="tag red" style={{ fontSize: 11 }}>❌ 失败</span></div>
+                          {ft && <div style={{ marginTop: 3 }}><span className={`tag ${ft.color}`} style={{ fontSize: 10 }}>{ft.label}</span></div>}
+                          {vst && !ft && <div style={{ marginTop: 3 }}><span className="tag orange" style={{ fontSize: 10 }}>{vst}</span></div>}
+                        </>
+                      )}
+                    </td>
+                    <td style={{ fontSize: 11 }}>
+                      {l.oldStatus || l.newStatus ? (
+                        <div>
+                          {l.oldStatus
+                            ? <span className={`tag ${l.oldStatus === l.newStatus ? 'gray' : 'orange'}`} style={{ fontSize: 10 }}>
+                                {meta?.statusNames?.[l.oldStatus] || l.oldStatus}
+                              </span>
+                            : <span style={{ color: 'var(--gray-400)' }}>-</span>}
+                          <span style={{ margin: '0 4px', color: 'var(--gray-400)' }}>→</span>
+                          {l.newStatus
+                            ? <span className={`tag ${l.oldStatus === l.newStatus ? 'gray' : 'green'}`} style={{ fontSize: 10 }}>
+                                {meta?.statusNames?.[l.newStatus] || l.newStatus}
+                              </span>
+                            : <span style={{ color: 'var(--gray-400)' }}>-</span>}
+                        </div>
+                      ) : <span style={{ color: 'var(--gray-400)' }}>-</span>}
+                    </td>
+                    <td style={{ fontSize: 11, fontFamily: 'monospace' }}>
+                      {(l.expectedVersion !== null && l.expectedVersion !== undefined) || l.currentVersion !== null || l.versionAfter !== null ? (
+                        <>
+                          <div>
+                            <span style={{ color: l.failureType && l.failureType.startsWith('version') ? 'var(--danger)' : 'var(--gray-600)' }}>
+                              {l.expectedVersion !== null && l.expectedVersion !== undefined ? `v${l.expectedVersion}` : '-'}
+                            </span>
+                            <span style={{ color: 'var(--gray-400)', margin: '0 2px' }}>→</span>
+                            <span>{l.currentVersion !== null && l.currentVersion !== undefined ? `v${l.currentVersion}` : '-'}</span>
+                          </div>
+                          {l.versionAfter !== null && l.versionAfter !== undefined && (
+                            <div style={{ color: 'var(--success)', marginTop: 2 }}>→后 v{l.versionAfter}</div>
+                          )}
+                        </>
+                      ) : <span style={{ color: 'var(--gray-400)' }}>-</span>}
+                    </td>
+                    <td style={{ lineHeight: 1.6 }}>
+                      <div>{l.details}</div>
+                      {l.failureReason && l.failureReason !== l.details && (
+                        <div style={{ marginTop: 3, color: 'var(--danger)', fontSize: 11 }}>
+                          💬 {l.failureReason}
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

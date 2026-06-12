@@ -143,6 +143,12 @@ export default function OrderList({ meta, user, navigate, showToast }) {
       if (res.success.length > 0) {
         showToast(`批量${action.startsWith('approve') ? '通过' : action.startsWith('reject') ? '退回' : '提交'} ${res.success.length} 条成功`, 'success');
       }
+      const hasVersionFail = res.failed.some(f =>
+        f.failureType === 'version_missing' || f.failureType === 'version_format' || f.failureType === 'version'
+      );
+      const versionFailCount = res.failed.filter(f =>
+        f.failureType === 'version_missing' || f.failureType === 'version_format' || f.failureType === 'version'
+      ).length;
       if (res.failed.length > 0) {
         const versionMissings = res.failed.filter(f => f.failureType === 'version_missing');
         const versionFormats = res.failed.filter(f => f.failureType === 'version_format');
@@ -152,26 +158,30 @@ export default function OrderList({ meta, user, navigate, showToast }) {
         );
         if (versionMissings.length > 0) {
           const names = versionMissings.map(f => f.orderNo || f.orderId?.slice(0, 8)).join('、');
-          showToast(`版本缺失 ${versionMissings.length} 条：${names}，请刷新后重试`, 'error');
+          showToast(`版本缺失 ${versionMissings.length} 条：${names}，请刷新后重试（审计日志可追溯）`, 'error');
         }
         if (versionFormats.length > 0) {
           const names = versionFormats.map(f => `${f.orderNo || f.orderId?.slice(0,8)}(${f.expectedVersionRaw})`).join('、');
-          showToast(`版本格式错误 ${versionFormats.length} 条：${names}`, 'error');
+          showToast(`版本格式错误 ${versionFormats.length} 条：${names}（审计日志可追溯）`, 'error');
         }
         if (versionConflicts.length > 0) {
           const names = versionConflicts.map(f => `${f.orderNo}（v${f.expectedVersion}→v${f.currentVersion}）`).join('、');
-          showToast(`版本冲突 ${versionConflicts.length} 条：${names}，请刷新后重试`, 'error');
+          showToast(`版本冲突 ${versionConflicts.length} 条：${names}，请刷新后重试（审计日志可追溯）`, 'error');
         }
         if (otherFails.length > 0) {
           const reasons = otherFails.slice(0, 3).map(f => `${f.orderNo || f.orderId?.slice(0,8)}：${f.reason}`).join('；');
-          showToast(`失败 ${otherFails.length} 条：${reasons}${otherFails.length > 3 ? '...' : ''}`, 'error');
+          showToast(`失败 ${otherFails.length} 条：${reasons}${otherFails.length > 3 ? '...' : ''}（审计日志可追溯）`, 'error');
         }
       }
-      const allVersionFailed = res.failed.length > 0 && res.success.length === 0 &&
-        res.failed.every(f =>
-          f.failureType === 'version_missing' || f.failureType === 'version_format' || f.failureType === 'version'
-        );
+      const allVersionFailed = res.failed.length > 0 && res.success.length === 0 && hasVersionFail;
       if (allVersionFailed) {
+        showToast(`全部 ${versionFailCount} 条均因版本异常被阻断，请刷新列表获取最新版本后重试，或进入单据审计页查看明细`, 'error');
+        setShowBatch(false);
+        setBatchAction(null);
+        setRefreshKey(k => k + 1);
+      } else if (hasVersionFail && res.success.length > 0) {
+        showToast(`部分成功 ${res.success.length}，${versionFailCount} 条因版本异常被阻断，请刷新查看状态`, 'warning');
+        setSelected(new Set());
         setShowBatch(false);
         setBatchAction(null);
         setRefreshKey(k => k + 1);

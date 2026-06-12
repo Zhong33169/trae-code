@@ -632,7 +632,9 @@ function generateSeedOrders() {
 }
 
 function generateSeedAuditLogs(orders) {
+  const now = new Date();
   const logs = [];
+
   for (const order of orders) {
     logs.push({
       id: uuidv4(),
@@ -644,27 +646,178 @@ function generateSeedAuditLogs(orders) {
       operatorRole: ROLES.REGISTRAR,
       details: `创建订货单「${order.title}」`,
       createdAt: order.createdAt,
+      batch: false,
+      success: true,
+      failureType: null,
+      versionSubtype: null,
+      oldStatus: null,
+      newStatus: ORDER_STATUS.DRAFT,
+      expectedVersion: null,
+      currentVersion: null,
+      versionAfter: 1,
     });
 
     if (order.stageOpinions) {
       for (const stage of STAGE_ORDER) {
         const op = order.stageOpinions[stage];
-        if (op) {
-          logs.push({
-            id: uuidv4(),
-            orderId: order.id,
-            orderNo: order.orderNo,
-            action: op.action,
-            actionName: ACTION_NAMES[op.action] || op.action,
-            operator: op.operator,
-            operatorRole: op.operatorRole,
-            details: `[${stage}] ${op.opinion}`,
-            createdAt: op.createdAt,
-          });
-        }
+        if (!op) continue;
+        let oldStatus = null;
+        let newStatus = null;
+        const action = op.action;
+        if (action === ACTIONS.SUBMIT) { oldStatus = ORDER_STATUS.DRAFT; newStatus = ORDER_STATUS.PENDING_VERIFICATION; }
+        else if (action === ACTIONS.CORRECT_SUBMIT) { oldStatus = ORDER_STATUS.VERIFICATION_REJECTED; newStatus = ORDER_STATUS.PENDING_VERIFICATION; }
+        else if (action === ACTIONS.APPROVE_VERIFY) { oldStatus = ORDER_STATUS.PENDING_VERIFICATION; newStatus = ORDER_STATUS.PENDING_REVIEW; }
+        else if (action === ACTIONS.REJECT_VERIFY) { oldStatus = ORDER_STATUS.PENDING_VERIFICATION; newStatus = ORDER_STATUS.VERIFICATION_REJECTED; }
+        else if (action === ACTIONS.APPROVE_REVIEW) { oldStatus = ORDER_STATUS.PENDING_REVIEW; newStatus = ORDER_STATUS.ARCHIVED; }
+        else if (action === ACTIONS.REJECT_REVIEW) { oldStatus = ORDER_STATUS.PENDING_REVIEW; newStatus = ORDER_STATUS.REVIEW_REJECTED; }
+        else if (action === ACTIONS.OVERDUE_EXTEND) { oldStatus = order.status; newStatus = order.status; }
+        const isApprove = action.startsWith('approve') || action === ACTIONS.SUBMIT || action === ACTIONS.CORRECT_SUBMIT;
+        const success = isApprove || action === ACTIONS.OVERDUE_EXTEND;
+        logs.push({
+          id: uuidv4(),
+          orderId: order.id,
+          orderNo: order.orderNo,
+          action,
+          actionName: ACTION_NAMES[action] || action,
+          operator: op.operator,
+          operatorRole: op.operatorRole,
+          details: `[${stage}] ${op.opinion}`,
+          createdAt: op.createdAt,
+          batch: false,
+          success,
+          failureReason: success ? null : (op.rejectReasons?.join('；') || null),
+          failureType: success ? null : (action.startsWith('reject') ? 'reject' : null),
+          versionSubtype: null,
+          oldStatus,
+          newStatus,
+          expectedVersion: null,
+          currentVersion: order.version - 1,
+          versionAfter: order.version,
+        });
       }
     }
   }
+
+  const o0008 = orders.find(o => o.orderNo && o.orderNo.endsWith('0008'));
+  const o0007 = orders.find(o => o.orderNo && o.orderNo.endsWith('0007'));
+  const o0009 = orders.find(o => o.orderNo && o.orderNo.endsWith('0009'));
+
+  if (o0008) {
+    logs.push({
+      id: uuidv4(),
+      orderId: o0008.id,
+      orderNo: o0008.orderNo,
+      action: ACTIONS.SUBMIT,
+      actionName: ACTION_NAMES[ACTIONS.SUBMIT],
+      operator: 'registrar_wang',
+      operatorRole: ROLES.REGISTRAR,
+      details: '[批量尝试] 版本冲突：期望 v5，当前 v1，单据已被他人在详情页修改',
+      createdAt: new Date(now - 180 * 60 * 1000).toISOString(),
+      batch: true,
+      success: false,
+      failureReason: '版本冲突：期望版本 v5，当前版本 v1，单据已被他人修改',
+      failureType: 'version',
+      versionSubtype: 'conflict',
+      oldStatus: ORDER_STATUS.DRAFT,
+      newStatus: ORDER_STATUS.DRAFT,
+      expectedVersion: 5,
+      currentVersion: 1,
+      versionAfter: 1,
+    });
+  }
+
+  if (o0007) {
+    logs.push({
+      id: uuidv4(),
+      orderId: o0007.id,
+      orderNo: o0007.orderNo,
+      action: ACTIONS.SUBMIT,
+      actionName: ACTION_NAMES[ACTIONS.SUBMIT],
+      operator: 'registrar_wang',
+      operatorRole: ROLES.REGISTRAR,
+      details: '[批量尝试] 版本号缺失：批量提交必须携带每张单据的版本号',
+      createdAt: new Date(now - 170 * 60 * 1000).toISOString(),
+      batch: true,
+      success: false,
+      failureReason: '版本号缺失：批量提交必须携带每张单据的版本号',
+      failureType: 'version_missing',
+      versionSubtype: 'missing',
+      oldStatus: ORDER_STATUS.DRAFT,
+      newStatus: ORDER_STATUS.DRAFT,
+      expectedVersion: null,
+      currentVersion: 1,
+      versionAfter: 1,
+    });
+  }
+
+  if (o0009) {
+    logs.push({
+      id: uuidv4(),
+      orderId: o0009.id,
+      orderNo: o0009.orderNo,
+      action: ACTIONS.CORRECT_SUBMIT,
+      actionName: ACTION_NAMES[ACTIONS.CORRECT_SUBMIT],
+      operator: 'registrar_chen',
+      operatorRole: ROLES.REGISTRAR,
+      details: '[批量尝试] 版本号格式错误：期望正整数，实际为「abc」',
+      createdAt: new Date(now - 160 * 60 * 1000).toISOString(),
+      batch: true,
+      success: false,
+      failureReason: '版本号格式错误：期望正整数，实际为「abc」',
+      failureType: 'version_format',
+      versionSubtype: 'format',
+      oldStatus: ORDER_STATUS.VERIFICATION_REJECTED,
+      newStatus: ORDER_STATUS.VERIFICATION_REJECTED,
+      expectedVersion: 'abc',
+      currentVersion: 3,
+      versionAfter: 3,
+    });
+  }
+
+  if (o0008 && o0007) {
+    logs.push({
+      id: uuidv4(),
+      orderId: o0008.id,
+      orderNo: o0008.orderNo,
+      action: ACTIONS.SUBMIT,
+      actionName: ACTION_NAMES[ACTIONS.SUBMIT],
+      operator: 'registrar_li',
+      operatorRole: ROLES.REGISTRAR,
+      details: '[批量成功] 草稿→待核验：陆家嘴店干货常规补货批量提交',
+      createdAt: new Date(now - 150 * 60 * 1000).toISOString(),
+      batch: true,
+      success: true,
+      failureType: null,
+      versionSubtype: null,
+      oldStatus: ORDER_STATUS.DRAFT,
+      newStatus: ORDER_STATUS.PENDING_VERIFICATION,
+      expectedVersion: 1,
+      currentVersion: 1,
+      versionAfter: 2,
+    });
+    logs.push({
+      id: uuidv4(),
+      orderId: o0007.id,
+      orderNo: o0007.orderNo,
+      action: ACTIONS.SUBMIT,
+      actionName: ACTION_NAMES[ACTIONS.SUBMIT],
+      operator: 'registrar_li',
+      operatorRole: ROLES.REGISTRAR,
+      details: '[批量失败] 登记阶段材料缺失：门店库存快照、历史订货参考数据',
+      createdAt: new Date(now - 150 * 60 * 1000).toISOString(),
+      batch: true,
+      success: false,
+      failureReason: '登记阶段材料缺失：门店库存快照、历史订货参考数据',
+      failureType: 'materials',
+      versionSubtype: null,
+      oldStatus: ORDER_STATUS.DRAFT,
+      newStatus: ORDER_STATUS.DRAFT,
+      expectedVersion: 1,
+      currentVersion: 1,
+      versionAfter: 1,
+    });
+  }
+
   return logs.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 }
 
