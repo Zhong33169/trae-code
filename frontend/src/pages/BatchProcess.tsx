@@ -22,6 +22,14 @@ interface ItemMaterials {
   [appId: number]: PendingMaterial[];
 }
 
+interface ItemOpinions {
+  [appId: number]: string;
+}
+
+interface ItemOverdueReasons {
+  [appId: number]: string;
+}
+
 interface BatchResult {
   application_id: number;
   application_no: string;
@@ -57,27 +65,47 @@ const MATERIAL_TYPES: Record<string, string[]> = {
   approval: ['审批意见', '会议纪要', '公示截图'],
 };
 
+const OPINION_REQUIRED = new Set(['verify', 'approve', 'reject']);
+
 export default function BatchProcess() {
   const [queueType, setQueueType] = createSignal('pending_verify');
   const [items, setItems] = createSignal<AppItem[]>([]);
   const [selected, setSelected] = createSignal<Set<number>>(new Set());
-  const [opinion, setOpinion] = createSignal('');
+  const [batchOpinion, setBatchOpinion] = createSignal('');
+  const [batchOverdueReason, setBatchOverdueReason] = createSignal('');
+  const [itemOpinions, setItemOpinions] = createSignal<ItemOpinions>({});
+  const [itemOverdueReasons, setItemOverdueReasons] = createSignal<ItemOverdueReasons>({});
   const [itemMaterials, setItemMaterials] = createSignal<ItemMaterials>({});
   const [loading, setLoading] = createSignal(false);
   const [results, setResults] = createSignal<BatchResult[]>([]);
   const [batchId, setBatchId] = createSignal('');
   const [showResults, setShowResults] = createSignal(false);
   const [expandedId, setExpandedId] = createSignal<number | null>(null);
+  const [batchErrors, setBatchErrors] = createSignal<string[]>([]);
 
   const currentAction = createMemo(() => queueType() === 'pending_verify' ? 'verify' : 'approve');
   const currentStage = createMemo(() => STAGE_FOR_ACTION[currentAction()] || 'verification');
+
+  const isOverdue = (item: AppItem) => {
+    if (!item.deadline) return false;
+    return new Date() > new Date(item.deadline);
+  };
+
+  const overdueDays = (item: AppItem) => {
+    if (!item.deadline) return 0;
+    const diff = Date.now() - new Date(item.deadline).getTime();
+    return Math.max(0, Math.floor(diff / (1000 * 60 * 60 * 24)));
+  };
 
   const fetchData = async () => {
     try {
       const data = await apiFetch(`/api/applications?status=${queueType()}`);
       setItems(Array.isArray(data) ? data : []);
       setSelected(new Set<number>());
+      setItemOpinions({});
+      setItemOverdueReasons({});
       setItemMaterials({});
+      setBatchErrors([]);
     } catch {}
   };
 
@@ -128,13 +156,59 @@ export default function BatchProcess() {
     setItemMaterials({ ...itemMaterials(), [appId]: mats });
   };
 
+  const updateItemOpinion = (appId: number, value: string) => {
+    setItemOpinions({ ...itemOpinions(), [appId]: value });
+  };
+
+  const updateItemOverdueReason = (appId: number, value: string) => {
+    setItemOverdueReasons({ ...itemOverdueReasons(), [appId]: value });
+  };
+
   const toggleExpand = (id: number) => {
     setExpandedId(expandedId() === id ? null : id);
   };
 
+  const getItemOpinion = (appId: number) => {
+    const itemOp = itemOpinions()[appId];
+    if (itemOp && itemOp.trim()) return itemOp;
+    return batchOpinion();
+  };
+
+  const getItemOverdueReason = (appId: number) => {
+    const itemOR = itemOverdueReasons()[appId];
+    if (itemOR && itemOR.trim()) return itemOR;
+    return batchOverdueReason();
+  };
+
+  const validateBeforeBatch = (): string[] => {
+    const errors: string[] = [];
+    const action = currentAction();
+    const requireOpinion = OPINION_REQUIRED.has(action);
+
+    for (const item of selectedItems()) {
+      const opinion = getItemOpinion(item.id);
+      if (requireOpinion && !opinion.trim()) {
+        errors.push(`[${item.application_no}] 必须填写处理意见`);
+      }
+      if (isOverdue(item)) {
+        const or = getItemOverdueReason(item.id);
+        if (!or.trim()) {
+          errors.push(`[${item.application_no}] 已逾期${overdueDays(item)}天，必须填写逾期说明`);
+        }
+      }
+    }
+    return errors;
+  };
+
   const handleBatch = async () => {
     if (selected().size === 0) return;
+    const validationErrors = validateBeforeBatch();
+    if (validationErrors.length > 0) {
+      setBatchErrors(validationErrors);
+      return;
+    }
     setLoading(true);
+    setBatchErrors([]);
     try {
       const action = currentAction();
       const batchItems = items()
@@ -142,9 +216,10 @@ export default function BatchProcess() {
         .map(i => ({
           application_id: i.id,
           action,
-          opinion: opinion(),
+          opinion: getItemOpinion(i.id),
           materials: itemMaterials()[i.id] || [],
           version: i.version,
+          overdue_reason: getItemOverdueReason(i.id),
         }));
       const data = await apiFetch('/api/batch/advance', {
         method: 'POST',
@@ -154,7 +229,9 @@ export default function BatchProcess() {
       setBatchId(data.batch_id || '');
       setShowResults(true);
       fetchData();
-    } catch {} finally {
+    } catch (err: any) {
+      setBatchErrors([err.detail || err.message || '批量处理失败']);
+    } finally {
       setLoading(false);
     }
   };
@@ -199,6 +276,22 @@ export default function BatchProcess() {
       </div>
 
       <Show when={!showResults()}>
+        <Show when={batchErrors().length > 0}>
+          <div style={{
+            background: '#fef2f2',
+            border: '1px solid #fecaca',
+            borderRadius: 'var(--radius)',
+            padding: '12px 16px',
+            marginBottom: '16px',
+          }}>
+            <For each={batchErrors()}>
+              {(err) => (
+                <div style={{ color: 'var(--danger)', fontSize: '13px', lineHeight: 1.8 }}>{err}</div>
+              )}
+            </For>
+          </div>
+        </Show>
+
         <div style={{
           background: 'var(--white)',
           borderRadius: 'var(--radius)',
@@ -236,6 +329,8 @@ export default function BatchProcess() {
               const isExpanded = expandedId() === item.id;
               const mats = itemMaterials()[item.id] || [];
               const isSelected = selected().has(item.id);
+              const itemOverdue = isOverdue(item);
+              const itemODays = overdueDays(item);
               return (
                 <>
                   <div style={{
@@ -253,8 +348,20 @@ export default function BatchProcess() {
                       onChange={() => toggleSelect(item.id)}
                       style={{ width: '16px', height: '16px', flexShrink: 0 }}
                     />
-                    <span style={{ width: '130px', color: 'var(--text-light)', fontSize: '13px' }}>
+                    <span style={{ width: '130px', color: 'var(--text-light)', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px' }}>
                       {item.application_no}
+                      <Show when={itemOverdue}>
+                        <span style={{
+                          fontSize: '10px',
+                          padding: '1px 6px',
+                          borderRadius: '3px',
+                          background: '#fef2f2',
+                          color: '#dc2626',
+                          border: '1px solid #fecaca',
+                        }}>
+                          逾期{itemODays}天
+                        </span>
+                      </Show>
                     </span>
                     <span style={{ width: '80px', fontWeight: 500 }}>{item.applicant_name}</span>
                     <span style={{
@@ -280,7 +387,7 @@ export default function BatchProcess() {
                           fontSize: '12px',
                         }}
                       >
-                        {isExpanded ? '收起材料' : `填写材料 (${mats.length})`}
+                        {isExpanded ? '收起' : `填写 (${mats.length}份材料)`}
                       </button>
                     </Show>
                   </div>
@@ -290,6 +397,51 @@ export default function BatchProcess() {
                       background: '#fafafa',
                       borderBottom: '1px solid var(--border)',
                     }}>
+                      <label style={{ fontSize: '13px', color: 'var(--text-light)', display: 'block', marginBottom: '8px' }}>
+                        处理意见 <span style={{ color: 'var(--danger)' }}>*</span>
+                        <textarea
+                          value={itemOpinions()[item.id] || ''}
+                          onInput={(e) => updateItemOpinion(item.id, e.currentTarget.value)}
+                          rows={2}
+                          placeholder="为该申请单独填写处理意见（留空则使用批量意见）"
+                          style={{
+                            display: 'block',
+                            width: '100%',
+                            padding: '6px 10px',
+                            border: '1px solid var(--border)',
+                            borderRadius: 'var(--radius)',
+                            marginTop: '4px',
+                            fontSize: '13px',
+                            resize: 'vertical',
+                          }}
+                        />
+                      </label>
+
+                      <Show when={itemOverdue}>
+                        <label style={{ fontSize: '13px', color: 'var(--text-light)', display: 'block', marginBottom: '8px' }}>
+                          逾期说明 <span style={{ color: 'var(--danger)' }}>*</span>
+                          <span style={{ color: '#92400e', fontSize: '12px', marginLeft: '8px' }}>
+                            （已逾期{itemODays}天）
+                          </span>
+                          <textarea
+                            value={itemOverdueReasons()[item.id] || ''}
+                            onInput={(e) => updateItemOverdueReason(item.id, e.currentTarget.value)}
+                            rows={2}
+                            placeholder="为该申请单独填写逾期说明（留空则使用批量逾期说明）"
+                            style={{
+                              display: 'block',
+                              width: '100%',
+                              padding: '6px 10px',
+                              border: '1px solid var(--border)',
+                              borderRadius: 'var(--radius)',
+                              marginTop: '4px',
+                              fontSize: '13px',
+                              resize: 'vertical',
+                            }}
+                          />
+                        </label>
+                      </Show>
+
                       <div style={{
                         fontSize: '13px',
                         fontWeight: 500,
@@ -376,39 +528,65 @@ export default function BatchProcess() {
             boxShadow: 'var(--shadow)',
             padding: '16px 20px',
             display: 'flex',
-            alignItems: 'center',
-            gap: '16px',
+            flexDirection: 'column',
+            gap: '12px',
           }}>
-            <label style={{ fontSize: '13px', color: 'var(--text-light)', flexShrink: 0 }}>
-              批量意见
+            <label style={{ fontSize: '13px', color: 'var(--text-light)', display: 'block' }}>
+              批量处理意见 <span style={{ color: 'var(--danger)' }}>*</span>
+              <textarea
+                value={batchOpinion()}
+                onInput={(e) => setBatchOpinion(e.currentTarget.value)}
+                rows={2}
+                placeholder="为选中的所有申请填写统一处理意见（单项意见优先）"
+                style={{
+                  display: 'block',
+                  width: '100%',
+                  padding: '8px 12px',
+                  border: '1px solid var(--border)',
+                  borderRadius: 'var(--radius)',
+                  marginTop: '4px',
+                  fontSize: '14px',
+                  resize: 'vertical',
+                }}
+              />
             </label>
-            <input
-              value={opinion()}
-              onInput={(e) => setOpinion(e.currentTarget.value)}
-              placeholder="输入批量处理意见（可选）"
-              style={{
-                flex: 1,
-                padding: '8px 12px',
-                border: '1px solid var(--border)',
-                borderRadius: 'var(--radius)',
-                fontSize: '14px',
-              }}
-            />
-            <button
-              onClick={handleBatch}
-              disabled={loading()}
-              style={{
-                background: 'var(--primary)',
-                color: '#fff',
-                padding: '8px 24px',
-                borderRadius: 'var(--radius)',
-                fontSize: '14px',
-                opacity: loading() ? 0.6 : 1,
-                whiteSpace: 'nowrap',
-              }}
-            >
-              批量推进
-            </button>
+
+            <label style={{ fontSize: '13px', color: 'var(--text-light)', display: 'block' }}>
+              批量逾期说明 <span style={{ color: '#92400e', fontSize: '12px' }}>（仅对逾期申请生效）</span>
+              <textarea
+                value={batchOverdueReason()}
+                onInput={(e) => setBatchOverdueReason(e.currentTarget.value)}
+                rows={2}
+                placeholder="为所有逾期申请填写统一逾期说明（单项逾期说明优先）"
+                style={{
+                  display: 'block',
+                  width: '100%',
+                  padding: '8px 12px',
+                  border: '1px solid var(--border)',
+                  borderRadius: 'var(--radius)',
+                  marginTop: '4px',
+                  fontSize: '14px',
+                  resize: 'vertical',
+                }}
+              />
+            </label>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '4px' }}>
+              <button
+                onClick={handleBatch}
+                disabled={loading()}
+                style={{
+                  background: 'var(--primary)',
+                  color: '#fff',
+                  padding: '8px 24px',
+                  borderRadius: 'var(--radius)',
+                  fontSize: '14px',
+                  opacity: loading() ? 0.6 : 1,
+                }}
+              >
+                批量推进
+              </button>
+            </div>
           </div>
         </Show>
       </Show>
@@ -482,9 +660,9 @@ export default function BatchProcess() {
                         </td>
                         <td>
                           <Show when={r.success} fallback={
-                            <div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                               <span style={{ color: 'var(--danger)', fontSize: '13px' }}>
-                                {r.error || '处理失败'}
+                                <strong>[{r.application_no || `#${r.application_id}`}]</strong> {r.error || '处理失败'}
                               </span>
                               <Show when={r.suggestion}>
                                 <button
@@ -493,10 +671,10 @@ export default function BatchProcess() {
                                     background: 'none',
                                     color: 'var(--primary)',
                                     fontSize: '12px',
-                                    marginLeft: '8px',
+                                    alignSelf: 'flex-start',
                                   }}
                                 >
-                                  {expanded() ? '收起' : '查看建议'}
+                                  {expanded() ? '收起建议' : '查看下一步建议'}
                                 </button>
                               </Show>
                             </div>

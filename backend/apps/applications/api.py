@@ -47,6 +47,7 @@ def _app_to_out(app, user=None):
         verified_at=app.verified_at,
         approved_at=app.approved_at,
         opinion_text=app.opinion_text,
+        overdue_reason=app.overdue_reason,
         available_actions=actions,
     )
 
@@ -167,13 +168,15 @@ def advance_application(request, application_id: int, payload: AdvanceRequest):
         opinion=payload.opinion,
         materials=[m.model_dump() for m in payload.materials],
         version=payload.version,
+        overdue_reason=payload.overdue_reason,
     )
 
     if not result["success"]:
         status_code = 403
-        if "已被其他人修改" in result.get("error", ""):
+        error_msg = result.get("error", "")
+        if "已被其他人修改" in error_msg:
             status_code = 409
-        elif "缺少" in result.get("error", "") or "顺序" in result.get("error", ""):
+        elif "缺少" in error_msg or "顺序" in error_msg or "必须填写" in error_msg or "逾期" in error_msg:
             status_code = 422
         return HttpResponse(result["error"], status=status_code)
 
@@ -264,8 +267,11 @@ def list_audit_logs(request, application_id: int = None,
         AuditLogOut(
             id=a.id, application_id=a.application_id,
             operator_id=a.operator_id, operator_name=a.operator.display_name,
-            action=a.action, from_status=a.from_status, to_status=a.to_status,
-            opinion=a.opinion, extra_data=a.extra_data, created_at=a.created_at,
+            operator_role=a.operator_role, action=a.action,
+            from_status=a.from_status, to_status=a.to_status,
+            opinion=a.opinion, client_version=a.client_version,
+            deadline_check=a.deadline_check, failure_reason=a.failure_reason,
+            extra_data=a.extra_data, created_at=a.created_at,
         ) for a in logs
     ]
 

@@ -35,6 +35,7 @@ class Application(models.Model):
     verified_at = models.DateTimeField(null=True, blank=True)
     approved_at = models.DateTimeField(null=True, blank=True)
     opinion_text = models.TextField(blank=True, default="")
+    overdue_reason = models.TextField(blank=True, default="")
 
     class Meta:
         app_label = "applications"
@@ -100,6 +101,10 @@ class AuditLog(models.Model):
     from_status = models.CharField(max_length=20, blank=True, default="")
     to_status = models.CharField(max_length=20, blank=True, default="")
     opinion = models.TextField(blank=True, default="")
+    operator_role = models.CharField(max_length=20, blank=True, default="")
+    client_version = models.IntegerField(default=0)
+    deadline_check = models.CharField(max_length=50, blank=True, default="")
+    failure_reason = models.TextField(blank=True, default="")
     extra_data = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 

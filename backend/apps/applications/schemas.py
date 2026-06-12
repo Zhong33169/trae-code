@@ -30,6 +30,7 @@ class ApplicationOut(Schema):
     verified_at: Optional[datetime]
     approved_at: Optional[datetime]
     opinion_text: str
+    overdue_reason: str = ""
     available_actions: List[str] = []
 
 
@@ -72,10 +73,14 @@ class AuditLogOut(Schema):
     application_id: int
     operator_id: int
     operator_name: str
+    operator_role: str = ""
     action: str
     from_status: str
     to_status: str
     opinion: str
+    client_version: int = 0
+    deadline_check: str = ""
+    failure_reason: str = ""
     extra_data: dict
     created_at: datetime
 
@@ -85,6 +90,7 @@ class AdvanceRequest(Schema):
     opinion: str = ""
     materials: List[MaterialCreate] = []
     version: int = 0
+    overdue_reason: str = ""
 
 
 class AdvanceResponse(Schema):
@@ -99,6 +105,7 @@ class BatchAdvanceItem(Schema):
     opinion: str = ""
     materials: List[MaterialCreate] = []
     version: int = 1
+    overdue_reason: str = ""
 
 
 class BatchAdvanceRequest(Schema):

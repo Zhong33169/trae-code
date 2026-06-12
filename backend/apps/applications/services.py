@@ -143,34 +143,154 @@ class ApplicationService:
         return {"valid": True}
 
     @staticmethod
+    def validate_deadline(application: Application, overdue_reason: str = "") -> dict:
+        if not application.deadline:
+            return {"valid": True, "is_overdue": False, "check": "no_deadline"}
+        now = dj_timezone.now()
+        is_overdue = now > application.deadline
+        if is_overdue:
+            days = (now - application.deadline).days
+            if not overdue_reason or not overdue_reason.strip():
+                return {
+                    "valid": False,
+                    "is_overdue": True,
+                    "check": "overdue_missing_reason",
+                    "error": f"申请已逾期{days}天，必须填写逾期说明",
+                    "suggestion": f"请在「逾期说明」栏填写原因（已逾期{days}天，原截止日期：{application.deadline.strftime('%Y-%m-%d')}）",
+                }
+        return {"valid": True, "is_overdue": is_overdue, "check": "overdue_with_reason" if is_overdue else "on_time"}
+
+    @staticmethod
+    def validate_opinion(action: str, opinion: str) -> dict:
+        require_opinion = {"verify", "approve", "reject"}
+        if action in require_opinion and (not opinion or not opinion.strip()):
+            stage_display = {
+                "verify": "入户核实",
+                "approve": "救助确认",
+                "reject": "驳回",
+            }.get(action, action)
+            return {
+                "valid": False,
+                "error": f"{stage_display}必须填写处理意见",
+                "suggestion": f"请在「处理意见」栏填写{stage_display}意见后再提交",
+            }
+        return {"valid": True}
+
+    @staticmethod
     @transaction.atomic
     def advance(user: User, application_id: int, action: str, opinion: str = "",
-                materials: list = None, version: int = 1) -> dict:
+                materials: list = None, version: int = 1, overdue_reason: str = "") -> dict:
         try:
             application = Application.objects.select_for_update().get(id=application_id)
         except Application.DoesNotExist:
             return {"success": False, "error": "申请不存在", "suggestion": "请检查申请ID是否正确"}
 
+        from_status = application.status
+
         lock_check = ApplicationService.check_optimistic_lock(application, version)
         if not lock_check["valid"]:
+            AuditLog.objects.create(
+                application=application,
+                operator=user,
+                action=action,
+                from_status=from_status,
+                to_status="",
+                opinion=opinion,
+                operator_role=user.role,
+                client_version=version,
+                deadline_check="",
+                failure_reason=lock_check["error"],
+                extra_data={"version": application.version, "failure": "optimistic_lock"},
+            )
             return {"success": False, "error": lock_check["error"], "suggestion": lock_check["suggestion"]}
 
         role_check = ApplicationService.validate_role_for_status(user, action)
         if not role_check["valid"]:
+            AuditLog.objects.create(
+                application=application,
+                operator=user,
+                action=action,
+                from_status=from_status,
+                to_status="",
+                opinion=opinion,
+                operator_role=user.role,
+                client_version=version,
+                deadline_check="",
+                failure_reason=role_check["error"],
+                extra_data={"failure": "role_mismatch"},
+            )
             return {"success": False, "error": role_check["error"], "suggestion": role_check["suggestion"]}
 
         flow = role_check["flow"]
 
         if application.status != flow["from"]:
-            return {
-                "success": False,
-                "error": f"流程顺序错误: 当前状态为{application.get_status_display()}, 无法执行此操作",
-                "suggestion": "请按流程顺序操作",
-            }
+            err = f"流程顺序错误: 当前状态为{application.get_status_display()}, 无法执行此操作"
+            AuditLog.objects.create(
+                application=application,
+                operator=user,
+                action=action,
+                from_status=from_status,
+                to_status="",
+                opinion=opinion,
+                operator_role=user.role,
+                client_version=version,
+                deadline_check="",
+                failure_reason=err,
+                extra_data={"failure": "wrong_order"},
+            )
+            return {"success": False, "error": err, "suggestion": "请按流程顺序操作"}
 
-        mat_check = ApplicationService.validate_materials(application, action, materials)
-        if not mat_check["valid"]:
-            return {"success": False, "error": mat_check["error"], "suggestion": mat_check["suggestion"]}
+        opinion_check = ApplicationService.validate_opinion(action, opinion)
+        if not opinion_check["valid"]:
+            AuditLog.objects.create(
+                application=application,
+                operator=user,
+                action=action,
+                from_status=from_status,
+                to_status="",
+                opinion=opinion,
+                operator_role=user.role,
+                client_version=version,
+                deadline_check="",
+                failure_reason=opinion_check["error"],
+                extra_data={"failure": "missing_opinion"},
+            )
+            return {"success": False, "error": opinion_check["error"], "suggestion": opinion_check["suggestion"]}
+
+        if action != "reject":
+            mat_check = ApplicationService.validate_materials(application, action, materials)
+            if not mat_check["valid"]:
+                AuditLog.objects.create(
+                    application=application,
+                    operator=user,
+                    action=action,
+                    from_status=from_status,
+                    to_status="",
+                    opinion=opinion,
+                    operator_role=user.role,
+                    client_version=version,
+                    deadline_check="",
+                    failure_reason=mat_check["error"],
+                    extra_data={"failure": "missing_materials"},
+                )
+                return {"success": False, "error": mat_check["error"], "suggestion": mat_check["suggestion"]}
+
+        deadline_check = ApplicationService.validate_deadline(application, overdue_reason)
+        if not deadline_check["valid"]:
+            AuditLog.objects.create(
+                application=application,
+                operator=user,
+                action=action,
+                from_status=from_status,
+                to_status="",
+                opinion=opinion,
+                operator_role=user.role,
+                client_version=version,
+                deadline_check=deadline_check.get("check", ""),
+                failure_reason=deadline_check["error"],
+                extra_data={"failure": "overdue_missing_reason", "deadline": str(application.deadline)},
+            )
+            return {"success": False, "error": deadline_check["error"], "suggestion": deadline_check["suggestion"]}
 
         if materials:
             for m in materials:
@@ -182,11 +302,12 @@ class ApplicationService:
                     material_type=m.get("material_type", ""),
                 )
 
-        from_status = application.status
         to_status = flow["to"]
         application.status = to_status
         application.version += 1
         application.opinion_text = opinion
+        if deadline_check.get("is_overdue"):
+            application.overdue_reason = overdue_reason
 
         now = dj_timezone.now()
         if action == "submit":
@@ -205,7 +326,11 @@ class ApplicationService:
             from_status=from_status,
             to_status=to_status,
             opinion=opinion,
-            extra_data={"version": application.version},
+            operator_role=user.role,
+            client_version=version,
+            deadline_check=deadline_check.get("check", ""),
+            failure_reason="",
+            extra_data={"version": application.version, "is_overdue": deadline_check.get("is_overdue", False)},
         )
 
         return {"success": True, "application": application}
@@ -312,6 +437,7 @@ class BatchService:
                 opinion=item.get("opinion", ""),
                 materials=item.get("materials", []),
                 version=item.get("version", 1),
+                overdue_reason=item.get("overdue_reason", ""),
             )
 
             r = {

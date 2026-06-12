@@ -1,4 +1,4 @@
-import { createSignal, onMount, Show, For } from 'solid-js';
+import { createSignal, onMount, Show, For, createMemo } from 'solid-js';
 import { useParams, useNavigate } from '@solidjs/router';
 import { user } from '../stores/auth';
 import { apiFetch } from '../utils/api';
@@ -38,10 +38,14 @@ interface AuditLog {
   application_id: number;
   operator_id: number;
   operator_name: string;
+  operator_role: string;
   action: string;
   from_status: string;
   to_status: string;
   opinion: string;
+  client_version: number;
+  deadline_check: string;
+  failure_reason: string;
   extra_data: any;
   created_at: string;
 }
@@ -64,6 +68,7 @@ interface Application {
   verified_at: string | null;
   approved_at: string | null;
   opinion_text: string;
+  overdue_reason: string;
   available_actions: string[];
   materials: Material[];
   scan_records: ScanRecord[];
@@ -119,11 +124,15 @@ const MATERIAL_TYPES: Record<string, string[]> = {
   approval: ['审批意见', '会议纪要', '公示截图'],
 };
 
+const OPINION_REQUIRED_ACTIONS = new Set(['verify', 'approve', 'reject']);
+const OVERDUE_REQUIRED_ACTIONS = new Set(['submit', 'verify', 'approve', 'reject']);
+
 export default function ApplicationDetail() {
   const params = useParams();
   const navigate = useNavigate();
   const [app, setApp] = createSignal<Application | null>(null);
   const [opinion, setOpinion] = createSignal('');
+  const [overdueReason, setOverdueReason] = createSignal('');
   const [amount, setAmount] = createSignal('');
   const [loading, setLoading] = createSignal(false);
   const [error, setError] = createSignal('');
@@ -131,11 +140,28 @@ export default function ApplicationDetail() {
   const [newFileName, setNewFileName] = createSignal('');
   const [newMaterialType, setNewMaterialType] = createSignal('');
 
+  const isOverdue = createMemo(() => {
+    const dl = app()?.deadline;
+    if (!dl) return false;
+    return new Date() > new Date(dl);
+  });
+
+  const overdueDays = createMemo(() => {
+    const dl = app()?.deadline;
+    if (!dl) return 0;
+    const diff = Date.now() - new Date(dl).getTime();
+    return Math.max(0, Math.floor(diff / (1000 * 60 * 60 * 24)));
+  });
+
+  const requireOpinion = (action: string) => OPINION_REQUIRED_ACTIONS.has(action);
+  const requireOverdueReason = (action: string) => OVERDUE_REQUIRED_ACTIONS.has(action) && isOverdue();
+
   onMount(async () => {
     try {
       const data = await apiFetch(`/api/applications/${params.id}`);
       setApp(data);
       setAmount(String(data.assistance_amount || ''));
+      setOverdueReason(data.overdue_reason || '');
     } catch (err: any) {
       setError(err.detail || err.message || '加载失败');
     }
@@ -198,8 +224,25 @@ export default function ApplicationDetail() {
     return false;
   };
 
+  const validateBeforeSubmit = (action: string): string | null => {
+    if (requireOpinion(action) && !opinion().trim()) {
+      const stageLabel = action === 'verify' ? '入户核实' : action === 'approve' ? '救助确认' : '驳回';
+      return `${stageLabel}必须填写处理意见`;
+    }
+    if (requireOverdueReason(action) && !overdueReason().trim()) {
+      return `申请已逾期${overdueDays()}天，必须填写逾期说明`;
+    }
+    return null;
+  };
+
   const handleAction = async (action: string) => {
     if (!app()) return;
+    const validationError = validateBeforeSubmit(action);
+    if (validationError) {
+      const appNo = app()?.application_no || '';
+      setError(appNo ? `[${appNo}] ${validationError}` : validationError);
+      return;
+    }
     setLoading(true);
     setError('');
     try {
@@ -208,6 +251,7 @@ export default function ApplicationDetail() {
         opinion: opinion(),
         materials: pendingMaterials(),
         version: app()!.version,
+        overdue_reason: overdueReason(),
       };
       await apiFetch(`/api/applications/${params.id}/advance`, {
         method: 'POST',
@@ -216,6 +260,7 @@ export default function ApplicationDetail() {
       const data = await apiFetch(`/api/applications/${params.id}`);
       setApp(data);
       setOpinion('');
+      setOverdueReason('');
       setPendingMaterials([]);
     } catch (err: any) {
       const msg = err.detail || err.message || '操作失败';
@@ -252,8 +297,21 @@ export default function ApplicationDetail() {
                 >
                   ← 返回队列
                 </button>
-                <h2 style={{ fontSize: '20px', fontWeight: 600 }}>
+                <h2 style={{ fontSize: '20px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '12px' }}>
                   {a.application_no}
+                  <Show when={isOverdue()}>
+                    <span style={{
+                      fontSize: '12px',
+                      padding: '2px 8px',
+                      borderRadius: '4px',
+                      background: '#fef2f2',
+                      color: '#dc2626',
+                      border: '1px solid #fecaca',
+                      fontWeight: 500,
+                    }}>
+                      ⚠️ 已逾期 {overdueDays()} 天
+                    </span>
+                  </Show>
                 </h2>
               </div>
               <StatusBadge status={a.status} />
@@ -274,7 +332,9 @@ export default function ApplicationDetail() {
               <span>身份证号: {a.applicant_id_card}</span>
               <span>困难类型: {DIFFICULTY_LABELS[a.difficulty_type] || a.difficulty_type}</span>
               <span>救助金额: ¥{a.assistance_amount}</span>
-              <span>截止日期: {a.deadline?.slice(0, 10) || '-'}</span>
+              <span style={{ color: isOverdue() ? '#dc2626' : 'inherit' }}>
+                截止日期: {a.deadline?.slice(0, 10) || '-'}
+              </span>
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: '20px' }}>
@@ -378,6 +438,32 @@ export default function ApplicationDetail() {
                 padding: '24px',
                 boxShadow: 'var(--shadow)',
               }}>
+                <Show when={error()}>
+                  <div style={{
+                    color: 'var(--danger)',
+                    fontSize: '13px',
+                    padding: '10px 12px',
+                    background: '#fef2f2',
+                    borderRadius: 'var(--radius)',
+                    marginBottom: '16px',
+                    border: '1px solid #fecaca',
+                  }}>{error()}</div>
+                </Show>
+
+                <Show when={isOverdue() && a.status !== 'approved' && a.status !== 'rejected'}>
+                  <div style={{
+                    background: '#fffbea',
+                    border: '1px solid #fef3c7',
+                    borderRadius: 'var(--radius)',
+                    padding: '12px 14px',
+                    marginBottom: '16px',
+                    fontSize: '13px',
+                    color: '#92400e',
+                  }}>
+                    ⚠️ 申请已逾期 <strong>{overdueDays()}</strong> 天，原截止日期：{a.deadline?.slice(0, 10)}，请填写逾期说明后再推进。
+                  </div>
+                </Show>
+
                 <Show when={a.status === 'draft'}>
                   <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '16px' }}>困难帮扶 - 申请材料</h3>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
@@ -390,6 +476,28 @@ export default function ApplicationDetail() {
                     <div style={{ fontSize: '14px' }}>
                       <span style={{ color: 'var(--text-light)' }}>困难说明:</span> {a.difficulty_description}
                     </div>
+
+                    <Show when={requireOverdueReason('submit')}>
+                      <label style={{ fontSize: '13px', color: 'var(--text-light)', display: 'block' }}>
+                        逾期说明 <span style={{ color: 'var(--danger)' }}>*</span>
+                        <textarea
+                          value={overdueReason()}
+                          onInput={(e) => setOverdueReason(e.currentTarget.value)}
+                          rows={2}
+                          placeholder="请填写逾期未及时处理的原因..."
+                          style={{
+                            display: 'block',
+                            width: '100%',
+                            padding: '8px 12px',
+                            border: '1px solid var(--border)',
+                            borderRadius: 'var(--radius)',
+                            marginTop: '4px',
+                            fontSize: '14px',
+                            resize: 'vertical',
+                          }}
+                        />
+                      </label>
+                    </Show>
 
                     <Show when={canEditMaterials()}>
                       <div style={{ marginTop: '12px', padding: '12px', background: '#f7fafc', borderRadius: 'var(--radius)' }}>
@@ -441,10 +549,6 @@ export default function ApplicationDetail() {
                       </div>
                     </Show>
 
-                    <Show when={error()}>
-                      <div style={{ color: 'var(--danger)', fontSize: '13px' }}>{error()}</div>
-                    </Show>
-
                     <Show when={user()?.role === 'community_worker'}>
                       <button
                         onClick={() => handleAction('submit')}
@@ -477,7 +581,7 @@ export default function ApplicationDetail() {
                     </div>
 
                     <label style={{ fontSize: '13px', color: 'var(--text-light)', display: 'block' }}>
-                      核实意见
+                      核实意见 <span style={{ color: 'var(--danger)' }}>*</span>
                       <textarea
                         value={opinion()}
                         onInput={(e) => setOpinion(e.currentTarget.value)}
@@ -495,6 +599,28 @@ export default function ApplicationDetail() {
                         }}
                       />
                     </label>
+
+                    <Show when={requireOverdueReason('verify')}>
+                      <label style={{ fontSize: '13px', color: 'var(--text-light)', display: 'block' }}>
+                        逾期说明 <span style={{ color: 'var(--danger)' }}>*</span>
+                        <textarea
+                          value={overdueReason()}
+                          onInput={(e) => setOverdueReason(e.currentTarget.value)}
+                          rows={2}
+                          placeholder="请填写逾期未及时核实的原因..."
+                          style={{
+                            display: 'block',
+                            width: '100%',
+                            padding: '8px 12px',
+                            border: '1px solid var(--border)',
+                            borderRadius: 'var(--radius)',
+                            marginTop: '4px',
+                            fontSize: '14px',
+                            resize: 'vertical',
+                          }}
+                        />
+                      </label>
+                    </Show>
 
                     <Show when={canEditMaterials()}>
                       <div style={{ padding: '12px', background: '#f7fafc', borderRadius: 'var(--radius)' }}>
@@ -544,10 +670,6 @@ export default function ApplicationDetail() {
                           已添加待提交材料: {pendingByStage('verification').length} 份
                         </div>
                       </div>
-                    </Show>
-
-                    <Show when={error()}>
-                      <div style={{ color: 'var(--danger)', fontSize: '13px' }}>{error()}</div>
                     </Show>
 
                     <Show when={user()?.role === 'clerk'}>
@@ -614,7 +736,7 @@ export default function ApplicationDetail() {
                     </label>
 
                     <label style={{ fontSize: '13px', color: 'var(--text-light)', display: 'block' }}>
-                      审批意见
+                      审批意见 <span style={{ color: 'var(--danger)' }}>*</span>
                       <textarea
                         value={opinion()}
                         onInput={(e) => setOpinion(e.currentTarget.value)}
@@ -632,6 +754,28 @@ export default function ApplicationDetail() {
                         }}
                       />
                     </label>
+
+                    <Show when={requireOverdueReason('approve')}>
+                      <label style={{ fontSize: '13px', color: 'var(--text-light)', display: 'block' }}>
+                        逾期说明 <span style={{ color: 'var(--danger)' }}>*</span>
+                        <textarea
+                          value={overdueReason()}
+                          onInput={(e) => setOverdueReason(e.currentTarget.value)}
+                          rows={2}
+                          placeholder="请填写逾期未及时审批的原因..."
+                          style={{
+                            display: 'block',
+                            width: '100%',
+                            padding: '8px 12px',
+                            border: '1px solid var(--border)',
+                            borderRadius: 'var(--radius)',
+                            marginTop: '4px',
+                            fontSize: '14px',
+                            resize: 'vertical',
+                          }}
+                        />
+                      </label>
+                    </Show>
 
                     <Show when={canEditMaterials()}>
                       <div style={{ padding: '12px', background: '#f7fafc', borderRadius: 'var(--radius)' }}>
@@ -683,10 +827,6 @@ export default function ApplicationDetail() {
                       </div>
                     </Show>
 
-                    <Show when={error()}>
-                      <div style={{ color: 'var(--danger)', fontSize: '13px' }}>{error()}</div>
-                    </Show>
-
                     <Show when={user()?.role === 'leader'}>
                       <div style={{ display: 'flex', gap: '12px', marginTop: '8px' }}>
                         <button
@@ -735,6 +875,9 @@ export default function ApplicationDetail() {
                     <Show when={a.opinion_text}>
                       <div><span style={{ color: 'var(--text-light)' }}>处理意见:</span> {a.opinion_text}</div>
                     </Show>
+                    <Show when={a.overdue_reason}>
+                      <div><span style={{ color: 'var(--text-light)' }}>逾期说明:</span> {a.overdue_reason}</div>
+                    </Show>
                   </div>
                 </Show>
               </div>
@@ -753,23 +896,41 @@ export default function ApplicationDetail() {
                   <thead>
                     <tr style={{ borderBottom: '1px solid var(--border)' }}>
                       <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 600, color: 'var(--text-light)' }}>操作人</th>
+                      <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 600, color: 'var(--text-light)' }}>角色</th>
                       <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 600, color: 'var(--text-light)' }}>动作</th>
                       <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 600, color: 'var(--text-light)' }}>状态变更</th>
+                      <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 600, color: 'var(--text-light)' }}>时限检查</th>
                       <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 600, color: 'var(--text-light)' }}>意见</th>
+                      <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 600, color: 'var(--text-light)' }}>失败原因</th>
                       <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 600, color: 'var(--text-light)' }}>时间</th>
                     </tr>
                   </thead>
                   <tbody>
                     <For each={a.audit_logs}>
-                      {(entry) => (
-                        <tr style={{ borderBottom: '1px solid #f0f0f0' }}>
-                          <td style={{ padding: '8px 12px' }}>{entry.operator_name}</td>
-                          <td style={{ padding: '8px 12px' }}>{ACTION_LABELS[entry.action] || entry.action}</td>
-                          <td style={{ padding: '8px 12px' }}>{entry.from_status} → {entry.to_status}</td>
-                          <td style={{ padding: '8px 12px' }}>{entry.opinion || '-'}</td>
-                          <td style={{ padding: '8px 12px', color: 'var(--text-light)' }}>{fmtTime(entry.created_at)}</td>
-                        </tr>
-                      )}
+                      {(entry) => {
+                        const isFailure = !!entry.failure_reason;
+                        return (
+                          <tr style={{
+                            borderBottom: '1px solid #f0f0f0',
+                            background: isFailure ? '#fef2f2' : 'inherit',
+                          }}>
+                            <td style={{ padding: '8px 12px' }}>{entry.operator_name}</td>
+                            <td style={{ padding: '8px 12px', fontSize: '12px', color: 'var(--text-light)' }}>{entry.operator_role || '-'}</td>
+                            <td style={{ padding: '8px 12px' }}>{ACTION_LABELS[entry.action] || entry.action}</td>
+                            <td style={{ padding: '8px 12px' }}>{entry.from_status || '-'} → {entry.to_status || '-'}</td>
+                            <td style={{ padding: '8px 12px', fontSize: '12px' }}>
+                              <span style={{
+                                color: entry.deadline_check?.includes('overdue') ? 'var(--warning)' : 'var(--text-light)',
+                              }}>
+                                {entry.deadline_check || '-'}
+                              </span>
+                            </td>
+                            <td style={{ padding: '8px 12px' }}>{entry.opinion || '-'}</td>
+                            <td style={{ padding: '8px 12px', fontSize: '12px', color: 'var(--danger)' }}>{entry.failure_reason || '-'}</td>
+                            <td style={{ padding: '8px 12px', color: 'var(--text-light)' }}>{fmtTime(entry.created_at)}</td>
+                          </tr>
+                        );
+                      }}
                     </For>
                   </tbody>
                 </table>

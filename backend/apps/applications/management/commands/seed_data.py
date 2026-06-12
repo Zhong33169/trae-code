@@ -101,6 +101,33 @@ class Command(BaseCommand):
                 "verified_at": now - timedelta(days=6),
                 "deadline": now - timedelta(days=1),
             },
+            {
+                "application_no": "BF20260006",
+                "creator": users["community_worker"],
+                "applicant_name": "郑大妈",
+                "applicant_id_card": "110101195206066789",
+                "difficulty_type": "medical",
+                "difficulty_description": "糖尿病并发症，长期医疗支出较大",
+                "assistance_amount": 6000.00,
+                "status": "pending_verify",
+                "submitted_at": now - timedelta(days=15),
+                "deadline": now - timedelta(days=8),
+                "opinion_text": "",
+            },
+            {
+                "application_no": "BF20260007",
+                "creator": users["community_worker"],
+                "applicant_name": "冯大叔",
+                "applicant_id_card": "110101194807077890",
+                "difficulty_type": "low_income",
+                "difficulty_description": "子女外出务工失联，独居老人生活困难",
+                "assistance_amount": 3500.00,
+                "status": "pending_approve",
+                "submitted_at": now - timedelta(days=20),
+                "verified_at": now - timedelta(days=15),
+                "deadline": now - timedelta(days=5),
+                "opinion_text": "",
+            },
         ]
 
         for app_data in applications_data:
@@ -128,6 +155,23 @@ class Command(BaseCommand):
                         file_path=f"uploads/{app.application_no}/核验报告.pdf",
                         material_type="核验报告",
                     )
+
+                if app.application_no in ("BF20260006", "BF20260007"):
+                    ApplicationMaterial.objects.create(
+                        application=app,
+                        stage="application",
+                        file_name=f"{app.applicant_name}_申请表.pdf",
+                        file_path=f"uploads/{app.application_no}/申请表.pdf",
+                        material_type="申请表",
+                    )
+                    if app.application_no == "BF20260007":
+                        ApplicationMaterial.objects.create(
+                            application=app,
+                            stage="verification",
+                            file_name=f"{app.applicant_name}_入户访谈记录.pdf",
+                            file_path=f"uploads/{app.application_no}/访谈记录.pdf",
+                            material_type="访谈记录",
+                        )
 
                 if app.status == "approved":
                     ApplicationMaterial.objects.create(
