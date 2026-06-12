@@ -18,6 +18,7 @@ interface FormListProps {
 }
 
 export default function FormList({ tabKey, tabConfig }: FormListProps) {
+  const [rawForms, setRawForms] = useState<MerchantOnboardingForm[]>([]);
   const [forms, setForms] = useState<MerchantOnboardingForm[]>([]);
   const [loading, setLoading] = useState(true);
   const [currentUser, setCurrentUser] = useState<any>(null);
@@ -65,7 +66,11 @@ export default function FormList({ tabKey, tabConfig }: FormListProps) {
 
   useEffect(() => {
     loadData();
-  }, [filters, viewMode, tabKey]);
+  }, [filters, tabKey]);
+
+  useEffect(() => {
+    applyViewFilter(rawForms);
+  }, [viewMode, currentUser, rawForms]);
 
   useEffect(() => {
     getCurrentUser().then((res) => {
@@ -73,11 +78,37 @@ export default function FormList({ tabKey, tabConfig }: FormListProps) {
     });
   }, []);
 
+  function applyViewFilter(source: MerchantOnboardingForm[]) {
+    let list = [...source];
+
+    if (viewMode === 'queue' && currentUser) {
+      list = list.filter((f: any) =>
+        f.currentRole === currentUser.role || f.hasException
+      );
+    }
+
+    list.sort((a: any, b: any) => {
+      if (a.hasException !== b.hasException) return a.hasException ? -1 : 1;
+      if (a.isOverdue !== b.isOverdue) return a.isOverdue ? -1 : 1;
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    });
+
+    setForms(list);
+    const validIds = new Set(list.map((f) => f.id));
+    setSelectedIds((prev) => {
+      const next = new Set<string>();
+      prev.forEach((id) => { if (validIds.has(id)) next.add(id); });
+      return next;
+    });
+  }
+
   async function loadData() {
     setLoading(true);
     try {
       const params: any = {
         keyword: filters.keyword || undefined,
+        tabRoles: tabConfig.roles.join(','),
+        tabStatuses: tabConfig.statuses.join(','),
       };
 
       if (filters.status !== 'ALL') {
@@ -93,25 +124,12 @@ export default function FormList({ tabKey, tabConfig }: FormListProps) {
 
       const res = await getForms(params);
       if (res.success) {
-        let allForms = res.data.items;
-
-        if (viewMode === 'queue' && currentUser) {
-          allForms = allForms.filter((f: any) =>
-            f.currentRole === currentUser.role || f.hasException
-          );
-        }
-
-        allForms = allForms.filter((f: any) =>
-          tabConfig.statuses.includes(f.status) || f.hasException
-        );
-
-        allForms.sort((a: any, b: any) => {
-          if (a.hasException !== b.hasException) return a.hasException ? -1 : 1;
-          if (a.isOverdue !== b.isOverdue) return a.isOverdue ? -1 : 1;
-          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-        });
-
-        setForms(allForms);
+        const fetched: MerchantOnboardingForm[] = res.data.items.map((f: any) => ({
+          ...f,
+          statusLabel: statusLabels[f.status as FormStatus],
+        }));
+        setRawForms(fetched);
+        applyViewFilter(fetched);
       }
     } catch (err) {
       console.error('Failed to load forms:', err);
@@ -177,9 +195,10 @@ export default function FormList({ tabKey, tabConfig }: FormListProps) {
 
   const selectedForms = forms.filter((f) => selectedIds.has(f.id));
 
-  const queueCount = forms.filter((f) => currentUser && f.currentRole === currentUser.role).length;
-  const exceptionCount = forms.filter((f) => f.hasException).length;
-  const overdueCount = forms.filter((f) => f.isOverdue).length;
+  const queueCount = rawForms.filter((f) => currentUser && f.currentRole === currentUser.role).length;
+  const exceptionCount = rawForms.filter((f) => f.hasException).length;
+  const overdueCount = rawForms.filter((f) => f.isOverdue).length;
+  const totalCount = rawForms.length;
 
   return (
     <div>
@@ -219,7 +238,7 @@ export default function FormList({ tabKey, tabConfig }: FormListProps) {
           <div className="stat-label">异常单</div>
         </div>
         <div className="stat-card stat-neutral">
-          <div className="stat-count">{forms.length}</div>
+          <div className="stat-count">{totalCount}</div>
           <div className="stat-label">本页签总计</div>
         </div>
       </div>

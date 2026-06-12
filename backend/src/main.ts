@@ -316,8 +316,7 @@ server.get('/api/users/current', async (request, reply) => {
 
 server.get('/api/forms', async (request, reply) => {
   await ensureDb();
-  const { status, hasException, isOverdue, currentRole, keyword } = request.query as any;
-  const user = currentUser;
+  const { status, hasException, isOverdue, currentRole, keyword, tabRoles, tabStatuses } = request.query as any;
 
   let sql = 'SELECT * FROM merchant_onboarding_forms WHERE 1=1';
   const params: any[] = [];
@@ -325,12 +324,23 @@ server.get('/api/forms', async (request, reply) => {
   if (currentRole) {
     sql += ' AND current_role = ?';
     params.push(currentRole);
-  } else if (user) {
-    sql += ' AND current_role = ?';
-    params.push(user.role);
   }
 
-  if (status && status !== 'ALL') {
+  if (tabRoles && typeof tabRoles === 'string') {
+    const roles = tabRoles.split(',');
+    if (roles.length > 0) {
+      sql += ` AND current_role IN (${roles.map(() => '?').join(',')})`;
+      params.push(...roles);
+    }
+  }
+
+  if (tabStatuses && typeof tabStatuses === 'string') {
+    const statuses = tabStatuses.split(',');
+    if (statuses.length > 0) {
+      sql += ` AND status IN (${statuses.map(() => '?').join(',')})`;
+      params.push(...statuses);
+    }
+  } else if (status && status !== 'ALL') {
     sql += ' AND status = ?';
     params.push(status);
   }
@@ -353,6 +363,7 @@ server.get('/api/forms', async (request, reply) => {
 
   const rows = await prepare(sql).all(...params);
   const forms = rows.map(rowToForm);
+  const user = currentUser;
 
   return {
     success: true,
@@ -507,14 +518,6 @@ server.post('/api/forms/:id/action', async (request, reply) => {
 
   const form = rowToForm(row);
 
-  if (!checkRolePermission(user.role, form, action)) {
-    reply.code(403);
-    return {
-      success: false,
-      error: `当前角色【${roleLabels[user.role]}】无权执行此操作【${actionLabels[action]}】，当前单据应由【${roleLabels[form.currentRole]}】处理`,
-    };
-  }
-
   if (form.hasException && action !== ActionType.ADD_AUDIT_NOTE && action !== ActionType.CORRECT_OFFLINE_STATUS && action !== ActionType.RESOLVE_EXCEPTION) {
     await createAuditLog(id, user.id, user.role, ActionType.ADD_AUDIT_NOTE, {
       reason: `尝试操作【${actionLabels[action]}】被拦截`,
@@ -525,6 +528,22 @@ server.post('/api/forms/:id/action', async (request, reply) => {
       success: false,
       error: `入驻单存在异常，无法处理：${form.exceptionMessage}`,
       exceptionMessage: form.exceptionMessage,
+    };
+  }
+
+  if (action === ActionType.RESOLVE_EXCEPTION && !reason) {
+    reply.code(400);
+    return {
+      success: false,
+      error: '解除异常标记必须填写解除原因',
+    };
+  }
+
+  if (!checkRolePermission(user.role, form, action)) {
+    reply.code(403);
+    return {
+      success: false,
+      error: `当前角色【${roleLabels[user.role]}】无权执行此操作【${actionLabels[action]}】，当前单据应由【${roleLabels[form.currentRole]}】处理`,
     };
   }
 
