@@ -1,12 +1,13 @@
 import { defineConfig } from "vite";
-import react from "@vitejs/plugin-react";
+import { createStartVitePlugin } from "@tanstack/start/vite";
 import path from "path";
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [createStartVitePlugin()],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
+      "~": path.resolve(__dirname, "./app"),
     },
   },
   server: {

@@ -490,10 +490,17 @@ func ReviewerReview(c *gin.Context) {
 	}
 
 	if req.Approve {
-		var count int64
-		database.DB.Model(&models.Evidence{}).Where("task_id = ? AND type = ?", task.ID, config.EvidenceTypeReview).Count(&count)
-		if count == 0 {
-			utils.MissingEvidenceError(c, "归档必须有复核证据")
+		var processCount int64
+		database.DB.Model(&models.Evidence{}).Where("task_id = ? AND type = ?", task.ID, config.EvidenceTypeProcess).Count(&processCount)
+		if processCount == 0 {
+			utils.MissingEvidenceError(c, "归档被拦截：缺少过程核验证据（主管审核前置不完整）")
+			return
+		}
+
+		var reviewCount int64
+		database.DB.Model(&models.Evidence{}).Where("task_id = ? AND type = ?", task.ID, config.EvidenceTypeReview).Count(&reviewCount)
+		if reviewCount == 0 {
+			utils.MissingEvidenceError(c, "归档被拦截：缺少复核归档证据")
 			return
 		}
 	}

@@ -4,9 +4,9 @@ import {
   HeadContent,
   Scripts,
 } from "@tanstack/react-router";
-import { AuthProvider } from "../src/context/AuthContext";
+import { AuthProvider } from "@/context/AuthContext";
 import { Toaster } from "sonner";
-import "../src/styles/globals.css";
+import "@/styles/globals.css";
 
 export const Route = createRootRoute({
   component: RootComponent,
