@@ -45,6 +45,7 @@ func main() {
 		batch := api.Group("/batch")
 		batch.Use(middleware.AuthMiddleware())
 		{
+			batch.POST("/registrar-submit", middleware.RoleMiddleware(config.RoleRegistrar), handlers.BatchRegistrarSubmit)
 			batch.POST("/supervisor-review", middleware.RoleMiddleware(config.RoleSupervisor), handlers.BatchSupervisorReview)
 			batch.POST("/reviewer-review", middleware.RoleMiddleware(config.RoleReviewer), handlers.BatchReviewerReview)
 		}

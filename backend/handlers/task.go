@@ -115,7 +115,26 @@ func CreateTask(c *gin.Context) {
 		return
 	}
 
+	hasRegEvidence := false
+	for _, ev := range req.Evidences {
+		if ev.Type == config.EvidenceTypeRegistration {
+			hasRegEvidence = true
+			break
+		}
+	}
+	if !hasRegEvidence {
+		utils.MissingEvidenceError(c, "创建任务必须至少有一个登记证据")
+		return
+	}
+
 	user := middleware.GetCurrentUser(c)
+
+	var existingTask models.SamplingTask
+	result := database.DB.Where("task_no = ?", req.TaskNo).First(&existingTask)
+	if result.Error == nil {
+		utils.ParamError(c, "任务编号已存在")
+		return
+	}
 
 	tx := database.DB.Begin()
 
@@ -124,7 +143,7 @@ func CreateTask(c *gin.Context) {
 		ProjectName:    req.ProjectName,
 		SampleLocation: req.SampleLocation,
 		SampleType:     req.SampleType,
-		Status:         config.StatusPendingReview,
+		Status:         config.StatusDraft,
 		Version:        1,
 		RegistrarID:    user.ID,
 		RegistrarName:  user.Name,
@@ -162,7 +181,7 @@ func CreateTask(c *gin.Context) {
 		OperatorID:   user.ID,
 		OperatorName: user.Name,
 		OperatorRole: user.Role,
-		Remark:       "创建采样任务",
+		Remark:       "创建采样任务（草稿）",
 		CreatedAt:    time.Now(),
 	}
 	if err := tx.Create(&log).Error; err != nil {
@@ -199,7 +218,9 @@ func UpdateTask(c *gin.Context) {
 		return
 	}
 
-	if task.Status != config.StatusReviewRejected && task.Status != config.StatusReviewReturned {
+	if task.Status != config.StatusDraft &&
+		task.Status != config.StatusReviewRejected &&
+		task.Status != config.StatusReviewReturned {
 		utils.StatusError(c, "当前状态不允许修改")
 		return
 	}
@@ -234,6 +255,9 @@ func UpdateTask(c *gin.Context) {
 	}
 
 	for _, ev := range req.Evidences {
+		if ev.Type != config.EvidenceTypeRegistration {
+			continue
+		}
 		evidence := models.Evidence{
 			TaskID:      task.ID,
 			Type:        ev.Type,
@@ -293,13 +317,22 @@ func SubmitTask(c *gin.Context) {
 		return
 	}
 
-	if task.Status != config.StatusReviewRejected && task.Status != config.StatusReviewReturned {
+	if task.Status != config.StatusDraft &&
+		task.Status != config.StatusReviewRejected &&
+		task.Status != config.StatusReviewReturned {
 		utils.StatusError(c, "当前状态不允许提交")
 		return
 	}
 
 	if task.Version != req.Version {
 		utils.VersionConflictError(c)
+		return
+	}
+
+	var regCount int64
+	database.DB.Model(&models.Evidence{}).Where("task_id = ? AND type = ?", task.ID, config.EvidenceTypeRegistration).Count(&regCount)
+	if regCount == 0 {
+		utils.MissingEvidenceError(c, "提交审核必须有登记证据")
 		return
 	}
 

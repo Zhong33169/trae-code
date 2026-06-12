@@ -10,6 +10,7 @@ export interface User {
 }
 
 export type TaskStatus =
+  | "draft"
   | "pending_review"
   | "review_passed"
   | "review_rejected"
@@ -17,6 +18,7 @@ export type TaskStatus =
   | "review_returned";
 
 export const STATUS_LABELS: Record<TaskStatus, string> = {
+  draft: "草稿",
   pending_review: "待审核",
   review_passed: "审核通过待复核",
   review_rejected: "审核驳回",
@@ -108,4 +110,16 @@ export interface ApiResponse<T> {
   code: number;
   message: string;
   data: T;
+}
+
+export interface BatchReviewItem {
+  id: number;
+  version: number;
+  pass: boolean;
+  reason?: string;
+}
+
+export interface BatchSubmitItem {
+  id: number;
+  version: number;
 }

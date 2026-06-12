@@ -43,6 +43,7 @@ export function TaskDetail({
     switch (currentRole) {
       case "registrar":
         if (
+          task.status === "draft" ||
           task.status === "review_rejected" ||
           task.status === "review_returned"
         ) {

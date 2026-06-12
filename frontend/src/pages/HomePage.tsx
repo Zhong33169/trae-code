@@ -6,9 +6,16 @@ import { TaskDetail } from "../components/TaskDetail";
 import { ReviewDialog } from "../components/ReviewDialog";
 import { BatchResultDialog } from "../components/BatchResultDialog";
 import { TaskFormDialog } from "../components/TaskFormDialog";
+import { Modal } from "../components/Modal";
+import { Button } from "../components/Button";
 import { useAuth } from "../context/AuthContext";
 import { taskApi, batchApi } from "../api/client";
-import type { SamplingTask, BatchResult, TaskStatus } from "../types";
+import type {
+  SamplingTask,
+  BatchResult,
+  BatchSubmitItem,
+  UserRole,
+} from "../types";
 import type { BatchReviewItem } from "../api/client";
 
 interface ReviewDialogState {
@@ -29,12 +36,17 @@ interface TaskFormState {
   task: SamplingTask | null;
 }
 
+interface BatchReviewDialogState {
+  isOpen: boolean;
+  action: "supervisor_pass" | "supervisor_reject" | "reviewer_approve" | "reviewer_return" | "submit" | null;
+}
+
 export default function HomePage() {
   const { user } = useAuth();
   const [tasks, setTasks] = useState<SamplingTask[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
-  const [pageSize] = useState(10);
+  const [pageSize] = useState(20);
   const [statusFilter, setStatusFilter] = useState("");
   const [keyword, setKeyword] = useState("");
   const [listLoading, setListLoading] = useState(false);
@@ -50,6 +62,13 @@ export default function HomePage() {
     taskId: null,
   });
   const [reviewLoading, setReviewLoading] = useState(false);
+
+  const [batchReviewDialog, setBatchReviewDialog] = useState<BatchReviewDialogState>({
+    isOpen: false,
+    action: null,
+  });
+  const [batchReason, setBatchReason] = useState("");
+  const [batchLoading, setBatchLoading] = useState(false);
 
   const [batchResult, setBatchResult] = useState<BatchResult | null>(null);
   const [batchResultOpen, setBatchResultOpen] = useState(false);
@@ -104,7 +123,16 @@ export default function HomePage() {
     setSelectedTaskId(null);
     setSelectedTask(null);
     setPage(1);
+    setStatusFilter("");
+    setKeyword("");
   }, [user?.role]);
+
+  const refreshAll = useCallback(async () => {
+    await fetchTasks();
+    if (selectedTaskId) {
+      await fetchTaskDetail(selectedTaskId);
+    }
+  }, [fetchTasks, selectedTaskId, fetchTaskDetail]);
 
   const handleSelectTask = (task: SamplingTask) => {
     setSelectedTaskId(task.id);
@@ -147,49 +175,72 @@ export default function HomePage() {
     setSelectedIds(new Set());
   };
 
-  const handleBatchAction = async (action: string) => {
-    if (selectedIds.size === 0) return;
+  const openBatchAction = (action: string) => {
+    if (selectedIds.size === 0) {
+      toast.warning("请先选择任务");
+      return;
+    }
+    setBatchReviewDialog({ isOpen: true, action: action as BatchReviewDialogState["action"] });
+    setBatchReason("");
+  };
+
+  const handleBatchConfirm = async () => {
+    if (!batchReviewDialog.action || selectedIds.size === 0) return;
 
     const idArray = Array.from(selectedIds);
+    const action = batchReviewDialog.action;
+    const needReason =
+      action === "supervisor_reject" || action === "reviewer_return";
 
-    if (action === "submit") {
-      toast.info("批量提交功能暂未开放");
+    if (needReason && !batchReason.trim()) {
+      toast.error("请填写原因");
       return;
     }
 
-    setReviewLoading(true);
+    setBatchLoading(true);
     try {
-      const items: BatchReviewItem[] = idArray.map((id) => {
-        const task = tasks.find((t) => t.id === id);
-        return {
-          id,
-          version: task?.version || 1,
-          pass: action === "pass" || action === "approve",
-          reason: "",
-        };
-      });
-
       let result: BatchResult | undefined;
-      if (user?.role === "supervisor") {
-        result = await batchApi.supervisorReview(items);
-      } else if (user?.role === "reviewer") {
-        result = await batchApi.reviewerReview(items);
+
+      if (action === "submit") {
+        const items: BatchSubmitItem[] = idArray.map((id) => {
+          const task = tasks.find((t) => t.id === id);
+          return {
+            id,
+            version: task?.version || 1,
+          };
+        });
+        result = await batchApi.registrarSubmit(items);
+      } else {
+        const items: BatchReviewItem[] = idArray.map((id) => {
+          const task = tasks.find((t) => t.id === id);
+          return {
+            id,
+            version: task?.version || 1,
+            pass: action === "supervisor_pass" || action === "reviewer_approve",
+            reason: batchReason,
+          };
+        });
+
+        if (user?.role === "supervisor") {
+          result = await batchApi.supervisorReview(items);
+        } else if (user?.role === "reviewer") {
+          result = await batchApi.reviewerReview(items);
+        }
       }
 
       if (result) {
         setBatchResult(result);
         setBatchResultOpen(true);
       }
-      await fetchTasks();
-      if (selectedTaskId) {
-        await fetchTaskDetail(selectedTaskId);
-      }
+
+      await refreshAll();
       toast.success("批量操作完成");
     } catch (error) {
       const err = error as Error;
       toast.error(`批量操作失败: ${err.message}`);
     } finally {
-      setReviewLoading(false);
+      setBatchLoading(false);
+      setBatchReviewDialog({ isOpen: false, action: null });
       setSelectedIds(new Set());
     }
   };
@@ -262,10 +313,7 @@ export default function HomePage() {
       if (resultTask) {
         setSelectedTask(resultTask);
       }
-      await fetchTasks();
-      if (selectedTaskId) {
-        await fetchTaskDetail(selectedTaskId);
-      }
+      await refreshAll();
       toast.success("操作成功");
     } catch (error) {
       const err = error as Error;
@@ -289,7 +337,7 @@ export default function HomePage() {
         };
       case "supervisor_pass":
         return {
-          title: "审核通过",
+          title: "审核通过（上传过程核验证据）",
           actionLabel: "通过",
           actionVariant: "success" as const,
           showReason: false,
@@ -307,7 +355,7 @@ export default function HomePage() {
         };
       case "reviewer_approve":
         return {
-          title: "复核归档",
+          title: "复核归档（上传复核证据）",
           actionLabel: "归档",
           actionVariant: "success" as const,
           showReason: false,
@@ -335,11 +383,71 @@ export default function HomePage() {
     }
   };
 
+  const getBatchDialogConfig = () => {
+    switch (batchReviewDialog.action) {
+      case "submit":
+        return {
+          title: `批量提交审核（${selectedIds.size}条）`,
+          description: "将选中的草稿、驳回、退回任务提交至主管审核",
+          actionLabel: "提交",
+          actionVariant: "primary" as const,
+          showReason: false,
+          reasonPlaceholder: "",
+        };
+      case "supervisor_pass":
+        return {
+          title: `批量审核通过（${selectedIds.size}条）`,
+          description: "只有已上传过过程核验证据的任务才能审核通过，缺少证据的将标注失败",
+          actionLabel: "批量通过",
+          actionVariant: "success" as const,
+          showReason: false,
+          reasonPlaceholder: "",
+        };
+      case "supervisor_reject":
+        return {
+          title: `批量审核驳回（${selectedIds.size}条）`,
+          description: "将选中的待审核任务驳回给登记员补正",
+          actionLabel: "批量驳回",
+          actionVariant: "danger" as const,
+          showReason: true,
+          reasonPlaceholder: "请填写统一驳回原因...",
+        };
+      case "reviewer_approve":
+        return {
+          title: `批量复核归档（${selectedIds.size}条）`,
+          description: "只有已上传过复核证据的任务才能归档，缺少证据的将标注失败",
+          actionLabel: "批量归档",
+          actionVariant: "success" as const,
+          showReason: false,
+          reasonPlaceholder: "",
+        };
+      case "reviewer_return":
+        return {
+          title: `批量复核退回（${selectedIds.size}条）`,
+          description: "将选中的待复核任务退回给登记员补正",
+          actionLabel: "批量退回",
+          actionVariant: "danger" as const,
+          showReason: true,
+          reasonPlaceholder: "请填写统一退回原因...",
+        };
+      default:
+        return {
+          title: "",
+          description: "",
+          actionLabel: "",
+          actionVariant: "primary" as const,
+          showReason: false,
+          reasonPlaceholder: "",
+        };
+    }
+  };
+
   const handleCreateTask = () => {
     setTaskForm({ isOpen: true, mode: "create", task: null });
   };
 
   const handleEditTask = () => {
+    if (!selectedTask) return;
     setTaskForm({ isOpen: true, mode: "edit", task: selectedTask });
   };
 
@@ -347,16 +455,17 @@ export default function HomePage() {
     setTaskFormLoading(true);
     try {
       if (taskForm.mode === "create") {
-        await taskApi.create(data);
-        toast.success("任务创建成功");
+        const created = await taskApi.create(data);
+        toast.success("任务创建成功（草稿状态）");
+        setSelectedTaskId(created.id);
       } else if (taskForm.mode === "edit" && selectedTaskId) {
         await taskApi.update(selectedTaskId, {
           ...data,
           version: selectedTask?.version || 1,
         });
-        toast.success("任务更新成功");
+        toast.success("任务补正成功，可继续提交审核");
       }
-      await fetchTasks();
+      await refreshAll();
       setTaskForm({ isOpen: false, mode: "create", task: null });
     } catch (error) {
       const err = error as Error;
@@ -366,11 +475,13 @@ export default function HomePage() {
     }
   };
 
+  const role = user?.role as UserRole | undefined;
+
   return (
     <div className="h-screen flex flex-col bg-gray-50">
       <Header />
 
-      <main className="flex-1 flex overflow-hidden p-4 gap-4 min-w-[1200px]">
+      <main className="flex-1 flex overflow-hidden p-4 gap-4 min-w-[1280px]">
         <div className="flex-[6] min-w-0">
           <TaskList
             tasks={tasks}
@@ -386,10 +497,10 @@ export default function HomePage() {
             onPageChange={handlePageChange}
             onStatusFilter={handleStatusFilter}
             onKeywordSearch={handleKeywordSearch}
-            currentRole={user?.role || null}
+            currentRole={role || null}
             statusFilter={statusFilter}
             keyword={keyword}
-            onBatchAction={handleBatchAction}
+            onBatchAction={openBatchAction}
             onCreateTask={handleCreateTask}
           />
         </div>
@@ -398,21 +509,25 @@ export default function HomePage() {
           <TaskDetail
             task={selectedTask}
             loading={detailLoading}
-            currentRole={user?.role || null}
+            currentRole={role || null}
             onEdit={handleEditTask}
-            onSubmit={() => openReviewDialog("submit", selectedTaskId!)}
-            onSupervisorReview={(action) =>
-              openReviewDialog(
-                action === "pass" ? "supervisor_pass" : "supervisor_reject",
-                selectedTaskId!
-              )
-            }
-            onReviewerReview={(action) =>
-              openReviewDialog(
-                action === "approve" ? "reviewer_approve" : "reviewer_return",
-                selectedTaskId!
-              )
-            }
+            onSubmit={() => {
+              if (selectedTaskId) openReviewDialog("submit", selectedTaskId);
+            }}
+            onSupervisorReview={(action) => {
+              if (selectedTaskId)
+                openReviewDialog(
+                  action === "pass" ? "supervisor_pass" : "supervisor_reject",
+                  selectedTaskId
+                );
+            }}
+            onReviewerReview={(action) => {
+              if (selectedTaskId)
+                openReviewDialog(
+                  action === "approve" ? "reviewer_approve" : "reviewer_return",
+                  selectedTaskId
+                );
+            }}
           />
         </div>
       </main>
@@ -431,6 +546,55 @@ export default function HomePage() {
         showEvidence={getReviewDialogConfig().showEvidence}
         evidenceType={getReviewDialogConfig().evidenceType}
       />
+
+      <Modal
+        isOpen={batchReviewDialog.isOpen}
+        onClose={() => setBatchReviewDialog({ isOpen: false, action: null })}
+        title={getBatchDialogConfig().title}
+        size="md"
+        footer={
+          <div className="flex gap-2 justify-end">
+            <Button
+              variant="secondary"
+              onClick={() =>
+                setBatchReviewDialog({ isOpen: false, action: null })
+              }
+              disabled={batchLoading}
+            >
+              取消
+            </Button>
+            <Button
+              variant={getBatchDialogConfig().actionVariant}
+              onClick={handleBatchConfirm}
+              loading={batchLoading}
+            >
+              {getBatchDialogConfig().actionLabel}
+            </Button>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-gray-600">{getBatchDialogConfig().description}</p>
+          <div className="text-xs bg-blue-50 border border-blue-100 rounded-md p-3 text-blue-700">
+            已选择 <span className="font-bold">{selectedIds.size}</span> 条任务。
+            系统将逐条校验并返回详细结果，不符合条件的任务会自动跳过并标注具体原因。
+          </div>
+          {getBatchDialogConfig().showReason && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                原因说明 <span className="text-red-500">*</span>
+              </label>
+              <textarea
+                value={batchReason}
+                onChange={(e) => setBatchReason(e.target.value)}
+                placeholder={getBatchDialogConfig().reasonPlaceholder}
+                rows={4}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+              />
+            </div>
+          )}
+        </div>
+      </Modal>
 
       <BatchResultDialog
         isOpen={batchResultOpen}

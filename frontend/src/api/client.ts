@@ -6,6 +6,7 @@ import type {
   BatchResult,
   ApiResponse,
   EvidenceType,
+  BatchSubmitItem,
 } from "../types";
 
 const API_BASE_URL = "http://localhost:8006";
@@ -174,6 +175,12 @@ export const taskApi = {
 };
 
 export const batchApi = {
+  registrarSubmit: (items: BatchSubmitItem[]) =>
+    request<BatchResult>("/api/batch/registrar-submit", {
+      method: "POST",
+      body: JSON.stringify(items),
+    }),
+
   supervisorReview: (items: BatchReviewItem[]) =>
     request<BatchResult>("/api/batch/supervisor-review", {
       method: "POST",

@@ -27,6 +27,7 @@ interface TaskListProps {
 
 const statusOptions: { value: string; label: string }[] = [
   { value: "", label: "全部状态" },
+  { value: "draft", label: STATUS_LABELS.draft },
   { value: "pending_review", label: STATUS_LABELS.pending_review },
   { value: "review_passed", label: STATUS_LABELS.review_passed },
   { value: "review_rejected", label: STATUS_LABELS.review_rejected },
@@ -78,13 +79,13 @@ export function TaskList({
         return [{ action: "submit", label: "批量提交审核", variant: "primary" as const }];
       case "supervisor":
         return [
-          { action: "pass", label: "批量审核通过", variant: "success" as const },
-          { action: "reject", label: "批量驳回", variant: "danger" as const },
+          { action: "supervisor_pass", label: "批量审核通过", variant: "success" as const },
+          { action: "supervisor_reject", label: "批量驳回", variant: "danger" as const },
         ];
       case "reviewer":
         return [
-          { action: "approve", label: "批量归档", variant: "success" as const },
-          { action: "return", label: "批量退回", variant: "danger" as const },
+          { action: "reviewer_approve", label: "批量归档", variant: "success" as const },
+          { action: "reviewer_return", label: "批量退回", variant: "danger" as const },
         ];
       default:
         return [];

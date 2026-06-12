@@ -3,6 +3,7 @@ import { STATUS_LABELS } from "../types";
 import { twMerge } from "tailwind-merge";
 
 const statusStyles: Record<TaskStatus, string> = {
+  draft: "bg-gray-100 text-gray-700 border-gray-200",
   pending_review: "bg-yellow-100 text-yellow-800 border-yellow-200",
   review_passed: "bg-blue-100 text-blue-800 border-blue-200",
   review_rejected: "bg-red-100 text-red-800 border-red-200",
