@@ -39,6 +39,8 @@ export interface OperationRecord {
   reason: string | null;
   from_status: string | null;
   to_status: string;
+  from_version: number | null;
+  to_version: number | null;
   created_at: string;
 }
 

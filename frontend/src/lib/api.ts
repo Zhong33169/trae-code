@@ -11,8 +11,9 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     ...options,
   });
   if (!res.ok) {
-    const error = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(error.detail || error.message || `请求失败: ${res.status}`);
+    const data = await res.json().catch(() => ({}));
+    const msg = (data as any).error || (data as any).detail || (data as any).message || `请求失败: ${res.status}`;
+    throw new Error(msg);
   }
   return res.json();
 }
@@ -86,6 +87,8 @@ export interface UpdateOrderData {
   location?: string;
   evidence_descriptions?: string[];
   operator_id: number;
+  version?: number;
+  opinion?: string;
 }
 
 export async function updateOrder(id: number, data: UpdateOrderData): Promise<RepairOrder> {

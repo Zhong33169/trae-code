@@ -59,11 +59,23 @@ async def init_db():
             reason TEXT,
             from_status TEXT,
             to_status TEXT,
+            from_version INTEGER,
+            to_version INTEGER,
             created_at TEXT NOT NULL DEFAULT (datetime('now')),
             FOREIGN KEY (order_id) REFERENCES repair_orders(id),
             FOREIGN KEY (operator_id) REFERENCES users(id)
         );
     """)
+
+    try:
+        await db.execute("ALTER TABLE operation_records ADD COLUMN from_version INTEGER")
+    except Exception:
+        pass
+    try:
+        await db.execute("ALTER TABLE operation_records ADD COLUMN to_version INTEGER")
+    except Exception:
+        pass
+
     await db.commit()
 
 

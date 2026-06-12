@@ -34,13 +34,15 @@ const ROLE_LABELS: Record<string, string> = {
 const ACTION_LABELS: Record<string, string> = {
   create: '创建',
   submit: '提交',
+  update: '编辑',
   accept_review: '受理审核',
-  approve: '审核通过',
-  return: '退回补正',
-  reject: '驳回',
+  review_approve: '审核通过',
+  review_return: '退回补正',
+  review_reject: '驳回',
   accept_recheck: '受理复核',
-  archive: '归档',
+  recheck_archive: '归档',
   recheck_return: '复核退回',
+  validation_failed: '校验失败',
 };
 
 function StatusBadge({ status }: { status: string }) {
@@ -61,13 +63,15 @@ function getDotClass(action: string): string {
   const map: Record<string, string> = {
     create: 'timeline-dot-create',
     submit: 'timeline-dot-submit',
+    update: 'timeline-dot-submit',
     accept_review: 'timeline-dot-accept',
-    approve: 'timeline-dot-approve',
-    return: 'timeline-dot-return',
-    reject: 'timeline-dot-reject',
+    review_approve: 'timeline-dot-approve',
+    review_return: 'timeline-dot-return',
+    review_reject: 'timeline-dot-reject',
     accept_recheck: 'timeline-dot-recheck',
-    archive: 'timeline-dot-archive',
+    recheck_archive: 'timeline-dot-archive',
     recheck_return: 'timeline-dot-return',
+    validation_failed: 'timeline-dot-failed',
   };
   return map[action] || 'bg-slate-400 ring-slate-200';
 }
@@ -92,48 +96,58 @@ function Timeline({ records }: { records: OperationRecord[] }) {
     <div className="relative">
       <div className="timeline-line" />
       <div className="space-y-6">
-        {sorted.map((record, idx) => (
-          <div key={record.id} className="relative pl-12">
-            <div className={`timeline-dot ${getDotClass(record.action)}`} style={{ top: '4px' }} />
-            <div className="card p-4">
-              <div className="flex flex-wrap items-center gap-2 mb-2">
-                <span className="text-sm font-semibold text-slate-800">{record.operator_name}</span>
-                <span className="badge bg-slate-100 text-slate-600">{ROLE_LABELS[record.operator_role] || record.operator_role}</span>
-                <span className="text-sm font-medium text-blue-700">{ACTION_LABELS[record.action] || record.action}</span>
-                <span className="text-xs text-slate-400">{new Date(record.created_at).toLocaleString('zh-CN')}</span>
-              </div>
-              <div className="flex items-center gap-2 mb-2">
-                {record.from_status && (
-                  <>
-                    <StatusBadge status={record.from_status} />
-                    <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                    </svg>
-                  </>
+        {sorted.map((record, idx) => {
+          const isFailed = record.action === 'validation_failed';
+          return (
+            <div key={record.id} className="relative pl-12">
+              <div className={`timeline-dot ${getDotClass(record.action)}`} style={{ top: '4px' }} />
+              <div className={`card p-4 ${isFailed ? 'border-red-200 bg-red-50/50' : ''}`}>
+                <div className="flex flex-wrap items-center gap-2 mb-2">
+                  <span className="text-sm font-semibold text-slate-800">{record.operator_name}</span>
+                  <span className="badge bg-slate-100 text-slate-600">{ROLE_LABELS[record.operator_role] || record.operator_role}</span>
+                  <span className={`text-sm font-medium ${isFailed ? 'text-red-700' : 'text-blue-700'}`}>
+                    {ACTION_LABELS[record.action] || record.action}
+                  </span>
+                  <span className="text-xs text-slate-400">{new Date(record.created_at).toLocaleString('zh-CN')}</span>
+                  {(record.from_version !== null || record.to_version !== null) && (
+                    <span className="text-xs font-mono bg-slate-100 text-slate-600 px-2 py-0.5 rounded">
+                      v{record.from_version} → v{record.to_version}
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 mb-2">
+                  {record.from_status && record.from_status !== record.to_status && (
+                    <>
+                      <StatusBadge status={record.from_status} />
+                      <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                      </svg>
+                    </>
+                  )}
+                  <StatusBadge status={record.to_status} />
+                </div>
+                {record.opinion && (
+                  <div className="mb-1.5">
+                    <span className="text-xs font-medium text-slate-500">意见：</span>
+                    <span className={`text-sm px-2 py-1 rounded ${isFailed ? 'bg-red-100 text-red-800' : 'bg-blue-50 text-slate-700'}`}>{record.opinion}</span>
+                  </div>
                 )}
-                <StatusBadge status={record.to_status} />
+                {record.reason && (
+                  <div className="mb-1.5">
+                    <span className="text-xs font-medium text-slate-500">原因：</span>
+                    <span className={`text-sm px-2 py-1 rounded ${isFailed ? 'bg-red-100 text-red-800' : 'bg-orange-50 text-slate-700'}`}>{record.reason}</span>
+                  </div>
+                )}
+                {record.result && (
+                  <div>
+                    <span className="text-xs font-medium text-slate-500">结果：</span>
+                    <span className={`text-sm px-2 py-1 rounded ${isFailed ? 'bg-red-100 text-red-800 font-medium' : 'bg-green-50 text-slate-700'}`}>{record.result}</span>
+                  </div>
+                )}
               </div>
-              {record.opinion && (
-                <div className="mb-1.5">
-                  <span className="text-xs font-medium text-slate-500">意见：</span>
-                  <span className="text-sm text-slate-700 bg-blue-50 px-2 py-1 rounded">{record.opinion}</span>
-                </div>
-              )}
-              {record.reason && (
-                <div className="mb-1.5">
-                  <span className="text-xs font-medium text-slate-500">原因：</span>
-                  <span className="text-sm text-slate-700 bg-orange-50 px-2 py-1 rounded">{record.reason}</span>
-                </div>
-              )}
-              {record.result && (
-                <div>
-                  <span className="text-xs font-medium text-slate-500">结果：</span>
-                  <span className="text-sm text-slate-700 bg-green-50 px-2 py-1 rounded">{record.result}</span>
-                </div>
-              )}
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
@@ -197,6 +211,8 @@ function ActionForm({
       await updateOrder(order.id, {
         ...editData,
         operator_id: user.id,
+        version: v,
+        opinion: opinion || '补正后重新提交',
       });
       await submitOrder(order.id, { operator_id: user.id, opinion, version: v + 1 });
       setOpinion('');
@@ -527,34 +543,37 @@ export default function OrderDetailPage() {
             <h2 className="text-lg font-semibold text-slate-800">历史处理意见</h2>
           </div>
           <div className="px-6 py-4 space-y-4">
-            {previousOpinions.map((record) => (
-              <div key={record.id} className="border border-slate-200 rounded-lg p-4">
-                <div className="flex items-center gap-2 mb-2">
-                  <span className="font-medium text-sm text-slate-800">{record.operator_name}</span>
-                  <span className="badge bg-slate-100 text-slate-600">{ROLE_LABELS[record.operator_role] || record.operator_role}</span>
-                  <span className="text-xs text-blue-700 font-medium">{ACTION_LABELS[record.action] || record.action}</span>
-                  <span className="text-xs text-slate-400 ml-auto">{new Date(record.created_at).toLocaleString('zh-CN')}</span>
+            {previousOpinions.map((record) => {
+              const isFailed = record.action === 'validation_failed';
+              return (
+                <div key={record.id} className={`border rounded-lg p-4 ${isFailed ? 'border-red-300 bg-red-50' : 'border-slate-200'}`}>
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="font-medium text-sm text-slate-800">{record.operator_name}</span>
+                    <span className="badge bg-slate-100 text-slate-600">{ROLE_LABELS[record.operator_role] || record.operator_role}</span>
+                    <span className={`text-xs font-medium ${isFailed ? 'text-red-700' : 'text-blue-700'}`}>{ACTION_LABELS[record.action] || record.action}</span>
+                    <span className="text-xs text-slate-400 ml-auto">{new Date(record.created_at).toLocaleString('zh-CN')}</span>
+                  </div>
+                  {record.opinion && (
+                    <div className="bg-blue-50 border border-blue-100 rounded p-3 mb-2">
+                      <span className="text-xs font-medium text-blue-600">意见：</span>
+                      <span className="text-sm text-blue-800">{record.opinion}</span>
+                    </div>
+                  )}
+                  {record.reason && (
+                    <div className={`border rounded p-3 mb-2 ${isFailed ? 'bg-red-100 border-red-200' : 'bg-orange-50 border-orange-100'}`}>
+                      <span className={`text-xs font-medium ${isFailed ? 'text-red-700' : 'text-orange-600'}`}>原因：</span>
+                      <span className={`text-sm ${isFailed ? 'text-red-800' : 'text-orange-800'}`}>{record.reason}</span>
+                    </div>
+                  )}
+                  {record.result && (
+                    <div className={`border rounded p-3 ${isFailed ? 'bg-red-100 border-red-200' : 'bg-green-50 border-green-100'}`}>
+                      <span className={`text-xs font-medium ${isFailed ? 'text-red-700' : 'text-green-600'}`}>结果：</span>
+                      <span className={`text-sm font-medium ${isFailed ? 'text-red-800' : 'text-green-800'}`}>{record.result}</span>
+                    </div>
+                  )}
                 </div>
-                {record.opinion && (
-                  <div className="bg-blue-50 border border-blue-100 rounded p-3 mb-2">
-                    <span className="text-xs font-medium text-blue-600">意见：</span>
-                    <span className="text-sm text-blue-800">{record.opinion}</span>
-                  </div>
-                )}
-                {record.reason && (
-                  <div className="bg-orange-50 border border-orange-100 rounded p-3 mb-2">
-                    <span className="text-xs font-medium text-orange-600">原因：</span>
-                    <span className="text-sm text-orange-800">{record.reason}</span>
-                  </div>
-                )}
-                {record.result && (
-                  <div className="bg-green-50 border border-green-100 rounded p-3">
-                    <span className="text-xs font-medium text-green-600">结果：</span>
-                    <span className="text-sm text-green-800">{record.result}</span>
-                  </div>
-                )}
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}

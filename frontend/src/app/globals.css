@@ -136,4 +136,8 @@
   .timeline-dot-archive {
     @apply bg-emerald-600 ring-emerald-200;
   }
+
+  .timeline-dot-failed {
+    @apply bg-red-500 ring-red-200 animate-pulse;
+  }
 }

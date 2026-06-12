@@ -33,6 +33,7 @@ export default function NewOrderPage() {
     urgency: 'medium' as 'low' | 'medium' | 'high' | 'urgent',
     location: '',
     evidence_descriptions: [''] as string[],
+    submit_opinion: '',
   });
 
   const handleSubmit = async (e: React.FormEvent, andSubmit: boolean) => {
@@ -63,7 +64,7 @@ export default function NewOrderPage() {
 
       if (andSubmit) {
         try {
-          await submitOrder(result.id, { operator_id: user.id });
+          await submitOrder(result.id, { operator_id: user.id, opinion: form.submit_opinion || '提交审核', version: 1 });
         } catch (submitErr: unknown) {
           setError(`工单已创建为草稿，但提交失败：${submitErr instanceof Error ? submitErr.message : '未知错误'}`);
           router.push(`/orders/${result.id}`);
@@ -237,6 +238,17 @@ export default function NewOrderPage() {
           <button type="button" onClick={addEvidence} className="btn-secondary text-xs">
             + 添加证据描述
           </button>
+        </div>
+
+        <div>
+          <label className="label-field">提交意见</label>
+          <textarea
+            rows={2}
+            value={form.submit_opinion}
+            onChange={(e) => updateField('submit_opinion', e.target.value)}
+            className="input-field"
+            placeholder="请输入提交意见（提交时必填）"
+          />
         </div>
 
         <div className="flex gap-3 pt-4 border-t border-slate-200">

@@ -153,6 +153,12 @@ async def seed():
                     "result": "return",
                     "created_at": "2026-06-09 11:00:00",
                 },
+                {
+                    "action": "validation_failed", "operator_id": 1, "operator_name": "张登记",
+                    "operator_role": "clerk", "from_status": "returned", "to_status": "returned",
+                    "reason": "退回工单必须补充证据描述后才能提交", "result": "failed",
+                    "created_at": "2026-06-09 14:20:00",
+                },
             ],
         },
         {
@@ -376,17 +382,34 @@ async def seed():
         )
         order_db_id = cursor.lastrowid
 
+        ver = 1
         for record in order["records"]:
+            if record["action"] == "create":
+                from_v = None
+                to_v = 1
+                ver = 1
+            elif record["action"] == "validation_failed":
+                from_v = ver
+                to_v = ver
+            else:
+                from_v = ver
+                to_v = ver + 1
+                ver = to_v
             await db.execute(
                 """INSERT INTO operation_records
                    (order_id, action, operator_id, operator_name, operator_role,
-                    opinion, result, reason, from_status, to_status, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    opinion, result, reason, from_status, to_status, from_version, to_version, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 [order_db_id, record["action"], record["operator_id"],
                  record["operator_name"], record["operator_role"],
                  record.get("opinion"), record.get("result"), record.get("reason"),
-                 record.get("from_status"), record.get("to_status"), record["created_at"]],
+                 record.get("from_status"), record.get("to_status"), from_v, to_v, record["created_at"]],
             )
+
+        await db.execute(
+            "UPDATE repair_orders SET version = ? WHERE id = ?",
+            [ver, order_db_id],
+        )
 
     await db.commit()
     print("种子数据写入完成：3个用户，8条工单")
