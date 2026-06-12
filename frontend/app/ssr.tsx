@@ -1,6 +1,9 @@
-import { createStartServer } from "@tanstack/start/server";
+import { StartServer } from "@tanstack/start/server";
 import { createRouter } from "./router";
 
-export default createStartServer({
-  createRouter,
-});
+export default createRouter;
+
+export function render() {
+  const router = createRouter();
+  return <StartServer router={router} />;
+}

@@ -15,8 +15,9 @@
     "types": ["vite/client"],
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["src/*"],
+      "~/*": ["app/*"]
     }
   },
-  "include": ["src", "app.config.ts"]
+  "include": ["src", "app", "app.config.ts"]
 }

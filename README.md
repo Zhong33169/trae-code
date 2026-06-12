@@ -6,10 +6,14 @@
 
 ## 技术栈
 
-- **前端**: React 18 + TypeScript + TanStack Start（基于 TanStack Router 的文件路由 SSR/CSR）+ TanStack Table/Form + Tailwind CSS + Sonner
+- **前端**: React 18 + TypeScript + TanStack Router（基于 `@tanstack/router-vite-plugin` 的文件路由，目录 `app/routes/`）+ TanStack Table/Form + Tailwind CSS + Sonner
 - **后端**: Go + Gin + GORM + SQLite
 - **数据库**: SQLite（本地文件存储）
-- **路由**: `@tanstack/start` 基于文件路由，入口为 `app/routes/`
+- **版本约定**:
+  - `@tanstack/react-router` ^1.58
+  - `@tanstack/router-vite-plugin` ^1.167
+  - `@tanstack/start` ^1.120（仅作为元包，实际路由生成和 vite 集成由 router-vite-plugin 提供）
+  - `vite` ^5.4
 
 ## 端口配置
 
@@ -44,9 +48,10 @@ go run main.go
 ```bash
 cd frontend
 npm install
-npm run dev         # 推荐：TanStack Start 原生开发服务器（文件路由）
-# 或
-npm run vite:dev    # 备选：直接用 Vite（同样走 createStartVitePlugin）
+npm run dev             # Vite + TanStack Router 文件路由开发服务器（端口 3006）
+npm run build           # 生产构建
+npm run preview         # 预览生产构建（端口 3006）
+npm run gen:routes      # 手动触发路由树生成（开发时 vite 插件会自动处理）
 ```
 
 ### 3. 访问系统
@@ -203,35 +208,37 @@ npm run vite:dev    # 备选：直接用 Vite（同样走 createStartVitePlugin�
 │   ├── database/                # SQLite 连接
 │   ├── models/                  # SamplingTask / Evidence / TaskLog / User GORM 模型
 │   ├── handlers/                # API 处理器
-│   │   ├── auth.go             # 登录/用户信息
-│   │   ├── task.go             # 任务 CRUD + 单条审核/复核
-│   │   ├── batch.go            # 批量提交/审核/复核（逐条返回结果）
-│   │   └── evidence.go       # 证据上传（角色+状态双重限制）
+│   │   ├── auth.go              # 登录/用户信息
+│   │   ├── task.go              # 任务 CRUD + 单条审核/复核（含双重证据拦截）
+│   │   ├── batch.go             # 批量提交/审核/复核（逐条返回结果）
+│   │   └── evidence.go          # 证据上传（角色+状态双重限制）
 │   ├── middleware/              # 认证/角色校验中间件
 │   ├── seed/                    # 12 条任务种子 + 证据 + 操作日志
 │   ├── utils/                   # 统一响应封装
 │   ├── data/                    # SQLite 数据库文件
 │   └── go.mod
-└── frontend/                     # 前端 TanStack Start
-│   ├── app/                      # ★ 文件路由入口（TanStack Start）
-│   │   ├── routes/
-│   │   │   ├── __root.tsx     # 根路由（AuthProvider + Toaster + Outlet）
-│   │   │   └── index.tsx    # 首页（渲染 HomePage）
-│   │   ├── client.tsx          # ★ TanStack Start 客户端入口
-│   │   ├── ssr.tsx             # SSR 入口
-│   │   ├── router.tsx           # Router 创建函数
-│   │   └── routeTree.gen.ts # 路由树生成结果
-│   ├── src/                      # 业务代码
-│   │   ├── api/                  # API 客户端封装
-│   │   ├── components/       # TaskList / TaskDetail / Header 等组件
-│   │   ├── context/         # AuthContext（角色切换
-│   │   ├── pages/           # HomePage（左右布局主页面）
-│   │   ├── styles/          # 全局样式（Tailwind）
-│   │   └── types/          # TypeScript 类型定义
-│   ├── app.config.ts         # TanStack Start 配置
-│   ├── vite.config.ts       # Vite 配置（含端口 3006 + API 代理 + createStartVitePlugin
-│   ├── tailwind.config.js  # Tailwind 配置
-│   ├── postcss.config.js   # PostCSS 配置
-│   ├── tsconfig.json        # TS 配置
-│   └── package.json
+└── frontend/                     # 前端 React + TanStack Router（文件路由）
+    ├── app/                      # ★ 文件路由目录（由 router-vite-plugin 自动扫描）
+    │   ├── routes/
+    │   │   ├── __root.tsx        # 根路由组件：AuthProvider + Toaster + Outlet + Scripts
+    │   │   └── index.tsx         # / 首页：渲染 HomePage
+    │   ├── client.tsx            # TanStack Start 客户端入口（兼容 SSR/CSR）
+    │   ├── ssr.tsx               # TanStack Start SSR 入口
+    │   ├── router.tsx            # createRouter() 工厂函数
+    │   └── routeTree.gen.ts      # ★ 自动生成的路由树（由 vite 插件 / gen:routes 产出）
+    ├── src/                      # 业务代码
+    │   ├── main.tsx              # CSR 入口：挂载 RouterProvider
+    │   ├── api/                  # API 客户端封装
+    │   ├── components/           # TaskList / TaskDetail / Header 等组件
+    │   ├── context/              # AuthContext（角色切换、权限判断）
+    │   ├── pages/                # HomePage（左右布局主页面）
+    │   ├── styles/               # 全局样式（Tailwind）
+    │   └── types/                # TypeScript 类型定义
+    ├── index.html                # Vite 入口 HTML
+    ├── app.config.ts             # @tanstack/start 配置文件（SSR 模式）
+    ├── vite.config.ts            # Vite 配置 + @tanstack/router-vite-plugin（端口 3006 / API 代理）
+    ├── tailwind.config.js        # Tailwind 配置
+    ├── postcss.config.js         # PostCSS 配置
+    ├── tsconfig.json             # TS 配置
+    └── package.json
 ```

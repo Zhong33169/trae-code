@@ -1,19 +1,16 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import { RouterProvider } from "@tanstack/react-router";
-import { StartClient } from "@tanstack/start/client";
-import { createRouter } from "./router";
-import { routeTree } from "./routeTree.gen";
+import { RouterProvider, createRouter } from "@tanstack/react-router";
+import { routeTree } from "~/routeTree.gen";
+import "./styles/globals.css";
 
-const router = createRouter();
+const router = createRouter({ routeTree });
 
 declare module "@tanstack/react-router" {
   interface Register {
-    router: ReturnType<typeof createRouter>;
+    router: typeof router;
   }
 }
-
-StartClient();
 
 const rootElement = document.getElementById("root")!;
 if (!rootElement.innerHTML) {
