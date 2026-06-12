@@ -43,8 +43,8 @@
           </label>
           <div style="flex:1"></div>
           <button v-if="canInitiate" class="btn btn-primary" @click="showCreateModal = true">＋ 发起线索单</button>
-          <button v-if="canBatchReview && selectedOrders.length > 0" class="btn btn-success" @click="batchReview">
-            ✓ 批量复核归档 ({{ selectedOrders.length }})
+          <button v-if="canBatchReview && selectedOrderNos.length > 0" class="btn btn-success" @click="batchReview">
+            ✓ 批量复核归档 ({{ selectedOrderNos.length }})
           </button>
         </div>
 
@@ -58,7 +58,7 @@
               <tr>
                 <th style="width:36px">
                   <input v-if="canBatchReview" type="checkbox" class="checkbox"
-                    :checked="allSelected" @change="toggleAll" />
+                    :checked="allChecked" @change="onToggleAll" />
                 </th>
                 <th>单号</th>
                 <th>标题</th>
@@ -73,12 +73,15 @@
               </tr>
             </thead>
             <tbody>
-              <tr v-for="o in orders" :key="o.order_no">
-                <td>
+              <tr v-for="o in orders" :key="o.order_no"
+                :class="{ 'row-active': previewDetail?.order?.order_no === o.order_no }"
+                @click="selectPreview(o)">
+                <td @click.stop>
                   <input v-if="canReview(o)" type="checkbox" class="checkbox"
-                    :value="o.order_no" v-model="selectedOrders" />
+                    :checked="selectedOrderNos.includes(o.order_no)"
+                    @change="onToggleOne(o.order_no)" />
                 </td>
-                <td><span class="link" @click="goDetail(o)">{{ o.order_no }}</span></td>
+                <td><span class="link" @click.stop="goDetail(o)">{{ o.order_no }}</span></td>
                 <td>{{ o.title }}</td>
                 <td>{{ o.enterprise_name }}</td>
                 <td>{{ o.industry || '-' }}</td>
@@ -97,7 +100,7 @@
                      o.initiator_name }}
                 </td>
                 <td>{{ o.created_at?.slice(0, 16).replace('T', ' ') }}</td>
-                <td>
+                <td @click.stop>
                   <button class="btn" style="padding:4px 10px;font-size:12px" @click="goDetail(o)">办理</button>
                 </td>
               </tr>
@@ -110,63 +113,99 @@
       </div>
 
       <div class="side-panel">
-        <div class="side-title">🔍 证据预览（点击左侧线索单查看详情）</div>
-        <div v-if="!previewOrder" style="color:#9ca3af;font-size:13px;text-align:center;padding:40px 0;">
-          点击左侧列表中的线索单，右侧显示该单的三类证据情况
+        <div class="side-title">🔍 证据预览（使用详情接口数据）</div>
+        <div v-if="!previewDetail" style="color:#9ca3af;font-size:13px;text-align:center;padding:40px 0;">
+          点击左侧列表中的线索单，右侧调用详情接口展示完整证据数据
         </div>
         <div v-else>
           <div style="margin-bottom:12px;">
-            <div style="font-weight:600;font-size:14px;">{{ previewOrder.order_no }}</div>
-            <div style="font-size:12px;color:#6b7280;">{{ previewOrder.title }} / {{ previewOrder.enterprise_name }}</div>
+            <div style="font-weight:600;font-size:14px;">{{ previewDetail.order.order_no }}</div>
+            <div style="font-size:12px;color:#6b7280;">
+              {{ previewDetail.order.title }} / 版本 v{{ previewDetail.order.version }}
+            </div>
+            <div style="font-size:12px;color:#4b5563;margin-top:4px;">
+              阶段：<b>{{ previewDetail.order.stageName }}</b> ·
+              状态：<span class="tag" :class="'tag-' + previewDetail.order.status.toLowerCase()"
+                style="font-size:11px;padding:1px 6px;">{{ previewDetail.order.statusName }}</span>
+            </div>
           </div>
 
-          <div class="evidence-card" :class="previewOrder.has_enterprise_evidence ? 'has' : 'no'">
+          <div class="evidence-card" :class="previewDetail.enterpriseEvidenceOk ? 'has' : 'no'">
             <h4>
-              <span>{{ previewOrder.has_enterprise_evidence ? '✓' : '✗' }}</span>
+              <span>{{ previewDetail.enterpriseEvidenceOk ? '✓' : '✗' }}</span>
               企业线索关键信息
             </h4>
-            <p v-if="previewOrder.has_enterprise_evidence">
-              名称：{{ previewOrder.enterprise_name }}<br/>
-              联系人：{{ previewOrder.contact_person || '-' }}<br/>
-              电话：{{ previewOrder.contact_phone || '-' }}<br/>
-              行业：{{ previewOrder.industry || '-' }}
-            </p>
-            <p v-else>企业线索信息不完整，缺少企业名称、联系人或联系电话</p>
+            <div v-if="previewDetail.enterprise">
+              <p>
+                名称：<b>{{ previewDetail.enterprise.enterprise_name }}</b><br/>
+                联系人：{{ previewDetail.enterprise.contact_person || '<span style=\'color:#dc2626\'>缺失</span>' }}<br/>
+                电话：{{ previewDetail.enterprise.contact_phone || '<span style=\'color:#dc2626\'>缺失</span>' }}<br/>
+                行业：{{ previewDetail.enterprise.industry || '-' }}
+                <span v-if="previewDetail.enterprise.scale">｜规模：{{ previewDetail.enterprise.scale }}</span>
+              </p>
+              <p v-if="!previewDetail.enterpriseEvidenceOk" style="color:#dc2626;font-size:12px;">
+                ⚠ 企业线索信息不完整（名称/联系人/电话任一缺失）
+              </p>
+            </div>
+            <p v-else>企业线索不存在</p>
           </div>
 
-          <div class="evidence-card" :class="previewOrder.has_followup_evidence ? 'has' : 'no'">
+          <div class="evidence-card" :class="previewDetail.followups.length > 0 ? 'has' : 'no'">
             <h4>
-              <span>{{ previewOrder.has_followup_evidence ? '✓' : '✗' }}</span>
+              <span>{{ previewDetail.followups.length > 0 ? '✓' : '✗' }}</span>
               跟进拜访记录
-              <span class="badge-count" style="margin-left:auto">{{ previewFollowups.length }}</span>
+              <span class="badge-count" style="margin-left:auto">{{ previewDetail.followups.length }}</span>
             </h4>
-            <p v-if="previewFollowups.length === 0">暂无跟进拜访记录</p>
-            <div v-for="f in previewFollowups.slice(0, 2)" :key="f.id" class="followup-card" style="margin-top:6px;">
+            <p v-if="previewDetail.followups.length === 0">暂无跟进拜访记录（至少需要1条）</p>
+            <div v-for="f in previewDetail.followups.slice().reverse()" :key="f.id" class="followup-card" style="margin-top:6px;">
               <div class="head">
-                <span class="date">{{ f.visit_date }}</span>
-                <span class="by">{{ f.handler_name }}</span>
+                <span class="date">📅 {{ f.visit_date }}</span>
+                <span class="by">👤 {{ f.handler_name }}</span>
               </div>
               <p>{{ f.content }}</p>
-            </div>
-          </div>
-
-          <div class="evidence-card" :class="previewOrder.has_signing_evidence ? 'has' : 'no'">
-            <h4>
-              <span>{{ previewOrder.has_signing_evidence ? '✓' : '✗' }}</span>
-              签约确认材料
-              <span class="badge-count" style="margin-left:auto">{{ previewSignings.length }}</span>
-            </h4>
-            <p v-if="previewSignings.length === 0">暂无签约确认材料</p>
-            <div v-for="s in previewSignings.slice(0, 2)" :key="s.id" class="signing-card" style="margin-top:6px;">
-              <div class="head">
-                <span class="date">{{ s.signing_date }}</span>
-                <span class="by">¥{{ s.contract_amount?.toLocaleString() }}万</span>
+              <div v-if="f.location || f.participants" style="font-size:11px;color:#6b7280;margin-top:4px;">
+                {{ f.location ? '📍 ' + f.location : '' }}
+                {{ f.participants ? ' · 👥 ' + f.participants : '' }}
+                {{ f.attachment ? ' · 📎 ' + f.attachment : '' }}
               </div>
-              <p>{{ s.contract_terms || '已签约' }}</p>
             </div>
           </div>
 
-          <button class="btn btn-primary" style="width:100%" @click="goDetail(previewOrder)">查看并办理 →</button>
+          <div class="evidence-card" :class="previewDetail.signings.length > 0 ? 'has' : 'no'">
+            <h4>
+              <span>{{ previewDetail.signings.length > 0 ? '✓' : '✗' }}</span>
+              签约确认材料
+              <span class="badge-count" style="margin-left:auto">{{ previewDetail.signings.length }}</span>
+            </h4>
+            <p v-if="previewDetail.signings.length === 0">暂无签约确认材料</p>
+            <div v-for="s in previewDetail.signings.slice().reverse()" :key="s.id" class="signing-card" style="margin-top:6px;">
+              <div class="head">
+                <span class="date">📅 {{ s.signing_date }}</span>
+                <span class="by">💰 ¥{{ s.contract_amount?.toLocaleString() }}万</span>
+              </div>
+              <p>{{ s.contract_terms || '合同已签约' }}</p>
+              <div v-if="s.attachment" style="font-size:11px;color:#6b7280;margin-top:4px;">
+                📎 {{ s.attachment }} · 👤 {{ s.handler_name }}
+              </div>
+            </div>
+          </div>
+
+          <div v-if="previewDetail.logs && previewDetail.logs.length > 0" class="evidence-card" style="margin-top:10px;background:#fafafa;">
+            <h4>
+              <span>📝</span> 操作日志（最近3条）
+            </h4>
+            <div v-for="(log, i) in previewDetail.logs.slice().reverse().slice(0, 3)" :key="i" style="font-size:12px;padding:4px 0;">
+              <div style="display:flex;justify-content:space-between;">
+                <span :style="{ color: log.action.includes('拦截') ? '#dc2626' : '#059669', fontWeight: 600 }">
+                  {{ log.action }}
+                </span>
+                <span style="color:#6b7280;">{{ log.created_at?.slice(5, 16).replace('T', ' ') }} · {{ log.operator_name }}</span>
+              </div>
+              <div style="color:#4b5563;margin-top:2px;">{{ log.detail }}</div>
+            </div>
+          </div>
+
+          <button class="btn btn-primary" style="width:100%" @click="goDetail(previewDetail.order)">查看详情并办理 →</button>
         </div>
       </div>
     </div>
@@ -184,7 +223,7 @@
             <select class="select" v-model="createForm.clue_no">
               <option value="">请选择企业线索</option>
               <option v-for="l in availableLeads" :key="l.clue_no" :value="l.clue_no">
-                {{ l.clue_no }} - {{ l.enterprise_name }} ({{ l.contact_person }} / {{ l.contact_phone }})
+                {{ l.clue_no }} - {{ l.enterprise_name }} ({{ l.contact_person || '无联系人' }} / {{ l.contact_phone || '无电话' }})
               </option>
             </select>
             <div v-if="!canInitiate" class="alert alert-error" style="margin-top:8px;">
@@ -196,8 +235,11 @@
             <input class="input" v-model="createForm.title" placeholder="例如：XX公司入驻意向" />
           </div>
           <div class="form-row">
-            <label>可发起角色</label>
-            <div style="font-size:13px;color:#6b7280;">招商专员(发起) —— 提交后进入办理阶段，由招商经理负责跟进拜访和签约确认</div>
+            <label>流转规则</label>
+            <div style="font-size:13px;color:#6b7280;line-height:1.6;">
+              ① 招商专员(发起) → ② 招商经理(办理：补跟进+签约) → ③ 复核专员(归档)<br/>
+              ⚠ 后一个岗位<strong>不能替前一个岗位</strong>补流程；<strong>已归档后</strong>禁止再补录
+            </div>
           </div>
         </div>
         <div class="modal-footer">
@@ -210,7 +252,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { useUserStore } from '../stores/user.js';
 import api from '../utils/api.js';
@@ -221,10 +263,9 @@ const userStore = useUserStore();
 const orders = ref([]);
 const stats = ref({});
 const filters = ref({ keyword: '', status: '', currentStage: '', mine: false });
-const selectedOrders = ref([]);
-const previewOrder = ref(null);
-const previewFollowups = ref([]);
-const previewSignings = ref([]);
+const selectedOrderNos = ref([]);
+const previewDetail = ref(null);
+const previewLoading = ref(false);
 const showCreateModal = ref(false);
 const createForm = ref({ clue_no: '', title: '' });
 const createAlert = ref(null);
@@ -233,19 +274,16 @@ const enterpriseLeads = ref([]);
 
 const canInitiate = computed(() => userStore.currentUser?.role === 'INITIATOR');
 const canReviewAny = computed(() => userStore.currentUser?.role === 'REVIEWER');
-
 const canBatchReview = computed(() => canReviewAny.value);
 
-const allSelected = computed({
-  get: () => orders.value.length > 0 && orders.value.filter(o => canReview(o)).every(o => selectedOrders.value.includes(o.order_no)),
-  set: (v) => {
-    if (v) {
-      selectedOrders.value = orders.value.filter(o => canReview(o)).map(o => o.order_no);
-    } else {
-      selectedOrders.value = [];
-    }
-  }
-});
+const reviewableOrderNos = computed(() =>
+  orders.value.filter(o => canReview(o)).map(o => o.order_no)
+);
+
+const allChecked = computed(() =>
+  reviewableOrderNos.value.length > 0 &&
+  reviewableOrderNos.value.every(n => selectedOrderNos.value.includes(n))
+);
 
 const availableLeads = computed(() => enterpriseLeads.value.filter(l => !l.active_order_count));
 
@@ -253,10 +291,34 @@ function canReview(o) {
   return canReviewAny.value && o.current_stage === 'REVIEW_ARCHIVE' && ['HANDLED', 'REVIEWED'].includes(o.status);
 }
 
+function onToggleAll(e) {
+  if (e.target.checked) {
+    selectedOrderNos.value = [...reviewableOrderNos.value];
+  } else {
+    selectedOrderNos.value = [];
+  }
+}
+
+function onToggleOne(orderNo) {
+  const idx = selectedOrderNos.value.indexOf(orderNo);
+  if (idx >= 0) {
+    selectedOrderNos.value.splice(idx, 1);
+  } else {
+    selectedOrderNos.value.push(orderNo);
+  }
+}
+
 onMounted(async () => {
   await loadOrders();
   await loadStats();
   await loadEnterpriseLeads();
+});
+
+watch(() => userStore.currentUser?.id, () => {
+  selectedOrderNos.value = [];
+  previewDetail.value = null;
+  loadOrders();
+  loadStats();
 });
 
 async function loadOrders() {
@@ -268,9 +330,17 @@ async function loadOrders() {
   const res = await api.get('/clue-orders?' + params.toString());
   if (res.success) {
     orders.value = res.data;
-    if (!previewOrder.value && orders.value.length > 0) {
-      await selectPreview(orders.value[0]);
+    if (!previewDetail.value && orders.value.length > 0) {
+      selectPreview(orders.value[0]);
+    } else if (previewDetail.value) {
+      const stillExists = orders.value.find(o => o.order_no === previewDetail.value.order.order_no);
+      if (!stillExists) {
+        previewDetail.value = orders.value[0] ? null : previewDetail.value;
+      }
     }
+    selectedOrderNos.value = selectedOrderNos.value.filter(n =>
+      reviewableOrderNos.value.includes(n)
+    );
   } else {
     showAlert('error', res.message || '加载失败');
   }
@@ -287,11 +357,27 @@ async function loadEnterpriseLeads() {
 }
 
 async function selectPreview(order) {
-  previewOrder.value = order;
-  const res = await api.get('/clue-orders/' + order.order_no);
-  if (res.success) {
-    previewFollowups.value = res.data.followups || [];
-    previewSignings.value = res.data.signings || [];
+  if (previewLoading.value) return;
+  previewLoading.value = true;
+  try {
+    const res = await api.get('/clue-orders/' + order.order_no);
+    if (res.success) {
+      const d = res.data;
+      const enterpriseEvidenceOk = !!(d.enterprise && d.enterprise.enterprise_name &&
+        d.enterprise.contact_person && d.enterprise.contact_phone);
+      previewDetail.value = {
+        order: d.order,
+        enterprise: d.enterprise,
+        followups: d.followups || [],
+        signings: d.signings || [],
+        logs: d.logs || [],
+        enterpriseEvidenceOk
+      };
+    } else {
+      showAlert('error', res.message || '加载详情失败');
+    }
+  } finally {
+    previewLoading.value = false;
   }
 }
 
@@ -299,11 +385,9 @@ function goDetail(order) {
   router.push('/queue/' + order.order_no);
 }
 
-function toggleAll() {}
-
 function showAlert(type, message) {
   alert.value = { type, message };
-  setTimeout(() => { alert.value = null; }, 4000);
+  setTimeout(() => { alert.value = null; }, 5000);
 }
 
 async function submitCreate() {
@@ -320,7 +404,9 @@ async function submitCreate() {
     await loadOrders();
     await loadStats();
     if (res.warnings && res.warnings.length > 0) {
-      showAlert('warning', '注意：' + res.warnings.map(w => w.name).join('、') + '有待补充');
+      setTimeout(() => {
+        showAlert('warning', '注意：' + res.warnings.map(w => w.name).join('、') + '有待补充');
+      }, 300);
     }
   } else {
     let msg = res.message || '创建失败';
@@ -337,19 +423,21 @@ async function submitCreate() {
 }
 
 async function batchReview() {
-  if (!confirm(`确认批量复核归档 ${selectedOrders.value.length} 条线索单吗？证据不全的将被跳过。`)) return;
-  const res = await api.post('/clue-orders/batch-review', { order_nos: selectedOrders.value });
+  if (!confirm(`确认批量复核归档 ${selectedOrderNos.value.length} 条线索单吗？证据不全的将被拦截并返回具体原因。`)) return;
+  const res = await api.post('/clue-orders/batch-review', { order_nos: selectedOrderNos.value });
   if (res.success) {
     showAlert(res.data.failed > 0 ? 'warning' : 'success', res.message);
-    if (res.data.details) {
+    if (res.data.details && res.data.details.length > 0) {
       const failed = res.data.details.filter(d => !d.success);
-      if (failed.length > 0) {
-        setTimeout(() => {
-          alert.value = { type: 'warning', message: '失败明细：' + failed.map(f => `${f.orderNo}: ${f.message}`).join('；') };
-        }, 100);
+      const success = res.data.details.filter(d => d.success);
+      let detailMsg = '';
+      if (success.length) detailMsg += `✅ 成功归档: ${success.map(s => s.orderNo).join(', ')}`;
+      if (failed.length) {
+        detailMsg += (detailMsg ? '\n' : '') + `❌ 失败: ` + failed.map(f => `${f.orderNo}(${f.error}): ${f.message}`).join('; ');
       }
+      setTimeout(() => showAlert(failed.length ? 'error' : 'success', detailMsg), 100);
     }
-    selectedOrders.value = [];
+    selectedOrderNos.value = [];
     await loadOrders();
     await loadStats();
   } else {
@@ -357,3 +445,12 @@ async function batchReview() {
   }
 }
 </script>
+
+<style scoped>
+.row-active {
+  background: #eff6ff !important;
+}
+.row-active td {
+  font-weight: 500;
+}
+</style>

@@ -23,11 +23,17 @@
               <div style="font-size:13px;color:#6b7280;margin-top:6px;">
                 单号：<b>{{ order.order_no }}</b> &nbsp;|&nbsp;
                 关联企业：<b>{{ order.enterprise_name }}</b> &nbsp;|&nbsp;
-                版本号：<b>{{ order.version }}</b>
+                版本号：<b>v{{ order.version }}</b>
+                <span v-if="order.handler_id" style="margin-left:8px;">
+                  &nbsp;|&nbsp; 当前办理人：<b :style="{ color: isCurrentHandler ? '#059669' : '#6b7280' }">
+                    {{ order.handler_name }}
+                    <span v-if="isCurrentHandler">(您)</span>
+                  </b>
+                </span>
               </div>
             </div>
             <div style="display:flex;gap:8px;">
-              <button v-if="canHandle" class="btn btn-primary" @click="showHandleModal = true">办理提交 →</button>
+              <button v-if="canHandleSubmit" class="btn btn-primary" @click="showHandleModal = true">办理提交 →</button>
               <button v-if="canReview" class="btn btn-success" @click="doReview">✓ 复核归档</button>
               <button v-if="canReview" class="btn btn-danger" @click="showRejectModal = true">✗ 驳回</button>
               <button class="btn" @click="$router.back()">返回列表</button>
@@ -35,11 +41,20 @@
           </div>
         </div>
 
+        <div v-if="!canSupplementButHandler && userStore.currentUser?.role === 'HANDLER'"
+          class="alert alert-warning" style="margin:12px 16px 0;">
+          ⚠ {{ supplementBlockReason }}
+        </div>
+
         <div v-if="alert" class="alert" :class="'alert-' + alert.type" style="margin:12px 16px 0;">
           <div style="font-weight:600;">{{ alert.title || '' }}</div>
           <div>{{ alert.message }}</div>
           <div v-if="alert.details" style="font-size:12px;opacity:0.9;margin-top:4px;">
-            <div v-for="(d, i) in alert.details" :key="i">• {{ d.name }}：{{ d.detail }}</div>
+            <div v-for="(d, i) in alert.details" :key="i">• {{ typeof d === 'string' ? d : (d.name + '：' + d.detail) }}</div>
+          </div>
+          <div v-if="alert.details && typeof alert.details === 'object' && !Array.isArray(alert.details)"
+            style="font-size:12px;opacity:0.9;margin-top:4px;">
+            <div v-for="(v, k) in alert.details" :key="k">• {{ k }}：{{ JSON.stringify(v) }}</div>
           </div>
         </div>
 
@@ -101,6 +116,11 @@
 
         <div class="section">
           <div class="section-title">🏢 企业线索信息</div>
+          <div v-if="!hasEnterpriseEvidence" style="margin-bottom:10px;" class="alert alert-error"
+               :class="enterpriseBlocked ? 'alert-error' : 'alert-warning'">
+            ⚠ 企业线索信息不完整
+            <span v-if="enterpriseMissingFields.length">：缺失 {{ enterpriseMissingFields.join('、') }}</span>
+          </div>
           <div class="detail-grid">
             <div class="detail-item">
               <label>企业名称</label>
@@ -108,11 +128,17 @@
             </div>
             <div class="detail-item">
               <label>联系人</label>
-              <div class="value">{{ order.contact_person || '-' }}</div>
+              <div class="value">
+                <template v-if="order.contact_person">{{ order.contact_person }}</template>
+                <template v-else><span style="color:#dc2626;">⚠ 缺失</span></template>
+              </div>
             </div>
             <div class="detail-item">
               <label>联系电话</label>
-              <div class="value">{{ order.contact_phone || '-' }}</div>
+              <div class="value">
+                <template v-if="order.contact_phone">{{ order.contact_phone }}</template>
+                <template v-else><span style="color:#dc2626;">⚠ 缺失</span></template>
+              </div>
             </div>
             <div class="detail-item">
               <label>所属行业</label>
@@ -138,9 +164,16 @@
         </div>
 
         <div class="section">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
             <div class="section-title" style="margin-bottom:0;">📅 跟进拜访记录 <span class="badge-count">{{ followups.length }}</span></div>
-            <button v-if="canHandleAdd" class="btn btn-primary" @click="showFollowupModal = true">＋ 添加跟进</button>
+            <div>
+              <button v-if="canSupplement" class="btn btn-primary" style="padding:4px 10px;font-size:12px;"
+                @click="showFollowupModal = true">＋ 补录跟进</button>
+              <span v-else-if="userStore.currentUser?.role === 'HANDLER'"
+                style="font-size:12px;color:#6b7280;" :title="supplementBlockReason">
+                🔒 {{ supplementBlockReasonShort }}
+              </span>
+            </div>
           </div>
           <div v-if="followups.length === 0" style="color:#9ca3af;font-size:13px;padding:16px 0;text-align:center;">
             暂无跟进拜访记录
@@ -157,9 +190,16 @@
         </div>
 
         <div class="section">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
             <div class="section-title" style="margin-bottom:0;">📝 签约确认材料 <span class="badge-count">{{ signings.length }}</span></div>
-            <button v-if="canHandleAdd" class="btn btn-primary" @click="showSigningModal = true">＋ 添加签约</button>
+            <div>
+              <button v-if="canSupplement" class="btn btn-primary" style="padding:4px 10px;font-size:12px;"
+                @click="showSigningModal = true">＋ 补录签约</button>
+              <span v-else-if="userStore.currentUser?.role === 'HANDLER'"
+                style="font-size:12px;color:#6b7280;" :title="supplementBlockReason">
+                🔒 {{ supplementBlockReasonShort }}
+              </span>
+            </div>
           </div>
           <div v-if="signings.length === 0" style="color:#9ca3af;font-size:13px;padding:16px 0;text-align:center;">
             暂无签约确认材料
@@ -176,14 +216,18 @@
         </div>
 
         <div class="section">
-          <div class="section-title">📜 操作日志</div>
-          <div v-for="l in logs" :key="l.id" class="log-item">
+          <div class="section-title">📜 操作日志（拦截日志已记录）</div>
+          <div v-for="l in logs" :key="l.id" class="log-item"
+            :style="{ borderLeft: l.action.includes('拦截') ? '3px solid #dc2626' : '3px solid #3b82f6' }">
             <div class="meta">
               <span>{{ l.created_at?.slice(0,19).replace('T',' ') }}</span>
               <span style="color:#2563eb;">{{ l.operator_name }}</span>
               <span>{{ l.operator_role === 'INITIATOR' ? '招商专员' : l.operator_role === 'HANDLER' ? '招商经理' : '复核专员' }}</span>
             </div>
-            <div class="action">{{ l.action }}</div>
+            <div class="action"
+              :style="{ color: l.action.includes('拦截') ? '#dc2626' : '#059669', fontWeight: 600 }">
+              {{ l.action }}
+            </div>
             <div class="detail">{{ l.detail }}</div>
           </div>
         </div>
@@ -192,18 +236,21 @@
       <div class="side-panel" style="position:sticky;top:20px;height:fit-content;">
         <div class="side-title">📁 证据完整性校验</div>
 
-        <div class="evidence-card" :class="evidence.hasEnterpriseEvidence ? 'has' : 'no'">
-          <h4><span>{{ evidence.hasEnterpriseEvidence ? '✓ 已齐备' : '✗ 缺失' }}</span>企业线索关键信息</h4>
+        <div class="evidence-card" :class="hasEnterpriseEvidence ? 'has' : 'no'">
+          <h4><span>{{ hasEnterpriseEvidence ? '✓ 已齐备' : '✗ 缺失' }}</span>企业线索关键信息</h4>
           <p>发起/办理/复核前都需要：企业名称、联系人、联系电话齐全</p>
+          <p v-if="!hasEnterpriseEvidence" style="color:#dc2626;font-size:12px;margin-top:4px;">
+            缺失：{{ enterpriseMissingFields.join('、') }}
+          </p>
         </div>
 
-        <div class="evidence-card" :class="evidence.hasFollowupEvidence ? 'has' : 'no'">
-          <h4><span>{{ evidence.hasFollowupEvidence ? '✓ 已齐备' : '✗ 缺失' }}</span>跟进拜访记录</h4>
+        <div class="evidence-card" :class="followups.length > 0 ? 'has' : 'no'">
+          <h4><span>{{ followups.length > 0 ? '✓ 已齐备' : '✗ 缺失' }}</span>跟进拜访记录</h4>
           <p>办理/复核归档前至少需要 1 条跟进拜访记录</p>
         </div>
 
-        <div class="evidence-card" :class="evidence.hasSigningEvidence ? 'has' : 'no'">
-          <h4><span>{{ evidence.hasSigningEvidence ? '✓ 已齐备' : '✗ 缺失' }}</span>签约确认材料</h4>
+        <div class="evidence-card" :class="signings.length > 0 ? 'has' : 'no'">
+          <h4><span>{{ signings.length > 0 ? '✓ 已齐备' : '✗ 缺失' }}</span>签约确认材料</h4>
           <p>复核归档前必须有签约确认（含合同金额、签约日期）</p>
         </div>
 
@@ -213,17 +260,23 @@
           <div>2️⃣ <b>办理</b> → 招商经理（HANDLER）</div>
           <div>3️⃣ <b>复核归档</b> → 复核专员（REVIEWER）</div>
           <div style="color:#b91c1c;margin-top:6px;">⚠️ 后岗不能替前岗补流程</div>
-          <div style="color:#b91c1c;">⚠️ 同一条企业线索不能重复发起</div>
+          <div style="color:#b91c1c;">⚠️ <b>办理阶段(HANDLE)外</b>不能补录跟进/签约</div>
+          <div style="color:#b91c1c;">⚠️ 已归档线索单禁止再补录</div>
+          <div style="color:#b91c1c;">⚠️ 非当前办理人不能补录</div>
           <div style="color:#b91c1c;">⚠️ 版本冲突时须刷新后再操作</div>
         </div>
 
-        <div class="side-title" style="margin-top:20px;">🎯 推荐测试用例</div>
-        <div style="font-size:12px;line-height:1.9;color:#6b7280;">
-          <div>• 用复核员角色去"办理" → 应被拦截</div>
-          <div>• 用旧版本号提交 → 应被拦截</div>
-          <div>• 缺跟进记录就归档 → 应被拦截</div>
-          <div>• 同一企业重复发起 → 应被拦截</div>
-          <div>• 覆盖他人办理结果 → 应被拦截</div>
+        <div class="side-title" style="margin-top:20px;">🎯 当前状态可操作提示</div>
+        <div style="font-size:12px;line-height:1.9;">
+          <div v-if="canSupplement" style="color:#059669;">✅ 您现在可以：补录跟进/签约 → 办理提交</div>
+          <div v-else-if="canHandleSubmit" style="color:#059669;">✅ 您现在可以：办理提交 → 进入复核</div>
+          <div v-else-if="canReview" style="color:#059669;">✅ 您现在可以：复核归档 / 驳回</div>
+          <div v-else-if="order.status === 'ARCHIVED'" style="color:#6b7280;">ℹ 线索单已归档，不可再操作</div>
+          <div v-else-if="order.status === 'REJECTED'" style="color:#b91c1c;">⚠ 线索单已被驳回，需重新发起</div>
+          <div v-else-if="!isCurrentHandler && userStore.currentUser?.role === 'HANDLER'" style="color:#b91c1c;">
+            ⚠ 当前办理人：{{ order.handler_name }}，您无法操作
+          </div>
+          <div v-else style="color:#6b7280;">ℹ 请切换到对应岗位角色再操作</div>
         </div>
       </div>
     </div>
@@ -238,18 +291,25 @@
           <div v-if="handleAlert" class="alert" :class="'alert-' + handleAlert.type">
             <div>{{ handleAlert.title || handleAlert.message }}</div>
             <div v-if="handleAlert.details" style="margin-top:6px;font-size:12px;">
-              <div v-for="(d, i) in handleAlert.details" :key="i">• {{ d.name }}：{{ d.detail }}</div>
+              <div v-for="(d, i) in handleAlert.details" :key="i">• {{ typeof d === 'string' ? d : (d.name + '：' + d.detail) }}</div>
+            </div>
+            <div v-if="handleAlert.details && typeof handleAlert.details === 'object' && !Array.isArray(handleAlert.details)"
+              style="font-size:12px;margin-top:6px;">
+              <div v-for="(v, k) in handleAlert.details" :key="k">• {{ k }}：{{ JSON.stringify(v) }}</div>
             </div>
           </div>
 
           <div class="alert alert-info">
-            当前角色：<b>{{ userStore.currentUser?.roleName }}</b>。办理时可同时补充跟进拜访和签约确认，提交后流转至【复核归档】阶段。
+            当前角色：<b>{{ userStore.currentUser?.roleName }}</b>。提交后流转至【复核归档】阶段。
+            <div v-if="order.handler_id && !isCurrentHandler" style="margin-top:6px;color:#b91c1c;">
+              ⚠ 当前办理人：{{ order.handler_name }}，您无法办理
+            </div>
           </div>
 
           <div style="margin:12px 0;padding:10px;background:#f9fafb;border-radius:6px;">
             <label style="display:flex;align-items:center;gap:6px;font-size:13px;">
               <input type="checkbox" class="checkbox" v-model="handleForm.addFollowup" />
-              <b>添加跟进拜访记录</b>
+              <b>同步添加跟进拜访记录</b>
             </label>
           </div>
           <div v-if="handleForm.addFollowup">
@@ -274,7 +334,7 @@
           <div style="margin:12px 0;padding:10px;background:#f9fafb;border-radius:6px;">
             <label style="display:flex;align-items:center;gap:6px;font-size:13px;">
               <input type="checkbox" class="checkbox" v-model="handleForm.addSigning" />
-              <b>添加签约确认</b>
+              <b>同步添加签约确认</b>
             </label>
           </div>
           <div v-if="handleForm.addSigning">
@@ -291,10 +351,14 @@
               <textarea class="textarea" v-model="handleForm.signing.contract_terms" placeholder="合同关键条款"></textarea>
             </div>
           </div>
+
+          <div class="alert alert-warning" style="margin-top:12px;">
+            客户端版本：<b>v{{ order.version }}</b>，服务器会校验版本；同时会校验您是否为当前办理人。
+          </div>
         </div>
         <div class="modal-footer">
           <button class="btn" @click="showHandleModal = false">取消</button>
-          <button class="btn btn-primary" @click="doHandle">提交办理</button>
+          <button class="btn btn-primary" :disabled="!canHandleSubmit" @click="doHandle">提交办理</button>
         </div>
       </div>
     </div>
@@ -322,10 +386,15 @@
     <div v-if="showFollowupModal" class="modal-mask" @click.self="showFollowupModal = false">
       <div class="modal">
         <div class="modal-header">
-          <h3>添加跟进拜访记录</h3>
+          <h3>补录跟进拜访（绑定线索单 v{{ order.version }}）</h3>
           <button class="btn" @click="showFollowupModal = false">✕</button>
         </div>
         <div class="modal-body">
+          <div class="alert alert-info">
+            此补录接口将通过后端校验：<br/>
+            ✓ 阶段必须是办理阶段(HANDLE) · ✓ 状态必须是已发起(INITIATED)<br/>
+            ✓ 版本号 v{{ order.version }} · ✓ 必须是当前办理人{{ order.handler_name ? '：' + order.handler_name : '（空）' }}
+          </div>
           <div class="form-row">
             <label class="required">拜访日期</label>
             <input type="date" class="input" v-model="followupForm.visit_date" />
@@ -345,7 +414,7 @@
         </div>
         <div class="modal-footer">
           <button class="btn" @click="showFollowupModal = false">取消</button>
-          <button class="btn btn-primary" @click="addFollowup">确认添加</button>
+          <button class="btn btn-primary" @click="addFollowup">确认补录</button>
         </div>
       </div>
     </div>
@@ -353,10 +422,15 @@
     <div v-if="showSigningModal" class="modal-mask" @click.self="showSigningModal = false">
       <div class="modal">
         <div class="modal-header">
-          <h3>添加签约确认</h3>
-          <button class="btn" @click="showFollowupModal = false">✕</button>
+          <h3>补录签约确认（绑定线索单 v{{ order.version }}）</h3>
+          <button class="btn" @click="showSigningModal = false">✕</button>
         </div>
         <div class="modal-body">
+          <div class="alert alert-info">
+            此补录接口将通过后端校验：<br/>
+            ✓ 阶段必须是办理阶段(HANDLE) · ✓ 状态必须是已发起(INITIATED)<br/>
+            ✓ 版本号 v{{ order.version }} · ✓ 必须是当前办理人{{ order.handler_name ? '：' + order.handler_name : '（空）' }}
+          </div>
           <div class="form-row">
             <label class="required">合同金额（万元）</label>
             <input type="number" class="input" v-model.number="signingForm.contract_amount" />
@@ -372,7 +446,7 @@
         </div>
         <div class="modal-footer">
           <button class="btn" @click="showSigningModal = false">取消</button>
-          <button class="btn btn-primary" @click="addSigning">确认添加</button>
+          <button class="btn btn-primary" @click="addSigning">确认补录</button>
         </div>
       </div>
     </div>
@@ -380,7 +454,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { useUserStore } from '../stores/user.js';
 import api from '../utils/api.js';
@@ -391,6 +465,7 @@ const orderNo = route.params.orderNo;
 
 const loading = ref(true);
 const order = ref(null);
+const enterprise = ref(null);
 const followups = ref([]);
 const signings = ref([]);
 const logs = ref([]);
@@ -414,17 +489,74 @@ const rejectForm = ref({ reason: '' });
 const followupForm = ref({ visit_date: '', location: '', participants: '', content: '' });
 const signingForm = ref({ contract_amount: null, signing_date: '', contract_terms: '' });
 
-const canHandle = computed(() => {
+const isCurrentHandler = computed(() => {
+  if (!order.value || !userStore.currentUser) return false;
+  if (userStore.currentUser.role !== 'HANDLER') return false;
+  if (!order.value.handler_id) return true;
+  return order.value.handler_id === userStore.currentUser.id;
+});
+
+const canHandleSubmit = computed(() => {
   if (!order.value || !userStore.currentUser) return false;
   return userStore.currentUser.role === 'HANDLER' &&
          order.value.current_stage === 'HANDLE' &&
-         order.value.status === 'INITIATED';
+         order.value.status === 'INITIATED' &&
+         isCurrentHandler.value;
 });
 
-const canHandleAdd = computed(() => {
-  if (!userStore.currentUser) return false;
-  return userStore.currentUser.role === 'HANDLER';
+const canSupplement = computed(() => {
+  if (!order.value || !userStore.currentUser) return false;
+  return userStore.currentUser.role === 'HANDLER' &&
+         order.value.current_stage === 'HANDLE' &&
+         order.value.status === 'INITIATED' &&
+         isCurrentHandler.value;
 });
+
+const canSupplementButHandler = computed(() => {
+  if (!order.value || !userStore.currentUser) return false;
+  if (userStore.currentUser.role !== 'HANDLER') return false;
+  return !canSupplement.value;
+});
+
+const supplementBlockReason = computed(() => {
+  if (!order.value) return '';
+  if (order.value.current_stage !== 'HANDLE') {
+    const stageText = { INITIATE: '发起', HANDLE: '办理', REVIEW_ARCHIVE: '复核归档' }[order.value.current_stage];
+    return `当前处于【${stageText}阶段】，仅【办理】阶段可补录跟进/签约（后岗不能替前岗补流程）`;
+  }
+  if (order.value.status !== 'INITIATED') {
+    const statusText = { INITIATED:'已发起', HANDLED:'已办理', REVIEWED:'已复核', ARCHIVED:'已归档', REJECTED:'已驳回' }[order.value.status];
+    return `当前状态为【${statusText}】，仅【已发起】状态可补录跟进/签约`;
+  }
+  if (!isCurrentHandler.value) {
+    return `当前办理人是【${order.value.handler_name}】，您不是当前办理人，无法补录（防止覆盖他人办理结果）`;
+  }
+  return '';
+});
+
+const supplementBlockReasonShort = computed(() => {
+  if (!order.value) return '不可补录';
+  if (order.value.current_stage !== 'HANDLE') return '阶段不符';
+  if (order.value.status !== 'INITIATED') return '状态不符';
+  if (!isCurrentHandler.value) return '非办理人';
+  return '不可补录';
+});
+
+const hasEnterpriseEvidence = computed(() => {
+  if (!order.value) return false;
+  return !!(order.value.enterprise_name && order.value.contact_person && order.value.contact_phone);
+});
+
+const enterpriseMissingFields = computed(() => {
+  if (!order.value) return [];
+  const missing = [];
+  if (!order.value.enterprise_name) missing.push('企业名称');
+  if (!order.value.contact_person) missing.push('联系人');
+  if (!order.value.contact_phone) missing.push('联系电话');
+  return missing;
+});
+
+const enterpriseBlocked = computed(() => enterpriseMissingFields.value.length > 0);
 
 const canReview = computed(() => {
   if (!order.value || !userStore.currentUser) return false;
@@ -435,11 +567,14 @@ const canReview = computed(() => {
 
 onMounted(() => { loadDetail(); });
 
+watch(() => userStore.currentUser?.id, () => { loadDetail(); });
+
 async function loadDetail() {
   loading.value = true;
   const res = await api.get('/clue-orders/' + orderNo);
   if (res.success) {
-    order.value = res.data;
+    order.value = { ...res.data.order, ...res.data.enterprise };
+    enterprise.value = res.data.enterprise;
     followups.value = res.data.followups || [];
     signings.value = res.data.signings || [];
     logs.value = res.data.logs || [];
@@ -450,7 +585,7 @@ async function loadDetail() {
 
 function showAlertMsg(type, message, title, details) {
   alert.value = { type, message, title, details };
-  setTimeout(() => { alert.value = null; }, 6000);
+  setTimeout(() => { alert.value = null; }, 8000);
 }
 
 async function doHandle() {
@@ -488,13 +623,13 @@ async function doHandle() {
       type: 'error',
       title: `办理被拦截 [${res.error}]`,
       message: res.message,
-      details: res.details && Array.isArray(res.details) ? res.details : null
+      details: res.details
     };
   }
 }
 
 async function doReview() {
-  if (!confirm('确认复核归档？证据齐全后才能归档。')) return;
+  if (!confirm('确认复核归档？证据齐全后才能归档。注意：归档后禁止再补录。')) return;
   const res = await api.post('/clue-orders/' + orderNo + '/review', {
     clientVersion: order.value.version, action: 'approve'
   });
@@ -506,7 +641,7 @@ async function doReview() {
       'error',
       res.message,
       `复核被拦截 [${res.error}]`,
-      res.details && Array.isArray(res.details) ? res.details : null
+      res.details
     );
   }
 }
@@ -525,7 +660,7 @@ async function doReject() {
     rejectForm.value = { reason: '' };
     await loadDetail();
   } else {
-    showAlertMsg('error', res.message);
+    showAlertMsg('error', res.message, `驳回被拦截 [${res.error}]`, res.details);
   }
 }
 
@@ -535,14 +670,24 @@ async function addFollowup() {
     showAlertMsg('error', '请填写拜访日期和内容');
     return;
   }
-  const res = await api.post('/follow-up-records', { clue_no: order.value.clue_no, ...f });
+  const res = await api.post('/follow-up-records', {
+    order_no: order.value.order_no,
+    clientVersion: order.value.version,
+    clue_no: order.value.clue_no,
+    ...f
+  });
   if (res.success) {
-    showAlertMsg('success', res.message);
+    showAlertMsg('success', res.message + '，线索单证据与版本已同步更新');
     showFollowupModal.value = false;
     followupForm.value = { visit_date: '', location: '', participants: '', content: '' };
     await loadDetail();
   } else {
-    showAlertMsg('error', res.message, res.error);
+    showAlertMsg(
+      'error',
+      res.message,
+      `补录跟进被拦截 [${res.error}]`,
+      res.details
+    );
   }
 }
 
@@ -552,14 +697,24 @@ async function addSigning() {
     showAlertMsg('error', '请填写合同金额和签约日期');
     return;
   }
-  const res = await api.post('/signing-confirmations', { clue_no: order.value.clue_no, ...s });
+  const res = await api.post('/signing-confirmations', {
+    order_no: order.value.order_no,
+    clientVersion: order.value.version,
+    clue_no: order.value.clue_no,
+    ...s
+  });
   if (res.success) {
-    showAlertMsg('success', res.message);
+    showAlertMsg('success', res.message + '，线索单证据与版本已同步更新');
     showSigningModal.value = false;
     signingForm.value = { contract_amount: null, signing_date: '', contract_terms: '' };
     await loadDetail();
   } else {
-    showAlertMsg('error', res.message, res.error);
+    showAlertMsg(
+      'error',
+      res.message,
+      `补录签约被拦截 [${res.error}]`,
+      res.details
+    );
   }
 }
 </script>

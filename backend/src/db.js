@@ -181,11 +181,13 @@ export async function initDatabase() {
 
 export async function seedDemoData() {
   await getDb();
-  const userCount = queryOne('SELECT COUNT(*) as cnt FROM users').cnt || 0;
-  if (userCount > 0) {
-    console.log('Demo data already seeded, skipping');
-    return;
-  }
+
+  run('DELETE FROM operation_logs');
+  run('DELETE FROM signing_confirmations');
+  run('DELETE FROM follow_up_records');
+  run('DELETE FROM clue_orders');
+  run('DELETE FROM enterprise_leads');
+  run('DELETE FROM users');
 
   const users = [
     ['zs001', '张招商', 'INITIATOR'],
@@ -204,9 +206,10 @@ export async function seedDemoData() {
   const leads = [
     ['QY20250001', '上海星瀚科技有限公司', '陈总', '13800138001', '人工智能', '100-500人', 5000, '高', '推荐'],
     ['QY20250002', '深圳云帆新能源有限公司', '林经理', '13900139002', '新能源', '500人以上', 20000, '中', '展会'],
-    ['QY20250003', '北京智联软件有限公司', '周总', '13700137003', '软件服务', '50-100人', 1000, '高', '主动拜访'],
+    ['QY20250003', '北京智联软件有限公司', '', '', '软件服务', '50-100人', 1000, '高', '主动拜访'],
     ['QY20250004', '杭州蓝鲸生物科技有限公司', '吴博士', '13600136004', '生物医药', '100-500人', 8000, '低', '推荐'],
-    ['QY20250005', '苏州锐驰精密制造有限公司', '孙总', '13500135005', '高端制造', '500人以上', 15000, '高', '政府推荐']
+    ['QY20250005', '苏州锐驰精密制造有限公司', '孙总', '13500135005', '高端制造', '500人以上', 15000, '高', '政府推荐'],
+    ['QY20250006', '宁波海晟半导体有限公司', '黄总', '', '集成电路', '100-500人', 30000, '高', '展会']
   ];
   for (const l of leads) {
     run(
@@ -218,23 +221,25 @@ export async function seedDemoData() {
   const now = new Date().toISOString();
 
   const orders = [
-    ['XS202506001', 'QY20250001', 'INITIATED', '星瀚科技入驻意向', 'HANDLE', userMap['zs001'].id, userMap['zs001'].name, now, null, null, null, null, null, 1, 0, 0],
-    ['XS202506002', 'QY20250002', 'HANDLED', '云帆新能源投资洽谈', 'REVIEW_ARCHIVE', userMap['zs001'].id, userMap['zs001'].name, now, userMap['bl001'].id, userMap['bl001'].name, now, null, null, 1, 1, 0],
-    ['XS202506003', 'QY20250003', 'INITIATED', '智联软件研发中心落地', 'HANDLE', userMap['zs002'].id, userMap['zs002'].name, now, null, null, null, null, null, 0, 0, 0],
-    ['XS202506004', 'QY20250004', 'HANDLED', '蓝鲸生物中试基地', 'REVIEW_ARCHIVE', userMap['zs001'].id, userMap['zs001'].name, now, userMap['bl002'].id, userMap['bl002'].name, now, null, null, 1, 1, 1],
-    ['XS202506005', 'QY20250005', 'REVIEWED', '锐驰精密智能制造基地', 'REVIEW_ARCHIVE', userMap['zs002'].id, userMap['zs002'].name, now, userMap['bl001'].id, userMap['bl001'].name, now, userMap['fh001'].id, userMap['fh001'].name, 1, 1, 1]
+    ['XS202506001', 'QY20250001', 'INITIATED', '星瀚科技AI研发中心入驻', 'HANDLE', userMap['zs001'].id, userMap['zs001'].name, now, null, null, null, null, null, null, 1, 0, 0, '发起阶段：有企业信息，缺跟进、签约'],
+    ['XS202506002', 'QY20250002', 'INITIATED', '云帆新能源华中区域总部', 'HANDLE', userMap['zs001'].id, userMap['zs001'].name, now, userMap['bl001'].id, userMap['bl001'].name, null, null, null, null, 1, 0, 0, '指定王办理(bl001)接手，缺跟进、签约 — 用于测试非办理人拦截'],
+    ['XS202506003', 'QY20250003', 'INITIATED', '智联软件行业SaaS研发中心', 'HANDLE', userMap['zs002'].id, userMap['zs002'].name, now, null, null, null, null, null, null, 0, 0, 0, '企业线索联系人/电话均为空 — 真实缺企业信息场景'],
+    ['XS202506004', 'QY20250006', 'INITIATED', '海晟半导体设备项目', 'HANDLE', userMap['zs001'].id, userMap['zs001'].name, now, userMap['bl002'].id, userMap['bl002'].name, null, null, null, null, 1, 1, 0, '指定赵办理(bl002)接手，已有跟进，缺签约 — 办齐后可推到复核'],
+    ['XS202506005', 'QY20250004', 'HANDLED', '蓝鲸生物中试基地项目', 'REVIEW_ARCHIVE', userMap['zs001'].id, userMap['zs001'].name, now, userMap['bl002'].id, userMap['bl002'].name, now, null, null, null, 1, 1, 0, '已办理推进到复核阶段，仅有跟进缺签约 — 测试"缺签约不可归档"'],
+    ['XS202506006', 'QY20250005', 'HANDLED', '锐驰精密智能制造基地', 'REVIEW_ARCHIVE', userMap['zs002'].id, userMap['zs002'].name, now, userMap['bl001'].id, userMap['bl001'].name, now, null, null, null, 1, 1, 1, '证据齐全已办理完成 — 测试"正常可归档"']
   ];
   for (const o of orders) {
     run(
-      'INSERT INTO clue_orders (order_no, clue_no, status, title, current_stage, initiator_id, initiator_name, initiate_time, handler_id, handler_name, handle_time, reviewer_id, reviewer_name, has_enterprise_evidence, has_followup_evidence, has_signing_evidence) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO clue_orders (order_no, clue_no, status, title, current_stage, initiator_id, initiator_name, initiate_time, handler_id, handler_name, handle_time, reviewer_id, reviewer_name, review_time, has_enterprise_evidence, has_followup_evidence, has_signing_evidence, evidence_check_note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
       o
     );
   }
 
   const followups = [
-    ['QY20250002', '2025-06-05', '园区会议室A', '李招商、王办理、云帆林经理', '讨论了新能源项目落地细节，对方提出需要3000平米厂房和电价优惠', 'meeting_summary_20250605.pdf', userMap['bl001'].id, userMap['bl001'].name],
-    ['QY20250004', '2025-06-08', '杭州蓝鲸生物', '王办理、蓝鲸吴博士', '考察了对方实验室，了解中试基地需求，对方提供了环评报告初稿', 'site_visit_photos.zip', userMap['bl002'].id, userMap['bl002'].name],
-    ['QY20250005', '2025-06-02', '苏州锐驰精密', '李招商、王办理、锐驰孙总', '实地考察生产车间，确认了智能制造基地的需求和投资规模', 'factory_inspection_report.pdf', userMap['bl001'].id, userMap['bl001'].name]
+    ['QY20250006', '2025-06-02', '园区规划展示厅', '赵办理(bl002)、海晟半导体黄总', '海晟半导体对园区集成电路配套及补贴政策高度关注，已提供企业营业执照和投资计划书扫描件', 'haisheng_investment_plan.pdf', userMap['bl002'].id, userMap['bl002'].name],
+    ['QY20250004', '2025-06-05', '杭州蓝鲸生物会议室', '赵办理(bl002)、蓝鲸吴博士', '考察了蓝鲸生物现有实验室，讨论了中试基地2000平米的布局需求和环评要求', 'bluewhale_site_visit.zip', userMap['bl002'].id, userMap['bl002'].name],
+    ['QY20250005', '2025-06-01', '苏州锐驰精密工厂', '王办理(bl001)、锐驰孙总', '实地考察锐驰现有生产车间，确认了50亩工业用地需求及智能制造投资规模', 'ruichi_factory_report.pdf', userMap['bl001'].id, userMap['bl001'].name],
+    ['QY20250005', '2025-06-08', '园区招商中心会议室B', '王办理(bl001)、李招商(zs002)、锐驰孙总', '第三次商务谈判，就土地出让金、建设周期、人才公寓配套达成一致', 'meeting_minutes_0608.pdf', userMap['bl001'].id, userMap['bl001'].name]
   ];
   for (const f of followups) {
     run(
@@ -244,8 +249,7 @@ export async function seedDemoData() {
   }
 
   const signings = [
-    ['QY20250004', 3000, '2025-06-10', '租赁中试基地2000平米，租期5年，享受前2年租金减半优惠', 'contract_draft_20250610.pdf', userMap['bl002'].id, userMap['bl002'].name],
-    ['QY20250005', 25000, '2025-06-06', '拿地50亩建设智能制造基地，总投资2.5亿，享受园区招商引资政策', 'investment_agreement_v3.pdf', userMap['bl001'].id, userMap['bl001'].name]
+    ['QY20250005', 25000, '2025-06-10', '签订《工业项目投资协议》：出让工业用地50亩，总投资2.5亿元人民币，享受园区重大项目招商引资一揽子政策', 'ruichi_investment_agreement_v3.pdf', userMap['bl001'].id, userMap['bl001'].name]
   ];
   for (const s of signings) {
     run(
@@ -255,15 +259,17 @@ export async function seedDemoData() {
   }
 
   const logs = [
-    ['XS202506001', userMap['zs001'].id, userMap['zs001'].name, 'INITIATOR', '发起线索单', '创建线索单，关联企业QY20250001'],
-    ['XS202506002', userMap['zs001'].id, userMap['zs001'].name, 'INITIATOR', '发起线索单', '创建线索单，关联企业QY20250002'],
-    ['XS202506002', userMap['bl001'].id, userMap['bl001'].name, 'HANDLER', '办理线索单', '添加跟进拜访记录，等待签约确认'],
-    ['XS202506003', userMap['zs002'].id, userMap['zs002'].name, 'INITIATOR', '发起线索单', '创建线索单，关联企业QY20250003'],
-    ['XS202506004', userMap['zs001'].id, userMap['zs001'].name, 'INITIATOR', '发起线索单', '创建线索单，关联企业QY20250004'],
-    ['XS202506004', userMap['bl002'].id, userMap['bl002'].name, 'HANDLER', '办理线索单', '完成跟进拜访和签约确认'],
-    ['XS202506005', userMap['zs002'].id, userMap['zs002'].name, 'INITIATOR', '发起线索单', '创建线索单，关联企业QY20250005'],
-    ['XS202506005', userMap['bl001'].id, userMap['bl001'].name, 'HANDLER', '办理线索单', '完成跟进拜访和签约确认'],
-    ['XS202506005', userMap['fh001'].id, userMap['fh001'].name, 'REVIEWER', '复核通过', '复核通过，证据齐全']
+    ['XS202506001', userMap['zs001'].id, userMap['zs001'].name, 'INITIATOR', '发起线索单', '创建线索单，关联QY20250001上海星瀚科技，当前缺跟进、签约证据'],
+    ['XS202506002', userMap['zs001'].id, userMap['zs001'].name, 'INITIATOR', '发起线索单', '创建线索单，关联QY20250002深圳云帆新能源，指定王办理(bl001)接手'],
+    ['XS202506003', userMap['zs002'].id, userMap['zs002'].name, 'INITIATOR', '发起线索单', '创建线索单，关联QY20250003北京智联软件，企业线索联系人/电话均缺失 — 真实缺企业信息'],
+    ['XS202506004', userMap['zs001'].id, userMap['zs001'].name, 'INITIATOR', '发起线索单', '创建线索单，关联QY20250006宁波海晟半导体，指定赵办理(bl002)接手，已有跟进记录'],
+    ['XS202506004', userMap['bl002'].id, userMap['bl002'].name, 'HANDLER', '补录跟进拜访', '补录6月2日海晟半导体展厅参观记录，缺签约待补录'],
+    ['XS202506005', userMap['zs001'].id, userMap['zs001'].name, 'INITIATOR', '发起线索单', '创建线索单，关联QY20250004杭州蓝鲸生物'],
+    ['XS202506005', userMap['bl002'].id, userMap['bl002'].name, 'HANDLER', '办理线索单', '办理完成，推进到复核归档阶段；但仅补了跟进记录，未提交签约确认 — 用于测试缺证据归档拦截'],
+    ['XS202506006', userMap['zs002'].id, userMap['zs002'].name, 'INITIATOR', '发起线索单', '创建线索单，关联QY20250005苏州锐驰精密'],
+    ['XS202506006', userMap['bl001'].id, userMap['bl001'].name, 'HANDLER', '补录跟进拜访', '补录6月1日现场考察记录'],
+    ['XS202506006', userMap['bl001'].id, userMap['bl001'].name, 'HANDLER', '补录签约确认', '补录6月10日2.5亿元投资协议'],
+    ['XS202506006', userMap['bl001'].id, userMap['bl001'].name, 'HANDLER', '办理线索单', '证据齐全（企业+跟进×2+签约），办理完成推进到复核归档阶段，待复核员归档']
   ];
   for (const l of logs) {
     run(
@@ -272,7 +278,7 @@ export async function seedDemoData() {
     );
   }
 
-  console.log('Demo data seeded successfully');
+  console.log('✅ 演示数据已重置并重新生成完毕');
 }
 
 export default { getDb, initDatabase, seedDemoData, run, exec, queryOne, queryAll, saveDb };

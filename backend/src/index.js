@@ -189,13 +189,23 @@ app.get('/api/clue-orders/:orderNo', (c) => {
   const logs = queryAll('SELECT * FROM operation_logs WHERE order_no = ? ORDER BY created_at DESC', [orderNo]);
   const evidence = checkEvidence(order.clue_no);
 
+  const enterpriseFields = ['enterprise_name', 'contact_person', 'contact_phone', 'industry', 'scale', 'registered_capital', 'intention', 'source'];
+  const enterprise = {};
+  enterpriseFields.forEach(f => { enterprise[f] = order[f]; delete order[f]; });
+
+  order.statusName = STATUS_NAMES[order.status];
+  order.stageName = order.current_stage === 'INITIATE' ? '发起' : order.current_stage === 'HANDLE' ? '办理' : '复核归档';
+
   return c.json({
     success: true,
     data: {
-      ...order,
-      statusName: STATUS_NAMES[order.status],
-      stageName: order.current_stage === 'INITIATE' ? '发起' : order.current_stage === 'HANDLE' ? '办理' : '复核归档',
-      followups, signings, logs, evidence
+      order,
+      enterprise,
+      followups,
+      signings,
+      logs,
+      evidence,
+      enterpriseEvidenceOk: evidence.hasEnterpriseEvidence
     }
   });
 });
@@ -291,10 +301,12 @@ app.post('/api/clue-orders/:orderNo/handle', async (c) => {
 
   const order = queryOne('SELECT * FROM clue_orders WHERE order_no = ?', [orderNo]);
   if (!order) {
+    addLog(orderNo, user, '办理-拦截', '失败原因：线索单不存在');
     return c.json({ success: false, error: 'ORDER_NOT_FOUND', message: `线索单【${orderNo}】不存在`, details: { orderNo } }, 404);
   }
 
   if (order.status === 'REJECTED') {
+    addLog(orderNo, user, '办理-拦截', '失败原因：线索单已被驳回');
     return c.json({
       success: false, error: 'ORDER_REJECTED', message: `线索单【${orderNo}】已被驳回，需重新发起`,
       details: { orderNo, rejectReason: order.reject_reason }
@@ -304,6 +316,8 @@ app.post('/api/clue-orders/:orderNo/handle', async (c) => {
   if (order.current_stage !== 'HANDLE') {
     const stageName = order.current_stage === 'INITIATE' ? '发起' : '复核归档';
     const requiredRole = order.current_stage === 'INITIATE' ? ROLE_NAMES['INITIATOR'] : ROLE_NAMES['REVIEWER'];
+    addLog(orderNo, user, '办理-拦截',
+      `失败原因：阶段不符(当前${order.current_stage})，HANDLER角色只能处理HANDLE阶段`);
     return c.json({
       success: false, error: 'WRONG_STAGE',
       message: `线索单【${orderNo}】当前处于【${stageName}】阶段，应由【${requiredRole}】处理，您作为【${ROLE_NAMES[user.role]}】无法办理`,
@@ -315,6 +329,8 @@ app.post('/api/clue-orders/:orderNo/handle', async (c) => {
   }
 
   if (order.status !== 'INITIATED') {
+    addLog(orderNo, user, '办理-拦截',
+      `失败原因：状态不符(当前${order.status})，仅INITIATED可办理`);
     return c.json({
       success: false, error: 'WRONG_STATUS',
       message: `线索单【${orderNo}】当前状态为【${STATUS_NAMES[order.status]}】，仅【已发起】状态可办理`,
@@ -323,6 +339,8 @@ app.post('/api/clue-orders/:orderNo/handle', async (c) => {
   }
 
   if (clientVersion !== undefined && clientVersion !== order.version) {
+    addLog(orderNo, user, '办理-拦截',
+      `失败原因：版本冲突(客户端${clientVersion}/服务端${order.version})`);
     return c.json({
       success: false, error: 'VERSION_CONFLICT',
       message: `线索单【${orderNo}】已被更新，请刷新后再操作`,
@@ -331,7 +349,9 @@ app.post('/api/clue-orders/:orderNo/handle', async (c) => {
   }
 
   if (order.handler_id && order.handler_id !== user.id) {
-    const handlerName = queryOne('SELECT name FROM users WHERE id = ?', [order.handler_id])?.name;
+    const handlerName = order.handler_name || queryOne('SELECT name FROM users WHERE id = ?', [order.handler_id])?.name;
+    addLog(orderNo, user, '办理-拦截',
+      `失败原因：非当前办理人，实际办理人${handlerName}`);
     return c.json({
       success: false, error: 'ORDER_ALREADY_ASSIGNED',
       message: `线索单【${orderNo}】已由【${handlerName}】办理，您无法覆盖他人办理结果`,
@@ -343,6 +363,7 @@ app.post('/api/clue-orders/:orderNo/handle', async (c) => {
   }
 
   if (!followup && !signing) {
+    addLog(orderNo, user, '办理-拦截', '失败原因：未提供任何证据(followup/signing)');
     return c.json({
       success: false, error: 'NO_EVIDENCE_PROVIDED',
       message: '办理时至少需要提供跟进拜访记录或签约确认信息',
@@ -354,6 +375,7 @@ app.post('/api/clue-orders/:orderNo/handle', async (c) => {
   const newFollowupCount = evidence.followupCount + (followup ? 1 : 0);
 
   if (newFollowupCount === 0) {
+    addLog(orderNo, user, '办理-拦截', '失败原因：缺少至少1条跟进拜访记录');
     return c.json({
       success: false, error: 'FOLLOWUP_REQUIRED',
       message: '办理阶段至少需要1条跟进拜访记录，请补充',
@@ -430,12 +452,15 @@ app.post('/api/clue-orders/:orderNo/review', async (c) => {
 
   const order = queryOne('SELECT * FROM clue_orders WHERE order_no = ?', [orderNo]);
   if (!order) {
+    addLog(orderNo, user, '复核-拦截', '失败原因：线索单不存在');
     return c.json({ success: false, error: 'ORDER_NOT_FOUND', message: `线索单【${orderNo}】不存在`, details: { orderNo } }, 404);
   }
 
   if (order.current_stage !== 'REVIEW_ARCHIVE') {
     const stageName = order.current_stage === 'INITIATE' ? '发起' : '办理';
     const requiredRole = order.current_stage === 'INITIATE' ? ROLE_NAMES['INITIATOR'] : ROLE_NAMES['HANDLER'];
+    addLog(orderNo, user, '复核-拦截',
+      `失败原因：阶段不符(当前${order.current_stage})，REVIEWER角色只能处理REVIEW_ARCHIVE阶段`);
     return c.json({
       success: false, error: 'WRONG_STAGE',
       message: `线索单【${orderNo}】当前处于【${stageName}】阶段，应由【${requiredRole}】处理，您作为【${ROLE_NAMES[user.role]}】无法复核`,
@@ -444,6 +469,8 @@ app.post('/api/clue-orders/:orderNo/review', async (c) => {
   }
 
   if (order.status !== 'HANDLED' && order.status !== 'REVIEWED') {
+    addLog(orderNo, user, '复核-拦截',
+      `失败原因：状态不符(当前${order.status})，仅HANDLED/REVIEWED可复核`);
     return c.json({
       success: false, error: 'WRONG_STATUS',
       message: `线索单【${orderNo}】当前状态为【${STATUS_NAMES[order.status]}】，仅【已办理/已复核】状态可复核归档`,
@@ -452,6 +479,8 @@ app.post('/api/clue-orders/:orderNo/review', async (c) => {
   }
 
   if (clientVersion !== undefined && clientVersion !== order.version) {
+    addLog(orderNo, user, '复核-拦截',
+      `失败原因：版本冲突(客户端${clientVersion}/服务端${order.version})`);
     return c.json({
       success: false, error: 'VERSION_CONFLICT',
       message: `线索单【${orderNo}】已被更新，请刷新后再操作`,
@@ -464,6 +493,7 @@ app.post('/api/clue-orders/:orderNo/review', async (c) => {
 
   if (action === 'reject') {
     if (!rejectReason) {
+      addLog(orderNo, user, '复核-拦截', '失败原因：驳回操作未填驳回原因');
       return c.json({ success: false, error: 'REJECT_REASON_REQUIRED', message: '驳回必须填写驳回原因', details: { orderNo } }, 400);
     }
     run(`
@@ -479,6 +509,8 @@ app.post('/api/clue-orders/:orderNo/review', async (c) => {
   }
 
   if (missing.length > 0) {
+    addLog(orderNo, user, '复核-拦截',
+      `失败原因：证据不齐全，缺少${missing.map(e => e.name).join('、')}`);
     return c.json({
       success: false, error: 'INSUFFICIENT_EVIDENCE',
       message: `复核归档前证据不齐全，缺少：${missing.map(e => e.name).join('、')}`,
@@ -522,14 +554,21 @@ app.post('/api/clue-orders/batch-review', async (c) => {
   const results = [];
   for (const orderNo of order_nos) {
     const order = queryOne('SELECT * FROM clue_orders WHERE order_no = ?', [orderNo]);
-    if (!order) { results.push({ orderNo, success: false, error: 'ORDER_NOT_FOUND', message: '线索单不存在' }); continue; }
+    if (!order) {
+      addLog(orderNo, user, '批量复核-拦截', '失败原因：线索单不存在');
+      results.push({ orderNo, success: false, error: 'ORDER_NOT_FOUND', message: '线索单不存在' });
+      continue;
+    }
     if (order.current_stage !== 'REVIEW_ARCHIVE' || !['HANDLED', 'REVIEWED'].includes(order.status)) {
+      addLog(orderNo, user, '批量复核-拦截',
+        `失败原因：阶段/状态不符(阶段${order.current_stage} 状态${order.status})，仅REVIEW_ARCHIVE阶段/HANDLED-REVIEWED状态可归档`);
       results.push({ orderNo, success: false, error: 'NOT_REVIEWABLE', message: `当前阶段${order.current_stage}状态${order.status}不可复核` });
       continue;
     }
     const evidence = checkEvidence(order.clue_no);
     const missing = validateEvidenceForStage('REVIEW_ARCHIVE', evidence);
     if (missing.length > 0) {
+      addLog(orderNo, user, '批量复核-拦截', `失败原因：证据不齐全，缺少${missing.map(e => e.name).join('、')}`);
       results.push({ orderNo, success: false, error: 'INSUFFICIENT_EVIDENCE', message: `缺少：${missing.map(e => e.name).join('、')}`, missing });
       continue;
     }
@@ -540,20 +579,111 @@ app.post('/api/clue-orders/batch-review', async (c) => {
           version = version + 1, updated_at = CURRENT_TIMESTAMP
         WHERE order_no = ?
       `, [user.id, user.name, new Date().toISOString(), orderNo]);
-      addLog(orderNo, user, '批量复核归档', '批量复核通过');
+      addLog(orderNo, user, '批量复核归档', '单条批量复核通过，证据齐全');
       results.push({ orderNo, success: true, message: '已归档' });
     } catch (e) {
+      addLog(orderNo, user, '批量复核-拦截', `失败原因：DB异常 - ${e.message}`);
       results.push({ orderNo, success: false, error: 'DB_ERROR', message: e.message });
     }
   }
 
   const successCount = results.filter(r => r.success).length;
+  const failedNos = results.filter(r => !r.success).map(r => r.orderNo).join(',');
+  addLog(order_nos[0] || 'BATCH', user, '【批量复核汇总】',
+    `共${results.length}条，成功${successCount}条，失败${results.length - successCount}条。失败单号：${failedNos || '无'}`);
+
   return c.json({
     success: true,
     message: `批量复核完成：成功${successCount}条，失败${results.length - successCount}条`,
     data: { total: results.length, success: successCount, failed: results.length - successCount, details: results }
   });
 });
+
+function validateBindOrderForSupplement(user, body, supplementType) {
+  const { order_no, clientVersion } = body;
+  const typeName = supplementType;
+  if (!order_no) {
+    return { blocked: true, httpStatus: 400, error: {
+      success: false, error: 'ORDER_NO_REQUIRED',
+      message: '补录' + typeName + '必须通过线索单办理页面发起（需order_no）',
+      details: { required: ['order_no'], provided: Object.keys(body) }
+    } };
+  }
+  const order = queryOne('SELECT * FROM clue_orders WHERE order_no = ?', [order_no]);
+  if (!order) {
+    addLog(order_no, user, '补录' + typeName + '-拦截', '失败原因：线索单不存在');
+    return { blocked: true, httpStatus: 404, error: { success: false, error: 'ORDER_NOT_FOUND', message: '线索单【' + order_no + '】不存在', details: { order_no } } };
+  }
+  if (order.status === 'ARCHIVED') {
+    addLog(order_no, user, '补录' + typeName + '-拦截', '失败原因：线索单已归档，禁止补录');
+    return { blocked: true, httpStatus: 409, error: { success: false, error: 'ORDER_ARCHIVED', message: '线索单【' + order_no + '】已归档，禁止补录' + typeName, details: { order_no } } };
+  }
+  if (order.status === 'REJECTED') {
+    addLog(order_no, user, '补录' + typeName + '-拦截', '失败原因：线索单已被驳回，禁止补录');
+    return { blocked: true, httpStatus: 409, error: { success: false, error: 'ORDER_REJECTED', message: '线索单【' + order_no + '】已被驳回，无法补录' + typeName + '，请重新发起', details: { order_no, reject_reason: order.reject_reason } } };
+  }
+  if (order.current_stage !== 'HANDLE') {
+    addLog(order_no, user, '补录' + typeName + '-拦截',
+      '失败原因：阶段不符(当前' + order.current_stage + ')，仅HANDLE阶段可补录');
+    const stageText = { INITIATE: '发起', HANDLE: '办理', REVIEW_ARCHIVE: '复核归档' }[order.current_stage];
+    return { blocked: true, httpStatus: 409, error: {
+      success: false, error: 'WRONG_STAGE',
+      message: '线索单【' + order_no + '】当前处于【' + stageText + '阶段】，仅【办理】阶段可补录' + typeName,
+      details: { order_no, current_stage: order.current_stage, required_stage: 'HANDLE' } } };
+  }
+  if (order.status !== 'INITIATED') {
+    addLog(order_no, user, '补录' + typeName + '-拦截',
+      '失败原因：状态不符(当前' + order.status + ')，仅INITIATED状态可补录');
+    return { blocked: true, httpStatus: 409, error: {
+      success: false, error: 'WRONG_STATUS',
+      message: '线索单【' + order_no + '】当前状态为【' + (STATUS_NAMES[order.status] || order.status) + '】，仅【已发起】状态可补录' + typeName,
+      details: { order_no, current_status: order.status, required_status: 'INITIATED' } } };
+  }
+  if (clientVersion !== undefined && clientVersion !== order.version) {
+    addLog(order_no, user, '补录' + typeName + '-拦截',
+      '失败原因：版本冲突(客户端' + clientVersion + '/服务端' + order.version + ')');
+    return { blocked: true, httpStatus: 409, error: {
+      success: false, error: 'VERSION_CONFLICT',
+      message: '线索单【' + order_no + '】已被他人更新，请刷新后再补录' + typeName,
+      details: { order_no, clientVersion, serverVersion: order.version } } };
+  }
+  if (order.handler_id && order.handler_id !== user.id) {
+    const handlerName = order.handler_name || '';
+    addLog(order_no, user, '补录' + typeName + '-拦截', '失败原因：非当前办理人，实际办理人' + handlerName);
+    return { blocked: true, httpStatus: 409, error: {
+      success: false, error: 'NOT_CURRENT_HANDLER',
+      message: '线索单【' + order_no + '】已由【' + handlerName + '】接手，您不是当前办理人，无法补录' + typeName,
+      details: { order_no, assigned_handler_id: order.handler_id, assigned_handler_name: handlerName, your_id: user.id, your_name: user.name } } };
+  }
+  return { blocked: false, order };
+}
+
+function syncEvidenceAfterSupplement(order_no, order, user, supplementType) {
+  const evidence = checkEvidence(order.clue_no);
+  const missing = [];
+  if (!evidence.hasEnterpriseEvidence) missing.push('企业关键信息');
+  if (!evidence.hasFollowupEvidence) missing.push('跟进拜访');
+  if (!evidence.hasSigningEvidence) missing.push('签约确认');
+  run(`
+    UPDATE clue_orders SET
+      handler_id = CASE WHEN handler_id IS NULL THEN ? ELSE handler_id END,
+      handler_name = CASE WHEN handler_name IS NULL THEN ? ELSE handler_name END,
+      has_enterprise_evidence = ?,
+      has_followup_evidence = ?,
+      has_signing_evidence = ?,
+      evidence_check_note = ?,
+      version = version + 1,
+      updated_at = CURRENT_TIMESTAMP
+    WHERE order_no = ?
+  `, [
+    user.id, user.name,
+    evidence.hasEnterpriseEvidence ? 1 : 0,
+    evidence.hasFollowupEvidence ? 1 : 0,
+    evidence.hasSigningEvidence ? 1 : 0,
+    `补录${supplementType}后：${missing.length ? '仍待补 - ' + missing.join('、') : '证据已齐全'}`,
+    order_no
+  ]);
+}
 
 app.get('/api/enterprise-leads', (c) => {
   const keyword = c.req.query('keyword');
@@ -618,27 +748,47 @@ app.post('/api/follow-up-records', async (c) => {
   if (roleError) return c.json(roleError, 403);
 
   const body = await c.req.json();
-  const { clue_no, visit_date, content, location, participants, attachment } = body;
+  const { visit_date, content, location, participants, attachment } = body;
 
-  if (!clue_no || !visit_date || !content) {
+  const validated = validateBindOrderForSupplement(user, body, '跟进拜访');
+  if (validated.blocked) return c.json(validated.error, validated.httpStatus);
+  const { order } = validated;
+
+  if (!visit_date || !content) {
+    addLog(order.order_no, user, '补录跟进拜访-拦截', '失败原因：必填字段缺失');
     return c.json({
       success: false, error: 'MISSING_REQUIRED_FIELDS', message: '跟进拜访缺少必填字段',
-      details: { required: ['clue_no', 'visit_date', 'content'], provided: Object.keys(body) }
+      details: { required: ['order_no', 'visit_date', 'content'], provided: Object.keys(body) }
     }, 400);
   }
 
-  const lead = queryOne('SELECT * FROM enterprise_leads WHERE clue_no = ?', [clue_no]);
+  const lead = queryOne('SELECT * FROM enterprise_leads WHERE clue_no = ?', [order.clue_no]);
   if (!lead) {
-    return c.json({ success: false, error: 'CLUE_NOT_FOUND', message: `企业线索【${clue_no}】不存在`, details: { clue_no } }, 404);
+    addLog(order.order_no, user, '补录跟进拜访-拦截', '失败原因：关联企业线索不存在');
+    return c.json({ success: false, error: 'CLUE_NOT_FOUND', message: `企业线索【${order.clue_no}】不存在`, details: { clue_no: order.clue_no } }, 404);
   }
 
-  const info = run(`
-    INSERT INTO follow_up_records (clue_no, visit_date, location, participants, content, attachment, handler_id, handler_name)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `, [clue_no, visit_date, location || '', participants || '', content, attachment || '', user.id, user.name]);
+  try {
+    run(`
+      INSERT INTO follow_up_records (clue_no, visit_date, location, participants, content, attachment, handler_id, handler_name)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `, [order.clue_no, visit_date, location || '', participants || '', content, attachment || '', user.id, user.name]);
 
-  const data = queryOne('SELECT * FROM follow_up_records WHERE id = ?', [info.lastInsertRowid]);
-  return c.json({ success: true, message: '跟进拜访记录已添加', data }, 201);
+    syncEvidenceAfterSupplement(order.order_no, order, user, '跟进拜访');
+
+    addLog(order.order_no, user, '补录跟进拜访',
+      `补录成功。拜访日期：${visit_date}${location ? `，地点：${location}` : ''}${participants ? `，参与人：${participants}` : ''}`);
+
+    const updatedOrder = queryOne(`
+      SELECT co.*, el.enterprise_name FROM clue_orders co
+      LEFT JOIN enterprise_leads el ON co.clue_no = el.clue_no WHERE co.order_no = ?
+    `, [order.order_no]);
+
+    return c.json({ success: true, message: '跟进拜访补录成功，线索单证据与版本已同步更新', data: { order: updatedOrder } }, 201);
+  } catch (e) {
+    addLog(order.order_no, user, '补录跟进拜访-拦截', `失败原因：DB异常 - ${e.message}`);
+    return c.json({ success: false, error: 'SUPPLEMENT_FAILED', message: '补录跟进拜访失败：' + e.message, details: { error: e.message } }, 500);
+  }
 });
 
 app.post('/api/signing-confirmations', async (c) => {
@@ -649,27 +799,47 @@ app.post('/api/signing-confirmations', async (c) => {
   if (roleError) return c.json(roleError, 403);
 
   const body = await c.req.json();
-  const { clue_no, contract_amount, signing_date, contract_terms, attachment } = body;
+  const { contract_amount, signing_date, contract_terms, attachment } = body;
 
-  if (!clue_no || !contract_amount || !signing_date) {
+  const validated = validateBindOrderForSupplement(user, body, '签约确认');
+  if (validated.blocked) return c.json(validated.error, validated.httpStatus);
+  const { order } = validated;
+
+  if (!contract_amount || !signing_date) {
+    addLog(order.order_no, user, '补录签约确认-拦截', '失败原因：必填字段缺失');
     return c.json({
       success: false, error: 'MISSING_REQUIRED_FIELDS', message: '签约确认缺少必填字段',
-      details: { required: ['clue_no', 'contract_amount', 'signing_date'], provided: Object.keys(body) }
+      details: { required: ['order_no', 'contract_amount', 'signing_date'], provided: Object.keys(body) }
     }, 400);
   }
 
-  const lead = queryOne('SELECT * FROM enterprise_leads WHERE clue_no = ?', [clue_no]);
+  const lead = queryOne('SELECT * FROM enterprise_leads WHERE clue_no = ?', [order.clue_no]);
   if (!lead) {
-    return c.json({ success: false, error: 'CLUE_NOT_FOUND', message: `企业线索【${clue_no}】不存在`, details: { clue_no } }, 404);
+    addLog(order.order_no, user, '补录签约确认-拦截', '失败原因：关联企业线索不存在');
+    return c.json({ success: false, error: 'CLUE_NOT_FOUND', message: `企业线索【${order.clue_no}】不存在`, details: { clue_no: order.clue_no } }, 404);
   }
 
-  const info = run(`
-    INSERT INTO signing_confirmations (clue_no, contract_amount, signing_date, contract_terms, attachment, handler_id, handler_name)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `, [clue_no, contract_amount, signing_date, contract_terms || '', attachment || '', user.id, user.name]);
+  try {
+    run(`
+      INSERT INTO signing_confirmations (clue_no, contract_amount, signing_date, contract_terms, attachment, handler_id, handler_name)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `, [order.clue_no, contract_amount, signing_date, contract_terms || '', attachment || '', user.id, user.name]);
 
-  const data = queryOne('SELECT * FROM signing_confirmations WHERE id = ?', [info.lastInsertRowid]);
-  return c.json({ success: true, message: '签约确认已添加', data }, 201);
+    syncEvidenceAfterSupplement(order.order_no, order, user, '签约确认');
+
+    addLog(order.order_no, user, '补录签约确认',
+      `补录成功。签约日期：${signing_date}，合同金额：${contract_amount}万`);
+
+    const updatedOrder = queryOne(`
+      SELECT co.*, el.enterprise_name FROM clue_orders co
+      LEFT JOIN enterprise_leads el ON co.clue_no = el.clue_no WHERE co.order_no = ?
+    `, [order.order_no]);
+
+    return c.json({ success: true, message: '签约确认补录成功，线索单证据与版本已同步更新', data: { order: updatedOrder } }, 201);
+  } catch (e) {
+    addLog(order.order_no, user, '补录签约确认-拦截', `失败原因：DB异常 - ${e.message}`);
+    return c.json({ success: false, error: 'SUPPLEMENT_FAILED', message: '补录签约确认失败：' + e.message, details: { error: e.message } }, 500);
+  }
 });
 
 app.get('/api/stats', (c) => {
