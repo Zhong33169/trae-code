@@ -329,7 +329,7 @@ server.get('/api/forms', async (request, reply) => {
   if (tabRoles && typeof tabRoles === 'string') {
     const roles = tabRoles.split(',');
     if (roles.length > 0) {
-      sql += ` AND current_role IN (${roles.map(() => '?').join(',')})`;
+      sql += ` AND (current_role IN (${roles.map(() => '?').join(',')}) OR has_exception = 1)`;
       params.push(...roles);
     }
   }
@@ -337,7 +337,7 @@ server.get('/api/forms', async (request, reply) => {
   if (tabStatuses && typeof tabStatuses === 'string') {
     const statuses = tabStatuses.split(',');
     if (statuses.length > 0) {
-      sql += ` AND status IN (${statuses.map(() => '?').join(',')})`;
+      sql += ` AND (status IN (${statuses.map(() => '?').join(',')}) OR has_exception = 1)`;
       params.push(...statuses);
     }
   } else if (status && status !== 'ALL') {

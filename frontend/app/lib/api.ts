@@ -39,6 +39,8 @@ export async function getForms(params?: {
   isOverdue?: boolean;
   currentRole?: string;
   keyword?: string;
+  tabRoles?: string;
+  tabStatuses?: string;
 }) {
   const queryParams = new URLSearchParams();
   if (params?.status) queryParams.append('status', params.status);
@@ -46,6 +48,8 @@ export async function getForms(params?: {
   if (params?.isOverdue) queryParams.append('isOverdue', 'true');
   if (params?.currentRole) queryParams.append('currentRole', params.currentRole);
   if (params?.keyword) queryParams.append('keyword', params.keyword);
+  if (params?.tabRoles) queryParams.append('tabRoles', params.tabRoles);
+  if (params?.tabStatuses) queryParams.append('tabStatuses', params.tabStatuses);
 
   const query = queryParams.toString();
   return apiFetch(`/forms${query ? `?${query}` : ''}`);
