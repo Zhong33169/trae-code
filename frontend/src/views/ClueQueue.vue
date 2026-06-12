@@ -423,25 +423,39 @@ async function submitCreate() {
 }
 
 async function batchReview() {
-  if (!confirm(`确认批量复核归档 ${selectedOrderNos.value.length} 条线索单吗？证据不全的将被拦截并返回具体原因。`)) return;
-  const res = await api.post('/clue-orders/batch-review', { order_nos: selectedOrderNos.value });
+  if (!confirm(`确认批量复核归档 ${selectedOrderNos.value.length} 条线索单吗？\n\n注意：版本过期或证据不全的将被逐条拦截并返回具体原因。`)) return;
+
+  const orderObjs = selectedOrderNos.value.map(no => {
+    const o = orders.value.find(x => x.order_no === no);
+    return { order_no: no, clientVersion: o?.version || 1 };
+  });
+  const missingVersions = orderObjs.filter(o => !o.clientVersion || o.clientVersion === undefined).length;
+  if (missingVersions > 0) {
+    showAlert('warning', `${missingVersions} 条线索单缺少版本号，已自动填充 v1，请先刷新后再操作`);
+  }
+
+  const res = await api.post('/clue-orders/batch-review', { orders: orderObjs });
   if (res.success) {
     showAlert(res.data.failed > 0 ? 'warning' : 'success', res.message);
-    if (res.data.details && res.data.details.length > 0) {
-      const failed = res.data.details.filter(d => !d.success);
-      const success = res.data.details.filter(d => d.success);
+    if (res.data.results && res.data.results.length > 0) {
+      const failed = res.data.results.filter(d => !d.success);
+      const success = res.data.results.filter(d => d.success);
       let detailMsg = '';
-      if (success.length) detailMsg += `✅ 成功归档: ${success.map(s => s.orderNo).join(', ')}`;
+      if (success.length) detailMsg += `✅ 成功归档 ${success.length} 条: ${success.map(s => s.order_no + '(v' + s.newVersion + ')').join(', ')}`;
       if (failed.length) {
-        detailMsg += (detailMsg ? '\n' : '') + `❌ 失败: ` + failed.map(f => `${f.orderNo}(${f.error}): ${f.message}`).join('; ');
+        const versionFail = failed.filter(f => f.error === 'VERSION_CONFLICT' || f.error === 'CLIENT_VERSION_REQUIRED');
+        const otherFail = failed.filter(f => f.error !== 'VERSION_CONFLICT' && f.error !== 'CLIENT_VERSION_REQUIRED');
+        if (versionFail.length) detailMsg += (detailMsg ? '\n' : '') + `🔴 版本冲突/缺失 ${versionFail.length} 条: ` + versionFail.map(f => `${f.order_no}(${f.error}: ${f.message})`).join('; ');
+        if (otherFail.length) detailMsg += (detailMsg ? '\n' : '') + `❌ 其他拦截 ${otherFail.length} 条: ` + otherFail.map(f => `${f.order_no}(${f.error}): ${f.message}`).join('; ');
       }
-      setTimeout(() => showAlert(failed.length ? 'error' : 'success', detailMsg), 100);
+      setTimeout(() => showAlert(failed.length ? 'error' : 'success', detailMsg, '批量复核明细'), 100);
     }
     selectedOrderNos.value = [];
     await loadOrders();
     await loadStats();
   } else {
-    showAlert('error', res.message || '批量操作失败');
+    showAlert('error', res.message || '批量操作失败', '批量复核失败');
+    await loadOrders();
   }
 }
 </script>

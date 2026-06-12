@@ -338,7 +338,16 @@ app.post('/api/clue-orders/:orderNo/handle', async (c) => {
     }, 409);
   }
 
-  if (clientVersion !== undefined && clientVersion !== order.version) {
+  if (clientVersion === undefined || clientVersion === null) {
+    addLog(orderNo, user, '办理-拦截', '失败原因：缺少clientVersion版本标记');
+    return c.json({
+      success: false, error: 'CLIENT_VERSION_REQUIRED',
+      message: '缺少版本号，请刷新页面后再办理',
+      details: { orderNo, required: ['clientVersion'], provided: Object.keys(body) }
+    }, 400);
+  }
+
+  if (clientVersion !== order.version) {
     addLog(orderNo, user, '办理-拦截',
       `失败原因：版本冲突(客户端${clientVersion}/服务端${order.version})`);
     return c.json({
@@ -478,7 +487,16 @@ app.post('/api/clue-orders/:orderNo/review', async (c) => {
     }, 409);
   }
 
-  if (clientVersion !== undefined && clientVersion !== order.version) {
+  if (clientVersion === undefined || clientVersion === null) {
+    addLog(orderNo, user, '复核-拦截', '失败原因：缺少clientVersion版本标记');
+    return c.json({
+      success: false, error: 'CLIENT_VERSION_REQUIRED',
+      message: '缺少版本号，请刷新页面后再复核归档',
+      details: { orderNo, required: ['clientVersion'], provided: Object.keys(body) }
+    }, 400);
+  }
+
+  if (clientVersion !== order.version) {
     addLog(orderNo, user, '复核-拦截',
       `失败原因：版本冲突(客户端${clientVersion}/服务端${order.version})`);
     return c.json({
@@ -545,31 +563,52 @@ app.post('/api/clue-orders/batch-review', async (c) => {
   if (roleError) return c.json(roleError, 403);
 
   const body = await c.req.json();
-  const { order_nos } = body;
+  const { orders } = body;
 
-  if (!Array.isArray(order_nos) || order_nos.length === 0) {
+  if (!Array.isArray(orders) || orders.length === 0) {
     return c.json({ success: false, error: 'EMPTY_BATCH', message: '请选择要批量复核的线索单', details: {} }, 400);
   }
 
+  const hasInvalidItem = orders.some(o => !o || typeof o !== 'object' || !o.order_no);
+  if (hasInvalidItem) {
+    return c.json({
+      success: false, error: 'INVALID_BATCH_FORMAT',
+      message: '批量复核格式错误，每项需包含 order_no 和 clientVersion',
+      details: { required: [{ order_no: 'string', clientVersion: 'number' }], providedSample: orders[0] }
+    }, 400);
+  }
+
   const results = [];
-  for (const orderNo of order_nos) {
-    const order = queryOne('SELECT * FROM clue_orders WHERE order_no = ?', [orderNo]);
+  for (const item of orders) {
+    const { order_no, clientVersion } = item;
+    const order = queryOne('SELECT * FROM clue_orders WHERE order_no = ?', [order_no]);
     if (!order) {
-      addLog(orderNo, user, '批量复核-拦截', '失败原因：线索单不存在');
-      results.push({ orderNo, success: false, error: 'ORDER_NOT_FOUND', message: '线索单不存在' });
+      addLog(order_no, user, '批量复核-拦截', '失败原因：线索单不存在');
+      results.push({ order_no, success: false, error: 'ORDER_NOT_FOUND', message: '线索单不存在' });
       continue;
     }
     if (order.current_stage !== 'REVIEW_ARCHIVE' || !['HANDLED', 'REVIEWED'].includes(order.status)) {
-      addLog(orderNo, user, '批量复核-拦截',
+      addLog(order_no, user, '批量复核-拦截',
         `失败原因：阶段/状态不符(阶段${order.current_stage} 状态${order.status})，仅REVIEW_ARCHIVE阶段/HANDLED-REVIEWED状态可归档`);
-      results.push({ orderNo, success: false, error: 'NOT_REVIEWABLE', message: `当前阶段${order.current_stage}状态${order.status}不可复核` });
+      results.push({ order_no, success: false, error: 'NOT_REVIEWABLE', message: `当前阶段${order.current_stage}状态${order.status}不可复核` });
+      continue;
+    }
+    if (clientVersion === undefined || clientVersion === null) {
+      addLog(order_no, user, '批量复核-拦截', '失败原因：缺少clientVersion版本标记');
+      results.push({ order_no, success: false, error: 'CLIENT_VERSION_REQUIRED', message: '缺少版本号，该单跳过' });
+      continue;
+    }
+    if (clientVersion !== order.version) {
+      addLog(order_no, user, '批量复核-拦截',
+        `失败原因：版本冲突(客户端${clientVersion}/服务端${order.version})，该单已被更新`);
+      results.push({ order_no, success: false, error: 'VERSION_CONFLICT', message: `版本冲突，服务端已为v${order.version}`, clientVersion, serverVersion: order.version });
       continue;
     }
     const evidence = checkEvidence(order.clue_no);
     const missing = validateEvidenceForStage('REVIEW_ARCHIVE', evidence);
     if (missing.length > 0) {
-      addLog(orderNo, user, '批量复核-拦截', `失败原因：证据不齐全，缺少${missing.map(e => e.name).join('、')}`);
-      results.push({ orderNo, success: false, error: 'INSUFFICIENT_EVIDENCE', message: `缺少：${missing.map(e => e.name).join('、')}`, missing });
+      addLog(order_no, user, '批量复核-拦截', `失败原因：证据不齐全，缺少${missing.map(e => e.name).join('、')}`);
+      results.push({ order_no, success: false, error: 'INSUFFICIENT_EVIDENCE', message: `缺少：${missing.map(e => e.name).join('、')}`, missing });
       continue;
     }
     try {
@@ -578,24 +617,24 @@ app.post('/api/clue-orders/batch-review', async (c) => {
           status = 'ARCHIVED', reviewer_id = ?, reviewer_name = ?, review_time = ?,
           version = version + 1, updated_at = CURRENT_TIMESTAMP
         WHERE order_no = ?
-      `, [user.id, user.name, new Date().toISOString(), orderNo]);
-      addLog(orderNo, user, '批量复核归档', '单条批量复核通过，证据齐全');
-      results.push({ orderNo, success: true, message: '已归档' });
+      `, [user.id, user.name, new Date().toISOString(), order_no]);
+      addLog(order_no, user, '批量复核归档', '单条批量复核通过，证据齐全');
+      results.push({ order_no, success: true, message: '已归档', newVersion: order.version + 1 });
     } catch (e) {
-      addLog(orderNo, user, '批量复核-拦截', `失败原因：DB异常 - ${e.message}`);
-      results.push({ orderNo, success: false, error: 'DB_ERROR', message: e.message });
+      addLog(order_no, user, '批量复核-拦截', `失败原因：DB异常 - ${e.message}`);
+      results.push({ order_no, success: false, error: 'DB_ERROR', message: e.message });
     }
   }
 
   const successCount = results.filter(r => r.success).length;
-  const failedNos = results.filter(r => !r.success).map(r => r.orderNo).join(',');
-  addLog(order_nos[0] || 'BATCH', user, '【批量复核汇总】',
+  const failedNos = results.filter(r => !r.success).map(r => r.order_no).join(',');
+  addLog(orders[0]?.order_no || 'BATCH', user, '【批量复核汇总】',
     `共${results.length}条，成功${successCount}条，失败${results.length - successCount}条。失败单号：${failedNos || '无'}`);
 
   return c.json({
     success: true,
     message: `批量复核完成：成功${successCount}条，失败${results.length - successCount}条`,
-    data: { total: results.length, success: successCount, failed: results.length - successCount, details: results }
+    data: { total: results.length, success: successCount, failed: results.length - successCount, results }
   });
 });
 
@@ -639,7 +678,14 @@ function validateBindOrderForSupplement(user, body, supplementType) {
       message: '线索单【' + order_no + '】当前状态为【' + (STATUS_NAMES[order.status] || order.status) + '】，仅【已发起】状态可补录' + typeName,
       details: { order_no, current_status: order.status, required_status: 'INITIATED' } } };
   }
-  if (clientVersion !== undefined && clientVersion !== order.version) {
+  if (clientVersion === undefined || clientVersion === null) {
+    addLog(order_no, user, '补录' + typeName + '-拦截', '失败原因：缺少clientVersion版本标记');
+    return { blocked: true, httpStatus: 400, error: {
+      success: false, error: 'CLIENT_VERSION_REQUIRED',
+      message: '缺少版本号，请刷新页面后再补录' + typeName,
+      details: { order_no, required: ['clientVersion'], provided: Object.keys(body) } } };
+  }
+  if (clientVersion !== order.version) {
     addLog(order_no, user, '补录' + typeName + '-拦截',
       '失败原因：版本冲突(客户端' + clientVersion + '/服务端' + order.version + ')');
     return { blocked: true, httpStatus: 409, error: {

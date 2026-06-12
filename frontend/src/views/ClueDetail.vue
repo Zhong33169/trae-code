@@ -619,12 +619,14 @@ async function doHandle() {
     showHandleModal.value = false;
     await loadDetail();
   } else {
+    const isVersionIssue = res.error === 'VERSION_CONFLICT' || res.error === 'CLIENT_VERSION_REQUIRED';
     handleAlert.value = {
       type: 'error',
       title: `办理被拦截 [${res.error}]`,
-      message: res.message,
+      message: res.message + (isVersionIssue ? '（页面已自动刷新，请核对最新状态后再操作）' : ''),
       details: res.details
     };
+    await loadDetail();
   }
 }
 
@@ -637,12 +639,14 @@ async function doReview() {
     showAlertMsg('success', res.message);
     await loadDetail();
   } else {
+    const isVersionIssue = res.error === 'VERSION_CONFLICT' || res.error === 'CLIENT_VERSION_REQUIRED';
     showAlertMsg(
       'error',
-      res.message,
+      res.message + (isVersionIssue ? '（页面已自动刷新，请核对最新状态后再操作）' : ''),
       `复核被拦截 [${res.error}]`,
       res.details
     );
+    await loadDetail();
   }
 }
 
@@ -660,7 +664,9 @@ async function doReject() {
     rejectForm.value = { reason: '' };
     await loadDetail();
   } else {
-    showAlertMsg('error', res.message, `驳回被拦截 [${res.error}]`, res.details);
+    const isVersionIssue = res.error === 'VERSION_CONFLICT' || res.error === 'CLIENT_VERSION_REQUIRED';
+    showAlertMsg('error', res.message + (isVersionIssue ? '（页面已自动刷新）' : ''), `驳回被拦截 [${res.error}]`, res.details);
+    await loadDetail();
   }
 }
 
@@ -682,12 +688,14 @@ async function addFollowup() {
     followupForm.value = { visit_date: '', location: '', participants: '', content: '' };
     await loadDetail();
   } else {
+    const isVersionIssue = res.error === 'VERSION_CONFLICT' || res.error === 'CLIENT_VERSION_REQUIRED';
     showAlertMsg(
       'error',
-      res.message,
+      res.message + (isVersionIssue ? '（页面已自动刷新，请核对最新状态后再补录）' : ''),
       `补录跟进被拦截 [${res.error}]`,
       res.details
     );
+    await loadDetail();
   }
 }
 
@@ -709,12 +717,14 @@ async function addSigning() {
     signingForm.value = { contract_amount: null, signing_date: '', contract_terms: '' };
     await loadDetail();
   } else {
+    const isVersionIssue = res.error === 'VERSION_CONFLICT' || res.error === 'CLIENT_VERSION_REQUIRED';
     showAlertMsg(
       'error',
-      res.message,
+      res.message + (isVersionIssue ? '（页面已自动刷新，请核对最新状态后再补录）' : ''),
       `补录签约被拦截 [${res.error}]`,
       res.details
     );
+    await loadDetail();
   }
 }
 </script>
