@@ -51,6 +51,9 @@ pkg/
 *.test
 *.out
 coverage.out
+# Go binary (no extension in this repo)
+backend/fire-hazard-tracker
+**/fire-hazard-tracker
 
 # Java and JVM build output
 target/

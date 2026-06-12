@@ -325,7 +325,7 @@ func ListHazardOrders(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	orders := make([]*models.HazardOrder, 0)
+	orders := make([]map[string]interface{}, 0)
 	for rows.Next() {
 		o := &models.HazardOrder{}
 		sid, scid, rd, rcd, err := scanOrder(rows, o)
@@ -333,7 +333,12 @@ func ListHazardOrders(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		applyNullsToOrder(o, sid, scid, rd, rcd)
-		orders = append(orders, o)
+		actions, denials := computeAllowedActions(user, o.Status, o.CurrentNode, o.IsTimeout)
+		orders = append(orders, map[string]interface{}{
+			"order":                  o,
+			"allowed_actions":        actions,
+			"action_denial_reasons":  denials,
+		})
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
@@ -341,7 +346,36 @@ func ListHazardOrders(w http.ResponseWriter, r *http.Request) {
 		"total": total,
 		"page":  page,
 		"size":  size,
+		"role":  user.Role,
 	})
+}
+
+var NODE_ORDER = []models.NodeType{
+	models.NodeReport, models.NodeAssign, models.NodeRectify, models.NodeRecheck, models.NodeConfirm,
+}
+
+var ALL_ACTIONS = []Action{ActionAssign, ActionRectify, ActionRecheck, ActionConfirm, ActionTimeout}
+
+var actionKeyMap = map[Action]string{
+	ActionAssign:  "assign",
+	ActionRectify: "rectify",
+	ActionRecheck: "recheck",
+	ActionConfirm: "confirm",
+	ActionTimeout: "handle_timeout",
+}
+
+func computeAllowedActions(user *models.User, status models.HazardStatus, node models.NodeType, isTimeout bool) ([]string, map[string]string) {
+	actions := []string{}
+	denials := map[string]string{}
+	for _, act := range ALL_ACTIONS {
+		key := actionKeyMap[act]
+		if err := validateAction(act, user, status, node, isTimeout); err != nil {
+			denials[key] = err.Error()
+		} else {
+			actions = append(actions, key)
+		}
+	}
+	return actions, denials
 }
 
 func GetHazardOrder(w http.ResponseWriter, r *http.Request) {
@@ -478,30 +512,7 @@ func GetHazardOrder(w http.ResponseWriter, r *http.Request) {
 		rows.Close()
 	}
 
-	allowedActions := []string{}
-	if err := validateAction(ActionAssign, user, o.Status, o.CurrentNode, o.IsTimeout); err == nil {
-		allowedActions = append(allowedActions, "assign")
-	}
-	if err := validateAction(ActionRectify, user, o.Status, o.CurrentNode, o.IsTimeout); err == nil {
-		allowedActions = append(allowedActions, "rectify")
-	}
-	if err := validateAction(ActionRecheck, user, o.Status, o.CurrentNode, o.IsTimeout); err == nil {
-		allowedActions = append(allowedActions, "recheck")
-	}
-	if err := validateAction(ActionConfirm, user, o.Status, o.CurrentNode, o.IsTimeout); err == nil {
-		allowedActions = append(allowedActions, "confirm")
-	}
-	if err := validateAction(ActionTimeout, user, o.Status, o.CurrentNode, o.IsTimeout); err == nil {
-		allowedActions = append(allowedActions, "handle_timeout")
-	}
-
-	actionDenials := map[string]string{}
-	for _, a := range []string{"assign", "rectify", "recheck", "confirm", "handle_timeout"} {
-		act := Action(a)
-		if er := validateAction(act, user, o.Status, o.CurrentNode, o.IsTimeout); er != nil {
-			actionDenials[a] = er.Error()
-		}
-	}
+	allowedActions, actionDenials := computeAllowedActions(user, o.Status, o.CurrentNode, o.IsTimeout)
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"order":                   o,
@@ -1335,15 +1346,18 @@ func BatchGetStatus(w http.ResponseWriter, r *http.Request) {
 		var reporterID int64
 		var supervisorID, stationChiefID sql.NullInt64
 		rows.Scan(&id, &orderNo, &status, &node, &isTimeout, &updatedAt, &reporterID, &supervisorID, &stationChiefID)
+		actions, denials := computeAllowedActions(user, status, node, isTimeout)
 		items = append(items, map[string]interface{}{
-			"id":           id,
-			"order_no":     orderNo,
-			"status":       status,
-			"status_text":  statusText(status),
-			"current_node": node,
-			"node_text":    nodeText(node),
-			"is_timeout":   isTimeout,
-			"updated_at":   updatedAt,
+			"id":                    id,
+			"order_no":              orderNo,
+			"status":                status,
+			"status_text":           statusText(status),
+			"current_node":          node,
+			"node_text":             nodeText(node),
+			"is_timeout":            isTimeout,
+			"updated_at":            updatedAt,
+			"allowed_actions":       actions,
+			"action_denial_reasons": denials,
 		})
 	}
 

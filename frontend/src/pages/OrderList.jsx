@@ -58,7 +58,12 @@ export default function OrderList({ user, onOpenDetail }) {
       if (status && status !== 'all') params.status = status;
       if (keyword) params.keyword = keyword;
       const res = await api.listOrders(params);
-      setList(res.list || []);
+      const flatList = (res.list || []).map((item) => ({
+        ...item.order,
+        allowed_actions: item.allowed_actions || [],
+        action_denial_reasons: item.action_denial_reasons || {},
+      }));
+      setList(flatList);
       setTotal(res.total || 0);
     } catch (err) {
       showToast(err.message || '加载列表失败', 'error');
@@ -90,7 +95,15 @@ export default function OrderList({ user, onOpenDetail }) {
           setList((prev) => prev.map((o) => {
             const m = map[o.id];
             if (m) {
-              return { ...o, status: m.status, current_node: m.current_node, is_timeout: m.is_timeout, updated_at: m.updated_at };
+              return {
+                ...o,
+                status: m.status,
+                current_node: m.current_node,
+                is_timeout: m.is_timeout,
+                updated_at: m.updated_at,
+                allowed_actions: m.allowed_actions || o.allowed_actions,
+                action_denial_reasons: m.action_denial_reasons || o.action_denial_reasons,
+              };
             }
             return o;
           }));
@@ -141,9 +154,11 @@ export default function OrderList({ user, onOpenDetail }) {
   };
 
   const openQuick = (order, type) => {
-    const reason = actionDisabledReason(user, order, type);
-    if (reason) {
-      showToast(reason, 'error');
+    const allowed = Array.isArray(order.allowed_actions) && order.allowed_actions.includes(type);
+    if (!allowed) {
+      const reason = order.action_denial_reasons?.[type] || actionDisabledReason(user, order, type);
+      if (reason) showToast(reason, 'error');
+      else showToast('当前无法执行该操作', 'error');
       return;
     }
     setQuickOrder(order);
@@ -313,19 +328,19 @@ export default function OrderList({ user, onOpenDetail }) {
                     <td>
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
                         <a onClick={() => onOpenDetail(o.id)}>详情</a>
-                        {canDo(user, o, 'assign') && (
+                        {o.allowed_actions?.includes('assign') && (
                           <a onClick={() => openQuick(o, 'assign')} style={{ color: '#1890ff' }}>转办</a>
                         )}
-                        {canDo(user, o, 'rectify') && (
+                        {o.allowed_actions?.includes('rectify') && (
                           <a onClick={() => openQuick(o, 'rectify')} style={{ color: '#1890ff' }}>整改</a>
                         )}
-                        {canDo(user, o, 'recheck') && (
+                        {o.allowed_actions?.includes('recheck') && (
                           <a onClick={() => openQuick(o, 'recheck')} style={{ color: '#52c41a' }}>复查</a>
                         )}
-                        {canDo(user, o, 'confirm') && (
+                        {o.allowed_actions?.includes('confirm') && (
                           <a onClick={() => openQuick(o, 'confirm')} style={{ color: '#52c41a' }}>确认</a>
                         )}
-                        {canDo(user, o, 'handle_timeout') && (
+                        {o.allowed_actions?.includes('handle_timeout') && (
                           <a onClick={() => openQuick(o, 'handle_timeout')} style={{ color: '#ff4d4f' }}>超时处理</a>
                         )}
                       </div>
