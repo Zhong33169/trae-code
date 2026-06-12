@@ -6,9 +6,10 @@
 
 ## 技术栈
 
-- **前端**: React 18 + TypeScript + Vite + Tailwind CSS + TanStack Router/Table/Form + Sonner
+- **前端**: React 18 + TypeScript + TanStack Start（基于 TanStack Router 的文件路由 SSR/CSR）+ TanStack Table/Form + Tailwind CSS + Sonner
 - **后端**: Go + Gin + GORM + SQLite
 - **数据库**: SQLite（本地文件存储）
+- **路由**: `@tanstack/start` 基于文件路由，入口为 `app/routes/`
 
 ## 端口配置
 
@@ -36,14 +37,16 @@ go run main.go
 后端启动后会自动：
 - 初始化 SQLite 数据库
 - 执行数据库迁移（自动建表）
-- 插入种子数据（3个用户 + 8条采样任务 + 对应证据和日志）
+- 插入种子数据（3个用户 + 12条采样任务 + 对应证据和操作日志）
 
 ### 2. 启动前端服务
 
 ```bash
 cd frontend
 npm install
-npm run dev
+npm run dev         # 推荐：TanStack Start 原生开发服务器（文件路由）
+# 或
+npm run vite:dev    # 备选：直接用 Vite（同样走 createStartVitePlugin）
 ```
 
 ### 3. 访问系统
@@ -173,29 +176,62 @@ npm run dev
 - `code = 0` 表示成功
 - `code != 0` 表示失败，`message` 为错误原因
 
+## 混合批量验证对照表（演示数据）
+
+### 12 条种子任务可按此表操作，观察批量操作会出现成功/失败混合结果。
+
+| 演示任务 | 初始状态 | 模拟异常 | 建议操作 | 预期返回原因 |
+|-----------|-----------|----------|------------|--------------|
+| T202401001 | 草稿 | ✅ 证据完整 | registrar 批量提交（选中 001 + 002 | 成功 |
+| T202401002 | 草稿 | ❌ 缺登记证据 | （同上批量） | 失败：提交审核必须有登记证据 |
+| T202401003 | 待审核 | ✅ 有过程证据 | supervisor 批量通过（003 + 004） | 成功 |
+| T202401004 | 待审核 | ❌ 缺过程证据 | （同上批量） | 失败：审核通过必须有过程核验证据 |
+| T202401006 | 审核驳回 | （错状态） | supervisor 批量通过（混入 006） | 失败：任务已被驳回，需登记员补正后重提 |
+| T202401007 | 审核通过 | ❌ 缺过程证据 | reviewer 批量归档（007 + 008 + 009） | 失败：归档被拦截：缺少过程核验证据（主管审核前置不完整） |
+| T202401008 | 审核通过 | ⚠️ 有过程、缺复核 | （同上批量） | 失败：归档被拦截：缺少复核归档证据 |
+| T202401009 | 审核通过 | ❌ 缺过程证据 | （同上批量） | 失败：归档被拦截：缺少过程核验证据 |
+| （手工测试：任意任务 | 任意 | 传递旧 version | 任何批量操作 | 失败：版本冲突，请刷新后重试（NeedRetry=true） |
+| T202401011 | 已归档 | （错状态） | 主管批量审核/复核归档 | 失败：任务已归档/已审核通过 |
+
 ## 项目结构
 
 ```
 .
-├── backend/                 # 后端 Go 项目
-│   ├── main.go             # 入口文件
-│   ├── config/             # 配置常量
-│   ├── database/           # 数据库连接
-│   ├── models/             # 数据模型
-│   ├── handlers/           # API 处理器
-│   ├── middleware/         # 中间件
-│   ├── seed/               # 种子数据
-│   ├── utils/              # 工具函数
-│   ├── data/               # SQLite 数据库文件
+├── backend/                      # 后端 Go + Gin + GORM
+│   ├── main.go                  # 入口：路由注册 + 中间件 + DB 初始化 + 种子
+│   ├── config/                  # 状态/角色/动作常量
+│   ├── database/                # SQLite 连接
+│   ├── models/                  # SamplingTask / Evidence / TaskLog / User GORM 模型
+│   ├── handlers/                # API 处理器
+│   │   ├── auth.go             # 登录/用户信息
+│   │   ├── task.go             # 任务 CRUD + 单条审核/复核
+│   │   ├── batch.go            # 批量提交/审核/复核（逐条返回结果）
+│   │   └── evidence.go       # 证据上传（角色+状态双重限制）
+│   ├── middleware/              # 认证/角色校验中间件
+│   ├── seed/                    # 12 条任务种子 + 证据 + 操作日志
+│   ├── utils/                   # 统一响应封装
+│   ├── data/                    # SQLite 数据库文件
 │   └── go.mod
-└── frontend/               # 前端 React 项目
-    ├── src/
-    │   ├── api/            # API 客户端
-    │   ├── components/     # 组件
-    │   ├── context/        # Context
-    │   ├── pages/          # 页面
-    │   ├── types/          # 类型定义
-    │   └── styles/         # 样式
-    ├── app/                # TanStack 路由配置
-    └── package.json
+└── frontend/                     # 前端 TanStack Start
+│   ├── app/                      # ★ 文件路由入口（TanStack Start）
+│   │   ├── routes/
+│   │   │   ├── __root.tsx     # 根路由（AuthProvider + Toaster + Outlet）
+│   │   │   └── index.tsx    # 首页（渲染 HomePage）
+│   │   ├── client.tsx          # ★ TanStack Start 客户端入口
+│   │   ├── ssr.tsx             # SSR 入口
+│   │   ├── router.tsx           # Router 创建函数
+│   │   └── routeTree.gen.ts # 路由树生成结果
+│   ├── src/                      # 业务代码
+│   │   ├── api/                  # API 客户端封装
+│   │   ├── components/       # TaskList / TaskDetail / Header 等组件
+│   │   ├── context/         # AuthContext（角色切换
+│   │   ├── pages/           # HomePage（左右布局主页面）
+│   │   ├── styles/          # 全局样式（Tailwind）
+│   │   └── types/          # TypeScript 类型定义
+│   ├── app.config.ts         # TanStack Start 配置
+│   ├── vite.config.ts       # Vite 配置（含端口 3006 + API 代理 + createStartVitePlugin
+│   ├── tailwind.config.js  # Tailwind 配置
+│   ├── postcss.config.js   # PostCSS 配置
+│   ├── tsconfig.json        # TS 配置
+│   └── package.json
 ```

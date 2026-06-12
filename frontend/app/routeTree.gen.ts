@@ -1,10 +1,10 @@
-import { createRoute, createRootRoute } from "@tanstack/react-router";
-import { RootRoute } from "./routes/__root";
-import { IndexRoute } from "./routes/index";
+import { createRoute } from "@tanstack/react-router";
+import { Route as RootRouteImport } from "./routes/__root";
+import { Route as IndexRouteImport } from "./routes/index";
 
-const rootRoute = RootRoute;
+const rootRoute = RootRouteImport;
 
-const indexRoute = IndexRoute;
+const indexRoute = IndexRouteImport;
 
 const routeTree = rootRoute.addChildren([indexRoute]);
 

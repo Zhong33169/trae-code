@@ -3,9 +3,13 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite --port 3006",
-    "build": "tsc && vite build",
-    "preview": "vite preview --port 3006"
+    "dev": "tanstack-start dev",
+    "start": "tanstack-start start",
+    "build": "tsc && tanstack-start build",
+    "preview": "vite preview --port 3006",
+    "vite:dev": "vite --port 3006",
+    "vite:build": "tsc && vite build",
+    "gen:routes": "tsr generate"
   },
   "dependencies": {
     "@tanstack/react-form": "^0.33.0",
