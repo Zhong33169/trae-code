@@ -45,8 +45,11 @@
           <button class="btn" style="padding:6px 12px;font-size:13px;" @click="onRefresh">⟳ 刷新列表</button>
           <button v-if="canInitiate" class="btn btn-primary" @click="showCreateModal = true">＋ 发起线索单</button>
           <button v-if="canBatchReview && selectedOrderNos.length > 0" class="btn btn-success" @click="batchReview"
-            :title="selectedOrderNos.some(n => { const o = orders.value.find(x=>x.order_no===n); return !o?.version; }) ? '部分选中项缺少版本号，将被跳过' : ''">
+            :title="hasSelectedMissingVersion ? '部分选中项缺少版本号，将被跳过。请先刷新列表' : ''">
             ✓ 批量复核归档 ({{ selectedOrderNos.length }})
+            <span v-if="hasSelectedMissingVersion" style="font-size:11px;margin-left:4px;color:#fef08a;">
+              (⚠{{ missingVersionCount }}缺版本)
+            </span>
           </button>
         </div>
 
@@ -77,7 +80,7 @@
             </thead>
             <tbody>
               <tr v-for="o in orders" :key="o.order_no"
-                :class="{ 'row-active': previewDetail?.order?.order_no === o.order_no, 'row-version-stale': !o.version }"
+                :class="rowClass(o)"
                 @click="selectPreview(o)">
                 <td @click.stop>
                   <input v-if="canReview(o)" type="checkbox" class="checkbox"
@@ -289,6 +292,14 @@ const reviewableOrderNos = computed(() =>
   orders.value.filter(o => canReview(o)).map(o => o.order_no)
 );
 
+const missingVersionCount = computed(() =>
+  selectedOrderNos.value.filter(n => {
+    const o = orders.value.find(x => x.order_no === n);
+    return !o || !o.version;
+  }).length
+);
+const hasSelectedMissingVersion = computed(() => missingVersionCount.value > 0);
+
 const allChecked = computed(() =>
   reviewableOrderNos.value.length > 0 &&
   reviewableOrderNos.value.every(n => selectedOrderNos.value.includes(n))
@@ -298,6 +309,13 @@ const availableLeads = computed(() => enterpriseLeads.value.filter(l => !l.activ
 
 function canReview(o) {
   return canReviewAny.value && o.current_stage === 'REVIEW_ARCHIVE' && ['HANDLED', 'REVIEWED'].includes(o.status) && !!o.version;
+}
+
+function rowClass(o) {
+  return {
+    'row-active': previewDetail.value?.order?.order_no === o.order_no,
+    'row-version-stale': !o.version
+  };
 }
 
 function onToggleAll(e) {
