@@ -42,15 +42,26 @@ export default function HomePage() {
   const [recentOrders, setRecentOrders] = useState<RepairOrder[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    Promise.all([
+  const loadAll = async () => {
+    const [s, o] = await Promise.all([
       fetchStats().catch(() => null),
       fetchOrders({ limit: 5 }).catch(() => null),
-    ]).then(([s, o]) => {
-      setStats(s);
-      setRecentOrders(o?.items || []);
-      setLoading(false);
-    });
+    ]);
+    setStats(s);
+    setRecentOrders(o?.items || []);
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    loadAll();
+  }, []);
+
+  useEffect(() => {
+    const handler = () => {
+      loadAll();
+    };
+    window.addEventListener('order-state-changed', handler);
+    return () => window.removeEventListener('order-state-changed', handler);
   }, []);
 
   const statCards = stats

@@ -128,14 +128,25 @@ async def _generate_order_no(db):
 
 
 async def _write_validation_failed(db, order_id, operator_id, user, errors, from_status, from_version):
-    await db.execute(
-        """INSERT INTO operation_records
-           (order_id, action, operator_id, operator_name, operator_role,
-            from_status, to_status, from_version, to_version, reason, result)
-           VALUES (?, 'validation_failed', ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        [order_id, operator_id, user["name"] if user else "", user["role"] if user else "",
-         from_status, from_status, from_version, from_version, "; ".join(errors), "failed"],
-    )
+    safe_op_id = operator_id if operator_id is not None else 0
+    safe_name = user["name"] if user else "未知用户"
+    safe_role = user["role"] if user else ""
+    try:
+        await db.execute(
+            """INSERT INTO operation_records
+               (order_id, action, operator_id, operator_name, operator_role,
+                from_status, to_status, from_version, to_version, reason, result)
+               VALUES (?, 'validation_failed', ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            [order_id, safe_op_id, safe_name, safe_role,
+             from_status, from_status, from_version, from_version,
+             "; ".join(errors) if errors else "校验失败", "failed"],
+        )
+        await db.commit()
+    except Exception:
+        try:
+            await db.rollback()
+        except Exception:
+            pass
 
 
 async def _write_success_record(db, order_id, action, operator_id, user, from_status, to_status,
@@ -148,6 +159,16 @@ async def _write_success_record(db, order_id, action, operator_id, user, from_st
         [order_id, action, operator_id, user["name"], user["role"],
          from_status, to_status, from_version, to_version, opinion, reason, result],
     )
+
+
+async def _load_operator(db, operator_id):
+    if operator_id is None:
+        return None
+    try:
+        cursor = await db.execute("SELECT id, name, role FROM users WHERE id = ?", [operator_id])
+        return await cursor.fetchone()
+    except Exception:
+        return None
 
 
 async def create_order(request: Request):
@@ -208,17 +229,22 @@ async def update_order(request: Request):
     operator_id = body.get("operator_id")
     version = body.get("version")
 
-    user_cursor = await db.execute("SELECT name, role FROM users WHERE id = ?", [operator_id])
-    user = await user_cursor.fetchone()
+    user = await _load_operator(db, operator_id)
 
     errors = []
+    if operator_id is None:
+        errors.append("缺少操作者ID")
+    if not user:
+        errors.append("操作者不存在")
     if order["status"] not in ("draft", "returned"):
         errors.append("当前状态不允许编辑")
-    if operator_id != order["current_handler_id"]:
+    if operator_id is not None and operator_id != order["current_handler_id"]:
         errors.append("非当前处理人无法编辑")
-    if not user or user["role"] not in ("clerk",):
+    if user and user["role"] not in ("clerk",):
         errors.append("仅登记员可编辑工单")
-    if version is not None and version != order["version"]:
+    if version is None:
+        errors.append("缺少版本号")
+    elif version != order["version"]:
         errors.append("版本冲突，请刷新后重试")
 
     updatable = ["title", "description", "enterprise_name", "contact_person",
@@ -230,7 +256,6 @@ async def update_order(request: Request):
     if errors:
         await _write_validation_failed(db, order_id, operator_id, user, errors,
                                         order["status"], order["version"])
-        await db.commit()
         return JSONResponse({"error": "; ".join(errors)}, status_code=400)
 
     sets = []
@@ -281,17 +306,22 @@ async def submit_order(request: Request):
     version = body.get("version")
     opinion = body.get("opinion")
 
-    user_cursor = await db.execute("SELECT name, role FROM users WHERE id = ?", [operator_id])
-    user = await user_cursor.fetchone()
+    user = await _load_operator(db, operator_id)
 
     errors = []
+    if operator_id is None:
+        errors.append("缺少操作者ID")
+    if not user:
+        errors.append("操作者不存在")
     if order["status"] not in ("draft", "returned"):
         errors.append("当前状态不允许提交")
-    if operator_id != order["current_handler_id"]:
+    if operator_id is not None and operator_id != order["current_handler_id"]:
         errors.append("非当前处理人无法提交")
-    if not user or user["role"] != "clerk":
+    if user and user["role"] != "clerk":
         errors.append("仅登记员可提交工单")
-    if version is not None and version != order["version"]:
+    if version is None:
+        errors.append("缺少版本号")
+    elif version != order["version"]:
         errors.append("版本冲突，请刷新后重试")
     if not opinion or not opinion.strip():
         errors.append("提交意见为必填项")
@@ -306,7 +336,6 @@ async def submit_order(request: Request):
     if errors:
         await _write_validation_failed(db, order_id, operator_id, user, errors,
                                         order["status"], order["version"])
-        await db.commit()
         return JSONResponse({"error": "; ".join(errors)}, status_code=400)
 
     from_ver = order["version"]
@@ -343,15 +372,20 @@ async def accept_review(request: Request):
     version = body.get("version")
     opinion = body.get("opinion")
 
-    user_cursor = await db.execute("SELECT name, role FROM users WHERE id = ?", [operator_id])
-    user = await user_cursor.fetchone()
+    user = await _load_operator(db, operator_id)
 
     errors = []
+    if operator_id is None:
+        errors.append("缺少操作者ID")
+    if not user:
+        errors.append("操作者不存在")
     if order["status"] != "submitted":
         errors.append("当前状态不允许受理审核")
-    if not user or user["role"] != "supervisor":
+    if user and user["role"] != "supervisor":
         errors.append("仅主管可受理审核")
-    if version is not None and version != order["version"]:
+    if version is None:
+        errors.append("缺少版本号")
+    elif version != order["version"]:
         errors.append("版本冲突，请刷新后重试")
     if not opinion or not opinion.strip():
         errors.append("受理意见为必填项")
@@ -359,7 +393,6 @@ async def accept_review(request: Request):
     if errors:
         await _write_validation_failed(db, order_id, operator_id, user, errors,
                                         order["status"], order["version"])
-        await db.commit()
         return JSONResponse({"error": "; ".join(errors)}, status_code=400)
 
     from_ver = order["version"]
@@ -398,17 +431,22 @@ async def review_order(request: Request):
     opinion = body.get("opinion")
     reason = body.get("reason")
 
-    user_cursor = await db.execute("SELECT name, role FROM users WHERE id = ?", [operator_id])
-    user = await user_cursor.fetchone()
+    user = await _load_operator(db, operator_id)
 
     errors = []
+    if operator_id is None:
+        errors.append("缺少操作者ID")
+    if not user:
+        errors.append("操作者不存在")
     if order["status"] != "under_review":
         errors.append("当前状态不允许审核")
-    if operator_id != order["current_handler_id"]:
+    if operator_id is not None and operator_id != order["current_handler_id"]:
         errors.append("非当前处理人无法审核")
-    if not user or user["role"] != "supervisor":
+    if user and user["role"] != "supervisor":
         errors.append("仅主管可审核")
-    if version is not None and version != order["version"]:
+    if version is None:
+        errors.append("缺少版本号")
+    elif version != order["version"]:
         errors.append("版本冲突，请刷新后重试")
     if result not in ("approve", "return", "reject"):
         errors.append("审核结果无效")
@@ -420,7 +458,6 @@ async def review_order(request: Request):
     if errors:
         await _write_validation_failed(db, order_id, operator_id, user, errors,
                                         order["status"], order["version"])
-        await db.commit()
         return JSONResponse({"error": "; ".join(errors)}, status_code=400)
 
     status_map = {
@@ -474,15 +511,20 @@ async def accept_recheck(request: Request):
     version = body.get("version")
     opinion = body.get("opinion")
 
-    user_cursor = await db.execute("SELECT name, role FROM users WHERE id = ?", [operator_id])
-    user = await user_cursor.fetchone()
+    user = await _load_operator(db, operator_id)
 
     errors = []
+    if operator_id is None:
+        errors.append("缺少操作者ID")
+    if not user:
+        errors.append("操作者不存在")
     if order["status"] != "review_approved":
         errors.append("当前状态不允许受理复核")
-    if not user or user["role"] != "rechecker":
+    if user and user["role"] != "rechecker":
         errors.append("仅复核员可受理复核")
-    if version is not None and version != order["version"]:
+    if version is None:
+        errors.append("缺少版本号")
+    elif version != order["version"]:
         errors.append("版本冲突，请刷新后重试")
     if not opinion or not opinion.strip():
         errors.append("受理意见为必填项")
@@ -490,7 +532,6 @@ async def accept_recheck(request: Request):
     if errors:
         await _write_validation_failed(db, order_id, operator_id, user, errors,
                                         order["status"], order["version"])
-        await db.commit()
         return JSONResponse({"error": "; ".join(errors)}, status_code=400)
 
     from_ver = order["version"]
@@ -529,17 +570,22 @@ async def recheck_order(request: Request):
     opinion = body.get("opinion")
     reason = body.get("reason")
 
-    user_cursor = await db.execute("SELECT name, role FROM users WHERE id = ?", [operator_id])
-    user = await user_cursor.fetchone()
+    user = await _load_operator(db, operator_id)
 
     errors = []
+    if operator_id is None:
+        errors.append("缺少操作者ID")
+    if not user:
+        errors.append("操作者不存在")
     if order["status"] != "under_recheck":
         errors.append("当前状态不允许复核")
-    if operator_id != order["current_handler_id"]:
+    if operator_id is not None and operator_id != order["current_handler_id"]:
         errors.append("非当前处理人无法复核")
-    if not user or user["role"] != "rechecker":
+    if user and user["role"] != "rechecker":
         errors.append("仅复核员可复核")
-    if version is not None and version != order["version"]:
+    if version is None:
+        errors.append("缺少版本号")
+    elif version != order["version"]:
         errors.append("版本冲突，请刷新后重试")
     if result not in ("archive", "return"):
         errors.append("复核结果无效")
@@ -551,7 +597,6 @@ async def recheck_order(request: Request):
     if errors:
         await _write_validation_failed(db, order_id, operator_id, user, errors,
                                         order["status"], order["version"])
-        await db.commit()
         return JSONResponse({"error": "; ".join(errors)}, status_code=400)
 
     if result == "archive":

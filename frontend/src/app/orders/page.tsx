@@ -94,6 +94,14 @@ export default function OrdersPage() {
     setPage(0);
   }, [statusFilter, roleFilter, keyword]);
 
+  useEffect(() => {
+    const handler = () => {
+      loadOrders();
+    };
+    window.addEventListener('order-state-changed', handler);
+    return () => window.removeEventListener('order-state-changed', handler);
+  }, [loadOrders]);
+
   const totalPages = Math.ceil(total / limit);
 
   return (

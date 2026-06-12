@@ -195,8 +195,19 @@ function ActionForm({
       setOpinion('');
       setReason('');
       onAction();
+      try {
+        window.dispatchEvent(new Event('order-state-changed'));
+      } catch {
+        // ignore
+      }
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : '操作失败');
+      onAction();
+      try {
+        window.dispatchEvent(new Event('order-state-changed'));
+      } catch {
+        // ignore
+      }
     } finally {
       setSubmitting(false);
     }
@@ -208,18 +219,29 @@ function ActionForm({
     setSubmitting(true);
     setError('');
     try {
-      await updateOrder(order.id, {
+      const updated = await updateOrder(order.id, {
         ...editData,
         operator_id: user.id,
         version: v,
         opinion: opinion || '补正后重新提交',
       });
-      await submitOrder(order.id, { operator_id: user.id, opinion, version: v + 1 });
+      await submitOrder(order.id, { operator_id: user.id, opinion, version: updated.version });
       setOpinion('');
       setEditMode(false);
       onAction();
+      try {
+        window.dispatchEvent(new Event('order-state-changed'));
+      } catch {
+        // ignore
+      }
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : '操作失败');
+      onAction();
+      try {
+        window.dispatchEvent(new Event('order-state-changed'));
+      } catch {
+        // ignore
+      }
     } finally {
       setSubmitting(false);
     }

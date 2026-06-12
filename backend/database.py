@@ -22,7 +22,7 @@ async def init_db():
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY,
             name TEXT NOT NULL,
-            role TEXT NOT NULL CHECK(role IN ('clerk', 'supervisor', 'rechecker')),
+            role TEXT NOT NULL CHECK(role IN ('clerk', 'supervisor', 'rechecker', 'system')),
             created_at TEXT NOT NULL DEFAULT (datetime('now'))
         );
 
@@ -46,26 +46,69 @@ async def init_db():
             updated_at TEXT NOT NULL DEFAULT (datetime('now')),
             FOREIGN KEY (current_handler_id) REFERENCES users(id)
         );
-
-        CREATE TABLE IF NOT EXISTS operation_records (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            order_id INTEGER NOT NULL,
-            action TEXT NOT NULL,
-            operator_id INTEGER NOT NULL,
-            operator_name TEXT NOT NULL,
-            operator_role TEXT NOT NULL,
-            opinion TEXT,
-            result TEXT,
-            reason TEXT,
-            from_status TEXT,
-            to_status TEXT,
-            from_version INTEGER,
-            to_version INTEGER,
-            created_at TEXT NOT NULL DEFAULT (datetime('now')),
-            FOREIGN KEY (order_id) REFERENCES repair_orders(id),
-            FOREIGN KEY (operator_id) REFERENCES users(id)
-        );
     """)
+
+    cursor = await db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='operation_records'")
+    old_table = await cursor.fetchone()
+    cursor_new = await db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='operation_records_new'")
+    new_table = await cursor_new.fetchone()
+
+    if not old_table and not new_table:
+        await db.execute("""
+            CREATE TABLE operation_records (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                order_id INTEGER NOT NULL,
+                action TEXT NOT NULL,
+                operator_id INTEGER,
+                operator_name TEXT,
+                operator_role TEXT,
+                opinion TEXT,
+                result TEXT,
+                reason TEXT,
+                from_status TEXT,
+                to_status TEXT,
+                from_version INTEGER,
+                to_version INTEGER,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+        """)
+    elif old_table:
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS operation_records_new (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                order_id INTEGER NOT NULL,
+                action TEXT NOT NULL,
+                operator_id INTEGER,
+                operator_name TEXT,
+                operator_role TEXT,
+                opinion TEXT,
+                result TEXT,
+                reason TEXT,
+                from_status TEXT,
+                to_status TEXT,
+                from_version INTEGER,
+                to_version INTEGER,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+        """)
+        try:
+            await db.execute("""
+                INSERT INTO operation_records_new
+                    (id, order_id, action, operator_id, operator_name, operator_role,
+                     opinion, result, reason, from_status, to_status, from_version, to_version, created_at)
+                SELECT id, order_id, action, operator_id, operator_name, operator_role,
+                       opinion, result, reason, from_status, to_status, from_version, to_version, created_at
+                FROM operation_records
+            """)
+            await db.execute("DROP TABLE operation_records")
+            await db.execute("ALTER TABLE operation_records_new RENAME TO operation_records")
+        except Exception:
+            pass
+    elif new_table:
+        try:
+            await db.execute("ALTER TABLE operation_records_new RENAME TO operation_records")
+        except Exception:
+            pass
 
     try:
         await db.execute("ALTER TABLE operation_records ADD COLUMN from_version INTEGER")
@@ -73,6 +116,16 @@ async def init_db():
         pass
     try:
         await db.execute("ALTER TABLE operation_records ADD COLUMN to_version INTEGER")
+    except Exception:
+        pass
+
+    try:
+        cursor = await db.execute("SELECT COUNT(*) as cnt FROM users WHERE id = 0")
+        row = await cursor.fetchone()
+        if row["cnt"] == 0:
+            await db.execute(
+                "INSERT INTO users (id, name, role) VALUES (0, '系统', 'system')"
+            )
     except Exception:
         pass
 

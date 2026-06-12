@@ -7,7 +7,7 @@ async def seed():
     await init_db()
     db = await get_db()
 
-    cursor = await db.execute("SELECT COUNT(*) as cnt FROM users")
+    cursor = await db.execute("SELECT COUNT(*) as cnt FROM users WHERE id > 0")
     if (await cursor.fetchone())["cnt"] > 0:
         print("数据库已有数据，跳过种子数据")
         await close_db()
