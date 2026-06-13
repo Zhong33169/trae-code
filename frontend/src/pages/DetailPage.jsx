@@ -82,9 +82,8 @@ export default function DetailPage(props) {
       setProcessing(false)
       if (props.onProcessed) {
         props.onProcessed()
-      } else {
-        loadDetail()
       }
+      loadDetail()
     } catch (err) {
       setProcessing(false)
       const msg = err.message
@@ -115,7 +114,7 @@ export default function DetailPage(props) {
     return <div class="empty-state">加载中...</div>
   }
 
-  const { order, evidences: existingEvidences, operation_logs, prev_handler, prev_opinion, prev_role, can_process } = data()
+  const { order, evidences: existingEvidences, operation_logs, last_processed, can_process } = data()
 
   return (
     <div>
@@ -234,13 +233,25 @@ export default function DetailPage(props) {
             </Show>
           </div>
 
-          <Show when={prev_opinion}>
+          <Show when={last_processed}>
             <div class="prev-opinion">
               <div class="title">
-                上一处理人意见
-                （{roleNames[prev_role] || prev_role} {prev_handler} 的处理意见）：
+                最新办理结果：
+                <span style="margin-left: 0.5rem; font-weight: normal; color: #111827;">
+                  {last_processed.action}
+                </span>
+                <span style="margin-left: 0.5rem; font-weight: normal; color: #6b7280; font-size: 0.875rem;">
+                  （{roleNames[last_processed.operator_role]} {last_processed.operator_name} ·
+                  版本 v{last_processed.version_before}→v{last_processed.version_after}）
+                </span>
               </div>
-              <div class="content">{prev_opinion}</div>
+              <div style="font-size: 0.875rem; color: #6b7280; margin-bottom: 0.5rem;">
+                状态变更：{statusNames[last_processed.from_status]} → {statusNames[last_processed.to_status]}
+                <Show when={last_processed.risk_level}>
+                  <span style="margin-left: 1rem;">风险：{riskNames[last_processed.risk_level]}</span>
+                </Show>
+              </div>
+              <div class="content">{last_processed.opinion}</div>
             </div>
           </Show>
 

@@ -48,6 +48,7 @@ func SeedData() error {
 		operatorIdx int
 		fromStatus  string
 		toStatus    string
+		opinion     string
 	}
 
 	type orderTemplate struct {
@@ -60,7 +61,6 @@ func SeedData() error {
 		dueDays     int
 		evidences   int
 		isOverdue   bool
-		lastOpinion string
 		conflict    string
 		steps       []opStep
 	}
@@ -69,113 +69,125 @@ func SeedData() error {
 		{
 			"小区电梯故障维修", "3号楼2单元电梯异响，运行卡顿，需紧急维修",
 			models.RiskHigh, models.StatusRegistered, models.StageDispatch,
-			2, 1, 0, false, "已完成登记，等待派单", "",
+			2, 1, 0, false, "",
 			[]opStep{
-				{"创建订单", 0, string(models.StatusPendingRegistration), string(models.StatusRegistered)},
+				{"创建订单", 0, string(models.StatusPendingRegistration), string(models.StatusRegistered), "已完成登记，等待派单"},
 			},
 		},
 		{
 			"办公室空调不制冷", "行政部3楼会议室空调不制冷，天气炎热影响办公",
 			models.RiskMedium, models.StatusDispatched, models.StageAcceptance,
-			2, 3, 1, false, "已派单给李师傅，等待完工", "",
+			2, 3, 1, false, "",
 			[]opStep{
-				{"创建订单", 0, string(models.StatusPendingRegistration), string(models.StatusRegistered)},
-				{"师傅派单", 2, string(models.StatusRegistered), string(models.StatusDispatched)},
+				{"创建订单", 0, string(models.StatusPendingRegistration), string(models.StatusRegistered), "新登空调故障工单"},
+				{"师傅派单", 2, string(models.StatusRegistered), string(models.StatusDispatched), "已派单给李师傅，等待完工"},
 			},
 		},
 		{
 			"公共区域照明维修", "地下车库B区有5盏灯不亮，存在安全隐患",
 			models.RiskLow, models.StatusCompleted, models.StageReview,
-			4, 7, 2, false, "已完工验收，等待复核归档", "",
+			4, 7, 2, false, "",
 			[]opStep{
-				{"创建订单", 0, string(models.StatusPendingRegistration), string(models.StatusRegistered)},
-				{"师傅派单", 2, string(models.StatusRegistered), string(models.StatusDispatched)},
-				{"完工验收", 2, string(models.StatusDispatched), string(models.StatusCompleted)},
+				{"创建订单", 0, string(models.StatusPendingRegistration), string(models.StatusRegistered), "登记车库照明故障"},
+				{"师傅派单", 2, string(models.StatusRegistered), string(models.StatusDispatched), "派张电工处理"},
+				{"完工验收", 2, string(models.StatusDispatched), string(models.StatusCompleted), "已更换5盏LED灯管，测试全部正常，等待复核归档"},
 			},
 		},
 		{
 			"消防喷淋漏水", "5楼走廊消防喷淋头漏水，已临时关闭阀门",
 			models.RiskHigh, models.StatusMissingEvidence, models.StageAcceptance,
-			2, 1, 1, false, "证据不足，缺少漏水现场照片和维修前检测报告", "",
+			2, 1, 1, false, "",
 			[]opStep{
-				{"创建订单", 0, string(models.StatusPendingRegistration), string(models.StatusRegistered)},
-				{"师傅派单", 2, string(models.StatusRegistered), string(models.StatusDispatched)},
-				{"标记缺证据", 2, string(models.StatusDispatched), string(models.StatusMissingEvidence)},
+				{"创建订单", 0, string(models.StatusPendingRegistration), string(models.StatusRegistered), "登记消防喷淋漏水"},
+				{"师傅派单", 2, string(models.StatusRegistered), string(models.StatusDispatched), "派消防维修组处理"},
+				{"标记缺证据", 2, string(models.StatusDispatched), string(models.StatusMissingEvidence), "证据不足，缺少漏水现场照片和维修前检测报告"},
 			},
 		},
 		{
 			"门禁系统升级", "园区东门禁系统需升级人脸识别模块",
 			models.RiskMedium, models.StatusOverdue, models.StageDispatch,
-			2, -2, 0, true, "已逾期2天，请尽快处理", "",
+			2, -2, 0, true, "",
 			[]opStep{
-				{"创建订单", 0, string(models.StatusPendingRegistration), string(models.StatusRegistered)},
-				{"标记逾期", 2, string(models.StatusRegistered), string(models.StatusOverdue)},
+				{"创建订单", 0, string(models.StatusPendingRegistration), string(models.StatusRegistered), "登记门禁系统升级需求"},
+				{"标记逾期", 2, string(models.StatusRegistered), string(models.StatusOverdue), "已逾期2天，请尽快处理"},
 			},
 		},
 		{
 			"会议室投影仪故障", "1号会议室投影仪无法开机，影响下周重要会议",
 			models.RiskMedium, models.StatusReturnedForCorrection, models.StageRegistration,
-			0, 5, 0, false, "故障描述不够详细，请补充具体现象和已尝试的解决方法", "",
+			0, 5, 0, false, "",
 			[]opStep{
-				{"创建订单", 0, string(models.StatusPendingRegistration), string(models.StatusRegistered)},
-				{"退回补正", 2, string(models.StatusRegistered), string(models.StatusReturnedForCorrection)},
+				{"创建订单", 0, string(models.StatusPendingRegistration), string(models.StatusRegistered), "登记投影仪故障"},
+				{"退回补正", 2, string(models.StatusRegistered), string(models.StatusReturnedForCorrection), "故障描述不够详细，请补充具体现象和已尝试的解决方法"},
 			},
 		},
 		{
 			"停车场道闸维修", "北门停车场道闸抬杆不顺畅，偶尔无法识别车牌",
 			models.RiskHigh, models.StatusConflict, models.StageAcceptance,
-			2, 2, 3, false, "状态冲突：系统显示已完工但现场实际未完成", "系统状态与实际情况不符",
+			2, 2, 3, false, "系统状态与实际情况不符",
 			[]opStep{
-				{"创建订单", 0, string(models.StatusPendingRegistration), string(models.StatusRegistered)},
-				{"师傅派单", 2, string(models.StatusRegistered), string(models.StatusDispatched)},
-				{"标记状态冲突", 2, string(models.StatusDispatched), string(models.StatusConflict)},
+				{"创建订单", 0, string(models.StatusPendingRegistration), string(models.StatusRegistered), "登记道闸故障"},
+				{"师傅派单", 2, string(models.StatusRegistered), string(models.StatusDispatched), "派弱电组处理"},
+				{"标记状态冲突", 2, string(models.StatusDispatched), string(models.StatusConflict), "状态冲突：系统显示已完工但现场实际未完成"},
 			},
 		},
 		{
 			"卫生间水龙头漏水", "2楼男卫生间3号洗手池水龙头漏水",
 			models.RiskLow, models.StatusArchived, models.StageReview,
-			4, 10, 1, false, "已完成维修并归档", "",
+			4, 10, 1, false, "",
 			[]opStep{
-				{"创建订单", 0, string(models.StatusPendingRegistration), string(models.StatusRegistered)},
-				{"师傅派单", 2, string(models.StatusRegistered), string(models.StatusDispatched)},
-				{"完工验收", 2, string(models.StatusDispatched), string(models.StatusCompleted)},
-				{"复核归档", 4, string(models.StatusCompleted), string(models.StatusArchived)},
+				{"创建订单", 0, string(models.StatusPendingRegistration), string(models.StatusRegistered), "登记水龙头漏水"},
+				{"师傅派单", 2, string(models.StatusRegistered), string(models.StatusDispatched), "派水工处理"},
+				{"完工验收", 2, string(models.StatusDispatched), string(models.StatusCompleted), "已更换陶瓷阀芯，测试不漏水"},
+				{"复核归档", 4, string(models.StatusCompleted), string(models.StatusArchived), "复核通过，维修质量合格，证据完整，归档完毕"},
 			},
 		},
 		{
 			"数据中心空调告警", "机房精密空调出现高压告警，需紧急排查",
 			models.RiskHigh, models.StatusDispatched, models.StageAcceptance,
-			2, 0, 2, true, "紧急工单，已派单", "",
+			2, 0, 2, true, "",
 			[]opStep{
-				{"创建订单", 0, string(models.StatusPendingRegistration), string(models.StatusRegistered)},
-				{"师傅派单", 2, string(models.StatusRegistered), string(models.StatusDispatched)},
+				{"创建订单", 0, string(models.StatusPendingRegistration), string(models.StatusRegistered), "紧急登记机房空调告警"},
+				{"师傅派单", 2, string(models.StatusRegistered), string(models.StatusDispatched), "紧急工单，已派空调维保厂家"},
 			},
 		},
 		{
 			"员工餐厅设备维修", "餐厅2号蒸箱无法加热，影响员工用餐",
 			models.RiskMedium, models.StatusRegistered, models.StageDispatch,
-			2, 2, 0, false, "新登记，等待派单", "",
+			2, 2, 0, false, "",
 			[]opStep{
-				{"创建订单", 0, string(models.StatusPendingRegistration), string(models.StatusRegistered)},
+				{"创建订单", 0, string(models.StatusPendingRegistration), string(models.StatusRegistered), "新登记，等待派单"},
 			},
 		},
 		{
 			"档案室恒温设备", "档案室恒温恒湿设备温度异常偏高",
 			models.RiskHigh, models.StatusArchived, models.StageReview,
-			4, 15, 1, false, "归档后订单 - 办理不可见边界演示", "",
+			4, 15, 1, false, "",
 			[]opStep{
-				{"创建订单", 0, string(models.StatusPendingRegistration), string(models.StatusRegistered)},
-				{"师傅派单", 2, string(models.StatusRegistered), string(models.StatusDispatched)},
-				{"完工验收", 2, string(models.StatusDispatched), string(models.StatusCompleted)},
-				{"复核归档", 4, string(models.StatusCompleted), string(models.StatusArchived)},
+				{"创建订单", 0, string(models.StatusPendingRegistration), string(models.StatusRegistered), "登记档案室恒温设备告警"},
+				{"师傅派单", 2, string(models.StatusRegistered), string(models.StatusDispatched), "派精密空调维修组"},
+				{"完工验收", 2, string(models.StatusDispatched), string(models.StatusCompleted), "已清洗冷凝器并补充冷媒，温度恢复正常"},
+				{"复核归档", 4, string(models.StatusCompleted), string(models.StatusArchived), "归档后订单 - 办理不可见边界演示"},
 			},
 		},
 		{
 			"大堂玻璃门维修", "大堂玻璃门地弹簧损坏，门体无法正常闭合",
 			models.RiskMedium, models.StatusRegistered, models.StageDispatch,
-			3, 2, 0, false, "非当前处理人订单 - 权限不可见边界演示", "",
+			3, 2, 0, false, "",
 			[]opStep{
-				{"创建订单", 1, string(models.StatusPendingRegistration), string(models.StatusRegistered)},
+				{"创建订单", 1, string(models.StatusPendingRegistration), string(models.StatusRegistered), "非当前处理人订单 - 权限不可见边界演示"},
+			},
+		},
+		{
+			"屋顶防水补漏", "行政楼3楼屋顶防水层破损，下雨时渗漏",
+			models.RiskHigh, models.StatusCompleted, models.StageReview,
+			4, 5, 4, false, "",
+			[]opStep{
+				{"创建订单", 0, string(models.StatusPendingRegistration), string(models.StatusRegistered), "登记屋顶防水补漏"},
+				{"师傅派单失败", 2, string(models.StatusRegistered), string(models.StatusRegistered), "角色或权限校验失败，未派单"},
+				{"师傅派单", 2, string(models.StatusRegistered), string(models.StatusDispatched), "派防水工程组处理"},
+				{"完工验收失败", 2, string(models.StatusDispatched), string(models.StatusDispatched), "证据不足，需要4份，现有2份（含本次补充0份）"},
+				{"完工验收", 2, string(models.StatusDispatched), string(models.StatusCompleted), "已重做SBS防水层，48小时闭水试验通过，补充4份证据齐全，等待复核归档"},
 			},
 		},
 	}
@@ -185,7 +197,17 @@ func SeedData() error {
 		dueDate := time.Now().AddDate(0, 0, tpl.dueDays)
 		requiredEvidences := calculateRequiredEvidences(tpl.risk)
 		priority := calculatePriority(tpl.risk, tpl.isOverdue)
-		version := len(tpl.steps)
+
+		successVersion := 0
+		var lastSuccessOpinion, lastSuccessOperator, lastSuccessOperatorRole string
+		for _, step := range tpl.steps {
+			if step.fromStatus != step.toStatus {
+				successVersion++
+				lastSuccessOpinion = step.opinion
+				lastSuccessOperator = users[step.operatorIdx].name
+				lastSuccessOperatorRole = string(users[step.operatorIdx].role)
+			}
+		}
 
 		var masterName, masterPhone sql.NullString
 		var dispatchTime, completeTime, archiveTime sql.NullTime
@@ -220,8 +242,8 @@ func SeedData() error {
 			tpl.risk, tpl.status, tpl.stage, userIDs[tpl.handlerIdx],
 			userIDs[0], userIDs[2], userIDs[4],
 			masterName, masterPhone, dispatchTime, completeTime, archiveTime,
-			dueDate, priority, version, tpl.evidences, requiredEvidences,
-			tpl.isOverdue, tpl.lastOpinion, users[tpl.handlerIdx].name, string(users[tpl.handlerIdx].role),
+			dueDate, priority, successVersion, tpl.evidences, requiredEvidences,
+			tpl.isOverdue, lastSuccessOpinion, lastSuccessOperator, lastSuccessOperatorRole,
 			tpl.conflict,
 			time.Now().AddDate(0, 0, -i-1), time.Now().AddDate(0, 0, -i),
 		)
@@ -243,9 +265,17 @@ func SeedData() error {
 			)
 		}
 
-		for s, step := range tpl.steps {
-			vBefore := s
-			vAfter := s + 1
+		currentV := 0
+		for _, step := range tpl.steps {
+			var vBefore, vAfter int
+			if step.fromStatus != step.toStatus {
+				vBefore = currentV
+				currentV++
+				vAfter = currentV
+			} else {
+				vBefore = currentV
+				vAfter = currentV
+			}
 			tx.Exec(`
 				INSERT INTO operation_logs (
 					order_id, operator_id, operator_name, operator_role,
@@ -255,7 +285,7 @@ func SeedData() error {
 			`, orderID, userIDs[step.operatorIdx], users[step.operatorIdx].name,
 				string(users[step.operatorIdx].role),
 				step.action, step.fromStatus, step.toStatus,
-				tpl.lastOpinion, string(tpl.risk), vBefore, vAfter,
+				step.opinion, string(tpl.risk), vBefore, vAfter,
 			)
 		}
 	}
@@ -264,7 +294,7 @@ func SeedData() error {
 		return fmt.Errorf("提交样例数据失败: %w", err)
 	}
 
-	log.Println("样例数据初始化完成，共创建 6 个用户和 12 个维修订单")
+	log.Println("样例数据初始化完成，共创建 6 个用户和 13 个维修订单")
 	return nil
 }
 

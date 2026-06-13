@@ -76,7 +76,6 @@ export default function App() {
               onBack={() => navigateTo('queue')}
               onProcessed={() => {
                 triggerRefresh()
-                navigateTo('queue')
               }}
             />
           </Show>

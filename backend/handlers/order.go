@@ -472,24 +472,22 @@ func GetOrderDetail(c *fiber.Ctx) error {
 		}
 	}
 
-	prevHandler := ""
-	prevOpinion := ""
-	prevRole := ""
-	if len(logs) > 1 {
-		for _, log := range logs[1:] {
-			if log.ToStatus != log.FromStatus ||
-				log.Action == "创建订单" ||
-				log.Action == "师傅派单" || log.Action == "dispatch" ||
-				log.Action == "完工验收" || log.Action == "complete" ||
-				log.Action == "复核归档" || log.Action == "archive" ||
-				log.Action == "退回补正" || log.Action == "return_to_registrar" ||
-				log.Action == "补正重提" || log.Action == "re_submit" ||
-				log.Action == "标记缺证据" || log.Action == "标记逾期" || log.Action == "标记状态冲突" {
-				prevHandler = log.OperatorName
-				prevOpinion = log.Opinion
-				prevRole = log.OperatorRole
-				break
+	var lastProcessed map[string]interface{}
+	for _, log := range logs {
+		if log.ToStatus != log.FromStatus {
+			lastProcessed = map[string]interface{}{
+				"operator_name":  log.OperatorName,
+				"operator_role":  log.OperatorRole,
+				"action":         log.Action,
+				"opinion":        log.Opinion,
+				"from_status":    log.FromStatus,
+				"to_status":      log.ToStatus,
+				"version_before": log.VersionBefore,
+				"version_after":  log.VersionAfter,
+				"risk_level":     log.RiskLevel,
+				"created_at":     log.CreatedAt,
 			}
+			break
 		}
 	}
 
@@ -497,9 +495,7 @@ func GetOrderDetail(c *fiber.Ctx) error {
 		"order":             order,
 		"evidences":         evidences,
 		"operation_logs":    logs,
-		"prev_handler":      prevHandler,
-		"prev_opinion":      prevOpinion,
-		"prev_role":         prevRole,
+		"last_processed":    lastProcessed,
 		"can_process":       canProcess,
 		"available_actions": availableActions,
 	})
