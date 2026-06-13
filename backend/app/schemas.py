@@ -122,3 +122,49 @@ class ContractConfirm(BaseModel):
 
 class CardActivate(BaseModel):
     activated: bool
+
+
+class BatchItemResult(BaseModel):
+    order_id: int
+    order_no: Optional[str] = None
+    member_name: Optional[str] = None
+    success: bool
+    status: Optional[str] = None
+    audit_log_id: Optional[int] = None
+    reject_reason: Optional[str] = None
+    contract_confirmed: Optional[bool] = None
+    card_activated: Optional[bool] = None
+    attachment_details: Optional[List[dict]] = None
+
+
+class BatchRequest(BaseModel):
+    order_ids: List[int]
+    remark: Optional[str] = None
+
+
+class BatchRejectRequest(BaseModel):
+    order_ids: List[int]
+    reject_reason: str
+    remark: Optional[str] = None
+
+
+class BatchSupplementItem(BaseModel):
+    order_id: int
+    items: List["AttachmentSupplementItemSchema"]
+    remark: Optional[str] = None
+
+
+class AttachmentSupplementItemSchema(BaseModel):
+    required_attachment_id: int
+    reject_reason: Optional[str] = None
+
+
+class BatchSupplementRequest(BaseModel):
+    orders: List[BatchSupplementItem]
+
+
+class BatchResponse(BaseModel):
+    total: int
+    success_count: int
+    fail_count: int
+    results: List[BatchItemResult]

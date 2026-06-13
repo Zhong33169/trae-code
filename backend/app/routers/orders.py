@@ -16,7 +16,7 @@ from app.models import (
 from app.schemas import (
     MembershipOrderSchema, MembershipOrderCreate,
     RequiredAttachmentSchema, AttachmentSchema, AuditLogSchema,
-    ReviewAction,
+    ReviewAction, BatchRequest, BatchRejectRequest, BatchResponse, BatchItemResult,
 )
 
 
@@ -450,8 +450,370 @@ async def archive_order(
     return _serialize_order(db, order)
 
 
+def _make_batch_result(
+    order: Optional[MembershipOrder],
+    success: bool,
+    audit_log_id: Optional[int] = None,
+    reject_reason: Optional[str] = None,
+) -> BatchItemResult:
+    if order:
+        return BatchItemResult(
+            order_id=order.id,
+            order_no=order.order_no,
+            member_name=order.member_name,
+            success=success,
+            status=order.status.value if success else None,
+            audit_log_id=audit_log_id,
+            reject_reason=reject_reason,
+            contract_confirmed=order.contract_confirmed if success else None,
+            card_activated=order.card_activated if success else None,
+            attachment_details=[
+                {
+                    "required_attachment_id": req.id,
+                    "attachment_name": req.attachment_name,
+                    "is_provided": req.is_provided,
+                    "reject_reason": req.reject_reason,
+                }
+                for req in (order.required_attachments if order else [])
+            ] if success else None,
+        )
+    return BatchItemResult(
+        order_id=0,
+        success=False,
+        reject_reason=reject_reason or "入会单不存在",
+    )
+
+
+@post("/orders/batch/submit", guards=[require_registrar])
+async def batch_submit_orders(
+    data: BatchRequest,
+    request: Request,
+) -> BatchResponse:
+    db: Session = next(get_db())
+    operator = get_current_user(request)
+    results = []
+    for order_id in data.order_ids:
+        try:
+            order = db.query(MembershipOrder).filter(MembershipOrder.id == order_id).first()
+            if not order:
+                results.append(BatchItemResult(order_id=order_id, success=False, reject_reason="入会单不存在"))
+                continue
+
+            allowed = {OrderStatus.DRAFT, OrderStatus.MATERIALS_MISSING}
+            if order.status not in allowed:
+                results.append(_make_batch_result(
+                    order, False,
+                    reject_reason=f"当前状态【{order.status.value}】下不能提交，仅草稿或附件缺失待补正可提交"
+                ))
+                continue
+
+            missing = db.query(RequiredAttachment).filter(
+                RequiredAttachment.order_id == order_id,
+                RequiredAttachment.is_provided == False,
+            ).all()
+            from_status = order.status
+            if from_status == OrderStatus.MATERIALS_MISSING and missing:
+                missing_names = "、".join([m.attachment_name for m in missing])
+                results.append(_make_batch_result(
+                    order, False,
+                    reject_reason=f"仍有缺失附件未补正（{missing_names}），请补齐全部附件后再重新提交"
+                ))
+                continue
+
+            if from_status == OrderStatus.MATERIALS_MISSING:
+                order.status = OrderStatus.RESUBMITTED
+                action = AuditAction.RESUBMIT
+                remark = data.remark or f"登记员【{operator.name}】补齐附件后重新提交审核"
+            else:
+                order.status = OrderStatus.PENDING_REVIEW
+                action = AuditAction.SUBMIT
+                remark = data.remark or f"登记员【{operator.name}】提交会员入会单进入审核"
+
+            order.is_overdue = False
+            order.reject_reason = None
+            order.updated_at = datetime.utcnow()
+
+            log = AuditLog(
+                order_id=order.id, operator_id=operator.id, action=action,
+                from_status=from_status, to_status=order.status, remark=remark,
+            )
+            db.add(log)
+            db.flush()
+            db.commit()
+            db.refresh(order)
+            db.refresh(log)
+            results.append(_make_batch_result(order, True, audit_log_id=log.id))
+        except Exception as e:
+            db.rollback()
+            order = db.query(MembershipOrder).filter(MembershipOrder.id == order_id).first()
+            results.append(_make_batch_result(order, False, reject_reason=str(e)))
+
+    success_count = sum(1 for r in results if r.success)
+    return BatchResponse(
+        total=len(results), success_count=success_count,
+        fail_count=len(results) - success_count, results=results,
+    )
+
+
+@post("/orders/batch/approve", guards=[require_supervisor])
+async def batch_approve_orders(
+    data: BatchRequest,
+    request: Request,
+) -> BatchResponse:
+    db: Session = next(get_db())
+    operator = get_current_user(request)
+    results = []
+    for order_id in data.order_ids:
+        try:
+            order = db.query(MembershipOrder).filter(MembershipOrder.id == order_id).first()
+            if not order:
+                results.append(BatchItemResult(order_id=order_id, success=False, reject_reason="入会单不存在"))
+                continue
+
+            allowed = {OrderStatus.PENDING_REVIEW, OrderStatus.RESUBMITTED}
+            if order.status not in allowed:
+                results.append(_make_batch_result(
+                    order, False,
+                    reject_reason=f"当前状态【{order.status.value}】下不能审核通过，仅待审核或补正后重提可审核"
+                ))
+                continue
+
+            missing = db.query(RequiredAttachment).filter(
+                RequiredAttachment.order_id == order_id,
+                RequiredAttachment.is_provided == False,
+            ).all()
+            if missing:
+                missing_names = "、".join([m.attachment_name for m in missing])
+                results.append(_make_batch_result(
+                    order, False,
+                    reject_reason=f"仍有 {len(missing)} 份附件缺失（{missing_names}），材料不齐全不能审核通过"
+                ))
+                continue
+
+            from_status = order.status
+            order.status = OrderStatus.APPROVED_REVIEW
+            order.contract_confirmed = True
+            order.updated_at = datetime.utcnow()
+
+            log1 = AuditLog(
+                order_id=order.id, operator_id=operator.id, action=AuditAction.APPROVE,
+                from_status=from_status, to_status=order.status,
+                remark=f"审核主管【{operator.name}】办理通过，材料齐全有效" +
+                       (f"，备注：{data.remark}" if data.remark else ""),
+            )
+            log2 = AuditLog(
+                order_id=order.id, operator_id=operator.id, action=AuditAction.CONFIRM_CONTRACT,
+                remark=f"审核主管【{operator.name}】确认合同已签署",
+            )
+            db.add(log1)
+            db.add(log2)
+            db.flush()
+            db.commit()
+            db.refresh(order)
+            db.refresh(log1)
+            results.append(_make_batch_result(order, True, audit_log_id=log1.id))
+        except Exception as e:
+            db.rollback()
+            order = db.query(MembershipOrder).filter(MembershipOrder.id == order_id).first()
+            results.append(_make_batch_result(order, False, reject_reason=str(e)))
+
+    success_count = sum(1 for r in results if r.success)
+    return BatchResponse(
+        total=len(results), success_count=success_count,
+        fail_count=len(results) - success_count, results=results,
+    )
+
+
+@post("/orders/batch/reject", guards=[require_supervisor])
+async def batch_reject_orders(
+    data: BatchRejectRequest,
+    request: Request,
+) -> BatchResponse:
+    db: Session = next(get_db())
+    operator = get_current_user(request)
+    results = []
+    if not data.reject_reason or not data.reject_reason.strip():
+        return BatchResponse(total=0, success_count=0, fail_count=0, results=[
+            BatchItemResult(order_id=0, success=False, reject_reason="请填写驳回原因")
+        ])
+    for order_id in data.order_ids:
+        try:
+            order = db.query(MembershipOrder).filter(MembershipOrder.id == order_id).first()
+            if not order:
+                results.append(BatchItemResult(order_id=order_id, success=False, reject_reason="入会单不存在"))
+                continue
+
+            allowed = {OrderStatus.PENDING_REVIEW, OrderStatus.RESUBMITTED}
+            if order.status not in allowed:
+                results.append(_make_batch_result(
+                    order, False,
+                    reject_reason=f"当前状态【{order.status.value}】下不能驳回，仅待审核或补正后重提可驳回"
+                ))
+                continue
+
+            for req in order.required_attachments:
+                if not req.is_provided:
+                    old_reason = req.reject_reason or ""
+                    timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M")
+                    new_line = f"[{timestamp} 最终驳回-{operator.name}] 整体驳回：{data.reject_reason}"
+                    req.reject_reason = f"{new_line}\n{old_reason}" if old_reason else new_line
+
+            from_status = order.status
+            order.status = OrderStatus.REJECTED
+            order.reject_reason = data.reject_reason
+            order.updated_at = datetime.utcnow()
+
+            log = AuditLog(
+                order_id=order.id, operator_id=operator.id, action=AuditAction.REJECT,
+                from_status=from_status, to_status=order.status,
+                remark=f"审核主管【{operator.name}】予以驳回" +
+                       (f"，备注：{data.remark}" if data.remark else ""),
+                failure_reason=data.reject_reason,
+            )
+            db.add(log)
+            db.flush()
+            db.commit()
+            db.refresh(order)
+            db.refresh(log)
+            results.append(_make_batch_result(order, True, audit_log_id=log.id))
+        except Exception as e:
+            db.rollback()
+            order = db.query(MembershipOrder).filter(MembershipOrder.id == order_id).first()
+            results.append(_make_batch_result(order, False, reject_reason=str(e)))
+
+    success_count = sum(1 for r in results if r.success)
+    return BatchResponse(
+        total=len(results), success_count=success_count,
+        fail_count=len(results) - success_count, results=results,
+    )
+
+
+@post("/orders/batch/review", guards=[require_reviewer])
+async def batch_review_orders(
+    data: BatchRequest,
+    request: Request,
+) -> BatchResponse:
+    db: Session = next(get_db())
+    operator = get_current_user(request)
+    results = []
+    for order_id in data.order_ids:
+        try:
+            order = db.query(MembershipOrder).filter(MembershipOrder.id == order_id).first()
+            if not order:
+                results.append(BatchItemResult(order_id=order_id, success=False, reject_reason="入会单不存在"))
+                continue
+
+            if order.status != OrderStatus.APPROVED_REVIEW:
+                results.append(_make_batch_result(
+                    order, False,
+                    reject_reason=f"当前状态【{order.status.value}】下不能复核，仅审核通过待复核可复核"
+                ))
+                continue
+
+            if not order.contract_confirmed:
+                results.append(_make_batch_result(order, False, reject_reason="合同尚未确认，不能复核"))
+                continue
+
+            missing = db.query(RequiredAttachment).filter(
+                RequiredAttachment.order_id == order_id,
+                RequiredAttachment.is_provided == False,
+            ).all()
+            if missing:
+                missing_names = "、".join([m.attachment_name for m in missing])
+                results.append(_make_batch_result(
+                    order, False,
+                    reject_reason=f"仍有 {len(missing)} 份附件缺失（{missing_names}）"
+                ))
+                continue
+
+            from_status = order.status
+            order.status = OrderStatus.REVIEWED
+            order.updated_at = datetime.utcnow()
+
+            log = AuditLog(
+                order_id=order.id, operator_id=operator.id, action=AuditAction.REVIEW,
+                from_status=from_status, to_status=order.status,
+                remark=f"复核负责人【{operator.name}】复核通过，信息核实无误" +
+                       (f"，备注：{data.remark}" if data.remark else ""),
+            )
+            db.add(log)
+            db.flush()
+            db.commit()
+            db.refresh(order)
+            db.refresh(log)
+            results.append(_make_batch_result(order, True, audit_log_id=log.id))
+        except Exception as e:
+            db.rollback()
+            order = db.query(MembershipOrder).filter(MembershipOrder.id == order_id).first()
+            results.append(_make_batch_result(order, False, reject_reason=str(e)))
+
+    success_count = sum(1 for r in results if r.success)
+    return BatchResponse(
+        total=len(results), success_count=success_count,
+        fail_count=len(results) - success_count, results=results,
+    )
+
+
+@post("/orders/batch/archive", guards=[require_reviewer])
+async def batch_archive_orders(
+    data: BatchRequest,
+    request: Request,
+) -> BatchResponse:
+    db: Session = next(get_db())
+    operator = get_current_user(request)
+    results = []
+    for order_id in data.order_ids:
+        try:
+            order = db.query(MembershipOrder).filter(MembershipOrder.id == order_id).first()
+            if not order:
+                results.append(BatchItemResult(order_id=order_id, success=False, reject_reason="入会单不存在"))
+                continue
+
+            if order.status != OrderStatus.REVIEWED:
+                results.append(_make_batch_result(
+                    order, False,
+                    reject_reason=f"当前状态【{order.status.value}】下不能归档，仅复核通过待归档可归档"
+                ))
+                continue
+
+            from_status = order.status
+            order.status = OrderStatus.ARCHIVED
+            order.card_activated = True
+            order.updated_at = datetime.utcnow()
+
+            log1 = AuditLog(
+                order_id=order.id, operator_id=operator.id, action=AuditAction.ACTIVATE_CARD,
+                remark=f"复核负责人【{operator.name}】启用会员卡权益",
+            )
+            log2 = AuditLog(
+                order_id=order.id, operator_id=operator.id, action=AuditAction.ARCHIVE,
+                from_status=from_status, to_status=order.status,
+                remark=f"复核负责人【{operator.name}】完成入会单归档" +
+                       (f"，备注：{data.remark}" if data.remark else ""),
+            )
+            db.add(log1)
+            db.add(log2)
+            db.flush()
+            db.commit()
+            db.refresh(order)
+            db.refresh(log2)
+            results.append(_make_batch_result(order, True, audit_log_id=log2.id))
+        except Exception as e:
+            db.rollback()
+            order = db.query(MembershipOrder).filter(MembershipOrder.id == order_id).first()
+            results.append(_make_batch_result(order, False, reject_reason=str(e)))
+
+    success_count = sum(1 for r in results if r.success)
+    return BatchResponse(
+        total=len(results), success_count=success_count,
+        fail_count=len(results) - success_count, results=results,
+    )
+
+
 orders_router = Router(path="/api", route_handlers=[
     list_orders, get_order, create_order, submit_order,
     approve_order, request_supplement, reject_order,
     review_order, archive_order,
+    batch_submit_orders, batch_approve_orders, batch_reject_orders,
+    batch_review_orders, batch_archive_orders,
 ])
