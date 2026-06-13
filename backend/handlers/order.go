@@ -23,15 +23,15 @@ type CreateOrderRequest struct {
 }
 
 type ProcessOrderRequest struct {
-	Action          string   `json:"action"`
-	Opinion         string   `json:"opinion"`
-	Version         int      `json:"version"`
-	EvidenceTypes   []string `json:"evidence_types"`
-	EvidenceDescs   []string `json:"evidence_descs"`
-	MasterName      string   `json:"master_name"`
-	MasterPhone     string   `json:"master_phone"`
-	NewRiskLevel    string   `json:"new_risk_level"`
-	ConflictNote    string   `json:"conflict_note"`
+	Action        string   `json:"action"`
+	Opinion       string   `json:"opinion"`
+	Version       int      `json:"version"`
+	EvidenceTypes []string `json:"evidence_types"`
+	EvidenceDescs []string `json:"evidence_descs"`
+	MasterName    string   `json:"master_name"`
+	MasterPhone   string   `json:"master_phone"`
+	NewRiskLevel  string   `json:"new_risk_level"`
+	ConflictNote  string   `json:"conflict_note"`
 }
 
 func calculatePriority(riskLevel models.RiskLevel, isOverdue bool) int {
@@ -78,10 +78,10 @@ func validateRoleTransition(currentStage models.ProcessStage, userRole models.Us
 	}
 }
 
-func logOperation(orderID int, operatorID int, operatorName string, operatorRole string,
+func logInTx(tx *sql.Tx, orderID int, operatorID int, operatorName string, operatorRole string,
 	action string, fromStatus string, toStatus string, opinion string,
 	riskLevel string, versionBefore int, versionAfter int) error {
-	_, err := database.DB.Exec(`
+	_, err := tx.Exec(`
 		INSERT INTO operation_logs (
 			order_id, operator_id, operator_name, operator_role,
 			action, from_status, to_status, opinion, risk_level,
@@ -91,6 +91,44 @@ func logOperation(orderID int, operatorID int, operatorName string, operatorRole
 		action, fromStatus, toStatus, opinion, riskLevel,
 		versionBefore, versionAfter)
 	return err
+}
+
+func persistFailLog(orderID int, operatorID int, operatorName string, operatorRole string,
+	action string, fromStatus string, opinion string,
+	riskLevel string, version int) {
+	failTx, err := database.DB.Begin()
+	if err != nil {
+		return
+	}
+	_ = logInTx(failTx, orderID, operatorID, operatorName, operatorRole,
+		action, fromStatus, fromStatus, opinion, riskLevel, version, version)
+	failTx.Commit()
+}
+
+func insertEvidencesInTx(tx *sql.Tx, orderID int, operatorID int, evidenceTypes []string, evidenceDescs []string) error {
+	for i, evType := range evidenceTypes {
+		if evType == "" {
+			continue
+		}
+		evDesc := ""
+		if i < len(evidenceDescs) {
+			evDesc = evidenceDescs[i]
+		}
+		_, err := tx.Exec(`
+			INSERT INTO evidences (order_id, type, description, uploaded_by)
+			VALUES (?, ?, ?, ?)
+		`, orderID, evType, evDesc, operatorID)
+		if err != nil {
+			return fmt.Errorf("添加证据失败: %w", err)
+		}
+	}
+	return nil
+}
+
+func countEvidencesInTx(tx *sql.Tx, orderID int) int {
+	var count int
+	tx.QueryRow("SELECT COUNT(*) FROM evidences WHERE order_id = ?", orderID).Scan(&count)
+	return count
 }
 
 func CreateOrder(c *fiber.Ctx) error {
@@ -147,11 +185,14 @@ func CreateOrder(c *fiber.Ctx) error {
 		INSERT INTO repair_orders (
 			order_no, title, description, contact_name, contact_phone, address,
 			risk_level, status, current_stage, current_handler_id,
-			registrar_id, due_date, priority, required_evidences, last_operator, last_operator_role
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			registrar_id, due_date, priority, required_evidences,
+			last_opinion, last_operator, last_operator_role,
+			version, evidence_count
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0)
 	`, orderNo, req.Title, req.Description, req.ContactName, req.ContactPhone, req.Address,
 		req.RiskLevel, models.StatusRegistered, models.StageDispatch, firstSupervisor.ID,
-		userID, dueDate, priority, requiredEvidences, user.Name, string(user.Role))
+		userID, dueDate, priority, requiredEvidences,
+		"新建维修订单", user.Name, string(user.Role))
 	if err != nil {
 		tx.Rollback()
 		return c.Status(500).JSON(fiber.Map{"error": "创建订单失败: " + err.Error()})
@@ -159,10 +200,9 @@ func CreateOrder(c *fiber.Ctx) error {
 
 	orderID, _ := result.LastInsertId()
 
-	err = logOperation(int(orderID), userID, user.Name, string(user.Role),
+	if err := logInTx(tx, int(orderID), userID, user.Name, string(user.Role),
 		"创建订单", string(models.StatusPendingRegistration), string(models.StatusRegistered),
-		"新建维修订单", string(req.RiskLevel), 1, 1)
-	if err != nil {
+		"新建维修订单", string(req.RiskLevel), 1, 1); err != nil {
 		tx.Rollback()
 		return c.Status(500).JSON(fiber.Map{"error": "记录操作失败"})
 	}
@@ -304,8 +344,9 @@ func GetOrderDetail(c *fiber.Ctx) error {
 	var evidences []models.Evidence
 	for evidenceRows.Next() {
 		var e models.Evidence
-		evidenceRows.Scan(&e.ID, &e.OrderID, &e.Type, &e.Description, &e.UploadedBy, &e.CreatedAt)
-		evidences = append(evidences, e)
+		if err := evidenceRows.Scan(&e.ID, &e.OrderID, &e.Type, &e.Description, &e.UploadedBy, &e.CreatedAt); err == nil {
+			evidences = append(evidences, e)
+		}
 	}
 
 	logRows, err := database.DB.Query(`
@@ -322,10 +363,11 @@ func GetOrderDetail(c *fiber.Ctx) error {
 	var logs []models.OperationLog
 	for logRows.Next() {
 		var l models.OperationLog
-		logRows.Scan(&l.ID, &l.OrderID, &l.OperatorID, &l.OperatorName, &l.OperatorRole,
+		if err := logRows.Scan(&l.ID, &l.OrderID, &l.OperatorID, &l.OperatorName, &l.OperatorRole,
 			&l.Action, &l.FromStatus, &l.ToStatus, &l.Opinion, &l.RiskLevel,
-			&l.VersionBefore, &l.VersionAfter, &l.CreatedAt)
-		logs = append(logs, l)
+			&l.VersionBefore, &l.VersionAfter, &l.CreatedAt); err == nil {
+			logs = append(logs, l)
+		}
 	}
 
 	prevHandler := ""
@@ -338,13 +380,13 @@ func GetOrderDetail(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(fiber.Map{
-		"order":           order,
-		"evidences":       evidences,
-		"operation_logs":  logs,
-		"prev_handler":    prevHandler,
-		"prev_opinion":    prevOpinion,
-		"prev_role":       prevRole,
-		"can_process":     order.CurrentHandlerID == userID,
+		"order":          order,
+		"evidences":      evidences,
+		"operation_logs": logs,
+		"prev_handler":   prevHandler,
+		"prev_opinion":   prevOpinion,
+		"prev_role":      prevRole,
+		"can_process":    order.CurrentHandlerID == userID,
 	})
 }
 
@@ -365,6 +407,10 @@ func ProcessOrder(c *fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": "请求参数错误: " + err.Error()})
 	}
 
+	if req.Action == "" {
+		return c.Status(400).JSON(fiber.Map{"error": "请指定操作类型"})
+	}
+
 	tx, err := database.DB.Begin()
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "开始事务失败"})
@@ -373,12 +419,12 @@ func ProcessOrder(c *fiber.Ctx) error {
 	var order models.RepairOrder
 	err = tx.QueryRow(`
 		SELECT id, status, current_stage, current_handler_id, version, risk_level,
-			evidence_count, required_evidences, is_overdue
+			evidence_count, required_evidences, is_overdue, registrar_id
 		FROM repair_orders WHERE id = ?
 	`, orderID).Scan(
 		&order.ID, &order.Status, &order.CurrentStage, &order.CurrentHandlerID,
 		&order.Version, &order.RiskLevel, &order.EvidenceCount, &order.RequiredEvidences,
-		&order.IsOverdue,
+		&order.IsOverdue, &order.RegistrarID,
 	)
 	if err != nil {
 		tx.Rollback()
@@ -389,10 +435,9 @@ func ProcessOrder(c *fiber.Ctx) error {
 	}
 
 	if order.CurrentHandlerID != userID {
-		tx.Rollback()
-		_ = logOperation(orderID, userID, user.Name, string(user.Role),
-			"越权尝试", string(order.Status), string(order.Status),
-			"非当前处理人尝试操作", string(order.RiskLevel), order.Version, order.Version)
+		persistFailLog(orderID, userID, user.Name, string(user.Role),
+			"越权尝试", string(order.Status),
+			"非当前处理人尝试操作", string(order.RiskLevel), order.Version)
 		return c.Status(403).JSON(fiber.Map{
 			"error":       "您不是当前处理人，无法操作此订单",
 			"old_status":  order.Status,
@@ -401,10 +446,9 @@ func ProcessOrder(c *fiber.Ctx) error {
 	}
 
 	if !validateRoleTransition(order.CurrentStage, user.Role) {
-		tx.Rollback()
-		_ = logOperation(orderID, userID, user.Name, string(user.Role),
-			"角色不匹配", string(order.Status), string(order.Status),
-			"当前角色无权处理此阶段订单", string(order.RiskLevel), order.Version, order.Version)
+		persistFailLog(orderID, userID, user.Name, string(user.Role),
+			"角色不匹配", string(order.Status),
+			"当前角色无权处理此阶段订单: "+string(user.Role), string(order.RiskLevel), order.Version)
 		return c.Status(403).JSON(fiber.Map{
 			"error":       "当前角色无权处理此阶段订单",
 			"old_status":  order.Status,
@@ -413,16 +457,15 @@ func ProcessOrder(c *fiber.Ctx) error {
 	}
 
 	if req.Version != order.Version {
-		tx.Rollback()
-		_ = logOperation(orderID, userID, user.Name, string(user.Role),
-			"版本冲突", string(order.Status), string(order.Status),
+		persistFailLog(orderID, userID, user.Name, string(user.Role),
+			"版本冲突", string(order.Status),
 			fmt.Sprintf("版本不匹配，期望:%d 实际:%d", order.Version, req.Version),
-			string(order.RiskLevel), order.Version, order.Version)
+			string(order.RiskLevel), order.Version)
 		return c.Status(409).JSON(fiber.Map{
-			"error":         "订单已被他人修改，请刷新后重试",
-			"old_status":    order.Status,
-			"old_version":   order.Version,
-			"your_version":  req.Version,
+			"error":        "订单已被他人修改，请刷新后重试",
+			"old_status":   order.Status,
+			"old_version":  order.Version,
+			"your_version": req.Version,
 		})
 	}
 
@@ -435,198 +478,187 @@ func ProcessOrder(c *fiber.Ctx) error {
 	newStatus := order.Status
 	newStage := order.CurrentStage
 	newHandlerID := order.CurrentHandlerID
-	masterName := order.MasterName
-	masterPhone := order.MasterPhone
+	actionLabel := req.Action
 
 	switch req.Action {
 	case "return_to_registrar":
 		if user.Role != models.RoleSupervisor {
 			tx.Rollback()
+			persistFailLog(orderID, userID, user.Name, string(user.Role),
+				"退回补正失败", string(order.Status),
+				"只有审核主管可以退回补正", string(order.RiskLevel), order.Version)
 			return c.Status(400).JSON(fiber.Map{"error": "只有审核主管可以退回补正"})
 		}
 		newStatus = models.StatusReturnedForCorrection
 		newStage = models.StageRegistration
-		newStatus = models.StatusReturnedForCorrection
-		var registrarID int
-		tx.QueryRow("SELECT registrar_id FROM repair_orders WHERE id = ?", orderID).Scan(&registrarID)
-		newHandlerID = registrarID
+		newHandlerID = order.RegistrarID
 
 	case "dispatch":
 		if user.Role != models.RoleSupervisor {
 			tx.Rollback()
+			persistFailLog(orderID, userID, user.Name, string(user.Role),
+				"派单失败", string(order.Status),
+				"只有审核主管可以派单", string(order.RiskLevel), order.Version)
 			return c.Status(400).JSON(fiber.Map{"error": "只有审核主管可以派单"})
 		}
 		if req.MasterName == "" || req.MasterPhone == "" {
-			tx.Rollback()
-			_ = logOperation(orderID, userID, user.Name, string(user.Role),
-				"派单失败", string(order.Status), string(order.Status),
-				"缺少师傅信息", string(order.RiskLevel), order.Version, order.Version)
+			persistFailLog(orderID, userID, user.Name, string(user.Role),
+				"派单失败", string(order.Status),
+				"缺少师傅信息", string(order.RiskLevel), order.Version)
 			return c.Status(400).JSON(fiber.Map{
 				"error":       "请填写师傅姓名和电话",
 				"old_status":  order.Status,
 				"old_version": order.Version,
 			})
 		}
-		masterName = req.MasterName
-		masterPhone = req.MasterPhone
+		if err := insertEvidencesInTx(tx, orderID, userID, req.EvidenceTypes, req.EvidenceDescs); err != nil {
+			tx.Rollback()
+			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+		}
 		newStatus = models.StatusDispatched
 		newStage = models.StageAcceptance
+		actionLabel = "师傅派单"
 
 	case "complete":
 		if user.Role != models.RoleSupervisor {
 			tx.Rollback()
+			persistFailLog(orderID, userID, user.Name, string(user.Role),
+				"验收失败", string(order.Status),
+				"只有审核主管可以完工验收", string(order.RiskLevel), order.Version)
 			return c.Status(400).JSON(fiber.Map{"error": "只有审核主管可以完工验收"})
 		}
-		if order.EvidenceCount < order.RequiredEvidences {
+		if err := insertEvidencesInTx(tx, orderID, userID, req.EvidenceTypes, req.EvidenceDescs); err != nil {
 			tx.Rollback()
-			_ = logOperation(orderID, userID, user.Name, string(user.Role),
-				"验收失败", string(order.Status), string(order.Status),
-				fmt.Sprintf("证据不足，需要%d份，现有%d份", order.RequiredEvidences, order.EvidenceCount),
-				string(order.RiskLevel), order.Version, order.Version)
+			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+		}
+		totalEvidences := countEvidencesInTx(tx, orderID)
+		if totalEvidences < order.RequiredEvidences {
+			tx.Rollback()
+			persistFailLog(orderID, userID, user.Name, string(user.Role),
+				"验收失败", string(order.Status),
+				fmt.Sprintf("证据不足，需要%d份，现有%d份（含本次补充%d份）",
+					order.RequiredEvidences, totalEvidences, len(req.EvidenceTypes)),
+				string(order.RiskLevel), order.Version)
 			return c.Status(400).JSON(fiber.Map{
-				"error":               fmt.Sprintf("证据不足，需要%d份，现有%d份", order.RequiredEvidences, order.EvidenceCount),
-				"old_status":          order.Status,
-				"old_version":         order.Version,
-				"missing_evidences":   order.RequiredEvidences - order.EvidenceCount,
+				"error":             fmt.Sprintf("证据不足，需要%d份，现有%d份（含本次补充%d份）",
+					order.RequiredEvidences, totalEvidences, len(req.EvidenceTypes)),
+				"old_status":        order.Status,
+				"old_version":       order.Version,
+				"missing_evidences": order.RequiredEvidences - totalEvidences,
 			})
 		}
 		newStatus = models.StatusCompleted
 		newStage = models.StageReview
 		var firstReviewer models.User
-		tx.QueryRow("SELECT id FROM users WHERE role = ? ORDER BY id LIMIT 1", models.RoleReviewer).Scan(&firstReviewer.ID)
+		if err := tx.QueryRow("SELECT id FROM users WHERE role = ? ORDER BY id LIMIT 1",
+			models.RoleReviewer).Scan(&firstReviewer.ID); err != nil {
+			tx.Rollback()
+			return c.Status(500).JSON(fiber.Map{"error": "获取复核负责人失败"})
+		}
 		newHandlerID = firstReviewer.ID
+		actionLabel = "完工验收"
 
 	case "mark_missing_evidence":
 		newStatus = models.StatusMissingEvidence
-		_ = logOperation(orderID, userID, user.Name, string(user.Role),
-			"标记缺证据", string(order.Status), string(newStatus),
-			req.Opinion, string(newRiskLevel), order.Version, order.Version)
-		tx.Exec(`
-			UPDATE repair_orders SET 
-				status = ?, last_opinion = ?, last_operator = ?, last_operator_role = ?,
-				updated_at = CURRENT_TIMESTAMP
-			WHERE id = ?
-		`, newStatus, req.Opinion, user.Name, string(user.Role), orderID)
-		tx.Commit()
-		return c.JSON(fiber.Map{
-			"message":     "已标记为缺证据",
-			"new_status":  newStatus,
-			"new_version": order.Version,
-		})
+		actionLabel = "标记缺证据"
 
 	case "mark_overdue":
 		newStatus = models.StatusOverdue
-		_ = logOperation(orderID, userID, user.Name, string(user.Role),
-			"标记逾期", string(order.Status), string(newStatus),
-			req.Opinion, string(newRiskLevel), order.Version, order.Version)
-		tx.Exec(`
-			UPDATE repair_orders SET 
-				status = ?, is_overdue = 1, priority = priority + 30,
-				last_opinion = ?, last_operator = ?, last_operator_role = ?,
-				updated_at = CURRENT_TIMESTAMP
-			WHERE id = ?
-		`, newStatus, req.Opinion, user.Name, string(user.Role), orderID)
-		tx.Commit()
-		return c.JSON(fiber.Map{
-			"message":     "已标记为逾期",
-			"new_status":  newStatus,
-			"new_version": order.Version,
-		})
+		actionLabel = "标记逾期"
 
 	case "mark_conflict":
 		newStatus = models.StatusConflict
-		_ = logOperation(orderID, userID, user.Name, string(user.Role),
-			"标记状态冲突", string(order.Status), string(newStatus),
-			req.Opinion+" 冲突说明:"+req.ConflictNote, string(newRiskLevel), order.Version, order.Version)
-		tx.Exec(`
-			UPDATE repair_orders SET 
-				status = ?, conflict_note = ?,
-				last_opinion = ?, last_operator = ?, last_operator_role = ?,
-				updated_at = CURRENT_TIMESTAMP
-			WHERE id = ?
-		`, newStatus, req.ConflictNote, req.Opinion, user.Name, string(user.Role), orderID)
-		tx.Commit()
-		return c.JSON(fiber.Map{
-			"message":     "已标记为状态冲突",
-			"new_status":  newStatus,
-			"new_version": order.Version,
-		})
+		actionLabel = "标记状态冲突"
 
 	case "re_submit":
 		if user.Role != models.RoleRegistrar {
 			tx.Rollback()
+			persistFailLog(orderID, userID, user.Name, string(user.Role),
+				"补正重提失败", string(order.Status),
+				"只有登记员可以补正后重提", string(order.RiskLevel), order.Version)
 			return c.Status(400).JSON(fiber.Map{"error": "只有登记员可以补正后重提"})
 		}
-		if order.EvidenceCount < order.RequiredEvidences {
+		if err := insertEvidencesInTx(tx, orderID, userID, req.EvidenceTypes, req.EvidenceDescs); err != nil {
 			tx.Rollback()
+			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+		}
+		totalEvidences := countEvidencesInTx(tx, orderID)
+		if totalEvidences < order.RequiredEvidences {
+			tx.Rollback()
+			persistFailLog(orderID, userID, user.Name, string(user.Role),
+				"补正重提失败", string(order.Status),
+				fmt.Sprintf("证据不足，需要%d份，现有%d份（含本次补充%d份）",
+					order.RequiredEvidences, totalEvidences, len(req.EvidenceTypes)),
+				string(order.RiskLevel), order.Version)
 			return c.Status(400).JSON(fiber.Map{
-				"error": fmt.Sprintf("证据不足，需要%d份，现有%d份",
-					order.RequiredEvidences, order.EvidenceCount),
-				"old_status":  order.Status,
-				"old_version": order.Version,
+				"error":             fmt.Sprintf("证据不足，需要%d份，现有%d份（含本次补充%d份）",
+					order.RequiredEvidences, totalEvidences, len(req.EvidenceTypes)),
+				"old_status":        order.Status,
+				"old_version":       order.Version,
+				"missing_evidences": order.RequiredEvidences - totalEvidences,
 			})
 		}
 		newStatus = models.StatusRegistered
 		newStage = models.StageDispatch
 		var firstSupervisor models.User
-		tx.QueryRow("SELECT id FROM users WHERE role = ? ORDER BY id LIMIT 1", models.RoleSupervisor).Scan(&firstSupervisor.ID)
+		if err := tx.QueryRow("SELECT id FROM users WHERE role = ? ORDER BY id LIMIT 1",
+			models.RoleSupervisor).Scan(&firstSupervisor.ID); err != nil {
+			tx.Rollback()
+			return c.Status(500).JSON(fiber.Map{"error": "获取审核主管失败"})
+		}
 		newHandlerID = firstSupervisor.ID
+		actionLabel = "补正重提"
 
 	case "archive":
 		if user.Role != models.RoleReviewer {
 			tx.Rollback()
+			persistFailLog(orderID, userID, user.Name, string(user.Role),
+				"归档失败", string(order.Status),
+				"只有复核负责人可以归档", string(order.RiskLevel), order.Version)
 			return c.Status(400).JSON(fiber.Map{"error": "只有复核负责人可以归档"})
 		}
 		newStatus = models.StatusArchived
 		newStage = models.StageReview
 		newHandlerID = userID
+		actionLabel = "复核归档"
 
 	default:
 		tx.Rollback()
-		return c.Status(400).JSON(fiber.Map{"error": "未知操作类型"})
+		return c.Status(400).JSON(fiber.Map{"error": "未知操作类型: " + req.Action})
 	}
 
-	if len(req.EvidenceTypes) > 0 {
-		for i, evType := range req.EvidenceTypes {
-			evDesc := ""
-			if i < len(req.EvidenceDescs) {
-				evDesc = req.EvidenceDescs[i]
-			}
-			_, err = tx.Exec(`
-				INSERT INTO evidences (order_id, type, description, uploaded_by)
-				VALUES (?, ?, ?, ?)
-			`, orderID, evType, evDesc, userID)
-			if err != nil {
-				tx.Rollback()
-				return c.Status(500).JSON(fiber.Map{"error": "添加证据失败"})
-			}
-		}
-	}
+	priority := calculatePriority(newRiskLevel, order.IsOverdue || newStatus == models.StatusOverdue)
 
-	priority := calculatePriority(newRiskLevel, order.IsOverdue)
+	opinion := req.Opinion
+	if req.Action == "mark_conflict" && req.ConflictNote != "" {
+		opinion = req.Opinion + " 冲突说明:" + req.ConflictNote
+	}
 
 	var updateSql string
 	var updateArgs []interface{}
 
-	if req.Action == "dispatch" {
+	switch req.Action {
+	case "dispatch":
 		updateSql = `
 			UPDATE repair_orders SET
 				status = ?, current_stage = ?, current_handler_id = ?,
 				master_name = ?, master_phone = ?, dispatch_time = CURRENT_TIMESTAMP,
 				risk_level = ?, priority = ?, version = ?,
 				last_opinion = ?, last_operator = ?, last_operator_role = ?,
+				supervisor_id = ?,
 				evidence_count = (SELECT COUNT(*) FROM evidences WHERE order_id = ?),
 				updated_at = CURRENT_TIMESTAMP
 			WHERE id = ? AND version = ?
 		`
 		updateArgs = []interface{}{
 			newStatus, newStage, userID,
-			masterName, masterPhone,
+			req.MasterName, req.MasterPhone,
 			newRiskLevel, priority, newVersion,
-			req.Opinion, user.Name, string(user.Role),
-			orderID, orderID, order.Version,
+			opinion, user.Name, string(user.Role),
+			userID, orderID, orderID, order.Version,
 		}
-	} else if req.Action == "complete" {
+
+	case "complete":
 		updateSql = `
 			UPDATE repair_orders SET
 				status = ?, current_stage = ?, current_handler_id = ?,
@@ -641,10 +673,11 @@ func ProcessOrder(c *fiber.Ctx) error {
 		updateArgs = []interface{}{
 			newStatus, newStage, newHandlerID,
 			newRiskLevel, priority, newVersion,
-			req.Opinion, user.Name, string(user.Role),
+			opinion, user.Name, string(user.Role),
 			userID, orderID, orderID, order.Version,
 		}
-	} else if req.Action == "archive" {
+
+	case "archive":
 		updateSql = `
 			UPDATE repair_orders SET
 				status = ?, current_stage = ?, current_handler_id = ?,
@@ -659,23 +692,55 @@ func ProcessOrder(c *fiber.Ctx) error {
 		updateArgs = []interface{}{
 			newStatus, newStage, userID,
 			newRiskLevel, priority, newVersion,
-			req.Opinion, user.Name, string(user.Role),
+			opinion, user.Name, string(user.Role),
 			userID, orderID, orderID, order.Version,
 		}
-	} else {
+
+	case "mark_overdue":
 		updateSql = `
 			UPDATE repair_orders SET
-				status = ?, current_stage = ?, current_handler_id = ?,
-				risk_level = ?, priority = ?, version = ?,
+				status = ?, is_overdue = 1, risk_level = ?, priority = ?, version = ?,
 				last_opinion = ?, last_operator = ?, last_operator_role = ?,
 				evidence_count = (SELECT COUNT(*) FROM evidences WHERE order_id = ?),
 				updated_at = CURRENT_TIMESTAMP
 			WHERE id = ? AND version = ?
 		`
 		updateArgs = []interface{}{
+			newStatus, newRiskLevel, priority, newVersion,
+			opinion, user.Name, string(user.Role),
+			orderID, orderID, order.Version,
+		}
+
+	case "mark_conflict":
+		updateSql = `
+			UPDATE repair_orders SET
+				status = ?, conflict_note = ?, risk_level = ?, priority = ?, version = ?,
+				last_opinion = ?, last_operator = ?, last_operator_role = ?,
+				evidence_count = (SELECT COUNT(*) FROM evidences WHERE order_id = ?),
+				updated_at = CURRENT_TIMESTAMP
+			WHERE id = ? AND version = ?
+		`
+		updateArgs = []interface{}{
+			newStatus, req.ConflictNote, newRiskLevel, priority, newVersion,
+			opinion, user.Name, string(user.Role),
+			orderID, orderID, order.Version,
+		}
+
+	default:
+		updateSql = `
+			UPDATE repair_orders SET
+				status = ?, current_stage = ?, current_handler_id = ?,
+				risk_level = ?, priority = ?, version = ?,
+				last_opinion = ?, last_operator = ?, last_operator_role = ?,
+				evidence_count = (SELECT COUNT(*) FROM evidences WHERE order_id = ?),
+				conflict_note = NULL,
+				updated_at = CURRENT_TIMESTAMP
+			WHERE id = ? AND version = ?
+		`
+		updateArgs = []interface{}{
 			newStatus, newStage, newHandlerID,
 			newRiskLevel, priority, newVersion,
-			req.Opinion, user.Name, string(user.Role),
+			opinion, user.Name, string(user.Role),
 			orderID, orderID, order.Version,
 		}
 	}
@@ -688,10 +753,9 @@ func ProcessOrder(c *fiber.Ctx) error {
 
 	rowsAffected, _ := result.RowsAffected()
 	if rowsAffected == 0 {
-		tx.Rollback()
-		_ = logOperation(orderID, userID, user.Name, string(user.Role),
-			"并发冲突", string(order.Status), string(order.Status),
-			"更新时版本已变化", string(order.RiskLevel), order.Version, order.Version)
+		persistFailLog(orderID, userID, user.Name, string(user.Role),
+			"并发冲突", string(order.Status),
+			"更新时版本已变化", string(order.RiskLevel), order.Version)
 		return c.Status(409).JSON(fiber.Map{
 			"error":       "订单已被修改，请刷新后重试",
 			"old_status":  order.Status,
@@ -699,10 +763,9 @@ func ProcessOrder(c *fiber.Ctx) error {
 		})
 	}
 
-	err = logOperation(orderID, userID, user.Name, string(user.Role),
-		req.Action, string(order.Status), string(newStatus),
-		req.Opinion, string(newRiskLevel), order.Version, newVersion)
-	if err != nil {
+	if err := logInTx(tx, orderID, userID, user.Name, string(user.Role),
+		actionLabel, string(order.Status), string(newStatus),
+		opinion, string(newRiskLevel), order.Version, newVersion); err != nil {
 		tx.Rollback()
 		return c.Status(500).JSON(fiber.Map{"error": "记录操作失败"})
 	}
@@ -710,10 +773,12 @@ func ProcessOrder(c *fiber.Ctx) error {
 	tx.Commit()
 
 	return c.JSON(fiber.Map{
-		"message":     "操作成功",
-		"new_status":  newStatus,
-		"new_version": newVersion,
-		"new_stage":   newStage,
+		"message":      actionLabel + "成功",
+		"action_label": actionLabel,
+		"new_status":   newStatus,
+		"new_version":  newVersion,
+		"new_stage":    newStage,
+		"new_handler":  newHandlerID,
 	})
 }
 
@@ -725,26 +790,17 @@ func GetStatistics(c *fiber.Ctx) error {
 
 	var stats models.Statistics
 
+	database.DB.QueryRow(`SELECT COUNT(*) FROM repair_orders`).Scan(&stats.Total)
 	database.DB.QueryRow(`
-		SELECT COUNT(*) FROM repair_orders WHERE 1=1
-	`).Scan(&stats.Total)
-
-	database.DB.QueryRow(`
-		SELECT COUNT(*) FROM repair_orders WHERE status IN ('pending_registration', 'registered', 'returned_for_correction')
+		SELECT COUNT(*) FROM repair_orders
+		WHERE status IN ('pending_registration', 'registered', 'returned_for_correction')
 	`).Scan(&stats.Pending)
-
 	database.DB.QueryRow(`
-		SELECT COUNT(*) FROM repair_orders WHERE status IN ('dispatched', 'completed', 'missing_evidence', 'overdue', 'status_conflict')
+		SELECT COUNT(*) FROM repair_orders
+		WHERE status IN ('dispatched', 'missing_evidence', 'overdue', 'status_conflict')
 	`).Scan(&stats.InProgress)
-
-	database.DB.QueryRow(`
-		SELECT COUNT(*) FROM repair_orders WHERE status = 'completed'
-	`).Scan(&stats.Completed)
-
-	database.DB.QueryRow(`
-		SELECT COUNT(*) FROM repair_orders WHERE status = 'archived'
-	`).Scan(&stats.Archived)
-
+	database.DB.QueryRow(`SELECT COUNT(*) FROM repair_orders WHERE status = 'completed'`).Scan(&stats.Completed)
+	database.DB.QueryRow(`SELECT COUNT(*) FROM repair_orders WHERE status = 'archived'`).Scan(&stats.Archived)
 	database.DB.QueryRow(`SELECT COUNT(*) FROM repair_orders WHERE risk_level = 'high'`).Scan(&stats.HighRisk)
 	database.DB.QueryRow(`SELECT COUNT(*) FROM repair_orders WHERE risk_level = 'medium'`).Scan(&stats.MediumRisk)
 	database.DB.QueryRow(`SELECT COUNT(*) FROM repair_orders WHERE risk_level = 'low'`).Scan(&stats.LowRisk)

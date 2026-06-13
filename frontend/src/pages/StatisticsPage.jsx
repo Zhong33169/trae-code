@@ -3,7 +3,7 @@ import { useApi } from '../utils/api.js'
 import { useAuth } from '../context/AuthContext.jsx'
 import { roleNames } from '../utils/constants.js'
 
-export default function StatisticsPage() {
+export default function StatisticsPage(props) {
   const api = useApi()
   const { currentUser } = useAuth()
   const [stats, setStats] = createSignal(null)
@@ -19,7 +19,7 @@ export default function StatisticsPage() {
 
   createEffect(() => {
     loadStats()
-  }, [currentUser().id])
+  }, [currentUser().id, props.refreshKey])
 
   if (!stats()) {
     return <div class="empty-state">加载中...</div>

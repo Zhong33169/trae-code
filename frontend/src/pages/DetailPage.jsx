@@ -63,12 +63,13 @@ export default function DetailPage(props) {
 
     setProcessing(true)
     try {
+      const evList = evidences().filter((e) => e.type)
       const body = {
         action: showAction(),
         opinion: opinion(),
         version: data().order.version,
-        evidence_types: evidences().filter((e) => e.type).map((e) => e.type),
-        evidence_descs: evidences().filter((e) => e.description),
+        evidence_types: evList.map((e) => e.type),
+        evidence_descs: evList.map((e) => e.description || ''),
         master_name: masterName(),
         master_phone: masterPhone(),
         new_risk_level: newRiskLevel(),
@@ -76,12 +77,16 @@ export default function DetailPage(props) {
       }
 
       const result = await api.post(`/orders/${props.orderId}/process`, body)
-      alert(result.message)
+      alert(result.message || result.action_label + '成功')
       setShowAction('')
       setOpinion('')
       setEvidences([])
       setProcessing(false)
-      loadDetail()
+      if (props.onProcessed) {
+        props.onProcessed()
+      } else {
+        loadDetail()
+      }
     } catch (err) {
       setProcessing(false)
       const msg = err.message

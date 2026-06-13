@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
-	"math/rand"
 	"repair-platform/models"
 	"time"
 )
@@ -44,7 +43,14 @@ func SeedData() error {
 		userIDs[i] = int(id)
 	}
 
-	orderTemplates := []struct {
+	type opStep struct {
+		action      string
+		operatorIdx int
+		fromStatus  string
+		toStatus    string
+	}
+
+	type orderTemplate struct {
 		title       string
 		description string
 		risk        models.RiskLevel
@@ -56,70 +62,118 @@ func SeedData() error {
 		isOverdue   bool
 		lastOpinion string
 		conflict    string
-	}{
+		steps       []opStep
+	}
+
+	templates := []orderTemplate{
 		{
 			"小区电梯故障维修", "3号楼2单元电梯异响，运行卡顿，需紧急维修",
 			models.RiskHigh, models.StatusRegistered, models.StageDispatch,
 			2, 1, 0, false, "已完成登记，等待派单", "",
+			[]opStep{
+				{"创建订单", 0, string(models.StatusPendingRegistration), string(models.StatusRegistered)},
+			},
 		},
 		{
 			"办公室空调不制冷", "行政部3楼会议室空调不制冷，天气炎热影响办公",
 			models.RiskMedium, models.StatusDispatched, models.StageAcceptance,
 			2, 3, 1, false, "已派单给李师傅，等待完工", "",
+			[]opStep{
+				{"创建订单", 0, string(models.StatusPendingRegistration), string(models.StatusRegistered)},
+				{"师傅派单", 2, string(models.StatusRegistered), string(models.StatusDispatched)},
+			},
 		},
 		{
 			"公共区域照明维修", "地下车库B区有5盏灯不亮，存在安全隐患",
 			models.RiskLow, models.StatusCompleted, models.StageReview,
 			4, 7, 2, false, "已完工验收，等待复核归档", "",
+			[]opStep{
+				{"创建订单", 0, string(models.StatusPendingRegistration), string(models.StatusRegistered)},
+				{"师傅派单", 2, string(models.StatusRegistered), string(models.StatusDispatched)},
+				{"完工验收", 2, string(models.StatusDispatched), string(models.StatusCompleted)},
+			},
 		},
 		{
 			"消防喷淋漏水", "5楼走廊消防喷淋头漏水，已临时关闭阀门",
 			models.RiskHigh, models.StatusMissingEvidence, models.StageAcceptance,
 			2, 1, 1, false, "证据不足，缺少漏水现场照片和维修前检测报告", "",
+			[]opStep{
+				{"创建订单", 0, string(models.StatusPendingRegistration), string(models.StatusRegistered)},
+				{"师傅派单", 2, string(models.StatusRegistered), string(models.StatusDispatched)},
+				{"标记缺证据", 2, string(models.StatusDispatched), string(models.StatusMissingEvidence)},
+			},
 		},
 		{
 			"门禁系统升级", "园区东门禁系统需升级人脸识别模块",
 			models.RiskMedium, models.StatusOverdue, models.StageDispatch,
 			2, -2, 0, true, "已逾期2天，请尽快处理", "",
+			[]opStep{
+				{"创建订单", 0, string(models.StatusPendingRegistration), string(models.StatusRegistered)},
+				{"标记逾期", 2, string(models.StatusRegistered), string(models.StatusOverdue)},
+			},
 		},
 		{
 			"会议室投影仪故障", "1号会议室投影仪无法开机，影响下周重要会议",
 			models.RiskMedium, models.StatusReturnedForCorrection, models.StageRegistration,
 			0, 5, 0, false, "故障描述不够详细，请补充具体现象和已尝试的解决方法", "",
+			[]opStep{
+				{"创建订单", 0, string(models.StatusPendingRegistration), string(models.StatusRegistered)},
+				{"退回补正", 2, string(models.StatusRegistered), string(models.StatusReturnedForCorrection)},
+			},
 		},
 		{
 			"停车场道闸维修", "北门停车场道闸抬杆不顺畅，偶尔无法识别车牌",
 			models.RiskHigh, models.StatusConflict, models.StageAcceptance,
 			2, 2, 3, false, "状态冲突：系统显示已完工但现场实际未完成", "系统状态与实际情况不符",
+			[]opStep{
+				{"创建订单", 0, string(models.StatusPendingRegistration), string(models.StatusRegistered)},
+				{"师傅派单", 2, string(models.StatusRegistered), string(models.StatusDispatched)},
+				{"标记状态冲突", 2, string(models.StatusDispatched), string(models.StatusConflict)},
+			},
 		},
 		{
 			"卫生间水龙头漏水", "2楼男卫生间3号洗手池水龙头漏水",
 			models.RiskLow, models.StatusArchived, models.StageReview,
 			4, 10, 1, false, "已完成维修并归档", "",
+			[]opStep{
+				{"创建订单", 0, string(models.StatusPendingRegistration), string(models.StatusRegistered)},
+				{"师傅派单", 2, string(models.StatusRegistered), string(models.StatusDispatched)},
+				{"完工验收", 2, string(models.StatusDispatched), string(models.StatusCompleted)},
+				{"复核归档", 4, string(models.StatusCompleted), string(models.StatusArchived)},
+			},
 		},
 		{
 			"数据中心空调告警", "机房精密空调出现高压告警，需紧急排查",
 			models.RiskHigh, models.StatusDispatched, models.StageAcceptance,
 			2, 0, 2, true, "紧急工单，已派单", "",
+			[]opStep{
+				{"创建订单", 0, string(models.StatusPendingRegistration), string(models.StatusRegistered)},
+				{"师傅派单", 2, string(models.StatusRegistered), string(models.StatusDispatched)},
+			},
 		},
 		{
 			"员工餐厅设备维修", "餐厅2号蒸箱无法加热，影响员工用餐",
 			models.RiskMedium, models.StatusRegistered, models.StageDispatch,
 			2, 2, 0, false, "新登记，等待派单", "",
+			[]opStep{
+				{"创建订单", 0, string(models.StatusPendingRegistration), string(models.StatusRegistered)},
+			},
 		},
 	}
 
-	for i, tpl := range orderTemplates {
+	for i, tpl := range templates {
 		orderNo := fmt.Sprintf("WX%s%04d", time.Now().AddDate(0, 0, -i).Format("20060102"), i+1)
 		dueDate := time.Now().AddDate(0, 0, tpl.dueDays)
 		requiredEvidences := calculateRequiredEvidences(tpl.risk)
 		priority := calculatePriority(tpl.risk, tpl.isOverdue)
+		version := len(tpl.steps)
 
 		var masterName, masterPhone sql.NullString
 		var dispatchTime, completeTime, archiveTime sql.NullTime
 
 		if tpl.status == models.StatusDispatched || tpl.status == models.StatusCompleted ||
-			tpl.status == models.StatusArchived || tpl.status == models.StatusConflict {
+			tpl.status == models.StatusArchived || tpl.status == models.StatusConflict ||
+			tpl.status == models.StatusMissingEvidence {
 			masterName = sql.NullString{String: "李师傅", Valid: true}
 			masterPhone = sql.NullString{String: "13800138001", Valid: true}
 			dispatchTime = sql.NullTime{Time: time.Now().AddDate(0, 0, -1), Valid: true}
@@ -147,7 +201,7 @@ func SeedData() error {
 			tpl.risk, tpl.status, tpl.stage, userIDs[tpl.handlerIdx],
 			userIDs[0], userIDs[2], userIDs[4],
 			masterName, masterPhone, dispatchTime, completeTime, archiveTime,
-			dueDate, priority, 1+rand.Intn(3), tpl.evidences, requiredEvidences,
+			dueDate, priority, version, tpl.evidences, requiredEvidences,
 			tpl.isOverdue, tpl.lastOpinion, users[tpl.handlerIdx].name, string(users[tpl.handlerIdx].role),
 			tpl.conflict,
 			time.Now().AddDate(0, 0, -i-1), time.Now().AddDate(0, 0, -i),
@@ -170,57 +224,19 @@ func SeedData() error {
 			)
 		}
 
-		actions := []string{"创建订单"}
-		fromStatuses := []string{string(models.StatusPendingRegistration)}
-		toStatuses := []string{string(tpl.status)}
-
-		if tpl.status == models.StatusDispatched {
-			actions = append(actions, "派单")
-			fromStatuses = append(fromStatuses, string(models.StatusRegistered))
-			toStatuses = append(toStatuses, string(models.StatusDispatched))
-		}
-		if tpl.status == models.StatusCompleted {
-			actions = append(actions, "派单", "完工验收")
-			fromStatuses = append(fromStatuses, string(models.StatusRegistered), string(models.StatusDispatched))
-			toStatuses = append(toStatuses, string(models.StatusDispatched), string(models.StatusCompleted))
-		}
-		if tpl.status == models.StatusArchived {
-			actions = append(actions, "派单", "完工验收", "归档")
-			fromStatuses = append(fromStatuses, string(models.StatusRegistered), string(models.StatusDispatched), string(models.StatusCompleted))
-			toStatuses = append(toStatuses, string(models.StatusDispatched), string(models.StatusCompleted), string(models.StatusArchived))
-		}
-		if tpl.status == models.StatusReturnedForCorrection {
-			actions = append(actions, "退回补正")
-			fromStatuses = append(fromStatuses, string(models.StatusRegistered))
-			toStatuses = append(toStatuses, string(models.StatusReturnedForCorrection))
-		}
-		if tpl.status == models.StatusMissingEvidence {
-			actions = append(actions, "派单", "标记缺证据")
-			fromStatuses = append(fromStatuses, string(models.StatusRegistered), string(models.StatusDispatched))
-			toStatuses = append(toStatuses, string(models.StatusDispatched), string(models.StatusMissingEvidence))
-		}
-		if tpl.status == models.StatusOverdue {
-			actions = append(actions, "标记逾期")
-			fromStatuses = append(fromStatuses, string(models.StatusRegistered))
-			toStatuses = append(toStatuses, string(models.StatusOverdue))
-		}
-		if tpl.status == models.StatusConflict {
-			actions = append(actions, "派单", "标记状态冲突")
-			fromStatuses = append(fromStatuses, string(models.StatusRegistered), string(models.StatusDispatched))
-			toStatuses = append(toStatuses, string(models.StatusDispatched), string(models.StatusConflict))
-		}
-
-		for a, action := range actions {
-			opIdx := a % len(users)
+		for s, step := range tpl.steps {
+			vBefore := s
+			vAfter := s + 1
 			tx.Exec(`
 				INSERT INTO operation_logs (
 					order_id, operator_id, operator_name, operator_role,
 					action, from_status, to_status, opinion, risk_level,
 					version_before, version_after
 				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-			`, orderID, userIDs[opIdx], users[opIdx].name, string(users[opIdx].role),
-				action, fromStatuses[a], toStatuses[a],
-				tpl.lastOpinion, string(tpl.risk), a+1, a+1,
+			`, orderID, userIDs[step.operatorIdx], users[step.operatorIdx].name,
+				string(users[step.operatorIdx].role),
+				step.action, step.fromStatus, step.toStatus,
+				tpl.lastOpinion, string(tpl.risk), vBefore, vAfter,
 			)
 		}
 	}

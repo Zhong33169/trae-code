@@ -7,13 +7,18 @@ import StatisticsPage from './pages/StatisticsPage.jsx'
 import { roleNames } from './utils/constants.js'
 
 export default function App() {
-  const { currentUser, switchUser, mockUsers, loading } = useAuth()
+  const { currentUser, switchUser, mockUsers } = useAuth()
   const [currentPage, setCurrentPage] = createSignal('queue')
   const [selectedOrderId, setSelectedOrderId] = createSignal(null)
+  const [refreshTick, setRefreshTick] = createSignal(0)
 
   const navigateTo = (page, orderId = null) => {
     setCurrentPage(page)
     setSelectedOrderId(orderId)
+  }
+
+  const triggerRefresh = () => {
+    setRefreshTick(prev => prev + 1)
   }
 
   return (
@@ -62,20 +67,27 @@ export default function App() {
           <Show when={currentPage() === 'queue'}>
             <QueuePage
               onSelectOrder={(id) => navigateTo('detail', id)}
-              refreshKey={selectedOrderId()}
+              refreshKey={refreshTick()}
             />
           </Show>
           <Show when={currentPage() === 'detail'}>
             <DetailPage
               orderId={selectedOrderId()}
               onBack={() => navigateTo('queue')}
+              onProcessed={() => {
+                triggerRefresh()
+                navigateTo('queue')
+              }}
             />
           </Show>
           <Show when={currentPage() === 'create'}>
-            <CreatePage onCreated={() => navigateTo('queue')} />
+            <CreatePage onCreated={() => {
+              triggerRefresh()
+              navigateTo('queue')
+            }} />
           </Show>
           <Show when={currentPage() === 'statistics'}>
-            <StatisticsPage />
+            <StatisticsPage refreshKey={refreshTick()} />
           </Show>
         </main>
       </div>
