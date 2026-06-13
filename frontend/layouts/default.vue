@@ -47,7 +47,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import { ROLE_LABELS } from '~/types'
 
 const auth = useAuth()

@@ -1,4 +1,4 @@
-import { reactive, watch } from 'vue'
+import { reactive, computed } from 'vue'
 import type { User } from '~/types'
 
 interface AuthState {
