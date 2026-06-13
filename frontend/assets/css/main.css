@@ -793,3 +793,155 @@ tr:hover td {
   padding: 8px;
   border-radius: 6px;
 }
+
+.batch-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  margin-bottom: 16px;
+}
+
+.batch-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 14px;
+  color: #1e40af;
+}
+
+.text-primary {
+  color: #2563eb;
+}
+
+.row-selected td {
+  background: #eff6ff;
+}
+
+.modal-lg {
+  max-width: 900px;
+}
+
+.batch-result-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.batch-result-table th,
+.batch-result-table td {
+  padding: 10px 12px;
+  text-align: left;
+  border-bottom: 1px solid #e5e7eb;
+  font-size: 13px;
+}
+
+.batch-result-table th {
+  background: #f9fafb;
+  font-weight: 600;
+  color: #374151;
+}
+
+.batch-result-table .row-success td {
+  background: #f0fdf4;
+}
+
+.batch-result-table .row-fail td {
+  background: #fef2f2;
+}
+
+.text-success {
+  color: #059669;
+}
+
+.text-danger {
+  color: #dc2626;
+}
+
+.text-muted {
+  color: #9ca3af;
+}
+
+.mt-3 {
+  margin-top: 12px;
+}
+
+.ml-2 {
+  margin-left: 8px;
+}
+
+.batch-supplement-order {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  margin-bottom: 12px;
+  overflow: hidden;
+}
+
+.batch-supplement-order-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: #f9fafb;
+  border-bottom: 1px solid #e5e7eb;
+  font-size: 14px;
+}
+
+.batch-supplement-items {
+  padding: 8px 14px;
+}
+
+.form-textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 14px;
+  font-family: inherit;
+  resize: vertical;
+  min-height: 80px;
+}
+
+.form-textarea:focus {
+  outline: none;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+.latest-action-card {
+  background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+  border: 1px solid #bae6fd;
+  margin-bottom: 16px;
+}
+
+.latest-action-info {
+  display: flex;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.latest-action-detail {
+  display: flex;
+  align-items: center;
+  margin-bottom: 6px;
+  font-size: 14px;
+}
+
+.latest-action-remark {
+  font-size: 13px;
+  color: #374151;
+  margin-top: 4px;
+}
+
+.latest-action-failure {
+  font-size: 13px;
+  color: #dc2626;
+  margin-top: 6px;
+  padding: 8px 12px;
+  background: #fef2f2;
+  border-radius: 6px;
+  border-left: 3px solid #dc2626;
+}

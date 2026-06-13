@@ -22,6 +22,47 @@
       <strong>超时提醒：</strong>该入会单补正材料已超时，请尽快联系会员处理或作其他处理。
     </div>
 
+    <div v-if="latestAuditLog" class="card latest-action-card">
+      <div class="flex-between" style="align-items: flex-start;">
+        <div>
+          <div class="card-title" style="margin-bottom: 8px;">🕐 最近处理结果</div>
+          <div class="latest-action-info">
+            <span class="badge" :class="latestLogBadgeClass">{{ actionLabel(latestAuditLog.action) }}</span>
+            <span class="text-muted text-sm" style="margin-left: 12px;">
+              审计编号：<span class="font-bold" style="color: #374151;">#{{ latestAuditLog.id }}</span>
+            </span>
+            <span class="text-muted text-sm" style="margin-left: 12px;">
+              {{ formatDate(latestAuditLog.created_at) }}
+            </span>
+          </div>
+          <div class="latest-action-detail">
+            <span class="font-bold">{{ latestAuditLog.operator_name || '未知操作人' }}</span>
+            <span v-if="latestAuditLog.operator_role" class="role-tag" :class="roleTagClass(latestAuditLog.operator_role)">
+              {{ ROLE_LABELS[latestAuditLog.operator_role] || latestAuditLog.operator_role }}
+            </span>
+            <span v-if="latestAuditLog.from_status && latestAuditLog.to_status" class="text-muted text-sm" style="margin-left: 8px;">
+              · {{ STATUS_LABELS[latestAuditLog.from_status] }} →
+              <span class="font-bold">{{ STATUS_LABELS[latestAuditLog.to_status] }}</span>
+            </span>
+          </div>
+          <div v-if="latestAuditLog.remark" class="latest-action-remark">
+            {{ latestAuditLog.remark }}
+          </div>
+          <div v-if="latestAuditLog.failure_reason" class="latest-action-failure">
+            <strong>失败/退回原因：</strong>{{ latestAuditLog.failure_reason }}
+          </div>
+        </div>
+        <div style="text-align: right;">
+          <div class="text-muted text-sm">合同确认</div>
+          <span v-if="order.contract_confirmed" class="badge badge-green">已确认</span>
+          <span v-else class="badge badge-gray">未确认</span>
+          <div style="margin-top: 8px;" class="text-muted text-sm">卡权益</div>
+          <span v-if="order.card_activated" class="badge badge-green">已启用</span>
+          <span v-else class="badge badge-gray">未启用</span>
+        </div>
+      </div>
+    </div>
+
     <div class="grid-4">
       <div class="card">
         <div class="card-title">📋 基本信息</div>
@@ -507,6 +548,26 @@ const sortedAuditLogs = computed(() => {
   return [...order.value.audit_logs].sort((a, b) =>
     new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
   )
+})
+
+const latestAuditLog = computed(() => {
+  if (!sortedAuditLogs.value.length) return null
+  return sortedAuditLogs.value[0]
+})
+
+const latestLogBadgeClass = computed(() => {
+  if (!latestAuditLog.value) return 'badge-gray'
+  const action = latestAuditLog.value.action
+  if (['approve', 'review', 'archive', 'activate_card', 'confirm_contract'].includes(action)) {
+    return 'badge-green'
+  }
+  if (['request_supplement', 'reject', 'mark_overdue'].includes(action)) {
+    return 'badge-red'
+  }
+  if (['submit', 'resubmit', 'upload_attachment', 'create'].includes(action)) {
+    return 'badge-blue'
+  }
+  return 'badge-gray'
 })
 
 const canSubmit = computed(() => {

@@ -354,6 +354,150 @@ def init_db():
         db.add(AuditLog(order_id=approved_order.id, operator_id=supervisor.id, action=AuditAction.APPROVE, from_status=OrderStatus.PENDING_REVIEW, to_status=OrderStatus.APPROVED_REVIEW, remark=f"审核主管【{supervisor.name}】办理通过，材料齐全有效", created_at=now - timedelta(days=2)))
         db.add(AuditLog(order_id=approved_order.id, operator_id=supervisor.id, action=AuditAction.CONFIRM_CONTRACT, remark=f"审核主管【{supervisor.name}】确认合同已签署", created_at=now - timedelta(days=2)))
 
+        # ============== 7. 待审核 - 郑小强（批量审核演示用） ==============
+        pending2_order = MembershipOrder(
+            order_no="HY20250601007",
+            member_name="郑小强",
+            member_phone="13800000007",
+            member_id_no="110101199307071234",
+            membership_type="季卡",
+            membership_duration=90,
+            amount=980,
+            contract_confirmed=False,
+            card_activated=False,
+            status=OrderStatus.PENDING_REVIEW,
+            is_overdue=False,
+            created_by=registrar.id,
+            created_at=now - timedelta(hours=4),
+            updated_at=now - timedelta(hours=4),
+        )
+        db.add(pending2_order)
+        db.flush()
+
+        p2r1 = RequiredAttachment(order_id=pending2_order.id, attachment_type=AttachmentType.ID_CARD, attachment_name="身份证复印件", is_provided=True)
+        p2r2 = RequiredAttachment(order_id=pending2_order.id, attachment_type=AttachmentType.PHOTO, attachment_name="一寸免冠照片", is_provided=True)
+        p2r3 = RequiredAttachment(order_id=pending2_order.id, attachment_type=AttachmentType.HEALTH_CERT, attachment_name="健康证明", is_provided=True)
+        p2r4 = RequiredAttachment(order_id=pending2_order.id, attachment_type=AttachmentType.CONTRACT, attachment_name="入会合同", is_provided=True)
+        db.add_all([p2r1, p2r2, p2r3, p2r4])
+        db.flush()
+
+        db.add(Attachment(order_id=pending2_order.id, required_attachment_id=p2r1.id, file_name="郑小强_身份证.pdf", file_type=AttachmentType.ID_CARD, file_size=102400, stored_name="id_pending_007.pdf", uploaded_by=registrar.id, uploaded_at=now - timedelta(hours=4)))
+        db.add(Attachment(order_id=pending2_order.id, required_attachment_id=p2r2.id, file_name="郑小强_照片.jpg", file_type=AttachmentType.PHOTO, file_size=204800, stored_name="photo_pending_007.jpg", uploaded_by=registrar.id, uploaded_at=now - timedelta(hours=4)))
+        db.add(Attachment(order_id=pending2_order.id, required_attachment_id=p2r3.id, file_name="郑小强_健康证明.pdf", file_type=AttachmentType.HEALTH_CERT, file_size=153600, stored_name="health_pending_007.pdf", uploaded_by=registrar.id, uploaded_at=now - timedelta(hours=4)))
+        db.add(Attachment(order_id=pending2_order.id, required_attachment_id=p2r4.id, file_name="郑小强_入会合同.pdf", file_type=AttachmentType.CONTRACT, file_size=307200, stored_name="contract_pending_007.pdf", uploaded_by=registrar.id, uploaded_at=now - timedelta(hours=4)))
+
+        db.add(AuditLog(order_id=pending2_order.id, operator_id=registrar.id, action=AuditAction.CREATE, to_status=OrderStatus.DRAFT, remark=f"登记员【{registrar.name}】创建会员入会单", created_at=now - timedelta(hours=4)))
+        db.add(AuditLog(order_id=pending2_order.id, operator_id=registrar.id, action=AuditAction.UPLOAD_ATTACHMENT, remark=f"登记员【{registrar.name}】上传全部4份附件材料", created_at=now - timedelta(hours=4)))
+        db.add(AuditLog(order_id=pending2_order.id, operator_id=registrar.id, action=AuditAction.SUBMIT, from_status=OrderStatus.DRAFT, to_status=OrderStatus.PENDING_REVIEW, remark=f"登记员【{registrar.name}】提交审核，等待审核主管办理", created_at=now - timedelta(hours=4)))
+
+        # ============== 8. 待审核 - 王美丽（批量退回补正演示用，材料不全） ==============
+        pending3_order = MembershipOrder(
+            order_no="HY20250601008",
+            member_name="王美丽",
+            member_phone="13800000008",
+            member_id_no="110101199408081234",
+            membership_type="月卡",
+            membership_duration=30,
+            amount=380,
+            contract_confirmed=False,
+            card_activated=False,
+            status=OrderStatus.PENDING_REVIEW,
+            is_overdue=False,
+            created_by=registrar.id,
+            created_at=now - timedelta(hours=2),
+            updated_at=now - timedelta(hours=2),
+        )
+        db.add(pending3_order)
+        db.flush()
+
+        p3r1 = RequiredAttachment(order_id=pending3_order.id, attachment_type=AttachmentType.ID_CARD, attachment_name="身份证复印件", is_provided=True)
+        p3r2 = RequiredAttachment(order_id=pending3_order.id, attachment_type=AttachmentType.PHOTO, attachment_name="一寸免冠照片", is_provided=False, missing_reason="暂未提供照片")
+        p3r3 = RequiredAttachment(order_id=pending3_order.id, attachment_type=AttachmentType.HEALTH_CERT, attachment_name="健康证明", is_provided=False, missing_reason="表示下周去体检")
+        p3r4 = RequiredAttachment(order_id=pending3_order.id, attachment_type=AttachmentType.CONTRACT, attachment_name="入会合同", is_provided=True)
+        db.add_all([p3r1, p3r2, p3r3, p3r4])
+        db.flush()
+
+        db.add(Attachment(order_id=pending3_order.id, required_attachment_id=p3r1.id, file_name="王美丽_身份证.pdf", file_type=AttachmentType.ID_CARD, file_size=102400, stored_name="id_pending_008.pdf", uploaded_by=registrar.id, uploaded_at=now - timedelta(hours=2)))
+        db.add(Attachment(order_id=pending3_order.id, required_attachment_id=p3r4.id, file_name="王美丽_入会合同.pdf", file_type=AttachmentType.CONTRACT, file_size=307200, stored_name="contract_pending_008.pdf", uploaded_by=registrar.id, uploaded_at=now - timedelta(hours=2)))
+
+        db.add(AuditLog(order_id=pending3_order.id, operator_id=registrar.id, action=AuditAction.CREATE, to_status=OrderStatus.DRAFT, remark=f"登记员【{registrar.name}】创建会员入会单", created_at=now - timedelta(hours=2)))
+        db.add(AuditLog(order_id=pending3_order.id, operator_id=registrar.id, action=AuditAction.UPLOAD_ATTACHMENT, remark=f"登记员【{registrar.name}】上传身份证和合同（缺照片、健康证明），申请后补", created_at=now - timedelta(hours=2)))
+        db.add(AuditLog(order_id=pending3_order.id, operator_id=registrar.id, action=AuditAction.SUBMIT, from_status=OrderStatus.DRAFT, to_status=OrderStatus.PENDING_REVIEW, remark=f"登记员【{registrar.name}】提交审核，申请容缺办理", created_at=now - timedelta(hours=2)))
+
+        # ============== 9. 草稿 - 陈大勇（批量提交演示用） ==============
+        draft2_order = MembershipOrder(
+            order_no="HY20250601009",
+            member_name="陈大勇",
+            member_phone="13800000009",
+            member_id_no="110101199509091234",
+            membership_type="年卡",
+            membership_duration=365,
+            amount=2880,
+            contract_confirmed=False,
+            card_activated=False,
+            status=OrderStatus.DRAFT,
+            is_overdue=False,
+            created_by=registrar.id,
+            created_at=now - timedelta(hours=1),
+            updated_at=now - timedelta(hours=1),
+        )
+        db.add(draft2_order)
+        db.flush()
+
+        d2r1 = RequiredAttachment(order_id=draft2_order.id, attachment_type=AttachmentType.ID_CARD, attachment_name="身份证复印件", is_provided=True)
+        d2r2 = RequiredAttachment(order_id=draft2_order.id, attachment_type=AttachmentType.PHOTO, attachment_name="一寸免冠照片", is_provided=True)
+        d2r3 = RequiredAttachment(order_id=draft2_order.id, attachment_type=AttachmentType.HEALTH_CERT, attachment_name="健康证明", is_provided=True)
+        d2r4 = RequiredAttachment(order_id=draft2_order.id, attachment_type=AttachmentType.CONTRACT, attachment_name="入会合同", is_provided=True)
+        db.add_all([d2r1, d2r2, d2r3, d2r4])
+        db.flush()
+
+        db.add(Attachment(order_id=draft2_order.id, required_attachment_id=d2r1.id, file_name="陈大勇_身份证.pdf", file_type=AttachmentType.ID_CARD, file_size=102400, stored_name="id_draft_009.pdf", uploaded_by=registrar.id, uploaded_at=now - timedelta(hours=1)))
+        db.add(Attachment(order_id=draft2_order.id, required_attachment_id=d2r2.id, file_name="陈大勇_照片.jpg", file_type=AttachmentType.PHOTO, file_size=204800, stored_name="photo_draft_009.jpg", uploaded_by=registrar.id, uploaded_at=now - timedelta(hours=1)))
+        db.add(Attachment(order_id=draft2_order.id, required_attachment_id=d2r3.id, file_name="陈大勇_健康证明.pdf", file_type=AttachmentType.HEALTH_CERT, file_size=153600, stored_name="health_draft_009.pdf", uploaded_by=registrar.id, uploaded_at=now - timedelta(hours=1)))
+        db.add(Attachment(order_id=draft2_order.id, required_attachment_id=d2r4.id, file_name="陈大勇_入会合同.pdf", file_type=AttachmentType.CONTRACT, file_size=307200, stored_name="contract_draft_009.pdf", uploaded_by=registrar.id, uploaded_at=now - timedelta(hours=1)))
+
+        db.add(AuditLog(order_id=draft2_order.id, operator_id=registrar.id, action=AuditAction.CREATE, to_status=OrderStatus.DRAFT, remark=f"登记员【{registrar.name}】创建会员入会单", created_at=now - timedelta(hours=1)))
+        db.add(AuditLog(order_id=draft2_order.id, operator_id=registrar.id, action=AuditAction.UPLOAD_ATTACHMENT, remark=f"登记员【{registrar.name}】上传全部4份附件材料", created_at=now - timedelta(hours=1)))
+
+        # ============== 10. 复核通过待归档 - 林小燕（批量归档演示用） ==============
+        reviewed2_order = MembershipOrder(
+            order_no="HY20250601010",
+            member_name="林小燕",
+            member_phone="13800000010",
+            member_id_no="110101199610101234",
+            membership_type="半年卡",
+            membership_duration=180,
+            amount=1680,
+            contract_confirmed=True,
+            card_activated=False,
+            status=OrderStatus.REVIEWED,
+            is_overdue=False,
+            created_by=registrar.id,
+            created_at=now - timedelta(days=3),
+            updated_at=now - timedelta(days=1),
+        )
+        db.add(reviewed2_order)
+        db.flush()
+
+        rv1 = RequiredAttachment(order_id=reviewed2_order.id, attachment_type=AttachmentType.ID_CARD, attachment_name="身份证复印件", is_provided=True)
+        rv2 = RequiredAttachment(order_id=reviewed2_order.id, attachment_type=AttachmentType.PHOTO, attachment_name="一寸免冠照片", is_provided=True)
+        rv3 = RequiredAttachment(order_id=reviewed2_order.id, attachment_type=AttachmentType.HEALTH_CERT, attachment_name="健康证明", is_provided=True)
+        rv4 = RequiredAttachment(order_id=reviewed2_order.id, attachment_type=AttachmentType.CONTRACT, attachment_name="入会合同", is_provided=True)
+        db.add_all([rv1, rv2, rv3, rv4])
+        db.flush()
+
+        db.add(Attachment(order_id=reviewed2_order.id, required_attachment_id=rv1.id, file_name="林小燕_身份证.pdf", file_type=AttachmentType.ID_CARD, file_size=102400, stored_name="id_review_010.pdf", uploaded_by=registrar.id, uploaded_at=now - timedelta(days=3)))
+        db.add(Attachment(order_id=reviewed2_order.id, required_attachment_id=rv2.id, file_name="林小燕_照片.jpg", file_type=AttachmentType.PHOTO, file_size=204800, stored_name="photo_review_010.jpg", uploaded_by=registrar.id, uploaded_at=now - timedelta(days=3)))
+        db.add(Attachment(order_id=reviewed2_order.id, required_attachment_id=rv3.id, file_name="林小燕_健康证明.pdf", file_type=AttachmentType.HEALTH_CERT, file_size=153600, stored_name="health_review_010.pdf", uploaded_by=registrar.id, uploaded_at=now - timedelta(days=3)))
+        db.add(Attachment(order_id=reviewed2_order.id, required_attachment_id=rv4.id, file_name="林小燕_入会合同.pdf", file_type=AttachmentType.CONTRACT, file_size=307200, stored_name="contract_review_010.pdf", uploaded_by=registrar.id, uploaded_at=now - timedelta(days=3)))
+
+        db.add(AuditLog(order_id=reviewed2_order.id, operator_id=registrar.id, action=AuditAction.CREATE, to_status=OrderStatus.DRAFT, remark=f"登记员【{registrar.name}】创建会员入会单", created_at=now - timedelta(days=3)))
+        db.add(AuditLog(order_id=reviewed2_order.id, operator_id=registrar.id, action=AuditAction.UPLOAD_ATTACHMENT, remark=f"登记员【{registrar.name}】上传全部4份附件材料", created_at=now - timedelta(days=3)))
+        db.add(AuditLog(order_id=reviewed2_order.id, operator_id=registrar.id, action=AuditAction.SUBMIT, from_status=OrderStatus.DRAFT, to_status=OrderStatus.PENDING_REVIEW, remark=f"登记员【{registrar.name}】提交审核", created_at=now - timedelta(days=2)))
+        db.add(AuditLog(order_id=reviewed2_order.id, operator_id=supervisor.id, action=AuditAction.APPROVE, from_status=OrderStatus.PENDING_REVIEW, to_status=OrderStatus.APPROVED_REVIEW, remark=f"审核主管【{supervisor.name}】办理通过，材料齐全有效", created_at=now - timedelta(days=2)))
+        db.add(AuditLog(order_id=reviewed2_order.id, operator_id=supervisor.id, action=AuditAction.CONFIRM_CONTRACT, remark=f"审核主管【{supervisor.name}】确认合同已签署", created_at=now - timedelta(days=2)))
+        db.add(AuditLog(order_id=reviewed2_order.id, operator_id=reviewer.id, action=AuditAction.REVIEW, from_status=OrderStatus.APPROVED_REVIEW, to_status=OrderStatus.REVIEWED, remark=f"复核负责人【{reviewer.name}】复核通过，信息核实无误", created_at=now - timedelta(days=1)))
+
         db.commit()
         print("=" * 60)
         print("数据库初始化完成！种子数据已加载。")
@@ -364,7 +508,7 @@ def init_db():
         print(f"  审核主管（supervisor）  : {supervisor.name}")
         print(f"  复核负责人（reviewer）  : {reviewer.name}")
         print("")
-        print("【Seed 样例入会单（共6条）】")
+        print("【Seed 样例入会单（共10条）】")
         print("")
         print("  1. HY20250601001  赵小明  【✅ 正常单】已归档")
         print("     → 完整流程：创建→提交→审核通过→复核→归档")
@@ -392,12 +536,30 @@ def init_db():
         print("     → 审核主管已通过并确认合同")
         print("     → 复核负责人可复核通过并归档（自动启用卡权益）")
         print("")
+        print("  7. HY20250601007  郑小强  【📋 待审核】批量审核演示（材料齐全）")
+        print("     → 4/4 附件齐全，可与周小龙一起批量审核通过")
+        print("")
+        print("  8. HY20250601008  王美丽  【📋 待审核】批量退回补正演示（材料不全）")
+        print("     → 2/4 附件（缺照片、健康证明），申请容缺办理")
+        print("     → 可与其他待审核单一起批量退回补正")
+        print("")
+        print("  9. HY20250601009  陈大勇  【📝 草稿】批量提交演示")
+        print("     → 4/4 附件齐全，处于草稿状态")
+        print("     → 登记员可批量提交草稿单进入审核")
+        print("")
+        print("  10. HY20250601010  林小燕  【📦 待归档】批量归档演示")
+        print("     → 已复核通过，等待归档")
+        print("     → 复核负责人可批量归档并自动启用卡权益")
+        print("")
         print("【验收路径建议】")
         print("  ● 正常流程：周小龙 → 审核主管通过 → 复核负责人复核 → 归档")
         print("  ● 补正流程：钱小红 → 登记员补传2个附件 → 重新提交 → 审核主管再处理")
         print("  ● 驳回流程：周小龙 → 审核主管按附件填原因退回 → 登记员重提 → 再退回 → 最终驳回")
         print("  ● 追溯查看：李小华 → 看每附件 2 轮驳回历史 → 看审计日志时间线")
         print("  ● 权限校验：用错误角色操作（如登记员点审核），后端会拒绝并返回原因")
+        print("  ● 批量审核：审核主管 → 勾选周小龙+郑小强+王美丽 → 批量通过 → 前2条成功+王美丽失败（材料不全）")
+        print("  ● 批量退回补正：审核主管 → 勾选周小龙+王美丽 → 批量退回 → 逐单指定附件和原因")
+        print("  ● 批量归档：复核负责人 → 勾选吴小芳+林小燕 → 批量归档 → 自动启用卡权益")
 
     finally:
         db.close()

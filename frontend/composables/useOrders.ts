@@ -1,5 +1,6 @@
 import type {
-  MembershipOrder, OrderListResponse, OrderStatus
+  MembershipOrder, OrderListResponse, OrderStatus,
+  BatchResponse, BatchSupplementItem
 } from '~/types'
 
 export function useOrders() {
@@ -102,6 +103,48 @@ export function useOrders() {
     })
   }
 
+  async function batchSubmit(orderIds: number[], remark?: string): Promise<BatchResponse> {
+    return await $apiFetch<BatchResponse>('/orders/batch/submit', {
+      method: 'POST',
+      body: { order_ids: orderIds, remark }
+    })
+  }
+
+  async function batchApprove(orderIds: number[], remark?: string): Promise<BatchResponse> {
+    return await $apiFetch<BatchResponse>('/orders/batch/approve', {
+      method: 'POST',
+      body: { order_ids: orderIds, remark }
+    })
+  }
+
+  async function batchRequestSupplement(orders: BatchSupplementItem[]): Promise<BatchResponse> {
+    return await $apiFetch<BatchResponse>('/orders/batch/request-supplement', {
+      method: 'POST',
+      body: { orders }
+    })
+  }
+
+  async function batchReject(orderIds: number[], rejectReason: string, remark?: string): Promise<BatchResponse> {
+    return await $apiFetch<BatchResponse>('/orders/batch/reject', {
+      method: 'POST',
+      body: { order_ids: orderIds, reject_reason: rejectReason, remark }
+    })
+  }
+
+  async function batchReview(orderIds: number[], remark?: string): Promise<BatchResponse> {
+    return await $apiFetch<BatchResponse>('/orders/batch/review', {
+      method: 'POST',
+      body: { order_ids: orderIds, remark }
+    })
+  }
+
+  async function batchArchive(orderIds: number[], remark?: string): Promise<BatchResponse> {
+    return await $apiFetch<BatchResponse>('/orders/batch/archive', {
+      method: 'POST',
+      body: { order_ids: orderIds, remark }
+    })
+  }
+
   return {
     fetchList,
     fetchDetail,
@@ -113,6 +156,12 @@ export function useOrders() {
     reviewOrder,
     archiveOrder,
     uploadAttachment,
-    deleteAttachment
+    deleteAttachment,
+    batchSubmit,
+    batchApprove,
+    batchRequestSupplement,
+    batchReject,
+    batchReview,
+    batchArchive
   }
 }

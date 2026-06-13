@@ -17,6 +17,7 @@ from app.schemas import (
     MembershipOrderSchema, MembershipOrderCreate,
     RequiredAttachmentSchema, AttachmentSchema, AuditLogSchema,
     ReviewAction, BatchRequest, BatchRejectRequest, BatchResponse, BatchItemResult,
+    BatchSupplementRequest,
 )
 
 
@@ -462,11 +463,11 @@ def _make_batch_result(
             order_no=order.order_no,
             member_name=order.member_name,
             success=success,
-            status=order.status.value if success else None,
+            status=order.status.value,
             audit_log_id=audit_log_id,
             reject_reason=reject_reason,
-            contract_confirmed=order.contract_confirmed if success else None,
-            card_activated=order.card_activated if success else None,
+            contract_confirmed=order.contract_confirmed,
+            card_activated=order.card_activated,
             attachment_details=[
                 {
                     "required_attachment_id": req.id,
@@ -474,8 +475,8 @@ def _make_batch_result(
                     "is_provided": req.is_provided,
                     "reject_reason": req.reject_reason,
                 }
-                for req in (order.required_attachments if order else [])
-            ] if success else None,
+                for req in order.required_attachments
+            ],
         )
     return BatchItemResult(
         order_id=0,
@@ -810,10 +811,109 @@ async def batch_archive_orders(
     )
 
 
+@post("/orders/batch/request-supplement", guards=[require_supervisor])
+async def batch_request_supplement(
+    data: BatchSupplementRequest,
+    request: Request,
+) -> BatchResponse:
+    db: Session = next(get_db())
+    operator = get_current_user(request)
+    results = []
+    for batch_item in data.orders:
+        try:
+            order = db.query(MembershipOrder).filter(
+                MembershipOrder.id == batch_item.order_id
+            ).first()
+            if not order:
+                results.append(BatchItemResult(
+                    order_id=batch_item.order_id,
+                    success=False,
+                    reject_reason="入会单不存在"
+                ))
+                continue
+
+            allowed = {OrderStatus.PENDING_REVIEW, OrderStatus.RESUBMITTED}
+            if order.status not in allowed:
+                results.append(_make_batch_result(
+                    order, False,
+                    reject_reason=f"当前状态【{order.status.value}】下不能退回补正，仅待审核或补正后重提可退回"
+                ))
+                continue
+
+            if not batch_item.items or len(batch_item.items) == 0:
+                results.append(_make_batch_result(
+                    order, False, reject_reason="请至少选择一项需补正的附件"
+                ))
+                continue
+
+            supplement_details = []
+            for item in batch_item.items:
+                req = db.query(RequiredAttachment).filter(
+                    RequiredAttachment.id == item.required_attachment_id,
+                    RequiredAttachment.order_id == order.id,
+                ).first()
+                if not req:
+                    continue
+                req.is_provided = False
+                old_reason = req.reject_reason or ""
+                new_reason = item.reject_reason or "材料不合格，需补正"
+                timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M")
+                if old_reason:
+                    req.reject_reason = f"[{timestamp} 审核主管{operator.name}] {new_reason}\n{old_reason}"
+                else:
+                    req.reject_reason = f"[{timestamp} 审核主管{operator.name}] {new_reason}"
+                if not req.missing_reason:
+                    req.missing_reason = new_reason
+                supplement_details.append(f"{req.attachment_name}：{new_reason}")
+
+            missing_list = db.query(RequiredAttachment).filter(
+                RequiredAttachment.order_id == order.id,
+                RequiredAttachment.is_provided == False,
+            ).all()
+            missing_names = "、".join([m.attachment_name for m in missing_list]) if missing_list else ""
+
+            from_status = order.status
+            order.status = OrderStatus.MATERIALS_MISSING
+            order.reject_reason = (
+                f"审核主管【{operator.name}】退回补正（共{len(batch_item.items)}项）：{missing_names}。"
+                f"请补正后重新提交。"
+            )
+            if batch_item.remark:
+                order.reject_reason += f" 备注：{batch_item.remark}"
+            order.updated_at = datetime.utcnow()
+
+            failure_detail = "；".join(supplement_details) if supplement_details else "附件材料不合格"
+            log = AuditLog(
+                order_id=order.id, operator_id=operator.id, action=AuditAction.REQUEST_SUPPLEMENT,
+                from_status=from_status, to_status=order.status,
+                remark=f"审核主管【{operator.name}】退回补正，需补充：{missing_names}" +
+                       (f"，备注：{batch_item.remark}" if batch_item.remark else ""),
+                failure_reason=f"共 {len(batch_item.items)} 项附件需要补正：{failure_detail}",
+            )
+            db.add(log)
+            db.flush()
+            db.commit()
+            db.refresh(order)
+            db.refresh(log)
+            results.append(_make_batch_result(order, True, audit_log_id=log.id))
+        except Exception as e:
+            db.rollback()
+            order = db.query(MembershipOrder).filter(
+                MembershipOrder.id == batch_item.order_id
+            ).first()
+            results.append(_make_batch_result(order, False, reject_reason=str(e)))
+
+    success_count = sum(1 for r in results if r.success)
+    return BatchResponse(
+        total=len(results), success_count=success_count,
+        fail_count=len(results) - success_count, results=results,
+    )
+
+
 orders_router = Router(path="/api", route_handlers=[
     list_orders, get_order, create_order, submit_order,
     approve_order, request_supplement, reject_order,
     review_order, archive_order,
     batch_submit_orders, batch_approve_orders, batch_reject_orders,
-    batch_review_orders, batch_archive_orders,
+    batch_review_orders, batch_archive_orders, batch_request_supplement,
 ])

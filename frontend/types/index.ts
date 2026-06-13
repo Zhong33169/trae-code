@@ -119,3 +119,37 @@ export const STATUS_COLORS: Record<OrderStatus, string> = {
   reviewed: '#10b981',
   archived: '#6b7280'
 }
+
+export interface BatchItemResult {
+  order_id: number
+  order_no: string | null
+  member_name: string | null
+  success: boolean
+  status: string | null
+  audit_log_id: number | null
+  reject_reason: string | null
+  contract_confirmed: boolean | null
+  card_activated: boolean | null
+  attachment_details: Array<{
+    required_attachment_id: number
+    attachment_name: string
+    is_provided: boolean
+    reject_reason: string | null
+  }> | null
+}
+
+export interface BatchResponse {
+  total: number
+  success_count: number
+  fail_count: number
+  results: BatchItemResult[]
+}
+
+export interface BatchSupplementItem {
+  order_id: number
+  items: Array<{
+    required_attachment_id: number
+    reject_reason?: string
+  }>
+  remark?: string
+}

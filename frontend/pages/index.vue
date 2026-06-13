@@ -63,10 +63,63 @@
         </div>
       </div>
 
+      <div v-if="selectedIds.length > 0" class="batch-bar">
+        <div class="batch-info">
+          已选择 <span class="font-bold text-primary">{{ selectedIds.length }}</span> 条
+          <button class="btn btn-sm" @click="clearSelection">取消选择</button>
+        </div>
+        <div class="flex gap-2" style="flex-wrap: wrap;">
+          <button
+            v-if="auth.isRegistrar.value && canBatchSubmit"
+            class="btn btn-sm btn-primary"
+            :disabled="batchLoading"
+            @click="handleBatchSubmit"
+          >📤 批量提交</button>
+          <button
+            v-if="auth.isSupervisor.value && canBatchApprove"
+            class="btn btn-sm btn-success"
+            :disabled="batchLoading"
+            @click="handleBatchApprove"
+          >✅ 批量审核通过</button>
+          <button
+            v-if="auth.isSupervisor.value && canBatchApprove"
+            class="btn btn-sm btn-warning"
+            :disabled="batchLoading"
+            @click="showBatchSupplementModal = true"
+          >📝 批量退回补正</button>
+          <button
+            v-if="auth.isSupervisor.value && canBatchApprove"
+            class="btn btn-sm btn-danger"
+            :disabled="batchLoading"
+            @click="showBatchRejectModal = true"
+          >❌ 批量驳回</button>
+          <button
+            v-if="auth.isReviewer.value && canBatchReview"
+            class="btn btn-sm btn-primary"
+            :disabled="batchLoading"
+            @click="handleBatchReview"
+          >🔍 批量复核</button>
+          <button
+            v-if="auth.isReviewer.value && canBatchArchive"
+            class="btn btn-sm btn-success"
+            :disabled="batchLoading"
+            @click="handleBatchArchive"
+          >📦 批量归档</button>
+        </div>
+      </div>
+
       <div style="overflow-x: auto;">
         <table>
           <thead>
             <tr>
+              <th style="width: 40px;">
+                <input
+                  type="checkbox"
+                  :checked="isAllSelected"
+                  @change="toggleSelectAll"
+                  :disabled="loading || !list.length"
+                />
+              </th>
               <th>入会单号</th>
               <th>会员姓名</th>
               <th>手机号</th>
@@ -82,12 +135,19 @@
           </thead>
           <tbody>
             <tr v-if="loading">
-              <td colspan="11" class="text-center" style="padding: 32px; color: #9ca3af;">加载中...</td>
+              <td colspan="12" class="text-center" style="padding: 32px; color: #9ca3af;">加载中...</td>
             </tr>
             <tr v-else-if="!list.length">
-              <td colspan="11" class="text-center" style="padding: 32px; color: #9ca3af;">暂无数据</td>
+              <td colspan="12" class="text-center" style="padding: 32px; color: #9ca3af;">暂无数据</td>
             </tr>
-            <tr v-else v-for="item in list" :key="item.id">
+            <tr v-else v-for="item in list" :key="item.id" :class="{ 'row-selected': isSelected(item.id) }">
+              <td>
+                <input
+                  type="checkbox"
+                  :checked="isSelected(item.id)"
+                  @change="toggleSelect(item.id)"
+                />
+              </td>
               <td>
                 <a class="font-bold" style="color: #2563eb; cursor: pointer;" @click="goDetail(item.id)">
                   {{ item.order_no }}
@@ -185,12 +245,173 @@
         </div>
       </div>
     </div>
+
+    <!-- 批量结果弹窗 -->
+    <div v-if="showBatchResultModal" class="modal-mask" @click.self="showBatchResultModal = false">
+      <div class="modal modal-lg">
+        <div class="modal-header">
+          <div class="modal-title">
+            批量处理结果
+            <span class="ml-2" style="font-size: 14px; font-weight: normal;">
+              共 {{ batchResult?.total }} 条 ·
+              <span class="text-success">成功 {{ batchResult?.success_count }}</span> ·
+              <span class="text-danger">失败 {{ batchResult?.fail_count }}</span>
+            </span>
+          </div>
+          <button class="modal-close" @click="handleCloseBatchResult">×</button>
+        </div>
+        <div style="max-height: 500px; overflow-y: auto;">
+          <table class="batch-result-table">
+            <thead>
+              <tr>
+                <th>状态</th>
+                <th>入会单号</th>
+                <th>会员姓名</th>
+                <th>当前状态</th>
+                <th>合同</th>
+                <th>卡权益</th>
+                <th>审计编号</th>
+                <th>原因</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="r in batchResult?.results" :key="r.order_id" :class="r.success ? 'row-success' : 'row-fail'">
+                <td>
+                  <span v-if="r.success" class="text-success font-bold">✅ 成功</span>
+                  <span v-else class="text-danger font-bold">❌ 失败</span>
+                </td>
+                <td class="font-bold">{{ r.order_no || '-' }}</td>
+                <td>{{ r.member_name || '-' }}</td>
+                <td>
+                  <span class="badge" :class="statusBadgeClass(r.status as any)">{{ r.status ? STATUS_LABELS[r.status as OrderStatus] || r.status : '-' }}</span>
+                </td>
+                <td>
+                  <span v-if="r.contract_confirmed" class="badge badge-green">已确认</span>
+                  <span v-else class="badge badge-gray">未确认</span>
+                </td>
+                <td>
+                  <span v-if="r.card_activated" class="badge badge-green">已启用</span>
+                  <span v-else class="badge badge-gray">未启用</span>
+                </td>
+                <td class="text-muted">{{ r.audit_log_id || '-' }}</td>
+                <td style="max-width: 300px;">
+                  <span v-if="r.reject_reason" class="text-danger" style="font-size: 12px;">{{ r.reject_reason }}</span>
+                  <span v-else class="text-muted">-</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-primary" @click="handleCloseBatchResult">确定</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 批量驳回弹窗 -->
+    <div v-if="showBatchRejectModal" class="modal-mask" @click.self="showBatchRejectModal = false">
+      <div class="modal">
+        <div class="modal-header">
+          <div class="modal-title">批量驳回（{{ selectedIds.length }} 条）</div>
+          <button class="modal-close" @click="showBatchRejectModal = false">×</button>
+        </div>
+        <div>
+          <div class="alert alert-warning">
+            选中的 {{ selectedIds.length }} 条入会单将被批量驳回，且不可恢复，请确认。
+          </div>
+          <div class="form-group">
+            <label class="form-label">驳回原因 <span class="text-danger">*</span></label>
+            <textarea
+              v-model="batchRejectReason"
+              class="form-textarea"
+              rows="4"
+              placeholder="请输入统一的驳回原因..."
+            ></textarea>
+          </div>
+          <div class="form-group">
+            <label class="form-label">备注</label>
+            <input v-model="batchRejectRemark" class="form-input" placeholder="可选" />
+          </div>
+          <div v-if="batchError" class="alert alert-danger">{{ batchError }}</div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn" @click="showBatchRejectModal = false">取消</button>
+          <button class="btn btn-danger" :disabled="batchLoading" @click="handleBatchReject">
+            {{ batchLoading ? '处理中...' : '确认驳回' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 批量退回补正弹窗（简化版 - 统一原因） -->
+    <div v-if="showBatchSupplementModal" class="modal-mask" @click.self="showBatchSupplementModal = false">
+      <div class="modal modal-lg">
+        <div class="modal-header">
+          <div class="modal-title">批量退回补正（{{ selectedOrders.length }} 条）</div>
+          <button class="modal-close" @click="showBatchSupplementModal = false">×</button>
+        </div>
+        <div style="max-height: 500px; overflow-y: auto;">
+          <div class="alert alert-info">
+            请为每笔入会单选择需退回的附件并填写补正原因。
+          </div>
+          <div v-for="order in selectedOrders" :key="order.id" class="batch-supplement-order">
+            <div class="batch-supplement-order-title">
+              <span class="font-bold">{{ order.order_no }}</span>
+              <span class="text-muted">· {{ order.member_name }}</span>
+              <span class="badge" :class="statusBadgeClass(order.status)" style="margin-left: auto;">{{ STATUS_LABELS[order.status] }}</span>
+            </div>
+            <div class="batch-supplement-items">
+              <div
+                v-for="req in order.required_attachments"
+                :key="req.id"
+                class="supplement-item"
+                :class="{ active: isBatchSupplementSelected(order.id, req.id) }"
+              >
+                <label style="display: flex; align-items: flex-start; gap: 8px; cursor: pointer; width: 100%;">
+                  <input
+                    type="checkbox"
+                    :checked="isBatchSupplementSelected(order.id, req.id)"
+                    @change="toggleBatchSupplementItem(order.id, req.id)"
+                    style="margin-top: 4px;"
+                  />
+                  <div style="flex: 1;">
+                    <div class="font-bold" style="font-size: 13px;">
+                      {{ req.attachment_name }}
+                      <span v-if="req.is_provided" class="text-success" style="font-size: 12px; font-weight: normal;">（已提供）</span>
+                      <span v-else class="text-danger" style="font-size: 12px; font-weight: normal;">（缺失）</span>
+                    </div>
+                    <div v-if="req.reject_reason" class="text-danger" style="font-size: 12px; margin-top: 4px;">
+                      历史退回：{{ firstLineOfReason(req.reject_reason) }}
+                    </div>
+                    <div v-if="isBatchSupplementSelected(order.id, req.id)" style="margin-top: 8px;">
+                      <input
+                        v-model="batchSupplementReasons[`${order.id}_${req.id}`]"
+                        class="form-input"
+                        placeholder="请输入退回原因（如：照片模糊，请重新提交）"
+                        style="font-size: 13px;"
+                      />
+                    </div>
+                  </div>
+                </label>
+              </div>
+            </div>
+          </div>
+          <div v-if="batchError" class="alert alert-danger mt-3">{{ batchError }}</div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn" @click="showBatchSupplementModal = false">取消</button>
+          <button class="btn btn-warning" :disabled="batchLoading" @click="handleBatchSupplement">
+            {{ batchLoading ? '处理中...' : '确认退回补正' }}
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, watch } from 'vue'
-import type { MembershipOrder, OrderStatus } from '~/types'
+import { ref, reactive, computed, onMounted } from 'vue'
+import type { MembershipOrder, OrderStatus, BatchResponse, BatchItemResult } from '~/types'
 import { STATUS_LABELS } from '~/types'
 
 const auth = useAuth()
@@ -212,6 +433,48 @@ const stats = reactive({
   missing: 0,
   review: 0,
   archived: 0
+})
+
+const selectedIds = ref<number[]>([])
+
+const batchLoading = ref(false)
+const batchError = ref('')
+const batchResult = ref<BatchResponse | null>(null)
+const showBatchResultModal = ref(false)
+const showBatchRejectModal = ref(false)
+const showBatchSupplementModal = ref(false)
+const batchRejectReason = ref('')
+const batchRejectRemark = ref('')
+const batchSupplementReasons = reactive<Record<string, string>>({})
+const batchSupplementItems = reactive<Record<string, boolean>>({})
+
+const isAllSelected = computed(() => {
+  if (!list.value.length) return false
+  return list.value.every(item => selectedIds.value.includes(item.id))
+})
+
+const selectedOrders = computed(() => {
+  return list.value.filter(item => selectedIds.value.includes(item.id))
+})
+
+const canBatchSubmit = computed(() => {
+  return selectedOrders.value.some(o =>
+    o.status === 'draft' || o.status === 'materials_missing'
+  )
+})
+
+const canBatchApprove = computed(() => {
+  return selectedOrders.value.some(o =>
+    o.status === 'pending_review' || o.status === 'resubmitted'
+  )
+})
+
+const canBatchReview = computed(() => {
+  return selectedOrders.value.some(o => o.status === 'approved_review')
+})
+
+const canBatchArchive = computed(() => {
+  return selectedOrders.value.some(o => o.status === 'reviewed')
 })
 
 const showCreateModal = ref(false)
@@ -328,6 +591,166 @@ async function handleCreate() {
   } finally {
     createLoading.value = false
   }
+}
+
+function isSelected(id: number) {
+  return selectedIds.value.includes(id)
+}
+
+function toggleSelect(id: number) {
+  const idx = selectedIds.value.indexOf(id)
+  if (idx >= 0) {
+    selectedIds.value.splice(idx, 1)
+  } else {
+    selectedIds.value.push(id)
+  }
+}
+
+function toggleSelectAll() {
+  if (isAllSelected.value) {
+    selectedIds.value = []
+  } else {
+    selectedIds.value = list.value.map(item => item.id)
+  }
+}
+
+function clearSelection() {
+  selectedIds.value = []
+}
+
+function firstLineOfReason(reason: string | null) {
+  if (!reason) return ''
+  return reason.split('\n')[0]
+}
+
+function isBatchSupplementSelected(orderId: number, reqId: number) {
+  return !!batchSupplementItems[`${orderId}_${reqId}`]
+}
+
+function toggleBatchSupplementItem(orderId: number, reqId: number) {
+  const key = `${orderId}_${reqId}`
+  batchSupplementItems[key] = !batchSupplementItems[key]
+  if (!batchSupplementItems[key]) {
+    delete batchSupplementReasons[key]
+  }
+}
+
+async function handleBatchSubmit() {
+  batchLoading.value = true
+  batchError.value = ''
+  try {
+    const res = await orders.batchSubmit(selectedIds.value)
+    batchResult.value = res
+    showBatchResultModal.value = true
+  } catch (e: any) {
+    batchError.value = e?.data?.detail || '批量提交失败'
+  } finally {
+    batchLoading.value = false
+  }
+}
+
+async function handleBatchApprove() {
+  batchLoading.value = true
+  batchError.value = ''
+  try {
+    const res = await orders.batchApprove(selectedIds.value)
+    batchResult.value = res
+    showBatchResultModal.value = true
+  } catch (e: any) {
+    batchError.value = e?.data?.detail || '批量审核失败'
+  } finally {
+    batchLoading.value = false
+  }
+}
+
+async function handleBatchReject() {
+  if (!batchRejectReason.value.trim()) {
+    batchError.value = '请填写驳回原因'
+    return
+  }
+  batchLoading.value = true
+  batchError.value = ''
+  try {
+    const res = await orders.batchReject(selectedIds.value, batchRejectReason.value, batchRejectRemark.value)
+    batchResult.value = res
+    showBatchRejectModal.value = false
+    showBatchResultModal.value = true
+  } catch (e: any) {
+    batchError.value = e?.data?.detail || '批量驳回失败'
+  } finally {
+    batchLoading.value = false
+  }
+}
+
+async function handleBatchSupplement() {
+  const ordersData: any[] = []
+  for (const order of selectedOrders.value) {
+    const items: any[] = []
+    for (const req of order.required_attachments) {
+      const key = `${order.id}_${req.id}`
+      if (batchSupplementItems[key]) {
+        items.push({
+          required_attachment_id: req.id,
+          reject_reason: batchSupplementReasons[key]?.trim() || undefined
+        })
+      }
+    }
+    if (items.length > 0) {
+      ordersData.push({ order_id: order.id, items })
+    }
+  }
+  if (ordersData.length === 0) {
+    batchError.value = '请至少为一笔订单选择需退回的附件'
+    return
+  }
+  batchLoading.value = true
+  batchError.value = ''
+  try {
+    const res = await orders.batchRequestSupplement(ordersData)
+    batchResult.value = res
+    showBatchSupplementModal.value = false
+    showBatchResultModal.value = true
+  } catch (e: any) {
+    batchError.value = e?.data?.detail || '批量退回补正失败'
+  } finally {
+    batchLoading.value = false
+  }
+}
+
+async function handleBatchReview() {
+  batchLoading.value = true
+  batchError.value = ''
+  try {
+    const res = await orders.batchReview(selectedIds.value)
+    batchResult.value = res
+    showBatchResultModal.value = true
+  } catch (e: any) {
+    batchError.value = e?.data?.detail || '批量复核失败'
+  } finally {
+    batchLoading.value = false
+  }
+}
+
+async function handleBatchArchive() {
+  batchLoading.value = true
+  batchError.value = ''
+  try {
+    const res = await orders.batchArchive(selectedIds.value)
+    batchResult.value = res
+    showBatchResultModal.value = true
+  } catch (e: any) {
+    batchError.value = e?.data?.detail || '批量归档失败'
+  } finally {
+    batchLoading.value = false
+  }
+}
+
+function handleCloseBatchResult() {
+  showBatchResultModal.value = false
+  batchResult.value = null
+  clearSelection()
+  loadList()
+  loadStats()
 }
 
 onMounted(() => {
