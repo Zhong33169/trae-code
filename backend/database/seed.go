@@ -159,6 +159,25 @@ func SeedData() error {
 				{"创建订单", 0, string(models.StatusPendingRegistration), string(models.StatusRegistered)},
 			},
 		},
+		{
+			"档案室恒温设备", "档案室恒温恒湿设备温度异常偏高",
+			models.RiskHigh, models.StatusArchived, models.StageReview,
+			4, 15, 1, false, "归档后订单 - 办理不可见边界演示", "",
+			[]opStep{
+				{"创建订单", 0, string(models.StatusPendingRegistration), string(models.StatusRegistered)},
+				{"师傅派单", 2, string(models.StatusRegistered), string(models.StatusDispatched)},
+				{"完工验收", 2, string(models.StatusDispatched), string(models.StatusCompleted)},
+				{"复核归档", 4, string(models.StatusCompleted), string(models.StatusArchived)},
+			},
+		},
+		{
+			"大堂玻璃门维修", "大堂玻璃门地弹簧损坏，门体无法正常闭合",
+			models.RiskMedium, models.StatusRegistered, models.StageDispatch,
+			3, 2, 0, false, "非当前处理人订单 - 权限不可见边界演示", "",
+			[]opStep{
+				{"创建订单", 1, string(models.StatusPendingRegistration), string(models.StatusRegistered)},
+			},
+		},
 	}
 
 	for i, tpl := range templates {
@@ -245,7 +264,7 @@ func SeedData() error {
 		return fmt.Errorf("提交样例数据失败: %w", err)
 	}
 
-	log.Println("样例数据初始化完成，共创建 6 个用户和 10 个维修订单")
+	log.Println("样例数据初始化完成，共创建 6 个用户和 12 个维修订单")
 	return nil
 }
 

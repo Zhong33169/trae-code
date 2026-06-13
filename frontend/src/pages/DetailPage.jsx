@@ -1,12 +1,10 @@
 import { createSignal, createEffect, Show, For } from 'solid-js'
 import { useApi } from '../utils/api.js'
-import { useAuth } from '../context/AuthContext.jsx'
 import {
   statusNames, riskNames, stageNames, formatDate, getPriorityClass, roleNames } from '../utils/constants.js'
 
 export default function DetailPage(props) {
   const api = useApi()
-  const { currentUser } = useAuth()
   const [data, setData] = useState(null)
   const [showAction, setShowAction] = useState('')
   const [opinion, setOpinion] = useState('')
@@ -101,41 +99,7 @@ export default function DetailPage(props) {
 
   const getAvailableActions = () => {
     if (!data()) return []
-    const { order, can_process } = data()
-    if (!can_process) return []
-
-    const actions = []
-    const role = currentUser().role
-    const stage = order.current_stage
-    const status = order.status
-
-    if (role === 'supervisor') {
-      if (stage === 'dispatch') {
-        if (status === 'registered' || status === 'returned_for_correction') {
-          actions.push({ value: 'dispatch', label: '📤 师傅派单', class: 'btn-primary', requiresMaster: true })
-          actions.push({ value: 'return_to_registrar', label: '↩️ 退回补正', class: 'btn-warning' })
-        }
-      }
-      if (stage === 'acceptance' && status === 'dispatched') {
-        actions.push({ value: 'complete', label: '✅ 完工验收', class: 'btn-success' })
-        actions.push({ value: 'mark_missing_evidence', label: '📎 标记缺证据', class: 'btn-warning' })
-      }
-      if (status !== 'archived') {
-        actions.push({ value: 'mark_overdue', label: '⏰ 标记逾期', class: 'btn-danger' })
-        actions.push({ value: 'mark_conflict', label: '⚠️ 标记状态冲突', class: 'btn-danger', requiresConflict: true })
-      }
-    }
-
-    if (role === 'registrar' && stage === 'registration' &&
-      (status === 'returned_for_correction' || status === 'missing_evidence')) {
-      actions.push({ value: 're_submit', label: '🔄 补正重提', class: 'btn-primary' })
-    }
-
-    if (role === 'reviewer' && stage === 'review' && status === 'completed') {
-      actions.push({ value: 'archive', label: '📦 复核归档', class: 'btn-success' })
-    }
-
-    return actions
+    return data().available_actions || []
   }
 
   const getLogClass = (action) => {
