@@ -1,16 +1,18 @@
 from datetime import datetime
 from typing import Optional
-from litestar import Router, get, post, delete, status_codes
+from litestar import Router, get, post, delete, status_codes, Request
+from litestar.connection import ASGIConnection
 from litestar.params import Parameter
 from litestar.exceptions import HTTPException
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.auth import get_current_user, require_registrar
 from app.models import (
     Attachment, AttachmentType, RequiredAttachment,
     AuditLog, AuditAction, User, MembershipOrder, OrderStatus
 )
-from app.schemas import AttachmentSchema, MembershipOrderSchema, RequiredAttachmentSchema
+from app.schemas import AttachmentSchema, MembershipOrderSchema, RequiredAttachmentSchema, AttachmentUpload, AuditLogSchema
 
 
 def _get_operator(db: Session, operator_id: int = 1):
@@ -21,8 +23,17 @@ def _get_operator(db: Session, operator_id: int = 1):
 
 
 def _serialize_order(db, order):
-    from app.routers.orders import _serialize_order as so
-    return so(db, order)
+    from app.routers.orders import _add_audit
+    data = MembershipOrderSchema.model_validate(order)
+    logs = []
+    for log in order.audit_logs:
+        op = db.query(User).filter(User.id == log.operator_id).first()
+        log_dict = AuditLogSchema.model_validate(log).model_dump()
+        log_dict["operator_name"] = op.name if op else "未知"
+        log_dict["operator_role"] = op.role.value if op else None
+        logs.append(log_dict)
+    data.audit_logs = logs
+    return data
 
 
 @get("/orders/{order_id:int}/attachments")
@@ -39,20 +50,30 @@ async def list_required_attachments(order_id: int) -> list[RequiredAttachmentSch
     return [RequiredAttachmentSchema.model_validate(a) for a in items]
 
 
-@post("/orders/{order_id:int}/attachments")
-async def upload_attachment(order_id: int, data: dict) -> dict:
+@post("/orders/{order_id:int}/attachments", guards=[require_registrar])
+async def upload_attachment(
+    order_id: int,
+    data: AttachmentUpload,
+    request: Request,
+) -> dict:
     db: Session = next(get_db())
+    operator = get_current_user(request)
+
     order = db.query(MembershipOrder).filter(MembershipOrder.id == order_id).first()
     if not order:
         raise HTTPException(status_code=404, detail="会员入会单不存在")
 
-    operator_id = data.get("operator_id", 1)
-    operator = _get_operator(db, operator_id)
+    if order.status not in {OrderStatus.DRAFT, OrderStatus.MATERIALS_MISSING}:
+        raise HTTPException(
+            status_code=400,
+            detail=f"登记员【{operator.name}】上传失败：当前状态【{order.status.value}】下不能上传附件，"
+                   f"只有草稿或附件缺失待补正状态可以上传"
+        )
 
-    required_attachment_id = data.get("required_attachment_id")
-    file_type = data.get("file_type", AttachmentType.OTHER)
-    file_name = data.get("file_name", "未命名文件")
-    file_size = data.get("file_size", 0)
+    required_attachment_id = data.required_attachment_id
+    file_type = data.file_type
+    file_name = data.file_name
+    file_size = data.file_size or 0
 
     if isinstance(file_type, str):
         file_type = AttachmentType(file_type)
@@ -73,18 +94,17 @@ async def upload_attachment(order_id: int, data: dict) -> dict:
         req = db.query(RequiredAttachment).filter(RequiredAttachment.id == required_attachment_id).first()
         if req and req.order_id == order_id:
             req.is_provided = True
-            req.missing_reason = None
-            req.reject_reason = None
 
     order.updated_at = datetime.utcnow()
 
     from app.routers.orders import _add_audit
     _add_audit(
         db, order_id, operator.id, AuditAction.UPLOAD_ATTACHMENT,
-        remark=f"上传附件：{file_name}"
+        remark=f"登记员【{operator.name}】上传附件：{file_name}"
     )
     db.commit()
     db.refresh(attachment)
+    db.refresh(order)
 
     return {
         "attachment": AttachmentSchema.model_validate(attachment).model_dump(),
@@ -92,13 +112,17 @@ async def upload_attachment(order_id: int, data: dict) -> dict:
     }
 
 
-@delete("/orders/{order_id:int}/attachments/{attachment_id:int}", status_code=status_codes.HTTP_200_OK)
+@delete("/orders/{order_id:int}/attachments/{attachment_id:int}",
+        status_code=status_codes.HTTP_200_OK,
+        guards=[require_registrar])
 async def delete_attachment(
     order_id: int,
     attachment_id: int,
-    operator_id: Optional[int] = Parameter(default=None, query=True),
+    request: Request,
 ) -> dict:
     db: Session = next(get_db())
+    operator = get_current_user(request)
+
     attachment = db.query(Attachment).filter(
         Attachment.id == attachment_id,
         Attachment.order_id == order_id,
@@ -107,10 +131,16 @@ async def delete_attachment(
         raise HTTPException(status_code=404, detail="附件不存在")
 
     order = db.query(MembershipOrder).filter(MembershipOrder.id == order_id).first()
-    if order.status in {OrderStatus.ARCHIVED, OrderStatus.REVIEWED}:
-        raise HTTPException(status_code=400, detail="已归档/已复核的单据不能删除附件")
-
-    operator = _get_operator(db, operator_id or 1)
+    if order.status in {OrderStatus.ARCHIVED, OrderStatus.REVIEWED, OrderStatus.APPROVED_REVIEW}:
+        raise HTTPException(
+            status_code=400,
+            detail=f"登记员【{operator.name}】删除失败：当前状态【{order.status.value}】下不能删除附件"
+        )
+    if order.status not in {OrderStatus.DRAFT, OrderStatus.MATERIALS_MISSING}:
+        raise HTTPException(
+            status_code=400,
+            detail=f"登记员【{operator.name}】删除失败：只有草稿或附件缺失待补正状态可以删除附件"
+        )
 
     req_id = attachment.required_attachment_id
     file_name = attachment.file_name
@@ -126,7 +156,7 @@ async def delete_attachment(
     from app.routers.orders import _add_audit
     _add_audit(
         db, order_id, operator.id, AuditAction.DELETE_ATTACHMENT,
-        remark=f"删除附件：{file_name}"
+        remark=f"登记员【{operator.name}】删除附件：{file_name}"
     )
     db.commit()
     db.refresh(order)
@@ -137,25 +167,7 @@ async def delete_attachment(
     }
 
 
-@post("/orders/{order_id:int}/required-attachments/{req_id:int}/mark-reject")
-async def mark_required_reject(order_id: int, req_id: int, data: dict) -> RequiredAttachmentSchema:
-    db: Session = next(get_db())
-    req = db.query(RequiredAttachment).filter(
-        RequiredAttachment.id == req_id,
-        RequiredAttachment.order_id == order_id,
-    ).first()
-    if not req:
-        raise HTTPException(status_code=404, detail="必需附件项不存在")
-
-    req.reject_reason = data.get("reject_reason", "材料不合格")
-    req.is_provided = False
-    req.updated_at = datetime.utcnow()
-    db.commit()
-    db.refresh(req)
-    return RequiredAttachmentSchema.model_validate(req)
-
-
 attachments_router = Router(path="/api", route_handlers=[
     list_attachments, list_required_attachments,
-    upload_attachment, delete_attachment, mark_required_reject
+    upload_attachment, delete_attachment,
 ])

@@ -11,6 +11,17 @@ from app.models import (
 )
 
 
+def fmt_time(d: datetime) -> str:
+    return d.strftime("%Y-%m-%d %H:%M")
+
+
+def add_reject_reason(req, reason: str, operator_name: str, d: datetime):
+    ts = fmt_time(d)
+    old = req.reject_reason or ""
+    new_line = f"[{ts} 审核主管{operator_name}] {reason}"
+    req.reject_reason = f"{new_line}\n{old}" if old else new_line
+
+
 def init_db():
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
@@ -37,6 +48,7 @@ def init_db():
 
         now = datetime.utcnow()
 
+        # ============== 1. 正常单 - 赵小明（完整流程，已归档） ==============
         normal_order = MembershipOrder(
             order_no="HY20250601001",
             member_name="赵小明",
@@ -56,140 +68,28 @@ def init_db():
         db.add(normal_order)
         db.flush()
 
-        normal_req_1 = RequiredAttachment(
-            order_id=normal_order.id,
-            attachment_type=AttachmentType.ID_CARD,
-            attachment_name="身份证复印件",
-            is_provided=True,
-        )
-        normal_req_2 = RequiredAttachment(
-            order_id=normal_order.id,
-            attachment_type=AttachmentType.PHOTO,
-            attachment_name="一寸免冠照片",
-            is_provided=True,
-        )
-        normal_req_3 = RequiredAttachment(
-            order_id=normal_order.id,
-            attachment_type=AttachmentType.HEALTH_CERT,
-            attachment_name="健康证明",
-            is_provided=True,
-        )
-        normal_req_4 = RequiredAttachment(
-            order_id=normal_order.id,
-            attachment_type=AttachmentType.CONTRACT,
-            attachment_name="入会合同",
-            is_provided=True,
-        )
-        db.add_all([normal_req_1, normal_req_2, normal_req_3, normal_req_4])
+        nr1 = RequiredAttachment(order_id=normal_order.id, attachment_type=AttachmentType.ID_CARD, attachment_name="身份证复印件", is_provided=True)
+        nr2 = RequiredAttachment(order_id=normal_order.id, attachment_type=AttachmentType.PHOTO, attachment_name="一寸免冠照片", is_provided=True)
+        nr3 = RequiredAttachment(order_id=normal_order.id, attachment_type=AttachmentType.HEALTH_CERT, attachment_name="健康证明", is_provided=True)
+        nr4 = RequiredAttachment(order_id=normal_order.id, attachment_type=AttachmentType.CONTRACT, attachment_name="入会合同", is_provided=True)
+        db.add_all([nr1, nr2, nr3, nr4])
         db.flush()
 
-        db.add(Attachment(
-            order_id=normal_order.id,
-            required_attachment_id=normal_req_1.id,
-            file_name="赵小明_身份证.pdf",
-            file_type=AttachmentType.ID_CARD,
-            file_size=102400,
-            stored_name="id_normal_001.pdf",
-            uploaded_by=registrar.id,
-            uploaded_at=now - timedelta(days=15),
-        ))
-        db.add(Attachment(
-            order_id=normal_order.id,
-            required_attachment_id=normal_req_2.id,
-            file_name="赵小明_照片.jpg",
-            file_type=AttachmentType.PHOTO,
-            file_size=204800,
-            stored_name="photo_normal_001.jpg",
-            uploaded_by=registrar.id,
-            uploaded_at=now - timedelta(days=15),
-        ))
-        db.add(Attachment(
-            order_id=normal_order.id,
-            required_attachment_id=normal_req_3.id,
-            file_name="赵小明_健康证明.pdf",
-            file_type=AttachmentType.HEALTH_CERT,
-            file_size=153600,
-            stored_name="health_normal_001.pdf",
-            uploaded_by=registrar.id,
-            uploaded_at=now - timedelta(days=15),
-        ))
-        db.add(Attachment(
-            order_id=normal_order.id,
-            required_attachment_id=normal_req_4.id,
-            file_name="赵小明_入会合同.pdf",
-            file_type=AttachmentType.CONTRACT,
-            file_size=307200,
-            stored_name="contract_normal_001.pdf",
-            uploaded_by=registrar.id,
-            uploaded_at=now - timedelta(days=15),
-        ))
+        db.add(Attachment(order_id=normal_order.id, required_attachment_id=nr1.id, file_name="赵小明_身份证.pdf", file_type=AttachmentType.ID_CARD, file_size=102400, stored_name="id_normal_001.pdf", uploaded_by=registrar.id, uploaded_at=now - timedelta(days=15)))
+        db.add(Attachment(order_id=normal_order.id, required_attachment_id=nr2.id, file_name="赵小明_照片.jpg", file_type=AttachmentType.PHOTO, file_size=204800, stored_name="photo_normal_001.jpg", uploaded_by=registrar.id, uploaded_at=now - timedelta(days=15)))
+        db.add(Attachment(order_id=normal_order.id, required_attachment_id=nr3.id, file_name="赵小明_健康证明.pdf", file_type=AttachmentType.HEALTH_CERT, file_size=153600, stored_name="health_normal_001.pdf", uploaded_by=registrar.id, uploaded_at=now - timedelta(days=15)))
+        db.add(Attachment(order_id=normal_order.id, required_attachment_id=nr4.id, file_name="赵小明_入会合同.pdf", file_type=AttachmentType.CONTRACT, file_size=307200, stored_name="contract_normal_001.pdf", uploaded_by=registrar.id, uploaded_at=now - timedelta(days=15)))
 
-        db.add(AuditLog(
-            order_id=normal_order.id,
-            operator_id=registrar.id,
-            action=AuditAction.CREATE,
-            to_status=OrderStatus.DRAFT,
-            remark="创建会员入会单",
-            created_at=now - timedelta(days=15),
-        ))
-        db.add(AuditLog(
-            order_id=normal_order.id,
-            operator_id=registrar.id,
-            action=AuditAction.UPLOAD_ATTACHMENT,
-            remark="上传全部4份附件材料",
-            created_at=now - timedelta(days=15),
-        ))
-        db.add(AuditLog(
-            order_id=normal_order.id,
-            operator_id=registrar.id,
-            action=AuditAction.SUBMIT,
-            from_status=OrderStatus.DRAFT,
-            to_status=OrderStatus.PENDING_REVIEW,
-            remark="提交入会单进入审核",
-            created_at=now - timedelta(days=14),
-        ))
-        db.add(AuditLog(
-            order_id=normal_order.id,
-            operator_id=supervisor.id,
-            action=AuditAction.APPROVE,
-            from_status=OrderStatus.PENDING_REVIEW,
-            to_status=OrderStatus.APPROVED_REVIEW,
-            remark="审核主管办理通过，材料齐全",
-            created_at=now - timedelta(days=13),
-        ))
-        db.add(AuditLog(
-            order_id=normal_order.id,
-            operator_id=supervisor.id,
-            action=AuditAction.CONFIRM_CONTRACT,
-            remark="合同已确认签署",
-            created_at=now - timedelta(days=13),
-        ))
-        db.add(AuditLog(
-            order_id=normal_order.id,
-            operator_id=reviewer.id,
-            action=AuditAction.REVIEW,
-            from_status=OrderStatus.APPROVED_REVIEW,
-            to_status=OrderStatus.REVIEWED,
-            remark="复核通过，信息无误",
-            created_at=now - timedelta(days=11),
-        ))
-        db.add(AuditLog(
-            order_id=normal_order.id,
-            operator_id=reviewer.id,
-            action=AuditAction.ACTIVATE_CARD,
-            remark="会员卡权益已启用",
-            created_at=now - timedelta(days=10),
-        ))
-        db.add(AuditLog(
-            order_id=normal_order.id,
-            operator_id=reviewer.id,
-            action=AuditAction.ARCHIVE,
-            from_status=OrderStatus.REVIEWED,
-            to_status=OrderStatus.ARCHIVED,
-            remark="入会单复核归档完成",
-            created_at=now - timedelta(days=10),
-        ))
+        db.add(AuditLog(order_id=normal_order.id, operator_id=registrar.id, action=AuditAction.CREATE, to_status=OrderStatus.DRAFT, remark=f"登记员【{registrar.name}】创建会员入会单", created_at=now - timedelta(days=15)))
+        db.add(AuditLog(order_id=normal_order.id, operator_id=registrar.id, action=AuditAction.UPLOAD_ATTACHMENT, remark=f"登记员【{registrar.name}】上传全部4份附件材料", created_at=now - timedelta(days=15)))
+        db.add(AuditLog(order_id=normal_order.id, operator_id=registrar.id, action=AuditAction.SUBMIT, from_status=OrderStatus.DRAFT, to_status=OrderStatus.PENDING_REVIEW, remark=f"登记员【{registrar.name}】提交入会单进入审核", created_at=now - timedelta(days=14)))
+        db.add(AuditLog(order_id=normal_order.id, operator_id=supervisor.id, action=AuditAction.APPROVE, from_status=OrderStatus.PENDING_REVIEW, to_status=OrderStatus.APPROVED_REVIEW, remark=f"审核主管【{supervisor.name}】办理通过，材料齐全有效", created_at=now - timedelta(days=13)))
+        db.add(AuditLog(order_id=normal_order.id, operator_id=supervisor.id, action=AuditAction.CONFIRM_CONTRACT, remark=f"审核主管【{supervisor.name}】确认合同已签署", created_at=now - timedelta(days=13)))
+        db.add(AuditLog(order_id=normal_order.id, operator_id=reviewer.id, action=AuditAction.REVIEW, from_status=OrderStatus.APPROVED_REVIEW, to_status=OrderStatus.REVIEWED, remark=f"复核负责人【{reviewer.name}】复核通过，信息无误", created_at=now - timedelta(days=11)))
+        db.add(AuditLog(order_id=normal_order.id, operator_id=reviewer.id, action=AuditAction.ACTIVATE_CARD, remark=f"复核负责人【{reviewer.name}】启用会员卡权益", created_at=now - timedelta(days=10)))
+        db.add(AuditLog(order_id=normal_order.id, operator_id=reviewer.id, action=AuditAction.ARCHIVE, from_status=OrderStatus.REVIEWED, to_status=OrderStatus.ARCHIVED, remark=f"复核负责人【{reviewer.name}】完成入会单归档", created_at=now - timedelta(days=10)))
 
+        # ============== 2. 缺材料单 - 钱小红（一轮退回补正中，每附件有独立原因） ==============
         missing_order = MembershipOrder(
             order_no="HY20250601002",
             member_name="钱小红",
@@ -202,7 +102,7 @@ def init_db():
             card_activated=False,
             status=OrderStatus.MATERIALS_MISSING,
             is_overdue=False,
-            reject_reason="缺少健康证明，请尽快补正后重新提交",
+            reject_reason=f"审核主管【{supervisor.name}】退回补正（共2项）：健康证明、入会合同。请补正后重新提交。 备注：请尽快补齐，否则会影响入会进度。",
             created_by=registrar.id,
             created_at=now - timedelta(days=5),
             updated_at=now - timedelta(days=2),
@@ -210,91 +110,31 @@ def init_db():
         db.add(missing_order)
         db.flush()
 
-        miss_req_1 = RequiredAttachment(
-            order_id=missing_order.id,
-            attachment_type=AttachmentType.ID_CARD,
-            attachment_name="身份证复印件",
-            is_provided=True,
-        )
-        miss_req_2 = RequiredAttachment(
-            order_id=missing_order.id,
-            attachment_type=AttachmentType.PHOTO,
-            attachment_name="一寸免冠照片",
-            is_provided=True,
-        )
-        miss_req_3 = RequiredAttachment(
-            order_id=missing_order.id,
-            attachment_type=AttachmentType.HEALTH_CERT,
-            attachment_name="健康证明",
-            is_provided=False,
-            missing_reason="会员表示健康证明需要重新去医院开具",
-        )
-        miss_req_4 = RequiredAttachment(
-            order_id=missing_order.id,
-            attachment_type=AttachmentType.CONTRACT,
-            attachment_name="入会合同",
-            is_provided=False,
-            missing_reason="合同需要双方签字后上传",
-        )
-        db.add_all([miss_req_1, miss_req_2, miss_req_3, miss_req_4])
+        mr1 = RequiredAttachment(order_id=missing_order.id, attachment_type=AttachmentType.ID_CARD, attachment_name="身份证复印件", is_provided=True)
+        mr2 = RequiredAttachment(order_id=missing_order.id, attachment_type=AttachmentType.PHOTO, attachment_name="一寸免冠照片", is_provided=True)
+        mr3 = RequiredAttachment(order_id=missing_order.id, attachment_type=AttachmentType.HEALTH_CERT, attachment_name="健康证明", is_provided=False, missing_reason="会员表示健康证明需要重新去医院开具，约下周才能提供")
+        mr4 = RequiredAttachment(order_id=missing_order.id, attachment_type=AttachmentType.CONTRACT, attachment_name="入会合同", is_provided=False, missing_reason="合同需要双方签字后上传，目前会员还在看合同条款")
+        add_reject_reason(mr3, "未提交健康证明，请提供近3个月内的正规医院体检报告", supervisor.name, now - timedelta(days=2))
+        add_reject_reason(mr4, "未提供已签署的入会合同，需会员本人签字并加盖公章", supervisor.name, now - timedelta(days=2))
+        db.add_all([mr1, mr2, mr3, mr4])
         db.flush()
 
-        db.add(Attachment(
-            order_id=missing_order.id,
-            required_attachment_id=miss_req_1.id,
-            file_name="钱小红_身份证.pdf",
-            file_type=AttachmentType.ID_CARD,
-            file_size=102400,
-            stored_name="id_missing_002.pdf",
-            uploaded_by=registrar.id,
-            uploaded_at=now - timedelta(days=5),
-        ))
-        db.add(Attachment(
-            order_id=missing_order.id,
-            required_attachment_id=miss_req_2.id,
-            file_name="钱小红_照片.jpg",
-            file_type=AttachmentType.PHOTO,
-            file_size=204800,
-            stored_name="photo_missing_002.jpg",
-            uploaded_by=registrar.id,
-            uploaded_at=now - timedelta(days=5),
-        ))
+        db.add(Attachment(order_id=missing_order.id, required_attachment_id=mr1.id, file_name="钱小红_身份证.pdf", file_type=AttachmentType.ID_CARD, file_size=102400, stored_name="id_missing_002.pdf", uploaded_by=registrar.id, uploaded_at=now - timedelta(days=5)))
+        db.add(Attachment(order_id=missing_order.id, required_attachment_id=mr2.id, file_name="钱小红_照片.jpg", file_type=AttachmentType.PHOTO, file_size=204800, stored_name="photo_missing_002.jpg", uploaded_by=registrar.id, uploaded_at=now - timedelta(days=5)))
 
+        db.add(AuditLog(order_id=missing_order.id, operator_id=registrar.id, action=AuditAction.CREATE, to_status=OrderStatus.DRAFT, remark=f"登记员【{registrar.name}】创建会员入会单", created_at=now - timedelta(days=5)))
+        db.add(AuditLog(order_id=missing_order.id, operator_id=registrar.id, action=AuditAction.UPLOAD_ATTACHMENT, remark=f"登记员【{registrar.name}】上传身份证和照片（缺少健康证明和合同）", created_at=now - timedelta(days=5)))
+        db.add(AuditLog(order_id=missing_order.id, operator_id=registrar.id, action=AuditAction.SUBMIT, from_status=OrderStatus.DRAFT, to_status=OrderStatus.PENDING_REVIEW, remark=f"登记员【{registrar.name}】提交审核，申请缓交健康证明，承诺3日内补齐", created_at=now - timedelta(days=4)))
         db.add(AuditLog(
-            order_id=missing_order.id,
-            operator_id=registrar.id,
-            action=AuditAction.CREATE,
-            to_status=OrderStatus.DRAFT,
-            remark="创建会员入会单",
-            created_at=now - timedelta(days=5),
-        ))
-        db.add(AuditLog(
-            order_id=missing_order.id,
-            operator_id=registrar.id,
-            action=AuditAction.UPLOAD_ATTACHMENT,
-            remark="上传身份证和照片（缺少健康证明和合同）",
-            created_at=now - timedelta(days=5),
-        ))
-        db.add(AuditLog(
-            order_id=missing_order.id,
-            operator_id=registrar.id,
-            action=AuditAction.SUBMIT,
-            from_status=OrderStatus.DRAFT,
-            to_status=OrderStatus.PENDING_REVIEW,
-            remark="提交审核，申请缓交健康证明",
-            created_at=now - timedelta(days=4),
-        ))
-        db.add(AuditLog(
-            order_id=missing_order.id,
-            operator_id=supervisor.id,
+            order_id=missing_order.id, operator_id=supervisor.id,
             action=AuditAction.REQUEST_SUPPLEMENT,
-            from_status=OrderStatus.PENDING_REVIEW,
-            to_status=OrderStatus.MATERIALS_MISSING,
-            remark="发现缺少健康证明和入会合同，退回补正",
-            failure_reason="附件缺失：健康证明、入会合同未提供，不满足审核条件",
+            from_status=OrderStatus.PENDING_REVIEW, to_status=OrderStatus.MATERIALS_MISSING,
+            remark=f"审核主管【{supervisor.name}】退回补正，需补充：健康证明、入会合同，备注：请尽快补齐，否则会影响入会进度。",
+            failure_reason="共 2 项附件需要补正：健康证明：未提交健康证明，请提供近3个月内的正规医院体检报告；入会合同：未提供已签署的入会合同，需会员本人签字并加盖公章",
             created_at=now - timedelta(days=2),
         ))
 
+        # ============== 3. 超时单 - 孙小刚（一轮退回后超7天未补正，有完整追溯） ==============
         overdue_order = MembershipOrder(
             order_no="HY20250601003",
             member_name="孙小刚",
@@ -307,7 +147,7 @@ def init_db():
             card_activated=False,
             status=OrderStatus.MATERIALS_MISSING,
             is_overdue=True,
-            reject_reason="超时未补正附件，请联系会员重新提交申请",
+            reject_reason=f"审核主管【{supervisor.name}】退回补正（共3项）：一寸免冠照片、健康证明、入会合同。请补正后重新提交。 备注：请7日内补齐，否则将作超时处理。",
             created_by=registrar.id,
             created_at=now - timedelta(days=25),
             updated_at=now - timedelta(days=3),
@@ -315,92 +155,39 @@ def init_db():
         db.add(overdue_order)
         db.flush()
 
-        overdue_req_1 = RequiredAttachment(
-            order_id=overdue_order.id,
-            attachment_type=AttachmentType.ID_CARD,
-            attachment_name="身份证复印件",
-            is_provided=True,
-        )
-        overdue_req_2 = RequiredAttachment(
-            order_id=overdue_order.id,
-            attachment_type=AttachmentType.PHOTO,
-            attachment_name="一寸免冠照片",
-            is_provided=False,
-            missing_reason="会员照片缺失，已通知超过7天未补正",
-        )
-        overdue_req_3 = RequiredAttachment(
-            order_id=overdue_order.id,
-            attachment_type=AttachmentType.HEALTH_CERT,
-            attachment_name="健康证明",
-            is_provided=False,
-            missing_reason="健康证明缺失，已通知超过7天未补正",
-        )
-        overdue_req_4 = RequiredAttachment(
-            order_id=overdue_order.id,
-            attachment_type=AttachmentType.CONTRACT,
-            attachment_name="入会合同",
-            is_provided=False,
-            missing_reason="合同未签署",
-        )
-        db.add_all([overdue_req_1, overdue_req_2, overdue_req_3, overdue_req_4])
+        or1 = RequiredAttachment(order_id=overdue_order.id, attachment_type=AttachmentType.ID_CARD, attachment_name="身份证复印件", is_provided=True)
+        or2 = RequiredAttachment(order_id=overdue_order.id, attachment_type=AttachmentType.PHOTO, attachment_name="一寸免冠照片", is_provided=False, missing_reason="会员照片缺失，已通知超过7天未补正")
+        or3 = RequiredAttachment(order_id=overdue_order.id, attachment_type=AttachmentType.HEALTH_CERT, attachment_name="健康证明", is_provided=False, missing_reason="健康证明缺失，已通知超过7天未补正，会员说最近比较忙")
+        or4 = RequiredAttachment(order_id=overdue_order.id, attachment_type=AttachmentType.CONTRACT, attachment_name="入会合同", is_provided=False, missing_reason="合同未签署，会员还在考虑中")
+        add_reject_reason(or2, "未提交一寸免冠照片，请提供近期白底免冠证件照", supervisor.name, now - timedelta(days=22))
+        add_reject_reason(or3, "健康证明缺失，入会必须提供有效期内的体检报告", supervisor.name, now - timedelta(days=22))
+        add_reject_reason(or4, "入会合同未签署，需会员本人签字确认后方可办理", supervisor.name, now - timedelta(days=22))
+        db.add_all([or1, or2, or3, or4])
         db.flush()
 
-        db.add(Attachment(
-            order_id=overdue_order.id,
-            required_attachment_id=overdue_req_1.id,
-            file_name="孙小刚_身份证.pdf",
-            file_type=AttachmentType.ID_CARD,
-            file_size=102400,
-            stored_name="id_overdue_003.pdf",
-            uploaded_by=registrar.id,
-            uploaded_at=now - timedelta(days=25),
-        ))
+        db.add(Attachment(order_id=overdue_order.id, required_attachment_id=or1.id, file_name="孙小刚_身份证.pdf", file_type=AttachmentType.ID_CARD, file_size=102400, stored_name="id_overdue_003.pdf", uploaded_by=registrar.id, uploaded_at=now - timedelta(days=25)))
 
+        db.add(AuditLog(order_id=overdue_order.id, operator_id=registrar.id, action=AuditAction.CREATE, to_status=OrderStatus.DRAFT, remark=f"登记员【{registrar.name}】创建会员入会单", created_at=now - timedelta(days=25)))
+        db.add(AuditLog(order_id=overdue_order.id, operator_id=registrar.id, action=AuditAction.UPLOAD_ATTACHMENT, remark=f"登记员【{registrar.name}】仅上传了身份证，缺少照片、健康证明、合同", created_at=now - timedelta(days=25)))
+        db.add(AuditLog(order_id=overdue_order.id, operator_id=registrar.id, action=AuditAction.SUBMIT, from_status=OrderStatus.DRAFT, to_status=OrderStatus.PENDING_REVIEW, remark=f"登记员【{registrar.name}】提交审核，承诺3日内补齐剩余材料", created_at=now - timedelta(days=24)))
         db.add(AuditLog(
-            order_id=overdue_order.id,
-            operator_id=registrar.id,
-            action=AuditAction.CREATE,
-            to_status=OrderStatus.DRAFT,
-            remark="创建会员入会单",
-            created_at=now - timedelta(days=25),
-        ))
-        db.add(AuditLog(
-            order_id=overdue_order.id,
-            operator_id=registrar.id,
-            action=AuditAction.UPLOAD_ATTACHMENT,
-            remark="仅上传了身份证，缺少照片、健康证明、合同",
-            created_at=now - timedelta(days=25),
-        ))
-        db.add(AuditLog(
-            order_id=overdue_order.id,
-            operator_id=registrar.id,
-            action=AuditAction.SUBMIT,
-            from_status=OrderStatus.DRAFT,
-            to_status=OrderStatus.PENDING_REVIEW,
-            remark="提交审核，承诺3日内补齐剩余材料",
-            created_at=now - timedelta(days=24),
-        ))
-        db.add(AuditLog(
-            order_id=overdue_order.id,
-            operator_id=supervisor.id,
+            order_id=overdue_order.id, operator_id=supervisor.id,
             action=AuditAction.REQUEST_SUPPLEMENT,
-            from_status=OrderStatus.PENDING_REVIEW,
-            to_status=OrderStatus.MATERIALS_MISSING,
-            remark="退回补正，请7日内补齐照片、健康证明和合同",
-            failure_reason="附件缺失：照片、健康证明、入会合同未提供",
+            from_status=OrderStatus.PENDING_REVIEW, to_status=OrderStatus.MATERIALS_MISSING,
+            remark=f"审核主管【{supervisor.name}】退回补正，请7日内补齐照片、健康证明和合同，备注：请7日内补齐，否则将作超时处理。",
+            failure_reason="共 3 项附件需要补正：一寸免冠照片：未提交一寸免冠照片，请提供近期白底免冠证件照；健康证明：健康证明缺失，入会必须提供有效期内的体检报告；入会合同：入会合同未签署，需会员本人签字确认后方可办理",
             created_at=now - timedelta(days=22),
         ))
         db.add(AuditLog(
-            order_id=overdue_order.id,
-            operator_id=supervisor.id,
+            order_id=overdue_order.id, operator_id=supervisor.id,
             action=AuditAction.MARK_OVERDUE,
-            from_status=OrderStatus.MATERIALS_MISSING,
-            to_status=OrderStatus.MATERIALS_MISSING,
-            remark="补正期限已超7天，标记为超时单",
-            failure_reason="补正超时：会员超过7天未补齐所需附件材料",
+            from_status=OrderStatus.MATERIALS_MISSING, to_status=OrderStatus.MATERIALS_MISSING,
+            remark=f"审核主管【{supervisor.name}】标记：补正期限已超7天，标记为超时单",
+            failure_reason="补正超时：会员超过7天未补齐所需附件材料（照片、健康证明、合同），已通知多次未回应",
             created_at=now - timedelta(days=3),
         ))
 
+        # ============== 4. 退回单 - 李小华（二轮补正+最终驳回，每附件多次驳回历史） ==============
         rejected_order = MembershipOrder(
             order_no="HY20250601004",
             member_name="李小华",
@@ -413,129 +200,87 @@ def init_db():
             card_activated=False,
             status=OrderStatus.REJECTED,
             is_overdue=False,
-            reject_reason="健康证明不合格（已过期），身份证复印件模糊不清，请重新提交合格材料",
+            reject_reason="二次补正后材料仍不合格：身份证扫描件模糊无法辨认、健康证明已过期、入会合同仍未签署。鉴于两次补正均不满足要求，予以驳回，请会员重新提交申请。",
             created_by=registrar.id,
-            created_at=now - timedelta(days=8),
+            created_at=now - timedelta(days=14),
             updated_at=now - timedelta(days=1),
         )
         db.add(rejected_order)
         db.flush()
 
-        reject_req_1 = RequiredAttachment(
-            order_id=rejected_order.id,
-            attachment_type=AttachmentType.ID_CARD,
-            attachment_name="身份证复印件",
-            is_provided=False,
-            reject_reason="身份证复印件扫描模糊，关键信息无法辨认，请重新上传清晰版本",
-        )
-        reject_req_2 = RequiredAttachment(
-            order_id=rejected_order.id,
-            attachment_type=AttachmentType.PHOTO,
-            attachment_name="一寸免冠照片",
-            is_provided=True,
-        )
-        reject_req_3 = RequiredAttachment(
-            order_id=rejected_order.id,
-            attachment_type=AttachmentType.HEALTH_CERT,
-            attachment_name="健康证明",
-            is_provided=False,
-            reject_reason="健康证明已过期（有效期至2025-05-01），请提供近3个月内的体检报告",
-        )
-        reject_req_4 = RequiredAttachment(
-            order_id=rejected_order.id,
-            attachment_type=AttachmentType.CONTRACT,
-            attachment_name="入会合同",
-            is_provided=False,
-            reject_reason="合同未签字盖章",
-        )
-        db.add_all([reject_req_1, reject_req_2, reject_req_3, reject_req_4])
+        rr1 = RequiredAttachment(order_id=rejected_order.id, attachment_type=AttachmentType.ID_CARD, attachment_name="身份证复印件", is_provided=False, missing_reason="身份证扫描件模糊，关键信息无法辨认")
+        rr2 = RequiredAttachment(order_id=rejected_order.id, attachment_type=AttachmentType.PHOTO, attachment_name="一寸免冠照片", is_provided=True)
+        rr3 = RequiredAttachment(order_id=rejected_order.id, attachment_type=AttachmentType.HEALTH_CERT, attachment_name="健康证明", is_provided=False, missing_reason="健康证明已过期，且重新提交的仍然过期")
+        rr4 = RequiredAttachment(order_id=rejected_order.id, attachment_type=AttachmentType.CONTRACT, attachment_name="入会合同", is_provided=False, missing_reason="合同未签字盖章，两次都未提供签署版")
+
+        # 身份证：2次退回历史
+        add_reject_reason(rr1, "身份证扫描件模糊，姓名和身份证号无法辨认，请重新上传清晰版本", supervisor.name, now - timedelta(days=11))
+        add_reject_reason(rr1, "二次提交的身份证仍然模糊，关键信息（照片、证件号）无法识别，请务必提供高清扫描件或拍照件", supervisor.name, now - timedelta(days=3))
+        ts_final = fmt_time(now - timedelta(days=1))
+        final_reason = f"[{ts_final} 最终驳回-{supervisor.name}] 整体驳回：二次补正后材料仍不合格，予以驳回"
+        old_r1 = rr1.reject_reason or ""
+        rr1.reject_reason = f"{final_reason}\n{old_r1}"
+
+        # 健康证明：2次退回历史
+        add_reject_reason(rr3, "健康证明已过期（有效期至2025-05-01），请提供近3个月内的体检报告", supervisor.name, now - timedelta(days=11))
+        add_reject_reason(rr3, "重新提交的健康证明还是过期的（2025-04-15签发，有效期3个月，2025-07-15到期，但现在是2026年），请提供有效的", supervisor.name, now - timedelta(days=3))
+        old_r3 = rr3.reject_reason or ""
+        rr3.reject_reason = f"{final_reason}\n{old_r3}"
+
+        # 合同：2次退回历史
+        add_reject_reason(rr4, "入会合同未签字盖章，请会员签字并加盖健身房公章后上传", supervisor.name, now - timedelta(days=11))
+        add_reject_reason(rr4, "合同还是只有电子版，没有双方签字，不能生效", supervisor.name, now - timedelta(days=3))
+        old_r4 = rr4.reject_reason or ""
+        rr4.reject_reason = f"{final_reason}\n{old_r4}"
+
+        db.add_all([rr1, rr2, rr3, rr4])
         db.flush()
 
-        db.add(Attachment(
-            order_id=rejected_order.id,
-            required_attachment_id=reject_req_1.id,
-            file_name="李小华_身份证_模糊版.pdf",
-            file_type=AttachmentType.ID_CARD,
-            file_size=51200,
-            stored_name="id_reject_004.pdf",
-            uploaded_by=registrar.id,
-            uploaded_at=now - timedelta(days=8),
-        ))
-        db.add(Attachment(
-            order_id=rejected_order.id,
-            required_attachment_id=reject_req_2.id,
-            file_name="李小华_照片.jpg",
-            file_type=AttachmentType.PHOTO,
-            file_size=204800,
-            stored_name="photo_reject_004.jpg",
-            uploaded_by=registrar.id,
-            uploaded_at=now - timedelta(days=8),
-        ))
-        db.add(Attachment(
-            order_id=rejected_order.id,
-            required_attachment_id=reject_req_3.id,
-            file_name="李小华_健康证明_过期.pdf",
-            file_type=AttachmentType.HEALTH_CERT,
-            file_size=153600,
-            stored_name="health_reject_004.pdf",
-            uploaded_by=registrar.id,
-            uploaded_at=now - timedelta(days=8),
-        ))
+        db.add(Attachment(order_id=rejected_order.id, required_attachment_id=rr1.id, file_name="李小华_身份证_模糊版v1.pdf", file_type=AttachmentType.ID_CARD, file_size=51200, stored_name="id_reject_v1_004.pdf", uploaded_by=registrar.id, uploaded_at=now - timedelta(days=14)))
+        db.add(Attachment(order_id=rejected_order.id, required_attachment_id=rr2.id, file_name="李小华_照片.jpg", file_type=AttachmentType.PHOTO, file_size=204800, stored_name="photo_reject_004.jpg", uploaded_by=registrar.id, uploaded_at=now - timedelta(days=14)))
+        db.add(Attachment(order_id=rejected_order.id, required_attachment_id=rr3.id, file_name="李小华_健康证明_过期v1.pdf", file_type=AttachmentType.HEALTH_CERT, file_size=153600, stored_name="health_reject_v1_004.pdf", uploaded_by=registrar.id, uploaded_at=now - timedelta(days=14)))
 
+        # 第二次提交的不合格附件
+        db.add(Attachment(order_id=rejected_order.id, required_attachment_id=rr1.id, file_name="李小华_身份证_模糊版v2.pdf", file_type=AttachmentType.ID_CARD, file_size=48000, stored_name="id_reject_v2_004.pdf", uploaded_by=registrar.id, uploaded_at=now - timedelta(days=6)))
+        db.add(Attachment(order_id=rejected_order.id, required_attachment_id=rr3.id, file_name="李小华_健康证明_过期v2.pdf", file_type=AttachmentType.HEALTH_CERT, file_size=140000, stored_name="health_reject_v2_004.pdf", uploaded_by=registrar.id, uploaded_at=now - timedelta(days=6)))
+
+        db.add(AuditLog(order_id=rejected_order.id, operator_id=registrar.id, action=AuditAction.CREATE, to_status=OrderStatus.DRAFT, remark=f"登记员【{registrar.name}】创建会员入会单", created_at=now - timedelta(days=14)))
+        db.add(AuditLog(order_id=rejected_order.id, operator_id=registrar.id, action=AuditAction.UPLOAD_ATTACHMENT, remark=f"登记员【{registrar.name}】上传身份证、照片、健康证明（合同未上传）", created_at=now - timedelta(days=14)))
+        db.add(AuditLog(order_id=rejected_order.id, operator_id=registrar.id, action=AuditAction.SUBMIT, from_status=OrderStatus.DRAFT, to_status=OrderStatus.PENDING_REVIEW, remark=f"登记员【{registrar.name}】第一次提交审核", created_at=now - timedelta(days=13)))
         db.add(AuditLog(
-            order_id=rejected_order.id,
-            operator_id=registrar.id,
-            action=AuditAction.CREATE,
-            to_status=OrderStatus.DRAFT,
-            remark="创建会员入会单",
-            created_at=now - timedelta(days=8),
-        ))
-        db.add(AuditLog(
-            order_id=rejected_order.id,
-            operator_id=registrar.id,
-            action=AuditAction.UPLOAD_ATTACHMENT,
-            remark="上传身份证、照片、健康证明（合同未上传）",
-            created_at=now - timedelta(days=8),
-        ))
-        db.add(AuditLog(
-            order_id=rejected_order.id,
-            operator_id=registrar.id,
-            action=AuditAction.SUBMIT,
-            from_status=OrderStatus.DRAFT,
-            to_status=OrderStatus.PENDING_REVIEW,
-            remark="提交审核",
-            created_at=now - timedelta(days=7),
-        ))
-        db.add(AuditLog(
-            order_id=rejected_order.id,
-            operator_id=supervisor.id,
+            order_id=rejected_order.id, operator_id=supervisor.id,
             action=AuditAction.REQUEST_SUPPLEMENT,
-            from_status=OrderStatus.PENDING_REVIEW,
-            to_status=OrderStatus.MATERIALS_MISSING,
-            remark="材料有问题：身份证模糊、健康证明过期、合同缺失，退回补正",
-            failure_reason="附件不合格：身份证扫描件模糊无法辨认；健康证明已过期；入会合同未上传",
-            created_at=now - timedelta(days=6),
+            from_status=OrderStatus.PENDING_REVIEW, to_status=OrderStatus.MATERIALS_MISSING,
+            remark=f"审核主管【{supervisor.name}】第一次退回补正：身份证模糊、健康证明过期、合同缺失，备注：请7日内补正后重新提交",
+            failure_reason="共 3 项附件需要补正：身份证复印件：身份证扫描件模糊，姓名和身份证号无法辨认，请重新上传清晰版本；健康证明：健康证明已过期（有效期至2025-05-01），请提供近3个月内的体检报告；入会合同：入会合同未签字盖章，请会员签字并加盖健身房公章后上传",
+            created_at=now - timedelta(days=11),
+        ))
+        db.add(AuditLog(order_id=rejected_order.id, operator_id=registrar.id, action=AuditAction.UPLOAD_ATTACHMENT, remark=f"登记员【{registrar.name}】重新上传身份证和健康证明（v2版本）", created_at=now - timedelta(days=6)))
+        db.add(AuditLog(
+            order_id=rejected_order.id, operator_id=registrar.id,
+            action=AuditAction.RESUBMIT,
+            from_status=OrderStatus.MATERIALS_MISSING, to_status=OrderStatus.RESUBMITTED,
+            remark=f"登记员【{registrar.name}】第一次补正后重新提交，备注：已重新扫描身份证和健康证明，合同还在走流程",
+            created_at=now - timedelta(days=5),
         ))
         db.add(AuditLog(
-            order_id=rejected_order.id,
-            operator_id=registrar.id,
-            action=AuditAction.RESUBMIT,
-            from_status=OrderStatus.MATERIALS_MISSING,
-            to_status=OrderStatus.RESUBMITTED,
-            remark="补正后重新提交（未重新上传附件，仅做了说明）",
+            order_id=rejected_order.id, operator_id=supervisor.id,
+            action=AuditAction.REQUEST_SUPPLEMENT,
+            from_status=OrderStatus.RESUBMITTED, to_status=OrderStatus.MATERIALS_MISSING,
+            remark=f"审核主管【{supervisor.name}】第二次退回补正：身份证仍模糊、健康证明仍过期、合同仍未签，备注：这是第二次退回，请务必认真核对材料",
+            failure_reason="共 3 项附件仍需补正：身份证复印件：二次提交的身份证仍然模糊，关键信息（照片、证件号）无法识别，请务必提供高清扫描件或拍照件；健康证明：重新提交的健康证明还是过期的，请提供有效的；入会合同：合同还是只有电子版，没有双方签字，不能生效",
             created_at=now - timedelta(days=3),
         ))
         db.add(AuditLog(
-            order_id=rejected_order.id,
-            operator_id=supervisor.id,
+            order_id=rejected_order.id, operator_id=supervisor.id,
             action=AuditAction.REJECT,
-            from_status=OrderStatus.RESUBMITTED,
-            to_status=OrderStatus.REJECTED,
-            remark="二次审核发现材料仍不合格，予以驳回",
-            failure_reason="补正不完整：未重新上传清晰的身份证、未更换有效的健康证明、仍未提供签署的合同，不符合入会审核标准",
+            from_status=OrderStatus.RESUBMITTED, to_status=OrderStatus.REJECTED,
+            remark=f"审核主管【{supervisor.name}】二次审核发现材料仍不合格，予以驳回，备注：两次补正均不通过，请重新发起申请",
+            failure_reason="二次补正后材料仍不合格：身份证扫描件模糊无法辨认、健康证明已过期、入会合同仍未签署。鉴于两次补正均不满足要求，予以驳回，请会员重新提交申请。",
             created_at=now - timedelta(days=1),
         ))
 
+        # ============== 5. 待审核单 - 周小龙（登记员已提交，等待审核主管办理） ==============
         pending_order = MembershipOrder(
             order_no="HY20250601005",
             member_name="周小龙",
@@ -555,99 +300,23 @@ def init_db():
         db.add(pending_order)
         db.flush()
 
-        pending_req_1 = RequiredAttachment(
-            order_id=pending_order.id,
-            attachment_type=AttachmentType.ID_CARD,
-            attachment_name="身份证复印件",
-            is_provided=True,
-        )
-        pending_req_2 = RequiredAttachment(
-            order_id=pending_order.id,
-            attachment_type=AttachmentType.PHOTO,
-            attachment_name="一寸免冠照片",
-            is_provided=True,
-        )
-        pending_req_3 = RequiredAttachment(
-            order_id=pending_order.id,
-            attachment_type=AttachmentType.HEALTH_CERT,
-            attachment_name="健康证明",
-            is_provided=True,
-        )
-        pending_req_4 = RequiredAttachment(
-            order_id=pending_order.id,
-            attachment_type=AttachmentType.CONTRACT,
-            attachment_name="入会合同",
-            is_provided=True,
-        )
-        db.add_all([pending_req_1, pending_req_2, pending_req_3, pending_req_4])
+        pr1 = RequiredAttachment(order_id=pending_order.id, attachment_type=AttachmentType.ID_CARD, attachment_name="身份证复印件", is_provided=True)
+        pr2 = RequiredAttachment(order_id=pending_order.id, attachment_type=AttachmentType.PHOTO, attachment_name="一寸免冠照片", is_provided=True)
+        pr3 = RequiredAttachment(order_id=pending_order.id, attachment_type=AttachmentType.HEALTH_CERT, attachment_name="健康证明", is_provided=True)
+        pr4 = RequiredAttachment(order_id=pending_order.id, attachment_type=AttachmentType.CONTRACT, attachment_name="入会合同", is_provided=True)
+        db.add_all([pr1, pr2, pr3, pr4])
         db.flush()
 
-        db.add(Attachment(
-            order_id=pending_order.id,
-            required_attachment_id=pending_req_1.id,
-            file_name="周小龙_身份证.pdf",
-            file_type=AttachmentType.ID_CARD,
-            file_size=102400,
-            stored_name="id_pending_005.pdf",
-            uploaded_by=registrar.id,
-            uploaded_at=now - timedelta(hours=6),
-        ))
-        db.add(Attachment(
-            order_id=pending_order.id,
-            required_attachment_id=pending_req_2.id,
-            file_name="周小龙_照片.jpg",
-            file_type=AttachmentType.PHOTO,
-            file_size=204800,
-            stored_name="photo_pending_005.jpg",
-            uploaded_by=registrar.id,
-            uploaded_at=now - timedelta(hours=6),
-        ))
-        db.add(Attachment(
-            order_id=pending_order.id,
-            required_attachment_id=pending_req_3.id,
-            file_name="周小龙_健康证明.pdf",
-            file_type=AttachmentType.HEALTH_CERT,
-            file_size=153600,
-            stored_name="health_pending_005.pdf",
-            uploaded_by=registrar.id,
-            uploaded_at=now - timedelta(hours=6),
-        ))
-        db.add(Attachment(
-            order_id=pending_order.id,
-            required_attachment_id=pending_req_4.id,
-            file_name="周小龙_入会合同.pdf",
-            file_type=AttachmentType.CONTRACT,
-            file_size=307200,
-            stored_name="contract_pending_005.pdf",
-            uploaded_by=registrar.id,
-            uploaded_at=now - timedelta(hours=6),
-        ))
+        db.add(Attachment(order_id=pending_order.id, required_attachment_id=pr1.id, file_name="周小龙_身份证.pdf", file_type=AttachmentType.ID_CARD, file_size=102400, stored_name="id_pending_005.pdf", uploaded_by=registrar.id, uploaded_at=now - timedelta(hours=6)))
+        db.add(Attachment(order_id=pending_order.id, required_attachment_id=pr2.id, file_name="周小龙_照片.jpg", file_type=AttachmentType.PHOTO, file_size=204800, stored_name="photo_pending_005.jpg", uploaded_by=registrar.id, uploaded_at=now - timedelta(hours=6)))
+        db.add(Attachment(order_id=pending_order.id, required_attachment_id=pr3.id, file_name="周小龙_健康证明.pdf", file_type=AttachmentType.HEALTH_CERT, file_size=153600, stored_name="health_pending_005.pdf", uploaded_by=registrar.id, uploaded_at=now - timedelta(hours=6)))
+        db.add(Attachment(order_id=pending_order.id, required_attachment_id=pr4.id, file_name="周小龙_入会合同.pdf", file_type=AttachmentType.CONTRACT, file_size=307200, stored_name="contract_pending_005.pdf", uploaded_by=registrar.id, uploaded_at=now - timedelta(hours=6)))
 
-        db.add(AuditLog(
-            order_id=pending_order.id,
-            operator_id=registrar.id,
-            action=AuditAction.CREATE,
-            to_status=OrderStatus.DRAFT,
-            remark="创建会员入会单",
-            created_at=now - timedelta(hours=6),
-        ))
-        db.add(AuditLog(
-            order_id=pending_order.id,
-            operator_id=registrar.id,
-            action=AuditAction.UPLOAD_ATTACHMENT,
-            remark="上传全部4份附件材料",
-            created_at=now - timedelta(hours=6),
-        ))
-        db.add(AuditLog(
-            order_id=pending_order.id,
-            operator_id=registrar.id,
-            action=AuditAction.SUBMIT,
-            from_status=OrderStatus.DRAFT,
-            to_status=OrderStatus.PENDING_REVIEW,
-            remark="提交审核，等待审核主管办理",
-            created_at=now - timedelta(hours=6),
-        ))
+        db.add(AuditLog(order_id=pending_order.id, operator_id=registrar.id, action=AuditAction.CREATE, to_status=OrderStatus.DRAFT, remark=f"登记员【{registrar.name}】创建会员入会单", created_at=now - timedelta(hours=6)))
+        db.add(AuditLog(order_id=pending_order.id, operator_id=registrar.id, action=AuditAction.UPLOAD_ATTACHMENT, remark=f"登记员【{registrar.name}】上传全部4份附件材料", created_at=now - timedelta(hours=6)))
+        db.add(AuditLog(order_id=pending_order.id, operator_id=registrar.id, action=AuditAction.SUBMIT, from_status=OrderStatus.DRAFT, to_status=OrderStatus.PENDING_REVIEW, remark=f"登记员【{registrar.name}】提交审核，等待审核主管办理", created_at=now - timedelta(hours=6)))
 
+        # ============== 6. 审核通过待复核 - 吴小芳 ==============
         approved_order = MembershipOrder(
             order_no="HY20250601006",
             member_name="吴小芳",
@@ -667,130 +336,69 @@ def init_db():
         db.add(approved_order)
         db.flush()
 
-        approv_req_1 = RequiredAttachment(
-            order_id=approved_order.id,
-            attachment_type=AttachmentType.ID_CARD,
-            attachment_name="身份证复印件",
-            is_provided=True,
-        )
-        approv_req_2 = RequiredAttachment(
-            order_id=approved_order.id,
-            attachment_type=AttachmentType.PHOTO,
-            attachment_name="一寸免冠照片",
-            is_provided=True,
-        )
-        approv_req_3 = RequiredAttachment(
-            order_id=approved_order.id,
-            attachment_type=AttachmentType.HEALTH_CERT,
-            attachment_name="健康证明",
-            is_provided=True,
-        )
-        approv_req_4 = RequiredAttachment(
-            order_id=approved_order.id,
-            attachment_type=AttachmentType.CONTRACT,
-            attachment_name="入会合同",
-            is_provided=True,
-        )
-        db.add_all([approv_req_1, approv_req_2, approv_req_3, approv_req_4])
+        ar1 = RequiredAttachment(order_id=approved_order.id, attachment_type=AttachmentType.ID_CARD, attachment_name="身份证复印件", is_provided=True)
+        ar2 = RequiredAttachment(order_id=approved_order.id, attachment_type=AttachmentType.PHOTO, attachment_name="一寸免冠照片", is_provided=True)
+        ar3 = RequiredAttachment(order_id=approved_order.id, attachment_type=AttachmentType.HEALTH_CERT, attachment_name="健康证明", is_provided=True)
+        ar4 = RequiredAttachment(order_id=approved_order.id, attachment_type=AttachmentType.CONTRACT, attachment_name="入会合同", is_provided=True)
+        db.add_all([ar1, ar2, ar3, ar4])
         db.flush()
 
-        db.add(Attachment(
-            order_id=approved_order.id,
-            required_attachment_id=approv_req_1.id,
-            file_name="吴小芳_身份证.pdf",
-            file_type=AttachmentType.ID_CARD,
-            file_size=102400,
-            stored_name="id_approv_006.pdf",
-            uploaded_by=registrar.id,
-            uploaded_at=now - timedelta(days=4),
-        ))
-        db.add(Attachment(
-            order_id=approved_order.id,
-            required_attachment_id=approv_req_2.id,
-            file_name="吴小芳_照片.jpg",
-            file_type=AttachmentType.PHOTO,
-            file_size=204800,
-            stored_name="photo_approv_006.jpg",
-            uploaded_by=registrar.id,
-            uploaded_at=now - timedelta(days=4),
-        ))
-        db.add(Attachment(
-            order_id=approved_order.id,
-            required_attachment_id=approv_req_3.id,
-            file_name="吴小芳_健康证明.pdf",
-            file_type=AttachmentType.HEALTH_CERT,
-            file_size=153600,
-            stored_name="health_approv_006.pdf",
-            uploaded_by=registrar.id,
-            uploaded_at=now - timedelta(days=4),
-        ))
-        db.add(Attachment(
-            order_id=approved_order.id,
-            required_attachment_id=approv_req_4.id,
-            file_name="吴小芳_入会合同.pdf",
-            file_type=AttachmentType.CONTRACT,
-            file_size=307200,
-            stored_name="contract_approv_006.pdf",
-            uploaded_by=registrar.id,
-            uploaded_at=now - timedelta(days=4),
-        ))
+        db.add(Attachment(order_id=approved_order.id, required_attachment_id=ar1.id, file_name="吴小芳_身份证.pdf", file_type=AttachmentType.ID_CARD, file_size=102400, stored_name="id_approv_006.pdf", uploaded_by=registrar.id, uploaded_at=now - timedelta(days=4)))
+        db.add(Attachment(order_id=approved_order.id, required_attachment_id=ar2.id, file_name="吴小芳_照片.jpg", file_type=AttachmentType.PHOTO, file_size=204800, stored_name="photo_approv_006.jpg", uploaded_by=registrar.id, uploaded_at=now - timedelta(days=4)))
+        db.add(Attachment(order_id=approved_order.id, required_attachment_id=ar3.id, file_name="吴小芳_健康证明.pdf", file_type=AttachmentType.HEALTH_CERT, file_size=153600, stored_name="health_approv_006.pdf", uploaded_by=registrar.id, uploaded_at=now - timedelta(days=4)))
+        db.add(Attachment(order_id=approved_order.id, required_attachment_id=ar4.id, file_name="吴小芳_入会合同.pdf", file_type=AttachmentType.CONTRACT, file_size=307200, stored_name="contract_approv_006.pdf", uploaded_by=registrar.id, uploaded_at=now - timedelta(days=4)))
 
-        db.add(AuditLog(
-            order_id=approved_order.id,
-            operator_id=registrar.id,
-            action=AuditAction.CREATE,
-            to_status=OrderStatus.DRAFT,
-            remark="创建会员入会单",
-            created_at=now - timedelta(days=4),
-        ))
-        db.add(AuditLog(
-            order_id=approved_order.id,
-            operator_id=registrar.id,
-            action=AuditAction.UPLOAD_ATTACHMENT,
-            remark="上传全部4份附件材料",
-            created_at=now - timedelta(days=4),
-        ))
-        db.add(AuditLog(
-            order_id=approved_order.id,
-            operator_id=registrar.id,
-            action=AuditAction.SUBMIT,
-            from_status=OrderStatus.DRAFT,
-            to_status=OrderStatus.PENDING_REVIEW,
-            remark="提交审核",
-            created_at=now - timedelta(days=3),
-        ))
-        db.add(AuditLog(
-            order_id=approved_order.id,
-            operator_id=supervisor.id,
-            action=AuditAction.APPROVE,
-            from_status=OrderStatus.PENDING_REVIEW,
-            to_status=OrderStatus.APPROVED_REVIEW,
-            remark="审核通过，材料齐全有效",
-            created_at=now - timedelta(days=2),
-        ))
-        db.add(AuditLog(
-            order_id=approved_order.id,
-            operator_id=supervisor.id,
-            action=AuditAction.CONFIRM_CONTRACT,
-            remark="合同已确认签署",
-            created_at=now - timedelta(days=2),
-        ))
+        db.add(AuditLog(order_id=approved_order.id, operator_id=registrar.id, action=AuditAction.CREATE, to_status=OrderStatus.DRAFT, remark=f"登记员【{registrar.name}】创建会员入会单", created_at=now - timedelta(days=4)))
+        db.add(AuditLog(order_id=approved_order.id, operator_id=registrar.id, action=AuditAction.UPLOAD_ATTACHMENT, remark=f"登记员【{registrar.name}】上传全部4份附件材料", created_at=now - timedelta(days=4)))
+        db.add(AuditLog(order_id=approved_order.id, operator_id=registrar.id, action=AuditAction.SUBMIT, from_status=OrderStatus.DRAFT, to_status=OrderStatus.PENDING_REVIEW, remark=f"登记员【{registrar.name}】提交审核", created_at=now - timedelta(days=3)))
+        db.add(AuditLog(order_id=approved_order.id, operator_id=supervisor.id, action=AuditAction.APPROVE, from_status=OrderStatus.PENDING_REVIEW, to_status=OrderStatus.APPROVED_REVIEW, remark=f"审核主管【{supervisor.name}】办理通过，材料齐全有效", created_at=now - timedelta(days=2)))
+        db.add(AuditLog(order_id=approved_order.id, operator_id=supervisor.id, action=AuditAction.CONFIRM_CONTRACT, remark=f"审核主管【{supervisor.name}】确认合同已签署", created_at=now - timedelta(days=2)))
 
         db.commit()
+        print("=" * 60)
         print("数据库初始化完成！种子数据已加载。")
+        print("=" * 60)
         print("")
-        print("用户账号（登录时可切换角色）：")
-        print("  会员入会登记员: registrar / 李登记")
-        print("  会员入会审核主管: supervisor / 王审核")
-        print("  社区健身房复核负责人: reviewer / 张复核")
+        print("【用户账号（登录时可切换角色）】")
+        print(f"  登记员（registrar）     : {registrar.name}")
+        print(f"  审核主管（supervisor）  : {supervisor.name}")
+        print(f"  复核负责人（reviewer）  : {reviewer.name}")
         print("")
-        print("种子数据包含以下会员入会单：")
-        print("  1. HY20250601001 赵小明 - 【正常单】已归档（完整流程）")
-        print("  2. HY20250601002 钱小红 - 【缺材料单】附件缺失待补正")
-        print("  3. HY20250601003 孙小刚 - 【超时单】补正超时未处理")
-        print("  4. HY20250601004 李小华 - 【退回单】二次审核不合格被驳回")
-        print("  5. HY20250601005 周小龙 - 【待审核】等待审核主管办理")
-        print("  6. HY20250601006 吴小芳 - 【审核通过】等待复核负责人复核")
+        print("【Seed 样例入会单（共6条）】")
+        print("")
+        print("  1. HY20250601001  赵小明  【✅ 正常单】已归档")
+        print("     → 完整流程：创建→提交→审核通过→复核→归档")
+        print("     → 4/4 附件齐全，合同已确认，卡权益已启用")
+        print("     → 审计日志包含 3 个角色的完整操作记录")
+        print("")
+        print("  2. HY20250601002  钱小红  【⚠️ 缺材料单】附件缺失待补正（一轮）")
+        print("     → 2/4 附件（缺健康证明、合同），每附件独立退回原因")
+        print("     → 登记员可以补正上传后重新提交")
+        print("")
+        print("  3. HY20250601003  孙小刚  【⏰ 超时单】补正超时未处理")
+        print("     → 1/4 附件，超 7 天未补齐")
+        print("     → 已标记超时，有独立的超时审计记录和失败原因")
+        print("")
+        print("  4. HY20250601004  李小华  【❌ 退回单】二次审核不合格被驳回")
+        print("     → 两轮退回补正 + 最终驳回，共 3 次审核交互")
+        print("     → 每个附件都有 2-3 条驳回历史（带时间+操作人+原因）")
+        print("     → 审计日志完整追溯：谁在什么时候因为什么退回/驳回")
+        print("")
+        print("  5. HY20250601005  周小龙  【📋 待审核】等待审核主管办理")
+        print("     → 4/4 附件齐全，登记员已提交")
+        print("     → 审核主管可选择：通过 / 退回补正 / 驳回")
+        print("")
+        print("  6. HY20250601006  吴小芳  【📬 待复核】审核通过等待复核归档")
+        print("     → 审核主管已通过并确认合同")
+        print("     → 复核负责人可复核通过并归档（自动启用卡权益）")
+        print("")
+        print("【验收路径建议】")
+        print("  ● 正常流程：周小龙 → 审核主管通过 → 复核负责人复核 → 归档")
+        print("  ● 补正流程：钱小红 → 登记员补传2个附件 → 重新提交 → 审核主管再处理")
+        print("  ● 驳回流程：周小龙 → 审核主管按附件填原因退回 → 登记员重提 → 再退回 → 最终驳回")
+        print("  ● 追溯查看：李小华 → 看每附件 2 轮驳回历史 → 看审计日志时间线")
+        print("  ● 权限校验：用错误角色操作（如登记员点审核），后端会拒绝并返回原因")
+
     finally:
         db.close()
 

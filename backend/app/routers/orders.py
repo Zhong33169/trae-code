@@ -1,26 +1,33 @@
 from datetime import datetime
-from typing import Optional
-from litestar import Router, get, post, put, delete
+from typing import Optional, List
+from pydantic import BaseModel
+from litestar import Router, get, post, put, Request
+from litestar.connection import ASGIConnection
 from litestar.params import Parameter
+from litestar.exceptions import HTTPException
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.auth import get_current_user, require_registrar, require_supervisor, require_reviewer
 from app.models import (
     MembershipOrder, OrderStatus, RequiredAttachment, Attachment, AttachmentType,
-    AuditLog, AuditAction, User
+    AuditLog, AuditAction, User, UserRole
 )
 from app.schemas import (
-    MembershipOrderSchema, MembershipOrderCreate, OrderQueryParams,
+    MembershipOrderSchema, MembershipOrderCreate,
     RequiredAttachmentSchema, AttachmentSchema, AuditLogSchema,
-    ReviewAction, SupplementRequest, ContractConfirm, CardActivate
+    ReviewAction,
 )
 
 
-def _get_operator(db: Session, operator_id: int = 1):
-    user = db.query(User).filter(User.id == operator_id).first()
-    if not user:
-        user = db.query(User).first()
-    return user
+class AttachmentSupplementItem(BaseModel):
+    required_attachment_id: int
+    reject_reason: Optional[str] = None
+
+
+class SupplementRequestV2(BaseModel):
+    items: List[AttachmentSupplementItem]
+    remark: Optional[str] = None
 
 
 def _add_audit(
@@ -52,9 +59,19 @@ def _serialize_order(db: Session, order: MembershipOrder) -> MembershipOrderSche
         op = db.query(User).filter(User.id == log.operator_id).first()
         log_dict = AuditLogSchema.model_validate(log).model_dump()
         log_dict["operator_name"] = op.name if op else "未知"
+        log_dict["operator_role"] = op.role.value if op else None
         logs.append(log_dict)
     data.audit_logs = logs
     return data
+
+
+def _assert_status(order: MembershipOrder, allowed: set, action_name: str, user: User):
+    if order.status not in allowed:
+        raise HTTPException(
+            status_code=400,
+            detail=f"操作【{action_name}】失败："
+                   f"当前角色【{user.role.value}】在状态【{order.status.value}】下无权限执行此操作"
+        )
 
 
 @get("/orders")
@@ -89,15 +106,17 @@ async def get_order(order_id: int) -> MembershipOrderSchema:
     db: Session = next(get_db())
     order = db.query(MembershipOrder).filter(MembershipOrder.id == order_id).first()
     if not order:
-        from litestar.exceptions import HTTPException
         raise HTTPException(status_code=404, detail="会员入会单不存在")
     return _serialize_order(db, order)
 
 
-@post("/orders")
-async def create_order(data: MembershipOrderCreate) -> MembershipOrderSchema:
+@post("/orders", guards=[require_registrar])
+async def create_order(
+    data: MembershipOrderCreate,
+    request: Request,
+) -> MembershipOrderSchema:
     db: Session = next(get_db())
-    operator = _get_operator(db, 1)
+    operator = get_current_user(request)
     now = datetime.utcnow()
     order_no = f"HY{now.strftime('%Y%m%d%H%M%S')}"
 
@@ -131,26 +150,27 @@ async def create_order(data: MembershipOrderCreate) -> MembershipOrderSchema:
     db.flush()
 
     _add_audit(db, order.id, operator.id, AuditAction.CREATE,
-               to_status=OrderStatus.DRAFT, remark="创建会员入会单")
+               to_status=OrderStatus.DRAFT,
+               remark=f"登记员【{operator.name}】创建会员入会单")
     db.commit()
     db.refresh(order)
     return _serialize_order(db, order)
 
 
-@post("/orders/{order_id:int}/submit")
-async def submit_order(order_id: int, data: dict = {}) -> MembershipOrderSchema:
+@post("/orders/{order_id:int}/submit", guards=[require_registrar])
+async def submit_order(
+    order_id: int,
+    data: dict = {},
+    request: Request = None,
+) -> MembershipOrderSchema:
     db: Session = next(get_db())
-    operator_id = data.get("operator_id", 1)
-    operator = _get_operator(db, operator_id)
+    operator = get_current_user(request)
     order = db.query(MembershipOrder).filter(MembershipOrder.id == order_id).first()
     if not order:
-        from litestar.exceptions import HTTPException
         raise HTTPException(status_code=404, detail="会员入会单不存在")
 
     allowed = {OrderStatus.DRAFT, OrderStatus.MATERIALS_MISSING}
-    if order.status not in allowed:
-        from litestar.exceptions import HTTPException
-        raise HTTPException(status_code=400, detail=f"当前状态[{order.status.value}]不能提交")
+    _assert_status(order, allowed, "提交审核", operator)
 
     missing = db.query(RequiredAttachment).filter(
         RequiredAttachment.order_id == order_id,
@@ -160,19 +180,19 @@ async def submit_order(order_id: int, data: dict = {}) -> MembershipOrderSchema:
     from_status = order.status
     if from_status == OrderStatus.MATERIALS_MISSING:
         if missing:
-            from litestar.exceptions import HTTPException
             missing_names = "、".join([m.attachment_name for m in missing])
             raise HTTPException(
                 status_code=400,
-                detail=f"仍有缺失附件未补正：{missing_names}，请补齐后再提交"
+                detail=f"登记员【{operator.name}】提交失败：仍有缺失附件未补正（{missing_names}），"
+                       f"请补齐全部 {len(order.required_attachments)} 份附件后再重新提交"
             )
         order.status = OrderStatus.RESUBMITTED
         action = AuditAction.RESUBMIT
-        remark = data.get("remark") or "附件补齐后重新提交审核"
+        remark = data.get("remark") or f"登记员【{operator.name}】补齐附件后重新提交审核"
     else:
         order.status = OrderStatus.PENDING_REVIEW
         action = AuditAction.SUBMIT
-        remark = data.get("remark") or "提交会员入会单进入审核"
+        remark = data.get("remark") or f"登记员【{operator.name}】提交会员入会单进入审核"
 
     order.is_overdue = False
     order.reject_reason = None
@@ -185,57 +205,94 @@ async def submit_order(order_id: int, data: dict = {}) -> MembershipOrderSchema:
     return _serialize_order(db, order)
 
 
-@post("/orders/{order_id:int}/approve")
-async def approve_order(order_id: int, data: ReviewAction) -> MembershipOrderSchema:
+@post("/orders/{order_id:int}/approve", guards=[require_supervisor])
+async def approve_order(
+    order_id: int,
+    data: ReviewAction,
+    request: Request,
+) -> MembershipOrderSchema:
     db: Session = next(get_db())
-    operator_id = 2
-    operator = _get_operator(db, operator_id)
+    operator = get_current_user(request)
     order = db.query(MembershipOrder).filter(MembershipOrder.id == order_id).first()
     if not order:
-        from litestar.exceptions import HTTPException
         raise HTTPException(status_code=404, detail="会员入会单不存在")
 
     allowed = {OrderStatus.PENDING_REVIEW, OrderStatus.RESUBMITTED}
-    if order.status not in allowed:
-        from litestar.exceptions import HTTPException
-        raise HTTPException(status_code=400, detail=f"当前状态[{order.status.value}]审核主管不能办理通过")
+    _assert_status(order, allowed, "审核通过", operator)
+
+    missing = db.query(RequiredAttachment).filter(
+        RequiredAttachment.order_id == order_id,
+        RequiredAttachment.is_provided == False,
+    ).all()
+    if missing:
+        missing_names = "、".join([m.attachment_name for m in missing])
+        raise HTTPException(
+            status_code=400,
+            detail=f"审核主管【{operator.name}】办理失败：仍有 {len(missing)} 份附件缺失（{missing_names}），"
+                   f"材料不齐全不能审核通过"
+        )
 
     from_status = order.status
     order.status = OrderStatus.APPROVED_REVIEW
     order.contract_confirmed = True
     order.updated_at = datetime.utcnow()
 
-    _add_audit(db, order.id, operator.id, AuditAction.APPROVE,
-               from_status=from_status, to_status=order.status,
-               remark=data.remark or "审核主管办理通过，材料齐全有效")
-    _add_audit(db, order.id, operator.id, AuditAction.CONFIRM_CONTRACT,
-               remark="合同已确认签署")
+    _add_audit(
+        db, order.id, operator.id, AuditAction.APPROVE,
+        from_status=from_status, to_status=order.status,
+        remark=f"审核主管【{operator.name}】办理通过" +
+               (f"，备注：{data.remark}" if data.remark else "") +
+               "，材料齐全有效",
+    )
+    _add_audit(
+        db, order.id, operator.id, AuditAction.CONFIRM_CONTRACT,
+        remark=f"审核主管【{operator.name}】确认合同已签署",
+    )
     db.commit()
     db.refresh(order)
     return _serialize_order(db, order)
 
 
-@post("/orders/{order_id:int}/request-supplement")
-async def request_supplement(order_id: int, data: SupplementRequest) -> MembershipOrderSchema:
+@post("/orders/{order_id:int}/request-supplement", guards=[require_supervisor])
+async def request_supplement(
+    order_id: int,
+    data: SupplementRequestV2,
+    request: Request,
+) -> MembershipOrderSchema:
     db: Session = next(get_db())
-    operator_id = 2
-    operator = _get_operator(db, operator_id)
+    operator = get_current_user(request)
     order = db.query(MembershipOrder).filter(MembershipOrder.id == order_id).first()
     if not order:
-        from litestar.exceptions import HTTPException
         raise HTTPException(status_code=404, detail="会员入会单不存在")
 
     allowed = {OrderStatus.PENDING_REVIEW, OrderStatus.RESUBMITTED}
-    if order.status not in allowed:
-        from litestar.exceptions import HTTPException
-        raise HTTPException(status_code=400, detail=f"当前状态[{order.status.value}]不能退回补正")
+    _assert_status(order, allowed, "退回补正", operator)
 
-    for req_id in data.required_attachment_ids:
-        req = db.query(RequiredAttachment).filter(RequiredAttachment.id == req_id).first()
-        if req and req.order_id == order_id:
-            req.is_provided = False
-            if not req.missing_reason:
-                req.missing_reason = "审核退回，需要补正"
+    if not data.items:
+        raise HTTPException(
+            status_code=400,
+            detail=f"审核主管【{operator.name}】退回失败：请至少选择一项需补正的附件"
+        )
+
+    supplement_details = []
+    for item in data.items:
+        req = db.query(RequiredAttachment).filter(
+            RequiredAttachment.id == item.required_attachment_id,
+            RequiredAttachment.order_id == order_id,
+        ).first()
+        if not req:
+            continue
+        req.is_provided = False
+        old_reason = req.reject_reason or ""
+        new_reason = item.reject_reason or "材料不合格，需补正"
+        timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M")
+        if old_reason:
+            req.reject_reason = f"[{timestamp} 审核主管{operator.name}] {new_reason}\n{old_reason}"
+        else:
+            req.reject_reason = f"[{timestamp} 审核主管{operator.name}] {new_reason}"
+        if not req.missing_reason:
+            req.missing_reason = new_reason
+        supplement_details.append(f"{req.attachment_name}：{new_reason}")
 
     missing_list = db.query(RequiredAttachment).filter(
         RequiredAttachment.order_id == order_id,
@@ -245,139 +302,149 @@ async def request_supplement(order_id: int, data: SupplementRequest) -> Membersh
 
     from_status = order.status
     order.status = OrderStatus.MATERIALS_MISSING
-    order.reject_reason = f"附件缺失/不合格：{missing_names}，请补正后重新提交"
+    order.reject_reason = (
+        f"审核主管【{operator.name}】退回补正（共{len(data.items)}项）：{missing_names}。"
+        f"请补正后重新提交。"
+    )
     if data.remark:
-        order.reject_reason += f"。备注：{data.remark}"
+        order.reject_reason += f" 备注：{data.remark}"
     order.updated_at = datetime.utcnow()
 
+    failure_detail = "；".join(supplement_details) if supplement_details else "附件材料不合格"
     _add_audit(
         db, order.id, operator.id, AuditAction.REQUEST_SUPPLEMENT,
         from_status=from_status, to_status=order.status,
-        remark=data.remark or f"退回补正，需补充：{missing_names}",
-        failure_reason=f"附件缺失或不合格：{missing_names}，不满足审核条件"
+        remark=f"审核主管【{operator.name}】退回补正，需补充：{missing_names}" +
+               (f"，备注：{data.remark}" if data.remark else ""),
+        failure_reason=f"共 {len(data.items)} 项附件需要补正：{failure_detail}",
     )
     db.commit()
     db.refresh(order)
     return _serialize_order(db, order)
 
 
-@post("/orders/{order_id:int}/reject")
-async def reject_order(order_id: int, data: ReviewAction) -> MembershipOrderSchema:
+@post("/orders/{order_id:int}/reject", guards=[require_supervisor])
+async def reject_order(
+    order_id: int,
+    data: ReviewAction,
+    request: Request,
+) -> MembershipOrderSchema:
     db: Session = next(get_db())
-    operator_id = 2
-    operator = _get_operator(db, operator_id)
+    operator = get_current_user(request)
     order = db.query(MembershipOrder).filter(MembershipOrder.id == order_id).first()
     if not order:
-        from litestar.exceptions import HTTPException
         raise HTTPException(status_code=404, detail="会员入会单不存在")
 
     allowed = {OrderStatus.PENDING_REVIEW, OrderStatus.RESUBMITTED}
-    if order.status not in allowed:
-        from litestar.exceptions import HTTPException
-        raise HTTPException(status_code=400, detail=f"当前状态[{order.status.value}]不能驳回")
+    _assert_status(order, allowed, "驳回申请", operator)
+
+    if not data.reject_reason or not data.reject_reason.strip():
+        raise HTTPException(
+            status_code=400,
+            detail=f"审核主管【{operator.name}】驳回失败：请填写驳回原因"
+        )
+
+    for req in order.required_attachments:
+        if not req.is_provided:
+            old_reason = req.reject_reason or ""
+            timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M")
+            new_line = f"[{timestamp} 最终驳回-{operator.name}] 整体驳回：{data.reject_reason}"
+            req.reject_reason = f"{new_line}\n{old_reason}" if old_reason else new_line
 
     from_status = order.status
     order.status = OrderStatus.REJECTED
-    order.reject_reason = data.reject_reason or "材料审核不通过，予以驳回"
+    order.reject_reason = data.reject_reason
     order.updated_at = datetime.utcnow()
 
     _add_audit(
         db, order.id, operator.id, AuditAction.REJECT,
         from_status=from_status, to_status=order.status,
-        remark=data.remark or "审核驳回",
-        failure_reason=data.reject_reason or "会员入会申请材料不满足审核标准，予以驳回"
+        remark=f"审核主管【{operator.name}】予以驳回" +
+               (f"，备注：{data.remark}" if data.remark else ""),
+        failure_reason=data.reject_reason,
     )
     db.commit()
     db.refresh(order)
     return _serialize_order(db, order)
 
 
-@post("/orders/{order_id:int}/review")
-async def review_order(order_id: int, data: ReviewAction) -> MembershipOrderSchema:
+@post("/orders/{order_id:int}/review", guards=[require_reviewer])
+async def review_order(
+    order_id: int,
+    data: ReviewAction,
+    request: Request,
+) -> MembershipOrderSchema:
     db: Session = next(get_db())
-    operator_id = 3
-    operator = _get_operator(db, operator_id)
+    operator = get_current_user(request)
     order = db.query(MembershipOrder).filter(MembershipOrder.id == order_id).first()
     if not order:
-        from litestar.exceptions import HTTPException
         raise HTTPException(status_code=404, detail="会员入会单不存在")
 
-    if order.status != OrderStatus.APPROVED_REVIEW:
-        from litestar.exceptions import HTTPException
-        raise HTTPException(status_code=400, detail=f"当前状态[{order.status.value}]不能复核")
+    allowed = {OrderStatus.APPROVED_REVIEW}
+    _assert_status(order, allowed, "复核通过", operator)
+
+    if not order.contract_confirmed:
+        raise HTTPException(
+            status_code=400,
+            detail=f"复核负责人【{operator.name}】复核失败：合同尚未确认，不能复核"
+        )
+
+    missing = db.query(RequiredAttachment).filter(
+        RequiredAttachment.order_id == order_id,
+        RequiredAttachment.is_provided == False,
+    ).all()
+    if missing:
+        missing_names = "、".join([m.attachment_name for m in missing])
+        raise HTTPException(
+            status_code=400,
+            detail=f"复核负责人【{operator.name}】复核失败：仍有 {len(missing)} 份附件缺失（{missing_names}）"
+        )
 
     from_status = order.status
     order.status = OrderStatus.REVIEWED
     order.updated_at = datetime.utcnow()
 
-    _add_audit(db, order.id, operator.id, AuditAction.REVIEW,
-               from_status=from_status, to_status=order.status,
-               remark=data.remark or "复核通过，信息核实无误")
+    _add_audit(
+        db, order.id, operator.id, AuditAction.REVIEW,
+        from_status=from_status, to_status=order.status,
+        remark=f"复核负责人【{operator.name}】复核通过，信息核实无误" +
+               (f"，备注：{data.remark}" if data.remark else ""),
+    )
     db.commit()
     db.refresh(order)
     return _serialize_order(db, order)
 
 
-@post("/orders/{order_id:int}/archive")
-async def archive_order(order_id: int, data: ReviewAction) -> MembershipOrderSchema:
+@post("/orders/{order_id:int}/archive", guards=[require_reviewer])
+async def archive_order(
+    order_id: int,
+    data: ReviewAction,
+    request: Request,
+) -> MembershipOrderSchema:
     db: Session = next(get_db())
-    operator_id = 3
-    operator = _get_operator(db, operator_id)
+    operator = get_current_user(request)
     order = db.query(MembershipOrder).filter(MembershipOrder.id == order_id).first()
     if not order:
-        from litestar.exceptions import HTTPException
         raise HTTPException(status_code=404, detail="会员入会单不存在")
 
-    if order.status != OrderStatus.REVIEWED:
-        from litestar.exceptions import HTTPException
-        raise HTTPException(status_code=400, detail=f"当前状态[{order.status.value}]不能归档")
+    allowed = {OrderStatus.REVIEWED}
+    _assert_status(order, allowed, "归档", operator)
 
     from_status = order.status
     order.status = OrderStatus.ARCHIVED
     order.card_activated = True
     order.updated_at = datetime.utcnow()
 
-    _add_audit(db, order.id, operator.id, AuditAction.ACTIVATE_CARD,
-               remark="会员卡权益已启用")
-    _add_audit(db, order.id, operator.id, AuditAction.ARCHIVE,
-               from_status=from_status, to_status=order.status,
-               remark=data.remark or "入会单复核归档完成")
-    db.commit()
-    db.refresh(order)
-    return _serialize_order(db, order)
-
-
-@put("/orders/{order_id:int}/contract")
-async def confirm_contract(order_id: int, data: ContractConfirm) -> MembershipOrderSchema:
-    db: Session = next(get_db())
-    operator = _get_operator(db, 2)
-    order = db.query(MembershipOrder).filter(MembershipOrder.id == order_id).first()
-    if not order:
-        from litestar.exceptions import HTTPException
-        raise HTTPException(status_code=404, detail="会员入会单不存在")
-
-    order.contract_confirmed = data.confirmed
-    order.updated_at = datetime.utcnow()
-    _add_audit(db, order.id, operator.id, AuditAction.CONFIRM_CONTRACT,
-               remark="合同确认状态已更新")
-    db.commit()
-    db.refresh(order)
-    return _serialize_order(db, order)
-
-
-@put("/orders/{order_id:int}/card")
-async def activate_card(order_id: int, data: CardActivate) -> MembershipOrderSchema:
-    db: Session = next(get_db())
-    operator = _get_operator(db, 3)
-    order = db.query(MembershipOrder).filter(MembershipOrder.id == order_id).first()
-    if not order:
-        from litestar.exceptions import HTTPException
-        raise HTTPException(status_code=404, detail="会员入会单不存在")
-
-    order.card_activated = data.activated
-    order.updated_at = datetime.utcnow()
-    _add_audit(db, order.id, operator.id, AuditAction.ACTIVATE_CARD,
-               remark="卡权益启用状态已更新")
+    _add_audit(
+        db, order.id, operator.id, AuditAction.ACTIVATE_CARD,
+        remark=f"复核负责人【{operator.name}】启用会员卡权益",
+    )
+    _add_audit(
+        db, order.id, operator.id, AuditAction.ARCHIVE,
+        from_status=from_status, to_status=order.status,
+        remark=f"复核负责人【{operator.name}】完成入会单归档" +
+               (f"，备注：{data.remark}" if data.remark else ""),
+    )
     db.commit()
     db.refresh(order)
     return _serialize_order(db, order)
@@ -386,5 +453,5 @@ async def activate_card(order_id: int, data: CardActivate) -> MembershipOrderSch
 orders_router = Router(path="/api", route_handlers=[
     list_orders, get_order, create_order, submit_order,
     approve_order, request_supplement, reject_order,
-    review_order, archive_order, confirm_contract, activate_card
+    review_order, archive_order,
 ])

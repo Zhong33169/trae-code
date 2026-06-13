@@ -1,7 +1,13 @@
-<!DOCTYPE html>
-<html>
-  <head>
-  </head>
-  <body>
-  </body>
-</html>
+<template>
+  <div>
+    <NuxtLayout>
+      <NuxtPage />
+    </NuxtLayout>
+  </div>
+</template>
+
+<script setup lang="ts">
+</script>
+
+<style>
+</style>

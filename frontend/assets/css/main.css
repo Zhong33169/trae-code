@@ -729,3 +729,67 @@ tr:hover td {
 .stat-card.warning .stat-value { color: #d97706; }
 .stat-card.success .stat-value { color: #059669; }
 .stat-card.info .stat-value { color: #2563eb; }
+
+.role-tag {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 500;
+  margin-left: 6px;
+}
+
+.role-tag-registrar {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.role-tag-supervisor {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.role-tag-reviewer {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.reject-history-list {
+  margin-top: 4px;
+}
+
+.reject-history-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 4px 0;
+  line-height: 1.5;
+}
+
+.reject-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #dc2626;
+  margin-top: 5px;
+  flex-shrink: 0;
+}
+
+.supplement-item {
+  padding: 8px 0;
+  border-bottom: 1px solid #f3f4f6;
+  transition: background 0.15s;
+  border-radius: 4px;
+}
+
+.supplement-item:last-child {
+  border-bottom: none;
+}
+
+.supplement-item.active {
+  background: #fffbeb;
+  margin: 0 -8px;
+  padding: 8px;
+  border-radius: 6px;
+}

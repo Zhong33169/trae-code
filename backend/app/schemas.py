@@ -106,7 +106,7 @@ class AttachmentUpload(BaseModel):
 
 
 class ReviewAction(BaseModel):
-    action: str
+    action: Optional[str] = None
     reject_reason: Optional[str] = None
     remark: Optional[str] = None
 

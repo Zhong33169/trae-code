@@ -158,9 +158,20 @@
             <div class="text-sm text-warning" style="font-weight: 500;">缺失说明：</div>
             <div class="text-sm">{{ req.missing_reason }}</div>
           </div>
-          <div v-if="req.reject_reason" class="mt-4" style="margin-top: 8px;">
-            <div class="text-sm text-danger" style="font-weight: 500;">退回原因：</div>
-            <div class="text-sm">{{ req.reject_reason }}</div>
+          <div v-if="req.reject_reason" class="mt-4 reject-history" style="margin-top: 8px;">
+            <div class="text-sm text-danger" style="font-weight: 500; margin-bottom: 4px;">
+              退回历史（共 {{ formatRejectReasonLines(req.reject_reason).length }} 条）
+            </div>
+            <div class="reject-history-list">
+              <div
+                v-for="(line, idx) in formatRejectReasonLines(req.reject_reason)"
+                :key="idx"
+                class="reject-history-item"
+              >
+                <span class="reject-dot"></span>
+                <span class="text-sm">{{ line }}</span>
+              </div>
+            </div>
           </div>
 
           <div v-if="findAttachmentByReq(req.id)" class="attachment-item" style="margin-top: 10px;">
@@ -247,26 +258,49 @@
         <div v-if="canRequestSupplement">
           <div class="font-bold mb-4" style="margin-bottom: 8px;">审核主管操作：退回补正</div>
           <div class="form-group">
-            <label class="form-label">选择需补正的附件</label>
-            <div style="border: 1px solid #e5e7eb; border-radius: 6px; padding: 10px;">
-              <label
+            <label class="form-label">选择需补正的附件并填写原因</label>
+            <div style="border: 1px solid #e5e7eb; border-radius: 6px; padding: 12px;">
+              <div
                 v-for="req in order.required_attachments"
                 :key="req.id"
-                class="flex gap-2"
-                style="align-items: center; padding: 4px 0; cursor: pointer;"
+                class="supplement-item"
+                :class="{ active: isSupplementSelected(req.id) }"
               >
-                <input type="checkbox" :value="req.id" v-model="supplementIds" />
-                <span>{{ req.attachment_name }}</span>
-                <span v-if="!req.is_provided" class="badge badge-red">已缺失</span>
-              </label>
+                <div class="flex gap-2" style="align-items: flex-start; padding: 4px 0;">
+                  <input
+                    type="checkbox"
+                    :value="req.id"
+                    v-model="supplementIds"
+                    style="margin-top: 4px;"
+                  />
+                  <div style="flex: 1;">
+                    <div class="flex-between" style="align-items: center;">
+                      <span class="font-bold">{{ req.attachment_name }}</span>
+                      <span v-if="!req.is_provided" class="badge badge-red">已缺失</span>
+                      <span v-else class="badge badge-green">已提供</span>
+                    </div>
+                    <div v-if="req.reject_reason" class="text-sm text-muted" style="margin-top: 4px;">
+                      历史退回：{{ firstLineOfReason(req.reject_reason) }}
+                    </div>
+                    <div v-if="isSupplementSelected(req.id)" style="margin-top: 8px;">
+                      <textarea
+                        v-model="supplementReasons[req.id]"
+                        class="form-textarea"
+                        :placeholder="`请填写【${req.attachment_name}】的退回原因`"
+                        rows="2"
+                      ></textarea>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
           <div class="form-group">
-            <label class="form-label">退回补正说明</label>
-            <textarea v-model="supplementRemark" class="form-textarea" placeholder="请说明退回原因和补正要求"></textarea>
+            <label class="form-label">整体备注（可选）</label>
+            <textarea v-model="supplementRemark" class="form-textarea" placeholder="请填写整体退回说明或补正要求"></textarea>
           </div>
           <div class="alert alert-warning" style="margin-bottom: 8px;">
-            退回后登记员需补齐附件才能重新提交进入审核队列。退回原因将记录至审计日志。
+            退回后登记员需补齐附件才能重新提交进入审核队列。每附件的退回原因将累加至历史记录，永久保留。
           </div>
           <button
             class="btn btn-warning"
@@ -339,11 +373,17 @@
           v-for="log in sortedAuditLogs"
           :key="log.id"
           class="timeline-item"
-          :class="log.failure_reason ? 'failure' : (log.action === 'approve' || log.action === 'review' || log.action === 'archive' ? 'success' : '')"
+          :class="[
+            log.failure_reason ? 'failure' : '',
+            (log.action === 'approve' || log.action === 'review' || log.action === 'archive') ? 'success' : ''
+          ]"
         >
           <div class="timeline-time">{{ formatDate(log.created_at) }}</div>
           <div class="timeline-title">
             <span class="font-bold">{{ log.operator_name || '未知操作人' }}</span>
+            <span v-if="log.operator_role" class="role-tag" :class="roleTagClass(log.operator_role)">
+              {{ ROLE_LABELS[log.operator_role] || log.operator_role }}
+            </span>
             <span class="text-muted text-sm"> · {{ actionLabel(log.action) }}</span>
             <span v-if="log.from_status && log.to_status" class="text-muted text-sm">
               · {{ STATUS_LABELS[log.from_status] }} → <span class="font-bold">{{ STATUS_LABELS[log.to_status] }}</span>
@@ -450,6 +490,7 @@ const actionError = ref('')
 const submitRemark = ref('')
 const approveRemark = ref('')
 const supplementIds = ref<number[]>([])
+const supplementReasons = reactive<Record<number, string>>({})
 const supplementRemark = ref('')
 const rejectReason = ref('')
 const rejectRemark = ref('')
@@ -546,6 +587,15 @@ function statusBadgeClass(status: OrderStatus) {
   return map[status] || 'badge-gray'
 }
 
+function roleTagClass(role: string) {
+  const map: Record<string, string> = {
+    registrar: 'role-tag-registrar',
+    supervisor: 'role-tag-supervisor',
+    reviewer: 'role-tag-reviewer'
+  }
+  return map[role] || ''
+}
+
 function actionLabel(action: string) {
   const map: Record<string, string> = {
     create: '创建入会单',
@@ -569,6 +619,20 @@ function reqClass(req: RequiredAttachment) {
   if (req.reject_reason) return 'rejected'
   if (req.is_provided) return 'provided'
   return 'missing'
+}
+
+function isSupplementSelected(reqId: number) {
+  return supplementIds.value.includes(reqId)
+}
+
+function firstLineOfReason(reason: string | null) {
+  if (!reason) return ''
+  return reason.split('\n')[0]
+}
+
+function formatRejectReasonLines(reason: string | null): string[] {
+  if (!reason) return []
+  return reason.split('\n').filter(line => line.trim())
 }
 
 function findAttachmentByReq(reqId: number | null) {
@@ -671,16 +735,23 @@ async function handleRequestSupplement() {
     actionError.value = '请选择需要补正的附件项'
     return
   }
+  const items = supplementIds.value.map(id => ({
+    required_attachment_id: id,
+    reject_reason: supplementReasons[id]?.trim() || undefined
+  }))
   actionLoading.value = true
   actionError.value = ''
   try {
     const res = await orders.requestSupplement(
       order.value!.id,
-      supplementIds.value,
+      items,
       supplementRemark.value
     )
     order.value = res
     supplementIds.value = []
+    Object.keys(supplementReasons).forEach(key => {
+      supplementReasons[Number(key)] = ''
+    })
     supplementRemark.value = ''
   } catch (e: any) {
     actionError.value = e?.data?.detail || '退回失败'

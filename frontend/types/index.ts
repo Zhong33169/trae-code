@@ -52,6 +52,7 @@ export interface AuditLog {
   failure_reason: string | null
   created_at: string
   operator_name: string | null
+  operator_role: string | null
 }
 
 export interface MembershipOrder {

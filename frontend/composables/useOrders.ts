@@ -54,10 +54,10 @@ export function useOrders() {
     })
   }
 
-  async function requestSupplement(id: number, requiredAttachmentIds: number[], remark?: string) {
+  async function requestSupplement(id: number, items: { required_attachment_id: number; reject_reason?: string }[], remark?: string) {
     return await $apiFetch<any>(`/orders/${id}/request-supplement`, {
       method: 'POST',
-      body: { required_attachment_ids: requiredAttachmentIds, remark }
+      body: { items, remark }
     })
   }
 
