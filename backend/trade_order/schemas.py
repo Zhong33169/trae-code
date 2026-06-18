@@ -106,6 +106,7 @@ class BatchItemResult(BaseModel):
     item_status: str
     error_code: Optional[str] = None
     error_message: Optional[str] = None
+    submitted_version: int = 0
 
 
 class BatchOperationOut(BaseModel):

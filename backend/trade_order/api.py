@@ -701,8 +701,8 @@ def batch_operation(request, payload: BatchOperationIn, x_user_id: str = Header(
                 failed_count += 1
                 BatchOperationItem.objects.create(
                     batch=batch,
-                    order_id=oid if TradeOrder.objects.filter(id=oid).exists() else 0,
-                    order=TradeOrder.objects.filter(id=oid).first(),
+                    order=None,
+                    order_id_tmp=oid,
                     item_status=ItemStatus.FAILED,
                     error_code="ORDER_NOT_FOUND",
                     error_message=f"订单{oid}不存在",
@@ -715,6 +715,7 @@ def batch_operation(request, payload: BatchOperationIn, x_user_id: str = Header(
                     item_status=ItemStatus.FAILED,
                     error_code="ORDER_NOT_FOUND",
                     error_message=f"订单{oid}不存在",
+                    submitted_version=expected_version,
                 ))
                 continue
 
@@ -724,6 +725,7 @@ def batch_operation(request, payload: BatchOperationIn, x_user_id: str = Header(
             BatchOperationItem.objects.create(
                 batch=batch,
                 order=order,
+                order_id_tmp=0,
                 item_status=item_status,
                 error_code=err_code or "",
                 error_message=err_msg or "",
@@ -744,6 +746,7 @@ def batch_operation(request, payload: BatchOperationIn, x_user_id: str = Header(
                 item_status=item_status,
                 error_code=err_code,
                 error_message=err_msg,
+                submitted_version=expected_version,
             ))
 
         batch.success_count = success_count
@@ -793,12 +796,15 @@ def list_batch_operations(request, x_user_id: str = Header(None), x_role: str = 
             operator_name = b.operator.username
         items_out = []
         for it in b.items.all():
+            real_order_id = it.order.id if it.order else it.order_id_tmp
+            real_order_no = it.order.order_no if it.order else f"[不存在-{it.order_id_tmp}]"
             items_out.append(BatchItemResult(
-                order_id=it.order_id,
-                order_no=it.order.order_no if it.order else f"[已删除-{it.order_id}]",
+                order_id=real_order_id,
+                order_no=real_order_no,
                 item_status=it.item_status,
                 error_code=it.error_code or None,
                 error_message=it.error_message or None,
+                submitted_version=it.version,
             ))
         result.append(BatchOperationOut(
             id=b.id,

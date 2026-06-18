@@ -554,17 +554,20 @@ async function deleteEvidence(ev: Evidence) {
   }
 }
 
-function clearActionState() {
+function clearActionState(keepRemark = false) {
   actionError.value = ''
-  actionRemark.value = ''
+  if (!keepRemark) {
+    actionRemark.value = ''
+  }
 }
 
 async function doSubmitToDoc() {
   if (!order.value) return
+  const remark = actionRemark.value
   clearActionState()
   try {
     actionLoading.value = true
-    order.value = await store.submitToDoc(order.value.id, order.value.version, actionRemark.value)
+    order.value = await store.submitToDoc(order.value.id, order.value.version, remark)
     histories.value = await store.getHistories(order.value.id)
   } catch (e: any) {
     actionError.value = e.message
@@ -575,10 +578,11 @@ async function doSubmitToDoc() {
 
 async function doDocApprove() {
   if (!order.value) return
+  const remark = actionRemark.value
   clearActionState()
   try {
     actionLoading.value = true
-    order.value = await store.docAction(order.value.id, 'approve', order.value.version, actionRemark.value)
+    order.value = await store.docAction(order.value.id, 'approve', order.value.version, remark)
     histories.value = await store.getHistories(order.value.id)
   } catch (e: any) {
     actionError.value = e.message
@@ -588,14 +592,15 @@ async function doDocApprove() {
 }
 async function doDocReject() {
   if (!order.value) return
-  clearActionState()
-  if (!actionRemark.value.trim()) {
+  const remark = actionRemark.value
+  if (!remark.trim()) {
     actionError.value = '退回必须填写补正说明'
     return
   }
+  clearActionState()
   try {
     actionLoading.value = true
-    order.value = await store.docAction(order.value.id, 'reject', order.value.version, actionRemark.value)
+    order.value = await store.docAction(order.value.id, 'reject', order.value.version, remark)
     histories.value = await store.getHistories(order.value.id)
   } catch (e: any) {
     actionError.value = e.message
@@ -605,14 +610,15 @@ async function doDocReject() {
 }
 async function doDocException() {
   if (!order.value) return
-  clearActionState()
-  if (!actionRemark.value.trim()) {
+  const remark = actionRemark.value
+  if (!remark.trim()) {
     actionError.value = '标记异常必须填写说明'
     return
   }
+  clearActionState()
   try {
     actionLoading.value = true
-    order.value = await store.docAction(order.value.id, 'mark-exception', order.value.version, actionRemark.value)
+    order.value = await store.docAction(order.value.id, 'mark-exception', order.value.version, remark)
     histories.value = await store.getHistories(order.value.id)
   } catch (e: any) {
     actionError.value = e.message
@@ -623,10 +629,11 @@ async function doDocException() {
 
 async function doManagerApprove() {
   if (!order.value) return
+  const remark = actionRemark.value
   clearActionState()
   try {
     actionLoading.value = true
-    order.value = await store.confirmAction(order.value.id, 'approve', order.value.version, actionRemark.value)
+    order.value = await store.confirmAction(order.value.id, 'approve', order.value.version, remark)
     histories.value = await store.getHistories(order.value.id)
   } catch (e: any) {
     actionError.value = e.message
@@ -636,14 +643,15 @@ async function doManagerApprove() {
 }
 async function doManagerReject() {
   if (!order.value) return
-  clearActionState()
-  if (!actionRemark.value.trim()) {
+  const remark = actionRemark.value
+  if (!remark.trim()) {
     actionError.value = '退回必须填写补正说明'
     return
   }
+  clearActionState()
   try {
     actionLoading.value = true
-    order.value = await store.confirmAction(order.value.id, 'reject', order.value.version, actionRemark.value)
+    order.value = await store.confirmAction(order.value.id, 'reject', order.value.version, remark)
     histories.value = await store.getHistories(order.value.id)
   } catch (e: any) {
     actionError.value = e.message
@@ -653,14 +661,15 @@ async function doManagerReject() {
 }
 async function doManagerException() {
   if (!order.value) return
-  clearActionState()
-  if (!actionRemark.value.trim()) {
+  const remark = actionRemark.value
+  if (!remark.trim()) {
     actionError.value = '标记异常必须填写说明'
     return
   }
+  clearActionState()
   try {
     actionLoading.value = true
-    order.value = await store.confirmAction(order.value.id, 'mark-exception', order.value.version, actionRemark.value)
+    order.value = await store.confirmAction(order.value.id, 'mark-exception', order.value.version, remark)
     histories.value = await store.getHistories(order.value.id)
   } catch (e: any) {
     actionError.value = e.message

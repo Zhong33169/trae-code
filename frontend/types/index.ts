@@ -55,6 +55,7 @@ export interface BatchItemResult {
   item_status: string
   error_code: string | null
   error_message: string | null
+  submitted_version: number
 }
 
 export interface BatchOrderItem {

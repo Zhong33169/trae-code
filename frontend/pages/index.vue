@@ -495,7 +495,7 @@
               <tbody class="divide-y divide-gray-100">
                 <tr v-for="item in batchResult.items" :key="item.order_id">
                   <td class="px-3 py-2 font-mono">{{ item.order_no }}</td>
-                  <td class="px-3 py-2 text-center font-mono text-gray-500">{{ getOrderById(item.order_id)?.version || '-' }}</td>
+                  <td class="px-3 py-2 text-center font-mono text-gray-500">v{{ item.submitted_version }}</td>
                   <td class="px-3 py-2">
                     <span
                       :class="[
