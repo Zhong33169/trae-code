@@ -176,6 +176,10 @@ class BatchOperationItem(models.Model):
     )
     error_code = models.CharField(max_length=50, blank=True, verbose_name="错误码")
     error_message = models.TextField(blank=True, verbose_name="错误/结果说明")
+    responsible_role = models.CharField(
+        max_length=30, blank=True, verbose_name="责任岗位"
+    )
+    suggestion = models.TextField(blank=True, verbose_name="处理建议")
     processed_at = models.DateTimeField(null=True, blank=True, verbose_name="处理时间")
     version = models.IntegerField(default=0, verbose_name="提交时的版本号")
 
@@ -185,7 +189,7 @@ class BatchOperationItem(models.Model):
         verbose_name_plural = "批处理明细"
 
     def __str__(self):
-        return f"{self.batch.batch_no} - {self.order.order_no}"
+        return f"{self.batch.batch_no} - {self.order.order_no if self.order else self.order_id_tmp}"
 
 
 class OrderHistory(models.Model):

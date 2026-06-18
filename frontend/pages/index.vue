@@ -84,6 +84,7 @@
                 <th class="px-3 py-3 text-left font-medium text-gray-600">状态</th>
                 <th class="px-3 py-3 text-left font-medium text-gray-600">证据</th>
                 <th class="px-3 py-3 text-left font-medium text-gray-600">创建人</th>
+                <th class="px-3 py-3 text-left font-medium text-gray-600">补正追踪</th>
                 <th class="px-3 py-3 text-center font-medium text-gray-600">操作</th>
               </tr>
             </thead>
@@ -132,6 +133,28 @@
                   </div>
                 </td>
                 <td class="px-3 py-3 text-xs text-gray-600">{{ order.created_by_name }}</td>
+                <td class="px-3 py-3">
+                  <div v-if="getLatestBatchItem(order.id)" class="text-xs space-y-0.5 max-w-xs">
+                    <div class="flex items-center gap-1">
+                      <span
+                        :class="[
+                          'inline-block px-1.5 py-0.5 rounded text-[10px] font-medium',
+                          getLatestBatchItem(order.id)!.item_status === 'failed' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
+                        ]"
+                      >
+                        {{ getLatestBatchItem(order.id)!.item_status === 'failed' ? '失败' : '需重试' }}
+                      </span>
+                      <span class="text-gray-500">v{{ getLatestBatchItem(order.id)!.submitted_version }}</span>
+                    </div>
+                    <div class="text-gray-600 truncate" :title="getLatestBatchItem(order.id)!.error_message || ''">
+                      {{ getLatestBatchItem(order.id)!.error_message }}
+                    </div>
+                    <div v-if="getLatestBatchItem(order.id)!.responsible_role" class="text-gray-400">
+                      责任: {{ getRoleLabel(getLatestBatchItem(order.id)!.responsible_role) }}
+                    </div>
+                  </div>
+                  <span v-else class="text-xs text-gray-300">-</span>
+                </td>
                 <td class="px-3 py-3 text-center">
                   <button
                     @click.stop="showDetail(order)"
@@ -530,8 +553,8 @@
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
 import { useAppStore } from '~/stores/app'
-import type { TradeOrder, Evidence } from '~/types'
-import { StatusColorClass, EvidenceTypeLabels } from '~/types'
+import type { TradeOrder, Evidence, BatchItemResult } from '~/types'
+import { StatusColorClass, EvidenceTypeLabels, RoleLabels } from '~/types'
 
 const store = useAppStore()
 const { orders, selectedOrderIds, batchHistory } = storeToRefs(store)
@@ -543,6 +566,7 @@ const page = ref(1)
 const pageSize = 10
 const detailOrderId = ref<number | null>(null)
 const selectedOrder = ref<TradeOrder | null>(null)
+const latestBatchItems = ref<BatchItemResult[]>([])
 
 const openCreateModal = ref(false)
 const creating = ref(false)
@@ -689,6 +713,25 @@ function getOrderById(id: number) {
   return store.orders.find(o => o.id === id)
 }
 
+function getRoleLabel(role: string) {
+  if (role === 'operator') return '操作人'
+  if (role === 'admin') return '系统管理员'
+  return RoleLabels[role] || role
+}
+
+function getLatestBatchItem(orderId: number): BatchItemResult | null {
+  return latestBatchItems.value.find(item => item.order_id === orderId) || null
+}
+
+async function loadLatestBatchItems() {
+  if (store.orders.length === 0) {
+    latestBatchItems.value = []
+    return
+  }
+  const ids = store.orders.map(o => o.id)
+  latestBatchItems.value = await store.getLatestBatchItems(ids)
+}
+
 async function doCreate() {
   createError.value = ''
   if (!createForm.value.customer_name || !createForm.value.country || !createForm.value.product_name) {
@@ -817,5 +860,10 @@ watch(() => store.orders, () => {
       selectedOrder.value = updated
     }
   }
+  loadLatestBatchItems()
 }, { deep: true })
+
+onMounted(() => {
+  loadLatestBatchItems()
+})
 </script>

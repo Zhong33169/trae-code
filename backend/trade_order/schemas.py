@@ -107,6 +107,8 @@ class BatchItemResult(BaseModel):
     error_code: Optional[str] = None
     error_message: Optional[str] = None
     submitted_version: int = 0
+    responsible_role: str = ""
+    suggestion: str = ""
 
 
 class BatchOperationOut(BaseModel):

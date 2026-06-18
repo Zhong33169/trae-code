@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import type { User, TradeOrder, BatchOperation, OrderHistory, Evidence } from '~/types'
+import type { User, TradeOrder, BatchOperation, OrderHistory, Evidence, BatchItemResult } from '~/types'
 
 const API_BASE = 'http://localhost:8005/api'
 
@@ -206,6 +206,24 @@ export const useAppStore = defineStore('app', {
       })
       if (!res.ok) return
       this.batchHistory = await res.json()
+    },
+
+    async getLatestBatchItems(orderIds: number[]): Promise<BatchItemResult[]> {
+      if (orderIds.length === 0) return []
+      const ids = orderIds.join(',')
+      const res = await fetch(`${API_BASE}/orders/ops/batch-items/latest?order_ids=${ids}`, {
+        headers: getHeaders(this.currentUser),
+      })
+      if (!res.ok) return []
+      return await res.json()
+    },
+
+    async getOrderBatchItems(orderId: number): Promise<BatchItemResult[]> {
+      const res = await fetch(`${API_BASE}/orders/ops/orders/${orderId}/batch-items`, {
+        headers: getHeaders(this.currentUser),
+      })
+      if (!res.ok) return []
+      return await res.json()
     },
   },
 })

@@ -6,6 +6,7 @@ from trade_order.models import (
     UserProfile, Role,
     TradeOrder, OrderStatus, OrderEvidence, EvidenceType,
     OrderHistory,
+    BatchOperation, BatchOperationItem, BatchAction, ItemStatus,
 )
 
 
@@ -272,6 +273,126 @@ class Command(BaseCommand):
                 )
             else:
                 self.stdout.write(f"  - 订单已存在, 跳过: {od['order_no']}")
+
+        # ===== 批量操作演示数据（补正追踪） =====
+        self.stdout.write("\n生成批量操作演示数据...")
+        
+        orders_by_no = {o.order_no: o for o in TradeOrder.objects.all()}
+        doc_user = doc_users[0]
+        sales_user = sales_users[0]
+        manager_user = manager_users[0]
+
+        demo_batches = [
+            {
+                "batch_no_suffix": "BATCH-DEMO-001",
+                "action": BatchAction.APPROVE_DOC,
+                "operator": doc_user,
+                "remark": "首次批量单证复核",
+                "items": [
+                    {
+                        "order_no": "PO202506180003",
+                        "item_status": ItemStatus.FAILED,
+                        "error_code": "VERSION_CONFLICT",
+                        "error_message": "订单已被其他人修改，当前版本不匹配",
+                        "responsible_role": "operator",
+                        "suggestion": "刷新页面获取最新版本号后重新提交",
+                        "version": 5,
+                    },
+                    {
+                        "order_no": "PO202506180004",
+                        "item_status": ItemStatus.RETRY,
+                        "error_code": "EVIDENCE_INCOMPLETE",
+                        "error_message": "缺少合同证据，三类证据不完整",
+                        "responsible_role": "sales",
+                        "suggestion": "请上传销售合同/采购订单后再提交复核",
+                        "version": 1,
+                    },
+                    {
+                        "order_no": "PO202506180005",
+                        "item_status": ItemStatus.FAILED,
+                        "error_code": "STATUS_INVALID",
+                        "error_message": "当前状态为待补正，不支持批量通过",
+                        "responsible_role": "doc_supervisor",
+                        "suggestion": "请先在单条详情页处理补正，或使用批量退回操作",
+                        "version": 2,
+                    },
+                ],
+            },
+            {
+                "batch_no_suffix": "BATCH-DEMO-002",
+                "action": BatchAction.APPROVE_DOC,
+                "operator": doc_user,
+                "remark": "补正后二次批量复核",
+                "items": [
+                    {
+                        "order_no": "PO202506180003",
+                        "item_status": ItemStatus.SUCCESS,
+                        "error_code": "",
+                        "error_message": "",
+                        "responsible_role": "",
+                        "suggestion": "",
+                        "version": 2,
+                    },
+                ],
+            },
+            {
+                "batch_no_suffix": "BATCH-DEMO-003",
+                "action": BatchAction.REJECT_DOC,
+                "operator": doc_user,
+                "remark": "批量退回待补正",
+                "items": [
+                    {
+                        "order_no": "PO202506180004",
+                        "item_status": ItemStatus.SUCCESS,
+                        "error_code": "",
+                        "error_message": "",
+                        "responsible_role": "",
+                        "suggestion": "",
+                        "version": 1,
+                    },
+                ],
+            },
+        ]
+
+        import datetime
+        base_time = datetime.datetime.now() - datetime.timedelta(hours=6)
+
+        for bi, bd in enumerate(demo_batches):
+            existing = BatchOperation.objects.filter(batch_no__endswith=bd["batch_no_suffix"]).first()
+            if existing:
+                self.stdout.write(f"  - 批次已存在, 跳过: {bd['batch_no_suffix']}")
+                continue
+
+            batch_time = base_time + datetime.timedelta(hours=bi * 2)
+            batch = BatchOperation.objects.create(
+                batch_no=f"DEMO{bi+1:03d}{bd['batch_no_suffix']}",
+                action=bd["action"],
+                operator=bd["operator"],
+                remark=bd["remark"],
+                total_count=len(bd["items"]),
+                success_count=sum(1 for it in bd["items"] if it["item_status"] == ItemStatus.SUCCESS),
+                failed_count=sum(1 for it in bd["items"] if it["item_status"] == ItemStatus.FAILED),
+                retry_count=sum(1 for it in bd["items"] if it["item_status"] == ItemStatus.RETRY),
+                created_at=batch_time,
+            )
+
+            for ii, item_data in enumerate(bd["items"]):
+                order = orders_by_no.get(item_data["order_no"])
+                item_time = batch_time + datetime.timedelta(seconds=ii * 5)
+                BatchOperationItem.objects.create(
+                    batch=batch,
+                    order=order,
+                    order_id_tmp=order.id if order else 0,
+                    item_status=item_data["item_status"],
+                    error_code=item_data["error_code"],
+                    error_message=item_data["error_message"],
+                    responsible_role=item_data["responsible_role"],
+                    suggestion=item_data["suggestion"],
+                    version=item_data["version"],
+                    processed_at=item_time,
+                )
+
+            self.stdout.write(self.style.SUCCESS(f"  ✓ 演示批次: {batch.batch_no} ({BatchAction(bd['action']).label})"))
 
         self.stdout.write(self.style.SUCCESS("演示数据初始化完成!"))
         self.stdout.write("")

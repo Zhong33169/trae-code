@@ -33,6 +33,30 @@ from .schemas import (
 router = Router()
 
 
+ERROR_RESPONSIBLE_MAP = {
+    "VERSION_CONFLICT": ("operator", "刷新页面获取最新版本后重新提交"),
+    "NOT_OWNER": ("sales", "只能操作自己创建的订单，请切换到正确的业务员账号"),
+    "INVALID_STATUS": ("operator", "当前订单状态不允许该操作，请确认订单状态后重试"),
+    "MISSING_EVIDENCE": ("sales", "缺少必要证据，请上传齐全后再提交"),
+    "REMARK_REQUIRED": ("operator", "该操作必须填写备注说明，请补充后重新提交"),
+    "ORDER_NOT_FOUND": ("operator", "订单不存在，请确认订单ID是否正确"),
+    "INVALID_ACTION": ("operator", "不支持的操作类型，请选择正确的操作"),
+    "PERMISSION_DENIED": ("operator", "权限不足，请使用对应岗位的账号操作"),
+    "SYSTEM_ERROR": ("admin", "系统错误，请联系管理员处理"),
+    "MISSING_USER": ("operator", "用户信息缺失，请重新登录"),
+    "INVALID_USER": ("operator", "用户不存在，请确认账号"),
+    "NO_PROFILE": ("admin", "用户资料不存在，请联系管理员"),
+    "ROLE_MISMATCH": ("operator", "角色不匹配，请使用正确的角色登录"),
+}
+
+
+def _get_responsible_and_suggestion(error_code: str) -> tuple[str, str]:
+    if not error_code:
+        return "", ""
+    role, suggestion = ERROR_RESPONSIBLE_MAP.get(error_code, ("operator", "请检查错误信息后重试"))
+    return role, suggestion
+
+
 def _get_user_from_headers(x_user_id: str = Header(None), x_role: str = Header(None)) -> User:
     if not x_user_id:
         _e(401, "MISSING_USER", "缺少用户标识(x-user-id)")
@@ -537,126 +561,145 @@ def list_histories(request, order_id: int, x_user_id: str = Header(None), x_role
     return result
 
 
-def _process_single_action(order: TradeOrder, action: str, user: User, expected_version: int, remark: str = "") -> tuple[str, Optional[str], Optional[str]]:
+def _process_single_action(order: TradeOrder, action: str, user: User, expected_version: int, remark: str = "") -> tuple[str, Optional[str], Optional[str], str, str]:
     try:
         if order.version != expected_version:
             _add_history(order, user, "批量-版本冲突", remark)
-            return ItemStatus.FAILED, "VERSION_CONFLICT", f"版本冲突：当前版本为{order.version}，你提供的版本为{expected_version}，请刷新后重试"
+            resp_role, resp_sug = _get_responsible_and_suggestion("VERSION_CONFLICT")
+            return ItemStatus.FAILED, "VERSION_CONFLICT", f"版本冲突：当前版本为{order.version}，你提供的版本为{expected_version}，请刷新后重试", resp_role, resp_sug
 
         if action == BatchAction.SUBMIT_TO_DOC:
             _require_role(user, Role.SALES)
             if order.created_by_id != user.id:
                 _add_history(order, user, "批量-提交失败(非本人)", remark)
-                return ItemStatus.FAILED, "NOT_OWNER", "只能提交自己创建的订单"
+                resp_role, resp_sug = _get_responsible_and_suggestion("NOT_OWNER")
+                return ItemStatus.FAILED, "NOT_OWNER", "只能提交自己创建的订单", resp_role, resp_sug
             if order.status not in (OrderStatus.DRAFT, OrderStatus.DOC_CORRECTION):
                 _add_history(order, user, "批量-提交失败(状态错误)", remark)
-                return ItemStatus.FAILED, "INVALID_STATUS", f"状态{OrderStatus(order.status).label}不允许提交单证"
+                resp_role, resp_sug = _get_responsible_and_suggestion("INVALID_STATUS")
+                return ItemStatus.FAILED, "INVALID_STATUS", f"状态{OrderStatus(order.status).label}不允许提交单证", resp_role, resp_sug
             try:
                 _check_evidences(order)
             except APIError as e:
                 _add_history(order, user, "批量-提交需重试(缺证据)", remark)
-                return ItemStatus.RETRY, e.code, e.message
+                resp_role, resp_sug = _get_responsible_and_suggestion(e.code)
+                return ItemStatus.RETRY, e.code, e.message, resp_role, resp_sug
             order.submitted_at = datetime.now()
             _transition_status(order, OrderStatus.PENDING_DOC, user, "批量-提交单证处理", remark)
-            return ItemStatus.SUCCESS, None, "提交成功"
+            return ItemStatus.SUCCESS, None, "提交成功", "", ""
 
         elif action == BatchAction.APPROVE_DOC:
             _require_role(user, Role.DOC_SUPERVISOR)
             if order.status not in (OrderStatus.PENDING_DOC, OrderStatus.DOC_PROCESSING, OrderStatus.CONFIRM_CORRECTION):
                 _add_history(order, user, "批量-单证复核失败(状态错误)", remark)
-                return ItemStatus.FAILED, "INVALID_STATUS", f"状态{OrderStatus(order.status).label}不允许单证复核通过"
+                resp_role, resp_sug = _get_responsible_and_suggestion("INVALID_STATUS")
+                return ItemStatus.FAILED, "INVALID_STATUS", f"状态{OrderStatus(order.status).label}不允许单证复核通过", resp_role, resp_sug
             order.doc_handler = user
             order.doc_processed_at = datetime.now()
             _transition_status(order, OrderStatus.PENDING_CONFIRM, user, "批量-单证复核通过", remark)
-            return ItemStatus.SUCCESS, None, "单证复核通过"
+            return ItemStatus.SUCCESS, None, "单证复核通过", "", ""
 
         elif action == BatchAction.REJECT_DOC:
             _require_role(user, Role.DOC_SUPERVISOR)
             if not remark or not remark.strip():
                 _add_history(order, user, "批量-退回失败(缺备注)", "")
-                return ItemStatus.FAILED, "REMARK_REQUIRED", "批量退回必须填写备注说明"
+                resp_role, resp_sug = _get_responsible_and_suggestion("REMARK_REQUIRED")
+                return ItemStatus.FAILED, "REMARK_REQUIRED", "批量退回必须填写备注说明", resp_role, resp_sug
             if order.status not in (OrderStatus.PENDING_DOC, OrderStatus.DOC_PROCESSING):
                 _add_history(order, user, "批量-退回失败(状态错误)", remark)
-                return ItemStatus.FAILED, "INVALID_STATUS", f"状态{OrderStatus(order.status).label}不允许退回补正"
+                resp_role, resp_sug = _get_responsible_and_suggestion("INVALID_STATUS")
+                return ItemStatus.FAILED, "INVALID_STATUS", f"状态{OrderStatus(order.status).label}不允许退回补正", resp_role, resp_sug
             order.doc_handler = user
             order.doc_remark = remark
             _transition_status(order, OrderStatus.DOC_CORRECTION, user, "批量-退回业务员补正", remark)
-            return ItemStatus.SUCCESS, None, "已退回业务员补正"
+            return ItemStatus.SUCCESS, None, "已退回业务员补正", "", ""
 
         elif action == BatchAction.MARK_EXCEPTION_DOC:
             _require_role(user, Role.DOC_SUPERVISOR)
             if not remark or not remark.strip():
                 _add_history(order, user, "批量-标记异常失败(缺备注)", "")
-                return ItemStatus.FAILED, "REMARK_REQUIRED", "批量标记异常必须填写备注说明"
+                resp_role, resp_sug = _get_responsible_and_suggestion("REMARK_REQUIRED")
+                return ItemStatus.FAILED, "REMARK_REQUIRED", "批量标记异常必须填写备注说明", resp_role, resp_sug
             if order.status not in (OrderStatus.PENDING_DOC, OrderStatus.DOC_PROCESSING):
                 _add_history(order, user, "批量-标记异常失败(状态错误)", remark)
-                return ItemStatus.FAILED, "INVALID_STATUS", f"状态{OrderStatus(order.status).label}不允许标记异常"
+                resp_role, resp_sug = _get_responsible_and_suggestion("INVALID_STATUS")
+                return ItemStatus.FAILED, "INVALID_STATUS", f"状态{OrderStatus(order.status).label}不允许标记异常", resp_role, resp_sug
             order.doc_handler = user
             order.exception_remark = remark
             _transition_status(order, OrderStatus.DOC_EXCEPTION, user, "批量-单证标记异常", remark)
-            return ItemStatus.SUCCESS, None, "已标记异常"
+            return ItemStatus.SUCCESS, None, "已标记异常", "", ""
 
         elif action == BatchAction.SUBMIT_TO_CONFIRM:
             _require_role(user, Role.DOC_SUPERVISOR)
             if order.status not in (OrderStatus.PENDING_DOC, OrderStatus.DOC_PROCESSING, OrderStatus.CONFIRM_CORRECTION):
                 _add_history(order, user, "批量-提交确认失败(状态错误)", remark)
-                return ItemStatus.FAILED, "INVALID_STATUS", f"状态{OrderStatus(order.status).label}不允许提交确认"
+                resp_role, resp_sug = _get_responsible_and_suggestion("INVALID_STATUS")
+                return ItemStatus.FAILED, "INVALID_STATUS", f"状态{OrderStatus(order.status).label}不允许提交确认", resp_role, resp_sug
             order.doc_handler = user
             order.doc_processed_at = datetime.now()
             _transition_status(order, OrderStatus.PENDING_CONFIRM, user, "批量-提交经理确认", remark)
-            return ItemStatus.SUCCESS, None, "已提交经理确认"
+            return ItemStatus.SUCCESS, None, "已提交经理确认", "", ""
 
         elif action == BatchAction.APPROVE_CONFIRM:
             _require_role(user, Role.BIZ_MANAGER)
             if order.status not in (OrderStatus.PENDING_CONFIRM, OrderStatus.CONFIRM_EXCEPTION):
                 _add_history(order, user, "批量-确认失败(状态错误)", remark)
-                return ItemStatus.FAILED, "INVALID_STATUS", f"状态{OrderStatus(order.status).label}不允许确认通过"
+                resp_role, resp_sug = _get_responsible_and_suggestion("INVALID_STATUS")
+                return ItemStatus.FAILED, "INVALID_STATUS", f"状态{OrderStatus(order.status).label}不允许确认通过", resp_role, resp_sug
             try:
                 _check_evidences(order)
             except APIError as e:
                 _add_history(order, user, "批量-确认需重试(缺证据)", remark)
-                return ItemStatus.RETRY, e.code, e.message
+                resp_role, resp_sug = _get_responsible_and_suggestion(e.code)
+                return ItemStatus.RETRY, e.code, e.message, resp_role, resp_sug
             order.confirm_handler = user
             order.confirmed_at = datetime.now()
             _transition_status(order, OrderStatus.COMPLETED, user, "批量-经理确认通过", remark)
-            return ItemStatus.SUCCESS, None, "经理确认通过"
+            return ItemStatus.SUCCESS, None, "经理确认通过", "", ""
 
         elif action == BatchAction.REJECT_CONFIRM:
             _require_role(user, Role.BIZ_MANAGER)
             if not remark or not remark.strip():
                 _add_history(order, user, "批量-退回失败(缺备注)", "")
-                return ItemStatus.FAILED, "REMARK_REQUIRED", "批量退回必须填写备注说明"
+                resp_role, resp_sug = _get_responsible_and_suggestion("REMARK_REQUIRED")
+                return ItemStatus.FAILED, "REMARK_REQUIRED", "批量退回必须填写备注说明", resp_role, resp_sug
             if order.status not in (OrderStatus.PENDING_CONFIRM,):
                 _add_history(order, user, "批量-退回失败(状态错误)", remark)
-                return ItemStatus.FAILED, "INVALID_STATUS", f"状态{OrderStatus(order.status).label}不允许退回补正"
+                resp_role, resp_sug = _get_responsible_and_suggestion("INVALID_STATUS")
+                return ItemStatus.FAILED, "INVALID_STATUS", f"状态{OrderStatus(order.status).label}不允许退回补正", resp_role, resp_sug
             order.confirm_handler = user
             order.confirm_remark = remark
             _transition_status(order, OrderStatus.CONFIRM_CORRECTION, user, "批量-退回单证补正", remark)
-            return ItemStatus.SUCCESS, None, "已退回单证补正"
+            return ItemStatus.SUCCESS, None, "已退回单证补正", "", ""
 
         elif action == BatchAction.MARK_EXCEPTION_CONFIRM:
             _require_role(user, Role.BIZ_MANAGER)
             if not remark or not remark.strip():
                 _add_history(order, user, "批量-标记异常失败(缺备注)", "")
-                return ItemStatus.FAILED, "REMARK_REQUIRED", "批量标记异常必须填写备注说明"
+                resp_role, resp_sug = _get_responsible_and_suggestion("REMARK_REQUIRED")
+                return ItemStatus.FAILED, "REMARK_REQUIRED", "批量标记异常必须填写备注说明", resp_role, resp_sug
             if order.status not in (OrderStatus.PENDING_CONFIRM,):
                 _add_history(order, user, "批量-标记异常失败(状态错误)", remark)
-                return ItemStatus.FAILED, "INVALID_STATUS", f"状态{OrderStatus(order.status).label}不允许标记异常"
+                resp_role, resp_sug = _get_responsible_and_suggestion("INVALID_STATUS")
+                return ItemStatus.FAILED, "INVALID_STATUS", f"状态{OrderStatus(order.status).label}不允许标记异常", resp_role, resp_sug
             order.confirm_handler = user
             order.exception_remark = remark
             _transition_status(order, OrderStatus.CONFIRM_EXCEPTION, user, "批量-确认环节标记异常", remark)
-            return ItemStatus.SUCCESS, None, "已标记异常"
+            return ItemStatus.SUCCESS, None, "已标记异常", "", ""
 
         else:
             _add_history(order, user, "批量-操作失败(不支持的操作)", remark)
-            return ItemStatus.FAILED, "INVALID_ACTION", f"不支持的批量操作: {action}"
+            resp_role, resp_sug = _get_responsible_and_suggestion("INVALID_ACTION")
+            return ItemStatus.FAILED, "INVALID_ACTION", f"不支持的批量操作: {action}", resp_role, resp_sug
 
     except APIError as e:
         _add_history(order, user, f"批量-操作失败({e.code})", remark)
-        return ItemStatus.FAILED, e.code, e.message
+        resp_role, resp_sug = _get_responsible_and_suggestion(e.code)
+        return ItemStatus.FAILED, e.code, e.message, resp_role, resp_sug
     except Exception as e:
         _add_history(order, user, f"批量-系统错误", remark)
-        return ItemStatus.FAILED, "SYSTEM_ERROR", str(e)
+        resp_role, resp_sug = _get_responsible_and_suggestion("SYSTEM_ERROR")
+        return ItemStatus.FAILED, "SYSTEM_ERROR", str(e), resp_role, resp_sug
 
 
 @router.post("/ops/batches", response=BatchOperationOut, tags=["外贸订单-批量操作"])
@@ -699,6 +742,7 @@ def batch_operation(request, payload: BatchOperationIn, x_user_id: str = Header(
             expected_version = version_map.get(oid, 0)
             if oid in missing_ids:
                 failed_count += 1
+                resp_role, resp_sug = _get_responsible_and_suggestion("ORDER_NOT_FOUND")
                 BatchOperationItem.objects.create(
                     batch=batch,
                     order=None,
@@ -706,6 +750,8 @@ def batch_operation(request, payload: BatchOperationIn, x_user_id: str = Header(
                     item_status=ItemStatus.FAILED,
                     error_code="ORDER_NOT_FOUND",
                     error_message=f"订单{oid}不存在",
+                    responsible_role=resp_role,
+                    suggestion=resp_sug,
                     processed_at=datetime.now(),
                     version=expected_version,
                 )
@@ -716,11 +762,13 @@ def batch_operation(request, payload: BatchOperationIn, x_user_id: str = Header(
                     error_code="ORDER_NOT_FOUND",
                     error_message=f"订单{oid}不存在",
                     submitted_version=expected_version,
+                    responsible_role=resp_role,
+                    suggestion=resp_sug,
                 ))
                 continue
 
             order = orders.get(id=oid)
-            item_status, err_code, err_msg = _process_single_action(order, payload.action, user, expected_version, payload.remark or "")
+            item_status, err_code, err_msg, resp_role, resp_sug = _process_single_action(order, payload.action, user, expected_version, payload.remark or "")
 
             BatchOperationItem.objects.create(
                 batch=batch,
@@ -729,6 +777,8 @@ def batch_operation(request, payload: BatchOperationIn, x_user_id: str = Header(
                 item_status=item_status,
                 error_code=err_code or "",
                 error_message=err_msg or "",
+                responsible_role=resp_role,
+                suggestion=resp_sug,
                 processed_at=datetime.now(),
                 version=expected_version,
             )
@@ -747,6 +797,8 @@ def batch_operation(request, payload: BatchOperationIn, x_user_id: str = Header(
                 error_code=err_code,
                 error_message=err_msg,
                 submitted_version=expected_version,
+                responsible_role=resp_role,
+                suggestion=resp_sug,
             ))
 
         batch.success_count = success_count
@@ -805,6 +857,8 @@ def list_batch_operations(request, x_user_id: str = Header(None), x_role: str = 
                 error_code=it.error_code or None,
                 error_message=it.error_message or None,
                 submitted_version=it.version,
+                responsible_role=it.responsible_role,
+                suggestion=it.suggestion,
             ))
         result.append(BatchOperationOut(
             id=b.id,
@@ -825,4 +879,99 @@ def list_batch_operations(request, x_user_id: str = Header(None), x_role: str = 
             remark=b.remark,
             items=items_out,
         ))
+    return result
+
+
+@router.get("/ops/batch-items/latest", response=List[BatchItemResult], tags=["外贸订单-批量操作"])
+def get_latest_batch_items_by_orders(request, order_ids: str = "", x_user_id: str = Header(None), x_role: str = Header(None)):
+    """
+    批量获取指定订单的最近一次批量操作记录（仅当最近一次是失败/重试时返回）
+    order_ids: 逗号分隔的订单ID列表
+    按角色限制：业务员只能查看自己创建的订单
+    """
+    user = _get_user_from_headers(x_user_id, x_role)
+    
+    if not order_ids:
+        return []
+    
+    oid_list = [int(x.strip()) for x in order_ids.split(",") if x.strip().isdigit()]
+    if not oid_list:
+        return []
+    
+    role = user.profile.role
+    qs = (
+        BatchOperationItem.objects
+        .filter(order_id__in=oid_list, order__isnull=False)
+        .select_related("order", "batch", "batch__operator", "batch__operator__profile")
+        .order_by("order_id", "-id")
+    )
+    
+    if role == Role.SALES:
+        qs = qs.filter(order__created_by=user)
+    
+    items = list(qs)
+    
+    seen = set()
+    latest_items = []
+    for it in items:
+        if it.order_id in seen:
+            continue
+        seen.add(it.order_id)
+        latest_items.append(it)
+    
+    result = []
+    for it in latest_items:
+        if it.item_status == ItemStatus.SUCCESS:
+            continue
+        result.append(BatchItemResult(
+            order_id=it.order.id,
+            order_no=it.order.order_no,
+            item_status=it.item_status,
+            error_code=it.error_code or None,
+            error_message=it.error_message or None,
+            submitted_version=it.version,
+            responsible_role=it.responsible_role,
+            suggestion=it.suggestion,
+        ))
+    
+    return result
+
+
+@router.get("/ops/orders/{order_id}/batch-items", response=List[BatchItemResult], tags=["外贸订单-批量操作"])
+def get_order_batch_items(request, order_id: int, x_user_id: str = Header(None), x_role: str = Header(None)):
+    """
+    获取单个订单的批量操作历史明细
+    按角色限制：业务员只能查看自己创建的订单
+    """
+    user = _get_user_from_headers(x_user_id, x_role)
+    
+    try:
+        order = TradeOrder.objects.get(id=order_id)
+    except TradeOrder.DoesNotExist:
+        _e(404, "ORDER_NOT_FOUND", "订单不存在")
+    
+    role = user.profile.role
+    if role == Role.SALES and order.created_by_id != user.id:
+        _e(403, "PERMISSION_DENIED", "无权查看他人订单的批量操作记录")
+    
+    items = (
+        BatchOperationItem.objects
+        .filter(order=order)
+        .select_related("batch", "batch__operator", "batch__operator__profile")
+        .order_by("-id")[:20]
+    )
+    
+    result = []
+    for it in items:
+        result.append(BatchItemResult(
+            order_id=order.id,
+            order_no=order.order_no,
+            item_status=it.item_status,
+            error_code=it.error_code or None,
+            error_message=it.error_message or None,
+            submitted_version=it.version,
+            responsible_role=it.responsible_role,
+            suggestion=it.suggestion,
+        ))
+    
     return result

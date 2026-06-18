@@ -259,6 +259,54 @@
           </div>
         </div>
 
+        <!-- 批量操作历史（补正追踪） -->
+        <div class="bg-white rounded-lg border border-gray-200 p-5">
+          <h2 class="text-base font-bold text-gray-800 mb-4">🔄 批量操作历史（补正追踪）</h2>
+          <div v-if="batchItems.length === 0" class="text-sm text-gray-400 py-6 text-center">
+            暂无批量操作记录
+          </div>
+          <div v-else class="space-y-3">
+            <div
+              v-for="(item, idx) in batchItems"
+              :key="idx"
+              class="border rounded-lg p-3"
+              :class="{
+                'border-red-200 bg-red-50/30': item.item_status === 'failed',
+                'border-amber-200 bg-amber-50/30': item.item_status === 'retry',
+                'border-green-200 bg-green-50/30': item.item_status === 'success'
+              }"
+            >
+              <div class="flex items-center justify-between mb-2">
+                <div class="flex items-center gap-2">
+                  <span
+                    :class="[
+                      'inline-block px-2 py-0.5 rounded text-[11px] font-medium',
+                      item.item_status === 'success' ? 'bg-green-100 text-green-700' : '',
+                      item.item_status === 'failed' ? 'bg-red-100 text-red-700' : '',
+                      item.item_status === 'retry' ? 'bg-amber-100 text-amber-700' : '',
+                    ]"
+                  >
+                    {{ item.item_status === 'success' ? '成功' : item.item_status === 'failed' ? '失败' : '需重试' }}
+                  </span>
+                  <span class="text-xs text-gray-500">提交版本: v{{ item.submitted_version }}</span>
+                </div>
+                <span v-if="item.responsible_role" class="text-xs text-gray-500">
+                  责任: {{ getRoleLabel(item.responsible_role) }}
+                </span>
+              </div>
+              <div v-if="item.error_code" class="text-sm font-medium text-gray-700">
+                {{ item.error_code }}
+              </div>
+              <div v-if="item.error_message" class="text-sm text-gray-600 mt-0.5">
+                {{ item.error_message }}
+              </div>
+              <div v-if="item.suggestion" class="text-sm text-blue-600 mt-1">
+                💡 {{ item.suggestion }}
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- 历史记录 -->
         <div class="bg-white rounded-lg border border-gray-200 p-5">
           <h2 class="text-base font-bold text-gray-800 mb-4">📜 操作历史</h2>
@@ -370,8 +418,8 @@
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
 import { useAppStore } from '~/stores/app'
-import type { TradeOrder, Evidence, OrderHistory } from '~/types'
-import { StatusColorClass, EvidenceTypeLabels } from '~/types'
+import type { TradeOrder, Evidence, OrderHistory, BatchItemResult } from '~/types'
+import { StatusColorClass, EvidenceTypeLabels, RoleLabels } from '~/types'
 
 const route = useRoute()
 const store = useAppStore()
@@ -379,6 +427,7 @@ const { currentUser } = storeToRefs(store)
 
 const order = ref<TradeOrder | null>(null)
 const histories = ref<OrderHistory[]>([])
+const batchItems = ref<BatchItemResult[]>([])
 
 const editMode = ref(false)
 const editLoading = ref(false)
@@ -482,10 +531,17 @@ function canDeleteEvidence(ev: Evidence) {
   return ['draft', 'doc_correction'].includes(order.value.status)
 }
 
+function getRoleLabel(role: string) {
+  if (role === 'operator') return '操作人'
+  if (role === 'admin') return '系统管理员'
+  return RoleLabels[role] || role
+}
+
 async function loadData() {
   try {
     order.value = await store.getOrder(orderId.value)
     histories.value = await store.getHistories(orderId.value)
+    batchItems.value = await store.getOrderBatchItems(orderId.value)
   } catch (e: any) {
     alert(e.message)
   }
