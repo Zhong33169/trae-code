@@ -1,0 +1,20 @@
+{
+  "name": "propaganda-plan-frontend",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vinxi dev --port 3004",
+    "build": "vinxi build",
+    "start": "vinxi start --port 3004"
+  },
+  "dependencies": {
+    "@solidjs/router": "^0.13.1",
+    "@solidjs/start": "^1.0.0",
+    "solid-js": "^1.8.16",
+    "vinxi": "^0.3.11"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.5",
+    "vite": "^5.2.11"
+  }
+}
