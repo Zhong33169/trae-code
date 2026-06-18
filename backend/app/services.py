@@ -8,7 +8,7 @@ from .models import (
 from .schemas import (
     SubmitData, ReviewData, ReturnForCorrectionData, CorrectData,
     AppealSubmitData, AppealReviewData, AppealRecordCreate, AppealRecordReview,
-    ConflictRecoveryData
+    ConflictRecoveryData, ReceiveData
 )
 from . import crud
 
@@ -628,35 +628,67 @@ def mark_overdue(db: Session, project_id: int, current_user_id: int) -> Training
 def process_incoming_project(
     db: Session,
     project_id: int,
-    current_user_id: int,
+    data: ReceiveData,
     expected_version: Optional[int] = None,
 ) -> TrainingProject:
     project = crud.get_project(db, project_id)
     if not project:
         raise BusinessError(f"项目 {project_id} 不存在", "project_not_found")
 
-    _validate_version(db, project, current_user_id, expected_version)
-    _validate_handler(db, project, current_user_id)
-    _validate_user_role(db, current_user_id, [Role.SUPERVISOR, Role.REVIEWER], project)
+    _validate_version(db, project, data.current_user_id, expected_version)
+    _validate_handler(db, project, data.current_user_id)
+    _validate_user_role(db, data.current_user_id, [Role.SUPERVISOR, Role.REVIEWER], project)
 
-    if project.status == Status.SUBMITTED:
-        from_status = project.status
-        project.status = Status.UNDER_REVIEW
+    if project.status not in [Status.SUBMITTED, Status.UNDER_REVIEW]:
+        _log_conflict(
+            db, project, data.current_user_id,
+            f"项目状态不允许接收：当前状态 {project.status.value}，仅允许 submitted 或 under_review",
+            "status_not_allowed",
+        )
+
+    from_status = project.status
+    if from_status == Status.UNDER_REVIEW:
         project.version += 1
 
         crud.add_operation_log(
             db,
             project_id=project_id,
-            user_id=current_user_id,
+            user_id=data.current_user_id,
             action=ActionType.REVIEW_APPROVE,
             from_status=from_status,
             to_status=Status.UNDER_REVIEW,
             stage=project.stage,
             version=project.version,
-            comment="已接收项目进入审核",
+            comment=data.comment or "已接收项目进入复核",
+            audit_note=data.audit_note,
         )
 
         db.commit()
         db.refresh(project)
+        return project
 
+    project.status = Status.UNDER_REVIEW
+    project.version += 1
+
+    last_recovery = crud.get_last_recovery_log(db, project_id)
+    is_from_recovery = last_recovery is not None
+
+    crud.add_operation_log(
+        db,
+        project_id=project_id,
+        user_id=data.current_user_id,
+        action=ActionType.REVIEW_APPROVE,
+        from_status=from_status,
+        to_status=Status.UNDER_REVIEW,
+        stage=project.stage,
+        version=project.version,
+        comment=data.comment or "已接收项目进入审核",
+        audit_note=data.audit_note,
+        receive_from_recovery=is_from_recovery,
+        receive_source_status=last_recovery.recovery_source if is_from_recovery else None,
+        next_status=Status.UNDER_REVIEW,
+    )
+
+    db.commit()
+    db.refresh(project)
     return project

@@ -83,6 +83,9 @@ export interface OperationLog {
   recovery_source?: Status;
   next_handler_id?: number;
   next_handler_name?: string;
+  receive_from_recovery?: boolean;
+  receive_source_status?: Status;
+  next_status?: Status;
   created_at: string;
 }
 
@@ -119,10 +122,12 @@ export interface TrainingProjectListItem {
   version: number;
   current_handler_name?: string;
   current_handler_role?: Role;
+  current_handler_id?: number;
   created_at: string;
   updated_at: string;
   is_overdue: boolean;
   recovery_summary?: string;
+  is_recovered_pending_receive?: boolean;
 }
 
 export type ConflictFilter = "pending_conflict" | "conflict_recovered" | "recovered_pending_receive";
@@ -144,6 +149,7 @@ export interface Statistics {
   pending_conflict: number;
   conflict_recovered: number;
   recovered_pending_receive: number;
+  recovered_received: number;
   by_stage_need: number;
   by_stage_quotation: number;
   by_stage_contract: number;
@@ -180,6 +186,12 @@ export interface CorrectData {
 }
 
 export interface ConflictRecoveryData {
+  current_user_id: number;
+  comment?: string;
+  audit_note?: string;
+}
+
+export interface ReceiveData {
   current_user_id: number;
   comment?: string;
   audit_note?: string;

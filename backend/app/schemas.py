@@ -103,6 +103,9 @@ class OperationLog(OperationLogBase):
     recovery_source: Optional[Status] = None
     next_handler_id: Optional[int] = None
     next_handler_name: Optional[str] = None
+    receive_from_recovery: Optional[bool] = False
+    receive_source_status: Optional[Status] = None
+    next_status: Optional[Status] = None
     created_at: datetime
     model_config = ConfigDict(from_attributes=True)
 
@@ -172,6 +175,12 @@ class CorrectData(BaseModel):
 
 
 class ConflictRecoveryData(BaseModel):
+    current_user_id: int
+    comment: Optional[str] = None
+    audit_note: Optional[str] = None
+
+
+class ReceiveData(BaseModel):
     current_user_id: int
     comment: Optional[str] = None
     audit_note: Optional[str] = None
@@ -263,10 +272,12 @@ class TrainingProjectListItem(BaseModel):
     version: int
     current_handler_name: Optional[str] = None
     current_handler_role: Optional[Role] = None
+    current_handler_id: Optional[int] = None
     created_at: datetime
     updated_at: datetime
     is_overdue: bool = False
     recovery_summary: Optional[str] = None
+    is_recovered_pending_receive: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -300,6 +311,7 @@ class Statistics(BaseModel):
     pending_conflict: int = 0
     conflict_recovered: int = 0
     recovered_pending_receive: int = 0
+    recovered_received: int = 0
     by_stage_need: int = 0
     by_stage_quotation: int = 0
     by_stage_contract: int = 0

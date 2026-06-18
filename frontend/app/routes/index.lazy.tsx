@@ -172,6 +172,14 @@ function Index() {
               恢复后待接收
             </div>
           </div>
+          <div className="stat-card" style={{ background: "#f5f3ff", borderTop: "3px solid #7c3aed" }}>
+            <div className="stat-value" style={{ color: "#6d28d9" }}>
+              {statistics.recovered_received}
+            </div>
+            <div className="stat-label" style={{ color: "#5b21b6" }}>
+              已恢复接收
+            </div>
+          </div>
         </div>
       )}
 
@@ -344,8 +352,22 @@ function Index() {
                 </tr>
               </thead>
               <tbody>
-                {projects.map((p) => (
-                  <tr key={p.id}>
+                {projects.map((p) => {
+                  const isMyRecoveryTodo =
+                    p.is_recovered_pending_receive &&
+                    currentUser &&
+                    p.current_handler_id === currentUser.id &&
+                    (currentUser.role === "supervisor" || currentUser.role === "reviewer");
+                  return (
+                  <tr
+                    key={p.id}
+                    style={isMyRecoveryTodo ? {
+                      background: "#eff6ff",
+                      borderLeft: "3px solid #3b82f6",
+                    } : p.is_recovered_pending_receive ? {
+                      background: "#f8faff",
+                    } : undefined}
+                  >
                     <td>
                       <code style={{ background: "#f3f4f6", padding: "2px 6px", borderRadius: 4 }}>
                         {p.project_no}
@@ -359,6 +381,19 @@ function Index() {
                           style={{ marginLeft: "0.5rem" }}
                         >
                           已逾期
+                        </span>
+                      )}
+                      {p.is_recovered_pending_receive && (
+                        <span
+                          className="badge"
+                          style={{
+                            marginLeft: "0.5rem",
+                            background: isMyRecoveryTodo ? "#1d4ed8" : "#93c5fd",
+                            color: isMyRecoveryTodo ? "#fff" : "#1e40af",
+                            fontSize: "0.7rem",
+                          }}
+                        >
+                          🔄 待接收
                         </span>
                       )}
                       {p.recovery_summary && (
@@ -404,7 +439,8 @@ function Index() {
                       </Link>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>

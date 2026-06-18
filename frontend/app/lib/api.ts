@@ -12,6 +12,7 @@ import type {
   ReturnForCorrectionData,
   CorrectData,
   ConflictRecoveryData,
+  ReceiveData,
   AppealSubmitData,
   AppealReviewData,
   ProjectCreate,
@@ -163,11 +164,11 @@ export const api = {
     });
   },
 
-  receiveProject: (projectId: number, userId: number, version?: number) => {
-    const qs = new URLSearchParams({ current_user_id: String(userId) });
-    if (version !== undefined) qs.set("version", String(version));
-    return request<TrainingProject>(`/projects/${projectId}/receive?${qs.toString()}`, {
+  receiveProject: (projectId: number, data: ReceiveData, version?: number) => {
+    const qs = version !== undefined ? `?version=${version}` : "";
+    return request<TrainingProject>(`/projects/${projectId}/receive${qs}`, {
       method: "POST",
+      body: JSON.stringify(data),
     });
   },
 

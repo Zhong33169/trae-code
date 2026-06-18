@@ -96,7 +96,10 @@ def init_db():
             current_user_id=registrar.id,
             comment="需求、报价、合同材料齐全，申请审核"
         ))
-        services.process_incoming_project(db, project1.id, supervisor.id)
+        services.process_incoming_project(db, project1.id, schemas.ReceiveData(
+            current_user_id=supervisor.id,
+            comment="接收审核",
+        ))
         services.review_project(
             db, project1.id,
             schemas.ReviewData(
@@ -105,7 +108,7 @@ def init_db():
             ),
             approve=True
         )
-        services.process_incoming_project(db, project1.id, reviewer.id)
+        services.process_incoming_project(db, project1.id, schemas.ReceiveData(current_user_id=reviewer.id))
         services.review_project(
             db, project1.id,
             schemas.ReviewData(
@@ -160,7 +163,7 @@ def init_db():
             current_user_id=registrar2.id,
             comment="需求文档已准备好，请审核"
         ))
-        services.process_incoming_project(db, project3.id, supervisor.id)
+        services.process_incoming_project(db, project3.id, schemas.ReceiveData(current_user_id=supervisor.id))
         services.mark_overdue(db, project3.id, supervisor.id)
         print(f"  [逾期] {project3.project_no} - {project3.project_name}")
 
@@ -183,7 +186,7 @@ def init_db():
             current_user_id=registrar2.id,
             comment="请审核需求文档"
         ))
-        services.process_incoming_project(db, project4.id, supervisor.id)
+        services.process_incoming_project(db, project4.id, schemas.ReceiveData(current_user_id=supervisor.id))
         services.return_for_correction(
             db, project4.id,
             schemas.ReturnForCorrectionData(
@@ -225,7 +228,7 @@ def init_db():
             current_user_id=registrar.id,
             comment="材料齐全，请审核"
         ))
-        services.process_incoming_project(db, project5.id, supervisor.id)
+        services.process_incoming_project(db, project5.id, schemas.ReceiveData(current_user_id=supervisor.id))
         services.review_project(
             db, project5.id,
             schemas.ReviewData(
@@ -234,7 +237,7 @@ def init_db():
             ),
             approve=True
         )
-        services.process_incoming_project(db, project5.id, reviewer.id)
+        services.process_incoming_project(db, project5.id, schemas.ReceiveData(current_user_id=reviewer.id))
         services.review_project(
             db, project5.id,
             schemas.ReviewData(
@@ -298,7 +301,7 @@ def init_db():
             current_user_id=registrar2.id,
             comment="进入合同阶段审核"
         ))
-        services.process_incoming_project(db, project7.id, supervisor.id)
+        services.process_incoming_project(db, project7.id, schemas.ReceiveData(current_user_id=supervisor.id))
         print(f"  [审核中] {project7.project_no} - {project7.project_name}")
 
         # 再次提交示例：申诉通过 → 转回补正 → 登记员补正后再次提交
@@ -333,7 +336,7 @@ def init_db():
             current_user_id=registrar.id,
             comment="合同材料齐全，申请审核"
         ))
-        services.process_incoming_project(db, project8.id, supervisor.id)
+        services.process_incoming_project(db, project8.id, schemas.ReceiveData(current_user_id=supervisor.id))
         services.review_project(db, project8.id, schemas.ReviewData(
             current_user_id=supervisor.id,
             opinion="材料完整，提交复核负责人确认",
@@ -400,8 +403,12 @@ def init_db():
             comment="已补齐报价单，执行冲突恢复提交",
             audit_note="审计：缺证据冲突恢复，补全报价单后重新提交，版本v2",
         ))
-        # 步骤4：主管接收（冲突恢复后的主管接收闭环，submitted → under_review）
-        services.process_incoming_project(db, project9.id, current_user_id=supervisor.id)
+        # 步骤4：主管接收（冲突恢复后的主管接收闭环，submitted → under_review，含审计备注）
+        services.process_incoming_project(db, project9.id, schemas.ReceiveData(
+            current_user_id=supervisor.id,
+            comment="接收冲突恢复项目进入审核",
+            audit_note="审计：确认恢复来源为缺证据冲突，证据已补齐，接收进入审核",
+        ))
         print(f"  [已恢复·主管已接收] {project9.project_no} - {project9.project_name} (恢复后被主管接收进入审核)")
 
         # 恢复后待主管接收示例：缺证据冲突 → 补齐 → 冲突恢复 → submitted（待主管接收）
@@ -460,6 +467,7 @@ def init_db():
         print(f"  待补救（冲突）: {stats['pending_conflict']}")
         print(f"  已恢复（冲突）: {stats['conflict_recovered']}")
         print(f"  恢复后待主管接收: {stats['recovered_pending_receive']}")
+        print(f"  已恢复接收: {stats['recovered_received']}")
 
     finally:
         db.close()

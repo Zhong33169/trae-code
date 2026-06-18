@@ -188,6 +188,9 @@ def add_operation_log(
     recovery_source: Optional[Status] = None,
     next_handler_id: Optional[int] = None,
     next_handler_name: Optional[str] = None,
+    receive_from_recovery: Optional[bool] = False,
+    receive_source_status: Optional[Status] = None,
+    next_status: Optional[Status] = None,
 ) -> OperationLog:
     user = get_user(db, user_id)
     log = OperationLog(
@@ -207,6 +210,9 @@ def add_operation_log(
         recovery_source=recovery_source,
         next_handler_id=next_handler_id,
         next_handler_name=next_handler_name,
+        receive_from_recovery=receive_from_recovery or False,
+        receive_source_status=receive_source_status,
+        next_status=next_status,
     )
     db.add(log)
     db.flush()
@@ -238,6 +244,25 @@ def get_recovery_summary(db: Session, project_id: int) -> Optional[str]:
         if log.recovery_source else "未知状态"
     handler = log.next_handler_name or "待分配"
     return f"从「{source_label}」恢复提交，下一处理人：{handler}"
+
+
+def get_last_recovery_log(db: Session, project_id: int) -> Optional[OperationLog]:
+    return (
+        db.query(OperationLog)
+        .filter(
+            OperationLog.project_id == project_id,
+            OperationLog.action == ActionType.CONFLICT_RECOVERED,
+        )
+        .order_by(OperationLog.created_at.desc())
+        .first()
+    )
+
+
+def is_recovered_pending_receive(db: Session, project_id: int) -> bool:
+    project = get_project(db, project_id)
+    if not project or project.status != Status.SUBMITTED:
+        return False
+    return get_last_recovery_log(db, project_id) is not None
 
 
 def create_appeal(db: Session, appeal: AppealRecordCreate, project_id: int, version: int) -> AppealRecord:
@@ -325,6 +350,15 @@ def get_statistics(db: Session) -> dict:
             .scalar() or 0
         )
 
+    recovered_received = (
+        db.query(func.count(func.distinct(OperationLog.project_id)))
+        .filter(
+            OperationLog.action == ActionType.REVIEW_APPROVE,
+            OperationLog.receive_from_recovery == True,
+        )
+        .scalar() or 0
+    )
+
     return {
         "total": total,
         "draft": count_status(Status.DRAFT),
@@ -342,6 +376,7 @@ def get_statistics(db: Session) -> dict:
         "pending_conflict": pending_conflict,
         "conflict_recovered": conflict_recovered,
         "recovered_pending_receive": recovered_pending_receive,
+        "recovered_received": recovered_received,
         "by_stage_need": count_stage(Stage.NEED),
         "by_stage_quotation": count_stage(Stage.QUOTATION),
         "by_stage_contract": count_stage(Stage.CONTRACT),

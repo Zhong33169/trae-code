@@ -99,10 +99,12 @@ def list_projects(
             version=p.version,
             current_handler_name=handler_name,
             current_handler_role=handler_role,
+            current_handler_id=p.current_handler_id,
             created_at=p.created_at,
             updated_at=p.updated_at,
             is_overdue=p.is_overdue,
             recovery_summary=crud.get_recovery_summary(db, p.id),
+            is_recovered_pending_receive=crud.is_recovered_pending_receive(db, p.id),
         ))
     return result
 
@@ -313,12 +315,12 @@ def archive_project(
 @app.post("/api/projects/{project_id}/receive", response_model=schemas.TrainingProject, tags=["流程操作"])
 def receive_project(
     project_id: int,
-    current_user_id: int,
+    data: schemas.ReceiveData,
     version: Optional[int] = Query(None),
     db: Session = Depends(get_db),
 ):
     try:
-        return services.process_incoming_project(db, project_id, current_user_id, expected_version=version)
+        return services.process_incoming_project(db, project_id, data, expected_version=version)
     except services.BusinessError as e:
         _handle_business_error(e)
 

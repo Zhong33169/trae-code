@@ -10,6 +10,7 @@ import type {
   ReturnForCorrectionData,
   CorrectData,
   ConflictRecoveryData,
+  ReceiveData,
   AppealSubmitData,
   AppealReviewData,
   EvidenceCreate,
@@ -60,6 +61,10 @@ function ProjectDetail() {
   const [showRecover, setShowRecover] = useState(false);
   const [recoverComment, setRecoverComment] = useState("");
   const [recoverAuditNote, setRecoverAuditNote] = useState("");
+
+  const [showReceive, setShowReceive] = useState(false);
+  const [receiveComment, setReceiveComment] = useState("");
+  const [receiveAuditNote, setReceiveAuditNote] = useState("");
 
   const [showAppeal, setShowAppeal] = useState(false);
   const [appealReason, setAppealReason] = useState("");
@@ -213,9 +218,12 @@ function ProjectDetail() {
   });
 
   const receiveMutation = useMutation({
-    mutationFn: (uid: number) => api.receiveProject(id, uid, project?.version),
+    mutationFn: (data: ReceiveData) => api.receiveProject(id, data, project?.version),
     onSuccess: () => {
       show("success", "已接收项目");
+      setShowReceive(false);
+      setReceiveComment("");
+      setReceiveAuditNote("");
       invalidateAll();
     },
     onError: (e: any) => show("error", e.message),
@@ -464,18 +472,62 @@ function ProjectDetail() {
             marginBottom: "1rem",
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+          <div style={{ display: "flex", alignItems: "flex-start", gap: "0.75rem" }}>
             <span style={{ fontSize: "1.5rem" }}>🔄</span>
             <div style={{ flex: 1 }}>
-              <div style={{ fontWeight: 600, color: "#1e40af" }}>
-                冲突恢复成功，已重新提交等待主管接收
+              <div style={{ fontWeight: 600, color: "#1e40af", marginBottom: "0.5rem" }}>
+                恢复交接卡片
               </div>
-              <div style={{ fontSize: "0.875rem", color: "#1d4ed8", marginTop: "0.25rem" }}>
-                {lastConflictRecovery.recovery_source &&
-                  `恢复来源：${labels.statuses[lastConflictRecovery.recovery_source]}`}
-                {lastConflictRecovery.next_handler_name &&
-                  ` · 下一处理人：${lastConflictRecovery.next_handler_name}（审核主管）`}
-                {canReceive ? " · 请点击下方「接收办理」继续审核" : " · 等待审核主管接收办理"}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.375rem 1.5rem", fontSize: "0.875rem" }}>
+                <div>
+                  <span style={{ color: "#6b7280" }}>恢复来源：</span>
+                  <span style={{ color: "#1d4ed8", fontWeight: 500 }}>
+                    {lastConflictRecovery.recovery_source
+                      ? labels.statuses[lastConflictRecovery.recovery_source]
+                      : "—"}
+                  </span>
+                </div>
+                <div>
+                  <span style={{ color: "#6b7280" }}>下一处理人：</span>
+                  <span style={{ color: "#1d4ed8", fontWeight: 500 }}>
+                    {lastConflictRecovery.next_handler_name || "待分配"}（审核主管）
+                  </span>
+                </div>
+                <div>
+                  <span style={{ color: "#6b7280" }}>恢复提交人：</span>
+                  <span style={{ fontWeight: 500 }}>{lastConflictRecovery.user_name}</span>
+                </div>
+                <div>
+                  <span style={{ color: "#6b7280" }}>恢复时间：</span>
+                  <span>{formatDateTime(lastConflictRecovery.created_at)}</span>
+                </div>
+                {lastConflictRecovery.comment && (
+                  <div style={{ gridColumn: "1 / -1" }}>
+                    <span style={{ color: "#6b7280" }}>补正说明：</span>
+                    {lastConflictRecovery.comment}
+                  </div>
+                )}
+                {lastConflictRecovery.audit_note && (
+                  <div style={{ gridColumn: "1 / -1" }}>
+                    <span style={{ color: "#166534" }}>📋 恢复审计：</span>
+                    {lastConflictRecovery.audit_note}
+                  </div>
+                )}
+              </div>
+              <div
+                style={{
+                  marginTop: "0.75rem",
+                  padding: "0.5rem 0.75rem",
+                  background: "#dbeafe",
+                  borderRadius: 6,
+                  fontSize: "0.875rem",
+                  color: "#1e40af",
+                  fontWeight: 500,
+                }}
+              >
+                {canReceive
+                  ? "📌 您是该项目的当前处理人，请点击下方「🔄 接收恢复项目」按钮办理接收"
+                  : "⏳ 等待审核主管接收办理，接收后进入审核流程"}
               </div>
             </div>
           </div>
@@ -487,9 +539,19 @@ function ProjectDetail() {
           {canReceive && (
             <button
               className="btn btn-primary"
-              onClick={() => receiveMutation.mutate(currentUser.id)}
+              onClick={() => {
+                setReceiveComment("");
+                setReceiveAuditNote("");
+                setShowReceive(true);
+              }}
+              style={lastConflictRecovery && project.status === "submitted" ? {
+                background: "#1d4ed8",
+                boxShadow: "0 0 0 3px rgba(59,130,246,0.3)",
+              } : undefined}
             >
-              接收办理
+              {lastConflictRecovery && project.status === "submitted"
+                ? "🔄 接收恢复项目"
+                : "接收办理"}
             </button>
           )}
           {canSubmit && (
@@ -939,6 +1001,23 @@ function ProjectDetail() {
                           {log.recovery_source && log.next_handler_name && " · "}
                           {log.next_handler_name &&
                             `下一处理人：${log.next_handler_name}`}
+                        </div>
+                      )}
+                      {log.receive_from_recovery && (
+                        <div
+                          className="log-comment"
+                          style={{
+                            color: "#7c3aed",
+                            marginTop: "0.5rem",
+                            borderLeft: "3px solid #7c3aed",
+                            paddingLeft: "0.5rem",
+                          }}
+                        >
+                          📥 恢复接收追溯：
+                          {log.receive_source_status &&
+                            `来源状态：${labels.statuses[log.receive_source_status]}`}
+                          {log.next_status &&
+                            ` → 下一状态：${labels.statuses[log.next_status]}`}
                         </div>
                       )}
                       {log.action === "state_conflict" && canRecover && (
@@ -1512,6 +1591,83 @@ function ProjectDetail() {
                 disabled={addEvidenceMutation.isPending || !newEvidenceName}
               >
                 添加
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showReceive && (
+        <div className="modal-overlay" onClick={() => setShowReceive(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 className="modal-title">
+                {lastConflictRecovery ? "接收恢复项目" : "接收办理"}
+              </h3>
+              <button className="modal-close" onClick={() => setShowReceive(false)}>
+                ×
+              </button>
+            </div>
+            {lastConflictRecovery && (
+              <div style={{
+                marginBottom: "1rem",
+                padding: "0.75rem",
+                background: "#eff6ff",
+                borderRadius: "0.375rem",
+                fontSize: "0.875rem",
+                color: "#1e40af",
+                border: "1px solid #bfdbfe",
+              }}>
+                <strong>🔄 恢复交接信息</strong>
+                <div style={{ marginTop: "0.375rem" }}>
+                  恢复来源：{lastConflictRecovery.recovery_source
+                    ? labels.statuses[lastConflictRecovery.recovery_source]
+                    : "—"}
+                  {" · "}恢复人：{lastConflictRecovery.user_name}
+                  {" · "}恢复时间：{formatDateTime(lastConflictRecovery.created_at)}
+                </div>
+                {lastConflictRecovery.comment && (
+                  <div style={{ marginTop: "0.25rem" }}>
+                    补正说明：{lastConflictRecovery.comment}
+                  </div>
+                )}
+              </div>
+            )}
+            <div className="form-group">
+              <label className="form-label">接收备注</label>
+              <textarea
+                className="form-textarea"
+                value={receiveComment}
+                onChange={(e) => setReceiveComment(e.target.value)}
+                placeholder="请输入接收备注（可选）..."
+              />
+            </div>
+            <div className="form-group">
+              <label className="form-label">审计备注</label>
+              <textarea
+                className="form-textarea"
+                value={receiveAuditNote}
+                onChange={(e) => setReceiveAuditNote(e.target.value)}
+                placeholder="请输入审计备注（可选，用于记录接收审计追踪信息）..."
+                style={{ background: "#f0fdf4" }}
+              />
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setShowReceive(false)}>
+                取消
+              </button>
+              <button
+                className="btn btn-primary"
+                onClick={() =>
+                  receiveMutation.mutate({
+                    current_user_id: currentUser.id,
+                    comment: receiveComment || undefined,
+                    audit_note: receiveAuditNote || undefined,
+                  })
+                }
+                disabled={receiveMutation.isPending}
+              >
+                {receiveMutation.isPending ? "接收中..." : "确认接收"}
               </button>
             </div>
           </div>

@@ -204,6 +204,10 @@ class OperationLog(Base):
     next_handler_id = Column(Integer)
     next_handler_name = Column(String(100))
 
+    receive_from_recovery = Column(Boolean, default=False)
+    receive_source_status = Column(Enum(Status))
+    next_status = Column(Enum(Status))
+
     created_at = Column(DateTime, default=datetime.utcnow)
 
     project = relationship("TrainingProject", back_populates="operation_logs")
