@@ -394,8 +394,14 @@ export class QueueComponent {
 
   batchActions(): ActionType[] {
     const role = this.auth.user()?.role;
+    if (!role) return [];
+    const tasks = this.selectedTasks();
+    if (tasks.length === 0) return [];
     const all: ActionType[] = ['submit', 'review', 'confirm', 'archive', 'reject'];
-    return all.filter(a => role === actionRequiredRole(a));
+    return all.filter(a => {
+      // 至少存在一个任务，当前角色可做动作 a
+      return tasks.some(t => role === actionRequiredRole(a, t.status));
+    });
   }
 
   openBatch(a: ActionType) {

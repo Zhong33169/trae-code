@@ -156,8 +156,8 @@ import { StatusBadgeComponent } from '../../components/status-badge.component';
                 </table>
               </div>
               <div class="field">
-                <label>重试证据 / 备注（必填）</label>
-                <textarea [value]="retryEvidence()" (input)="retryEvidence.set($any($event.target).value)" placeholder="补充重试说明或更正后的证据"></textarea>
+                <label>{{ batch()?.action === 'reject' ? '重试驳回原因（必填）' : '重试证据 / 备注（必填）' }}</label>
+                <textarea [value]="retryEvidence()" (input)="retryEvidence.set($any($event.target).value)" placeholder="{{ batch()?.action === 'reject' ? '补充驳回原因后再重试' : '补充重试说明或更正后的证据' }}"></textarea>
               </div>
             </div>
             <div class="m-foot">
@@ -240,7 +240,13 @@ export class BatchDetailComponent {
           versions[it.taskId] = 0;
         }
       }
-      const res = await this.api.retryBatch(this.batchId, { itemIds: failedIds, evidence: this.retryEvidence(), versions });
+      const payload: any = { itemIds: failedIds, versions };
+      if (this.batch()?.action === 'reject') {
+        payload.reason = this.retryEvidence();
+      } else {
+        payload.evidence = this.retryEvidence();
+      }
+      const res = await this.api.retryBatch(this.batchId, payload);
       this.batch.set(res.batch);
       this.items.set(res.items);
       this.retryOpen.set(false);

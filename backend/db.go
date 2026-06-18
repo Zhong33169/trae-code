@@ -194,6 +194,20 @@ func MustSeed(db *sql.DB) {
 		{"RT-2026-0008", "PA202600092", "南京云岭科技", "雇主责任险", "标准续保", 19500, 19500,
 			StatusSubmitted, 1, cmID, RoleUnderwritingSpecialist,
 			regEv("员工人数微调，提供最新工资表。", "陈经理", cmID, "2026-06-16 15:50:00"), sql.NullString{}, sql.NullString{}},
+		// T9 已提交（核保手）：核保专员可驳回样例
+		{"RT-2026-0009", "PA202600101", "天津海昌物流", "货物运输险", "扩项续保", 56000, 62000,
+			StatusSubmitted, 1, cmID, RoleUnderwritingSpecialist,
+			regEv("新增冷藏运输线路，但风险评估报告未附上。", "陈经理", cmID, "2026-06-16 11:05:00"), sql.NullString{}, sql.NullString{}},
+		// T10 已复核（业务负责人手）：业务负责人可驳回样例
+		{"RT-2026-0010", "PA202600115", "重庆璧山制造", "机器损坏险", "费率调整", 42000, 45000,
+			StatusReviewed, 1, cmID, RoleBusinessOwner,
+			regEv("上年出险2次，今年费率上浮5%，客户同意。", "陈经理", cmID, "2026-06-15 09:00:00"),
+			regEv("费率上浮依据可量化，但赔付凭证未附。", "林专员", usID, "2026-06-17 14:20:00"), sql.NullString{}},
+		// T11 已复核（但因为操作延迟仍挂在核保专员名下）：业务负责人尝试驳回会 FORBIDDEN_ROLE——错角色失败样例
+		{"RT-2026-0011", "PA202600128", "西安大兴建材", "建筑工程一切险", "标准续保", 96000, 96000,
+			StatusReviewed, 1, cmID, RoleUnderwritingSpecialist,
+			regEv("续保持平，工地安全无事故。", "陈经理", cmID, "2026-06-14 08:35:00"),
+			regEv("核保要素齐全，但流转操作尚未转至业务负责人。", "林专员", usID, "2026-06-17 16:00:00"), sql.NullString{}},
 	}
 
 	for _, t := range tasks {

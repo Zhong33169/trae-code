@@ -136,13 +136,19 @@ export const DEMO_ACCOUNTS: Record<Role, DemoAccount> = {
 
 export const ROLE_LIST: Role[] = ['customer_manager', 'underwriting_specialist', 'business_owner'];
 
-export function actionRequiredRole(action: ActionType): Role {
+export function actionRequiredRole(action: ActionType, status?: TaskStatus): Role {
   switch (action) {
     case 'submit': return 'customer_manager';
     case 'review': return 'underwriting_specialist';
     case 'confirm':
     case 'archive': return 'business_owner';
-    case 'reject': return 'customer_manager';
+    case 'reject':
+      // 按任务状态匹配可驳回角色
+      switch (status) {
+        case 'submitted': return 'underwriting_specialist';
+        case 'reviewed':  return 'business_owner';
+        default:          return 'customer_manager';
+      }
   }
 }
 

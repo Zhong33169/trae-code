@@ -77,7 +77,7 @@ export class ApiService {
     return this.call('GET', `/api/batches/${id}`);
   }
 
-  retryBatch(id: number, payload: { itemIds: number[]; evidence: string; versions: Record<number, number> }): Promise<{ batch: Batch; items: BatchItem[] }> {
+  retryBatch(id: number, payload: { itemIds: number[]; evidence?: string; reason?: string; versions: Record<number, number> }): Promise<{ batch: Batch; items: BatchItem[] }> {
     return this.call('POST', `/api/batches/${id}/retry`, payload);
   }
 

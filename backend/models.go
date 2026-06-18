@@ -151,7 +151,7 @@ func statusFor(code string) int {
 		return http.StatusForbidden
 	case "STALE_VERSION", "INVALID_STATUS":
 		return http.StatusConflict
-	case "MISSING_EVIDENCE", "MISSING_VERSION":
+	case "MISSING_EVIDENCE", "MISSING_VERSION", "MISSING_REASON":
 		return http.StatusUnprocessableEntity
 	case "UNAUTHORIZED":
 		return http.StatusUnauthorized
@@ -235,6 +235,7 @@ type BatchRequest struct {
 type RetryRequest struct {
 	ItemIDs  []int       `json:"itemIds"`
 	Evidence string      `json:"evidence"`
+	Reason   string      `json:"reason"`
 	Versions map[int]int `json:"versions"`
 }
 
