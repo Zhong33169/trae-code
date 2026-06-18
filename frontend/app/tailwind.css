@@ -1,0 +1,65 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    font-family: "Manrope", sans-serif;
+    color: #1a2b2b;
+    background-color: #f5f7f6;
+  }
+  body {
+    min-height: 100vh;
+    background-image: linear-gradient(rgba(14, 77, 77, 0.035) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(14, 77, 77, 0.035) 1px, transparent 1px);
+    background-size: 24px 24px;
+  }
+  ::selection {
+    background-color: #0e4d4d;
+    color: #fff;
+  }
+}
+
+@layer components {
+  .card {
+    @apply bg-white border border-deep-100 rounded shadow-sm;
+  }
+  .btn-primary {
+    @apply inline-flex items-center gap-1.5 px-4 py-2 bg-deep-500 text-white rounded text-sm font-semibold
+      hover:bg-deep-600 active:bg-deep-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-secondary {
+    @apply inline-flex items-center gap-1.5 px-4 py-2 bg-white text-deep-700 border border-deep-200 rounded
+      text-sm font-semibold hover:bg-deep-50 active:bg-deep-100 transition-colors disabled:opacity-50;
+  }
+  .btn-danger {
+    @apply inline-flex items-center gap-1.5 px-4 py-2 bg-crimson text-white rounded text-sm font-semibold
+      hover:bg-crimson/90 active:bg-crimson/80 transition-colors disabled:opacity-50;
+  }
+  .btn-success {
+    @apply inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-ok text-white rounded text-sm font-semibold
+      hover:bg-emerald-ok/90 active:bg-emerald-ok/80 transition-colors disabled:opacity-50;
+  }
+  .input-field {
+    @apply w-full px-3 py-2 bg-white border border-deep-100 rounded text-sm text-ink
+      focus:outline-none focus:ring-2 focus:ring-deep-200 focus:border-deep-300 transition;
+  }
+  .badge {
+    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold;
+  }
+}
+
+@layer utilities {
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: #8fcccc transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background-color: #8fcccc;
+    border-radius: 3px;
+  }
+}
