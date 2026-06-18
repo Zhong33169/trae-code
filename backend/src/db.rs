@@ -74,6 +74,7 @@ pub fn init_db() -> Result<()> {
             id TEXT PRIMARY KEY,
             batch_id TEXT NOT NULL,
             topic_no TEXT NOT NULL,
+            title TEXT,
             status TEXT NOT NULL,
             diff_json TEXT,
             error_msg TEXT,
@@ -83,6 +84,7 @@ pub fn init_db() -> Result<()> {
         CREATE TABLE IF NOT EXISTS audit_logs (
             id TEXT PRIMARY KEY,
             topic_id TEXT,
+            import_batch_id TEXT,
             user_id TEXT NOT NULL,
             user_name TEXT NOT NULL,
             action TEXT NOT NULL,
@@ -93,6 +95,15 @@ pub fn init_db() -> Result<()> {
         );
         "#,
     )?;
+
+    // 字段补齐（兼容旧库）
+    let conn = Connection::open("data/topics.db")?;
+    let _ = conn.execute_batch(
+        "ALTER TABLE import_records ADD COLUMN title TEXT;",
+    );
+    let _ = conn.execute_batch(
+        "ALTER TABLE audit_logs ADD COLUMN import_batch_id TEXT;",
+    );
 
     Ok(())
 }
@@ -171,10 +182,102 @@ pub fn seed_demo_data() -> Result<()> {
     )?;
 
     conn.execute(
-        "INSERT INTO audit_logs (id, topic_id, user_id, user_name, action, old_status, new_status, detail, created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+        "INSERT INTO audit_logs (id, topic_id, import_batch_id, user_id, user_name, action, old_status, new_status, detail, created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
         rusqlite::params![
-            Uuid::new_v4().to_string(), rejected_id, reviewer_id, "李审核", "reject",
+            Uuid::new_v4().to_string(), rejected_id, None as Option<String>, reviewer_id, "李审核", "reject",
             "registered", "rejected", "退回原因：线索不充分、方向模糊", now
+        ],
+    )?;
+
+    // ===== 演示数据：离线台账回填历史批次（含成功/冲突/失败） =====
+    let demo_batch_id = Uuid::new_v4().to_string();
+    let demo_batch_no = format!("IMP{}001", (Utc::now() - chrono::Duration::hours(2)).format("%Y%m%d%H%M"));
+    let demo_import_time = (Utc::now() - chrono::Duration::hours(2)).to_rfc3339();
+    let demo_offline_topic_id = Uuid::new_v4().to_string();
+
+    conn.execute(
+        "INSERT INTO import_batches (id, batch_no, source, operator_id, imported_at, total_count, success_count, conflict_count, error_count, remark) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
+        rusqlite::params![
+            demo_batch_id, demo_batch_no, "5月历史台账补录（演示）", register_id, demo_import_time,
+            3, 1, 1, 1, "演示批次：含成功1条、冲突1条、失败1条"
+        ],
+    )?;
+
+    // 成功：新增一条离线导入选题（缺材料标签，用于验收演示）
+    conn.execute(
+        "INSERT INTO topics (id, topic_no, title, source, reporter, department, deadline, status, content, register_id, register_at, anomaly_tag, created_from, import_batch_id) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,'offline',?13)",
+        rusqlite::params![
+            demo_offline_topic_id, "XT202505101", "五一劳动节劳模系列报道",
+            "5月线下台账", "周记者", "时政部",
+            (Utc::now() - chrono::Duration::days(10)).to_rfc3339(),
+            "registered", "五一劳动节期间劳模先进事迹系列报道。",
+            register_id, demo_import_time, "missing_material", demo_batch_id
+        ],
+    )?;
+    conn.execute(
+        "INSERT INTO import_records (id, batch_id, topic_no, title, status, diff_json, error_msg, topic_id) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+        rusqlite::params![
+            Uuid::new_v4().to_string(), demo_batch_id, "XT202505101", "五一劳动节劳模系列报道",
+            "success", None as Option<String>, None as Option<String>, demo_offline_topic_id
+        ],
+    )?;
+    conn.execute(
+        "INSERT INTO audit_logs (id, topic_id, import_batch_id, user_id, user_name, action, old_status, new_status, detail, created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
+        rusqlite::params![
+            Uuid::new_v4().to_string(), demo_offline_topic_id, demo_batch_id,
+            register_id, "张登记", "import_create",
+            None as Option<String>, Some("registered"),
+            "离线台账回填成功导入：批次演示批次，来源 5月历史台账补录（演示）",
+            demo_import_time
+        ],
+    )?;
+
+    // 冲突：XT202506001 已在线上存在，记录差异
+    let conflict_diff = serde_json::json!({
+        "title": { "old": "关于加强基层宣传工作的专题报道", "new": "基层宣传工作专题报道（线下版）" },
+        "reporter": { "old": "刘记者", "new": "演示记者B" },
+        "department": { "old": "时政部", "new": "宣传部" }
+    }).to_string();
+    conn.execute(
+        "INSERT INTO import_records (id, batch_id, topic_no, title, status, diff_json, error_msg, topic_id) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+        rusqlite::params![
+            Uuid::new_v4().to_string(), demo_batch_id, "XT202506001",
+            "基层宣传工作专题报道（线下版）", "conflict",
+            conflict_diff,
+            "选题单编号已存在，存在线上线下状态冲突或重复回填，未覆盖",
+            normal_id
+        ],
+    )?;
+    conn.execute(
+        "INSERT INTO audit_logs (id, topic_id, import_batch_id, user_id, user_name, action, old_status, new_status, detail, created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
+        rusqlite::params![
+            Uuid::new_v4().to_string(), normal_id, demo_batch_id,
+            register_id, "张登记", "import_conflict",
+            None as Option<String>, None as Option<String>,
+            "离线台账回填冲突：选题单 XT202506001 已存在，未覆盖",
+            demo_import_time
+        ],
+    )?;
+
+    // 失败：非法状态值
+    conn.execute(
+        "INSERT INTO import_records (id, batch_id, topic_no, title, status, diff_json, error_msg, topic_id) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+        rusqlite::params![
+            Uuid::new_v4().to_string(), demo_batch_id, "XT202505202",
+            "文明城市创建复查报道", "error",
+            None as Option<String>,
+            "非法状态值：published",
+            None as Option<String>
+        ],
+    )?;
+    conn.execute(
+        "INSERT INTO audit_logs (id, topic_id, import_batch_id, user_id, user_name, action, old_status, new_status, detail, created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
+        rusqlite::params![
+            Uuid::new_v4().to_string(), None as Option<String>, demo_batch_id,
+            register_id, "张登记", "import_error",
+            None as Option<String>, None as Option<String>,
+            "离线台账回填失败：选题单 XT202505202，非法状态值：published",
+            demo_import_time
         ],
     )?;
 

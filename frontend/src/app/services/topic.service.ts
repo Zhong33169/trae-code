@@ -44,6 +44,7 @@ export interface Attachment {
 export interface AuditLog {
   id: string;
   topic_id?: string;
+  import_batch_id?: string;
   user_id: string;
   user_name: string;
   action: string;
@@ -71,6 +72,7 @@ export interface ImportRecord {
   id: string;
   batch_id: string;
   topic_no: string;
+  title?: string;
   status: 'success' | 'conflict' | 'error';
   diff_json?: string;
   error_msg?: string;
@@ -158,8 +160,11 @@ export class TopicService {
     return this.http.post<any>('/api/import/execute', data, this.opts());
   }
 
-  listAudit(topicId?: string) {
-    const q = topicId ? `?topic_id=${encodeURIComponent(topicId)}` : '';
+  listAudit(params?: { topic_id?: string; batch_id?: string }) {
+    const parts: string[] = [];
+    if (params?.topic_id) parts.push(`topic_id=${encodeURIComponent(params.topic_id)}`);
+    if (params?.batch_id) parts.push(`batch_id=${encodeURIComponent(params.batch_id)}`);
+    const q = parts.length ? '?' + parts.join('&') : '';
     return this.http.get<any>(`/api/audit/logs` + q, this.opts());
   }
 }

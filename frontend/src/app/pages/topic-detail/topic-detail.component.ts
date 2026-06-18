@@ -335,7 +335,7 @@ export class TopicDetailComponent implements OnInit {
     this.service.listAttachments(id).subscribe((res) => {
       if (res.code === 0) this.attachments.set(res.data || []);
     });
-    this.service.listAudit(id).subscribe((res) => {
+    this.service.listAudit({ topic_id: id }).subscribe((res) => {
       if (res.code === 0) this.audits.set(res.data || []);
     });
   }

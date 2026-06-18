@@ -1,4 +1,4 @@
-import { Component, OnInit, signal } from '@angular/core';
+import { Component, OnInit, signal, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterModule } from '@angular/router';
@@ -125,30 +125,72 @@ import {
           </table>
 
           <div *ngIf="currentRecords().length > 0" style="margin-top: 16px;">
-            <h4>批次明细：{{ expandedBatchId }}</h4>
-            <table class="sub-table">
-              <thead><tr><th>编号</th><th>状态</th><th>说明</th><th>差异</th></tr></thead>
-              <tbody>
-                <tr *ngFor="let r of currentRecords()">
-                  <td>
-                    <ng-container *ngIf="r.topic_id">
-                      <a [routerLink]="['/topics', r.topic_id]" class="link">{{ r.topic_no }}</a>
-                    </ng-container>
-                    <ng-container *ngIf="!r.topic_id">{{ r.topic_no }}</ng-container>
-                  </td>
-                  <td>
-                    <span class="istatus istatus-{{ r.status }}">
-                      {{ r.status === 'success' ? '成功' : r.status === 'conflict' ? '冲突（未覆盖）' : '失败' }}
-                    </span>
-                  </td>
-                  <td>{{ r.error_msg || '-' }}</td>
-                  <td style="font-family: monospace; font-size: 12px;">
-                    <div *ngIf="r.diff_json && r.diff_json !== '{}'" style="white-space: pre-wrap;">{{ formatDiff(r.diff_json) }}</div>
-                    <span *ngIf="!r.diff_json || r.diff_json === '{}'" class="muted">-</span>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+              <h4 style="margin: 0;">批次明细：{{ expandedBatchId }}</h4>
+              <div style="font-size: 12px; color: #666;">
+                共 {{ currentRecords().length }} 条
+              </div>
+            </div>
+
+            <div class="record-group" *ngIf="successRecords().length > 0">
+              <div class="group-title group-title-success">
+                <span class="dot dot-success"></span>
+                成功导入 ({{ successRecords().length }})
+              </div>
+              <table class="sub-table">
+                <thead><tr><th>选题编号</th><th>标题</th><th>关联选题</th></tr></thead>
+                <tbody>
+                  <tr *ngFor="let r of successRecords()">
+                    <td>{{ r.topic_no }}</td>
+                    <td>{{ r.title || '-' }}</td>
+                    <td>
+                      <a *ngIf="r.topic_id" [routerLink]="['/topics', r.topic_id]" class="link">查看选题</a>
+                      <span *ngIf="!r.topic_id" class="muted">-</span>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="record-group" *ngIf="conflictRecords().length > 0">
+              <div class="group-title group-title-conflict">
+                <span class="dot dot-conflict"></span>
+                冲突未覆盖 ({{ conflictRecords().length }})
+              </div>
+              <table class="sub-table">
+                <thead><tr><th>选题编号</th><th>标题</th><th>冲突原因</th><th>字段差异</th></tr></thead>
+                <tbody>
+                  <tr *ngFor="let r of conflictRecords()">
+                    <td>{{ r.topic_no }}</td>
+                    <td>{{ r.title || '-' }}</td>
+                    <td class="warn-cell">{{ r.error_msg || '-' }}</td>
+                    <td style="font-family: monospace; font-size: 12px; max-width: 300px;">
+                      <div *ngIf="r.diff_json && r.diff_json !== '{}'" style="white-space: pre-wrap;">
+                        {{ formatDiff(r.diff_json) }}
+                      </div>
+                      <span *ngIf="!r.diff_json || r.diff_json === '{}'" class="muted">-</span>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="record-group" *ngIf="errorRecords().length > 0">
+              <div class="group-title group-title-error">
+                <span class="dot dot-error"></span>
+                导入失败 ({{ errorRecords().length }})
+              </div>
+              <table class="sub-table">
+                <thead><tr><th>选题编号</th><th>标题</th><th>失败原因</th></tr></thead>
+                <tbody>
+                  <tr *ngFor="let r of errorRecords()">
+                    <td>{{ r.topic_no }}</td>
+                    <td>{{ r.title || '-' }}</td>
+                    <td class="err-cell">{{ r.error_msg || '-' }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       </div>
@@ -193,6 +235,19 @@ import {
       .sub-table td { padding: 8px; border-top: 1px solid #eef0f5; vertical-align: top; }
       .sub-table .empty { text-align: center; color: #999; padding: 24px 0; }
       .link { color: #1f5fb0; text-decoration: none; }
+      .record-group { margin-bottom: 14px; border: 1px solid #e2e8f0; border-radius: 6px; overflow: hidden; }
+      .group-title {
+        padding: 10px 14px; font-size: 13px; font-weight: 600;
+        display: flex; align-items: center; gap: 8px;
+      }
+      .group-title-success { background: #d8f3df; color: #1d7a38; }
+      .group-title-conflict { background: #fff3d6; color: #a76b12; }
+      .group-title-error { background: #fde0dc; color: #a53225; }
+      .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+      .dot-success { background: #1d7a38; }
+      .dot-conflict { background: #a76b12; }
+      .dot-error { background: #a53225; }
+      .warn-cell { color: #a76b12; }
     `,
   ],
 })
@@ -203,6 +258,10 @@ export class ImportPageComponent implements OnInit {
   lastResult = signal<ImportResult | null>(null);
   loading = false;
   opError = '';
+
+  successRecords = computed(() => this.currentRecords().filter(r => r.status === 'success'));
+  conflictRecords = computed(() => this.currentRecords().filter(r => r.status === 'conflict'));
+  errorRecords = computed(() => this.currentRecords().filter(r => r.status === 'error'));
 
   importForm = { source: '', remark: '' };
   importJson = '';

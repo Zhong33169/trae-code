@@ -3,7 +3,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterModule } from '@angular/router';
 import { AuthService } from '../../services/auth.service';
-import { TopicService, AuditLog } from '../../services/topic.service';
+import { TopicService, AuditLog, ImportBatch } from '../../services/topic.service';
 
 @Component({
   selector: 'app-audit-page',
@@ -17,6 +17,13 @@ import { TopicService, AuditLog } from '../../services/topic.service';
 
       <div class="card">
         <div class="filters">
+          <div class="filter-item flex-1">
+            <label>按导入批次筛选（可选）</label>
+            <select [(ngModel)]="filterBatchId" class="input">
+              <option value="">全部批次 / 不筛选</option>
+              <option *ngFor="let b of batches()" [value]="b.id">{{ b.batch_no }} - {{ b.source }}</option>
+            </select>
+          </div>
           <div class="filter-item flex-1">
             <label>选题单ID（可选，留空查询全部）</label>
             <input [(ngModel)]="filterTopicId" class="input" placeholder="选题单ID" />
@@ -34,6 +41,7 @@ import { TopicService, AuditLog } from '../../services/topic.service';
               <th>动作</th>
               <th>状态变更</th>
               <th>关联选题</th>
+              <th>关联批次</th>
               <th>详情</th>
             </tr>
           </thead>
@@ -52,9 +60,13 @@ import { TopicService, AuditLog } from '../../services/topic.service';
                 <a *ngIf="log.topic_id" [routerLink]="['/topics', log.topic_id]" class="link">查看</a>
                 <span *ngIf="!log.topic_id" class="muted">全局</span>
               </td>
+              <td>
+                <span *ngIf="log.import_batch_id" class="muted" style="font-family: monospace; font-size: 12px;">{{ log.import_batch_id | slice : 0 : 8 }}</span>
+                <span *ngIf="!log.import_batch_id" class="muted">-</span>
+              </td>
               <td style="max-width: 360px;">{{ log.detail || '-' }}</td>
             </tr>
-            <tr *ngIf="logs().length === 0"><td colspan="6" class="empty">暂无记录</td></tr>
+            <tr *ngIf="logs().length === 0"><td colspan="7" class="empty">暂无记录</td></tr>
           </tbody>
         </table>
 
@@ -101,16 +113,28 @@ import { TopicService, AuditLog } from '../../services/topic.service';
 })
 export class AuditPageComponent implements OnInit {
   logs = signal<AuditLog[]>([]);
+  batches = signal<ImportBatch[]>([]);
   filterTopicId = '';
+  filterBatchId = '';
 
   constructor(public auth: AuthService, private service: TopicService) {}
 
   ngOnInit() {
+    this.loadBatches();
     this.load();
   }
 
+  loadBatches() {
+    this.service.listBatches().subscribe((res) => {
+      if (res.code === 0) this.batches.set(res.data || []);
+    });
+  }
+
   load() {
-    this.service.listAudit(this.filterTopicId || undefined).subscribe((res) => {
+    const params: { topic_id?: string; batch_id?: string } = {};
+    if (this.filterTopicId.trim()) params.topic_id = this.filterTopicId.trim();
+    if (this.filterBatchId) params.batch_id = this.filterBatchId;
+    this.service.listAudit(Object.keys(params).length ? params : undefined).subscribe((res) => {
       if (res.code === 0) this.logs.set(res.data || []);
     });
   }

@@ -132,6 +132,8 @@ pub struct ImportRecord {
     pub id: String,
     pub batch_id: String,
     pub topic_no: String,
+    #[serde(default)]
+    pub title: Option<String>,
     pub status: String,
     #[serde(default)]
     pub diff_json: Option<String>,
@@ -186,6 +188,8 @@ pub struct AuditLog {
     pub id: String,
     #[serde(default)]
     pub topic_id: Option<String>,
+    #[serde(default)]
+    pub import_batch_id: Option<String>,
     pub user_id: String,
     pub user_name: String,
     pub action: String,

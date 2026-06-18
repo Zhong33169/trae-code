@@ -83,10 +83,11 @@ fn row_to_import_record(row: &rusqlite::Row) -> rusqlite::Result<ImportRecord> {
         id: row.get(0)?,
         batch_id: row.get(1)?,
         topic_no: row.get(2)?,
-        status: row.get(3)?,
-        diff_json: row.get(4)?,
-        error_msg: row.get(5)?,
-        topic_id: row.get(6)?,
+        title: row.get(3)?,
+        status: row.get(4)?,
+        diff_json: row.get(5)?,
+        error_msg: row.get(6)?,
+        topic_id: row.get(7)?,
     })
 }
 
@@ -94,18 +95,20 @@ fn row_to_audit(row: &rusqlite::Row) -> rusqlite::Result<AuditLog> {
     Ok(AuditLog {
         id: row.get(0)?,
         topic_id: row.get(1)?,
-        user_id: row.get(2)?,
-        user_name: row.get(3)?,
-        action: row.get(4)?,
-        old_status: row.get(5)?,
-        new_status: row.get(6)?,
-        detail: row.get(7)?,
-        created_at: row.get(8)?,
+        import_batch_id: row.get(2)?,
+        user_id: row.get(3)?,
+        user_name: row.get(4)?,
+        action: row.get(5)?,
+        old_status: row.get(6)?,
+        new_status: row.get(7)?,
+        detail: row.get(8)?,
+        created_at: row.get(9)?,
     })
 }
 
 pub fn write_audit(
     topic_id: Option<&str>,
+    import_batch_id: Option<&str>,
     user_id: &str,
     user_name: &str,
     action: &str,
@@ -115,10 +118,11 @@ pub fn write_audit(
 ) -> Result<()> {
     let conn = get_conn();
     conn.execute(
-        "INSERT INTO audit_logs (id, topic_id, user_id, user_name, action, old_status, new_status, detail, created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+        "INSERT INTO audit_logs (id, topic_id, import_batch_id, user_id, user_name, action, old_status, new_status, detail, created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
         params![
             new_uuid(),
             topic_id,
+            import_batch_id,
             user_id,
             user_name,
             action,
@@ -332,6 +336,7 @@ pub async fn handle_create_topic(
 
     write_audit(
         Some(&id),
+        None,
         &user.id,
         &user.display_name,
         "create",
@@ -405,6 +410,7 @@ pub async fn handle_review_topic(
     };
     write_audit(
         Some(&id),
+        None,
         &user.id,
         &user.display_name,
         if new_status == "reviewed" { "approve" } else { "reject" },
@@ -452,6 +458,7 @@ pub async fn handle_archive_topic(
 
     write_audit(
         Some(&id),
+        None,
         &user.id,
         &user.display_name,
         "archive",
@@ -516,6 +523,7 @@ pub async fn handle_rectify_topic(
 
     write_audit(
         Some(&id),
+        None,
         &user.id,
         &user.display_name,
         "rectify",
@@ -583,6 +591,7 @@ pub async fn handle_add_attachment(
     }
     write_audit(
         Some(&id),
+        None,
         &user.id,
         &user.display_name,
         "upload_attachment",
@@ -645,7 +654,7 @@ pub async fn handle_batch_records(
     let conn = get_conn();
     let mut stmt = conn
         .prepare(
-            "SELECT id, batch_id, topic_no, status, diff_json, error_msg, topic_id FROM import_records WHERE batch_id = ?1 ORDER BY id",
+            "SELECT id, batch_id, topic_no, title, status, diff_json, error_msg, topic_id FROM import_records WHERE batch_id = ?1 ORDER BY id",
         )
         .unwrap();
     let rows: Vec<ImportRecord> = stmt
@@ -692,15 +701,24 @@ pub async fn handle_execute_import(
         if exists > 0 {
             conflict_count += 1;
             let diff = compute_diff(&conn, item);
+            let existing_topic_id: Option<String> = conn
+                .query_row(
+                    "SELECT id FROM topics WHERE topic_no = ?1",
+                    params![item.topic_no],
+                    |row| row.get(0),
+                )
+                .ok();
             conn.execute(
-                "INSERT INTO import_records (id, batch_id, topic_no, status, diff_json, error_msg, topic_id) VALUES (?1,?2,?3,?4,?5,?6,NULL)",
+                "INSERT INTO import_records (id, batch_id, topic_no, title, status, diff_json, error_msg, topic_id) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
                 params![
                     record_id,
                     batch_id,
                     item.topic_no,
+                    item.title,
                     "conflict",
                     diff.clone(),
                     "选题单编号已存在，存在线上线下状态冲突或重复回填，未覆盖",
+                    existing_topic_id,
                 ],
             )
             .ok();
@@ -708,13 +726,15 @@ pub async fn handle_execute_import(
                 id: record_id,
                 batch_id: batch_id.clone(),
                 topic_no: item.topic_no.clone(),
+                title: Some(item.title.clone()),
                 status: "conflict".to_string(),
                 diff_json: diff,
                 error_msg: Some("选题单编号已存在，存在线上线下状态冲突或重复回填，未覆盖".to_string()),
-                topic_id: None,
+                topic_id: existing_topic_id.clone(),
             });
             write_audit(
-                None,
+                existing_topic_id.as_deref(),
+                Some(&batch_id),
                 &user.id,
                 &user.display_name,
                 "import_conflict",
@@ -742,11 +762,12 @@ pub async fn handle_execute_import(
         if !valid_statuses.contains(&status.as_str()) {
             error_count += 1;
             conn.execute(
-                "INSERT INTO import_records (id, batch_id, topic_no, status, diff_json, error_msg, topic_id) VALUES (?1,?2,?3,?4,?5,?6,NULL)",
+                "INSERT INTO import_records (id, batch_id, topic_no, title, status, diff_json, error_msg, topic_id) VALUES (?1,?2,?3,?4,?5,?6,?7,NULL)",
                 params![
                     record_id,
                     batch_id,
                     item.topic_no,
+                    item.title,
                     "error",
                     Option::<String>::None,
                     format!("非法状态值：{}", status),
@@ -757,11 +778,26 @@ pub async fn handle_execute_import(
                 id: record_id,
                 batch_id: batch_id.clone(),
                 topic_no: item.topic_no.clone(),
+                title: Some(item.title.clone()),
                 status: "error".to_string(),
                 diff_json: None,
                 error_msg: Some(format!("非法状态值：{}", status)),
                 topic_id: None,
             });
+            write_audit(
+                None,
+                Some(&batch_id),
+                &user.id,
+                &user.display_name,
+                "import_error",
+                None,
+                None,
+                Some(&format!(
+                    "离线台账回填失败：选题单 {}，非法状态值：{}",
+                    item.topic_no, status
+                )),
+            )
+            .ok();
             continue;
         }
 
@@ -789,11 +825,12 @@ pub async fn handle_execute_import(
             Ok(_) => {
                 success_count += 1;
                 conn.execute(
-                    "INSERT INTO import_records (id, batch_id, topic_no, status, diff_json, error_msg, topic_id) VALUES (?1,?2,?3,?4,?5,?6,?7)",
+                    "INSERT INTO import_records (id, batch_id, topic_no, title, status, diff_json, error_msg, topic_id) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
                     params![
                         record_id,
                         batch_id,
                         item.topic_no,
+                        item.title,
                         "success",
                         Option::<String>::None,
                         Option::<String>::None,
@@ -805,6 +842,7 @@ pub async fn handle_execute_import(
                     id: record_id,
                     batch_id: batch_id.clone(),
                     topic_no: item.topic_no.clone(),
+                    title: Some(item.title.clone()),
                     status: "success".to_string(),
                     diff_json: None,
                     error_msg: None,
@@ -812,6 +850,7 @@ pub async fn handle_execute_import(
                 });
                 write_audit(
                     Some(&topic_id),
+                    Some(&batch_id),
                     &user.id,
                     &user.display_name,
                     "import_create",
@@ -827,11 +866,12 @@ pub async fn handle_execute_import(
             Err(e) => {
                 error_count += 1;
                 conn.execute(
-                    "INSERT INTO import_records (id, batch_id, topic_no, status, diff_json, error_msg, topic_id) VALUES (?1,?2,?3,?4,?5,?6,NULL)",
+                    "INSERT INTO import_records (id, batch_id, topic_no, title, status, diff_json, error_msg, topic_id) VALUES (?1,?2,?3,?4,?5,?6,?7,NULL)",
                     params![
                         record_id,
                         batch_id,
                         item.topic_no,
+                        item.title,
                         "error",
                         Option::<String>::None,
                         e.to_string(),
@@ -842,6 +882,7 @@ pub async fn handle_execute_import(
                     id: record_id,
                     batch_id: batch_id.clone(),
                     topic_no: item.topic_no.clone(),
+                    title: Some(item.title.clone()),
                     status: "error".to_string(),
                     diff_json: None,
                     error_msg: Some(e.to_string()),
@@ -849,6 +890,7 @@ pub async fn handle_execute_import(
                 });
                 write_audit(
                     None,
+                    Some(&batch_id),
                     &user.id,
                     &user.display_name,
                     "import_error",
@@ -970,6 +1012,8 @@ fn compute_diff(conn: &rusqlite::Connection, item: &ImportTopicItem) -> Option<S
 pub struct AuditQuery {
     #[serde(default, rename = "topic_id")]
     pub topic_id: Option<String>,
+    #[serde(default, rename = "batch_id")]
+    pub batch_id: Option<String>,
 }
 
 #[handler]
@@ -985,21 +1029,26 @@ pub async fn handle_list_audit(
         return json_err(&e.to_string());
     }
     let conn = get_conn();
+    let base_sql = "SELECT id, topic_id, import_batch_id, user_id, user_name, action, old_status, new_status, detail, created_at FROM audit_logs";
     let rows: Vec<AuditLog> = if let Some(tid) = q.topic_id.as_ref() {
         let mut stmt = conn
-            .prepare(
-                "SELECT id, topic_id, user_id, user_name, action, old_status, new_status, detail, created_at FROM audit_logs WHERE topic_id = ?1 ORDER BY created_at DESC",
-            )
+            .prepare(&format!("{} WHERE topic_id = ?1 ORDER BY created_at DESC", base_sql))
             .unwrap();
         stmt.query_map(params![tid], |row| row_to_audit(row))
             .unwrap()
             .filter_map(|r| r.ok())
             .collect()
+    } else if let Some(bid) = q.batch_id.as_ref() {
+        let mut stmt = conn
+            .prepare(&format!("{} WHERE import_batch_id = ?1 ORDER BY created_at DESC", base_sql))
+            .unwrap();
+        stmt.query_map(params![bid], |row| row_to_audit(row))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect()
     } else {
         let mut stmt = conn
-            .prepare(
-                "SELECT id, topic_id, user_id, user_name, action, old_status, new_status, detail, created_at FROM audit_logs ORDER BY created_at DESC LIMIT 200",
-            )
+            .prepare(&format!("{} ORDER BY created_at DESC LIMIT 200", base_sql))
             .unwrap();
         stmt.query_map([], |row| row_to_audit(row))
             .unwrap()
