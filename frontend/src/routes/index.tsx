@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { api } from '../lib/api.js'
-import { STATUS, STATUS_NAMES, STATUS_COLORS, ROLES, ISSUE_TYPE_NAMES } from '../lib/constants.js'
+import { STATUS, STATUS_NAMES, STATUS_COLORS, ROLES, ISSUE_TYPE_NAMES, SAMPLE_CASE_NAMES, SAMPLE_CASE_COLORS } from '../lib/constants.js'
 import { useCurrentUser } from '../lib/userContext.jsx'
 
 export const Route = createFileRoute('/')({
@@ -202,9 +202,9 @@ function ApplicationsList() {
               <th>申请编号</th>
               <th>批次号</th>
               <th>客户名称</th>
-              <th>旧表号</th>
-              <th>新表号</th>
+              <th>样例类型</th>
               <th>状态</th>
+              <th>下一步办理人</th>
               <th>离线台账</th>
               <th>操作</th>
             </tr>
@@ -234,13 +234,40 @@ function ApplicationsList() {
                 </td>
                 <td>{app.batch_no}</td>
                 <td>{app.customer_name}</td>
-                <td>{app.old_meter_no}</td>
-                <td>{app.new_meter_no}</td>
+                <td>
+                  {app.sample_case_name && (
+                    <span className="sample-tag" style={{ backgroundColor: app.sample_case_color || '#64748b', color: '#fff' }}>
+                      {app.sample_case_name}
+                    </span>
+                  )}
+                  {app.offline_expected_issue_name && (
+                    <div style={{ fontSize: 11, color: '#dc2626', marginTop: 2 }}>
+                      预期异常：{app.offline_expected_issue_name}
+                    </div>
+                  )}
+                </td>
                 <td>
                   <span className="status-tag" style={{ backgroundColor: STATUS_COLORS[app.status] }}>
                     {STATUS_NAMES[app.status]}
                   </span>
                   {app.is_abnormal && <span className="abnormal-tag">异常</span>}
+                </td>
+                <td>
+                  {app.next_action?.next_user ? (
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 500 }}>
+                        {app.next_action.next_user.name}
+                      </div>
+                      <div style={{ fontSize: 11, color: '#64748b' }}>
+                        {app.next_action.next_user.role_name}
+                      </div>
+                      <div style={{ fontSize: 11, color: '#3b82f6', marginTop: 2 }}>
+                        {app.next_action.action_name}
+                      </div>
+                    </div>
+                  ) : (
+                    <span style={{ color: '#64748b', fontSize: 13 }}>-</span>
+                  )}
                 </td>
                 <td>
                   {app.offline_ledger_backfilled ? (

@@ -602,3 +602,12 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.sample-tag {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+  margin-right: 6px;
+}

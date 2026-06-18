@@ -3,7 +3,8 @@ import db from '../db/index.js';
 import { authMiddleware, requireRole } from '../middleware/auth.js';
 import {
   generateId, ROLES, STATUS, STATUS_NAMES,
-  ACTIONS, ACTION_NAMES, ROLE_NAMES, ISSUE_TYPE_NAMES
+  ACTIONS, ACTION_NAMES, ROLE_NAMES, ISSUE_TYPE_NAMES,
+  SAMPLE_CASE_NAMES, SAMPLE_CASE_COLORS, computeNextAction
 } from '../utils/constants.js';
 
 const app = new Hono();
@@ -64,9 +65,15 @@ function buildApplicationDetail(appData) {
     SELECT * FROM offline_ledger WHERE batch_no = ? AND meter_no = ?
   `).get(appData.batch_no, appData.old_meter_no);
 
+  const nextAction = computeNextAction(appData, null);
+
   return {
     ...appData,
     status_name: STATUS_NAMES[appData.status] || appData.status,
+    sample_case_name: SAMPLE_CASE_NAMES[appData.sample_case] || null,
+    sample_case_color: SAMPLE_CASE_COLORS[appData.sample_case] || null,
+    offline_expected_issue_name: appData.offline_expected_issue ? ISSUE_TYPE_NAMES[appData.offline_expected_issue] || null : null,
+    next_action: nextAction,
     operator: operator ? { ...operator, role_name: ROLE_NAMES[operator.role] } : null,
     reviewer: reviewer ? { ...reviewer, role_name: ROLE_NAMES[reviewer.role] } : null,
     archivist: archivist ? { ...archivist, role_name: ROLE_NAMES[archivist.role] } : null,
@@ -182,13 +189,20 @@ app.get('/', (c) => {
 
   query += ' ORDER BY a.created_at DESC';
 
-  const applications = db.prepare(query).all(...params).map(a => ({
-    ...a,
-    status_name: STATUS_NAMES[a.status] || a.status,
-    is_abnormal: a.is_timeout === 1 || a.status === STATUS.REJECTED ||
-      !!a.offline_ledger_failure_reason ||
-      (a.status === STATUS.ARCHIVED && a.offline_ledger_backfilled === 0)
-  }));
+  const applications = db.prepare(query).all(...params).map(a => {
+    const nextAction = computeNextAction(a, user);
+    return {
+      ...a,
+      status_name: STATUS_NAMES[a.status] || a.status,
+      sample_case_name: SAMPLE_CASE_NAMES[a.sample_case] || null,
+      sample_case_color: SAMPLE_CASE_COLORS[a.sample_case] || null,
+      offline_expected_issue_name: a.offline_expected_issue ? ISSUE_TYPE_NAMES[a.offline_expected_issue] || null : null,
+      next_action: nextAction,
+      is_abnormal: a.is_timeout === 1 || a.status === STATUS.REJECTED ||
+        !!a.offline_ledger_failure_reason ||
+        (a.status === STATUS.ARCHIVED && a.offline_ledger_backfilled === 0)
+    };
+  });
 
   return c.json(wrapWithCurrentUser({ list: applications }, user));
 });

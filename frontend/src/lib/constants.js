@@ -53,3 +53,23 @@ export const ISSUE_TYPE_NAMES = {
   batch_conflict: '重复批次冲突',
   status_inconsistency: '状态不一致'
 };
+
+export const SAMPLE_CASE_NAMES = {
+  normal: '正常样例',
+  missing_materials: '缺材料',
+  timeout: '超时',
+  rejected: '退回',
+  offline_missing: '离线台账缺失',
+  status_inconsistency: '状态不一致',
+  batch_conflict: '重复批次'
+};
+
+export const SAMPLE_CASE_COLORS = {
+  normal: '#16a34a',
+  missing_materials: '#f59e0b',
+  timeout: '#ef4444',
+  rejected: '#dc2626',
+  offline_missing: '#7c3aed',
+  status_inconsistency: '#ec4899',
+  batch_conflict: '#ea580c'
+};

@@ -65,3 +65,68 @@ export const ISSUE_TYPE_NAMES = {
   batch_conflict: '重复批次冲突',
   status_inconsistency: '状态不一致'
 };
+
+export const SAMPLE_CASE_NAMES = {
+  normal: '正常样例',
+  missing_materials: '缺材料',
+  timeout: '超时',
+  rejected: '退回',
+  offline_missing: '离线台账缺失',
+  status_inconsistency: '状态不一致',
+  batch_conflict: '重复批次'
+};
+
+export const SAMPLE_CASE_COLORS = {
+  normal: '#16a34a',
+  missing_materials: '#f59e0b',
+  timeout: '#ef4444',
+  rejected: '#dc2626',
+  offline_missing: '#7c3aed',
+  status_inconsistency: '#ec4899',
+  batch_conflict: '#ea580c'
+};
+
+export function computeNextAction(app, user) {
+  const status = app.status;
+  const userRole = user?.role;
+
+  if (status === 'pending_operator' || status === 'rejected') {
+    return {
+      action: 'submit',
+      action_name: '补正提交',
+      required_role: 'meter_operator',
+      required_role_name: '换表登记员',
+      next_user: { name: '张三', role: 'meter_operator', role_name: '换表登记员' },
+      hint: '登记员补正材料后提交审核'
+    };
+  } else if (status === 'pending_supervisor') {
+    return {
+      action: 'approve_or_reject',
+      action_name: '审核办理',
+      required_role: 'meter_supervisor',
+      required_role_name: '换表审核主管',
+      next_user: { name: '李四', role: 'meter_supervisor', role_name: '换表审核主管' },
+      hint: '主管审核，可通过或退回'
+    };
+  } else if (status === 'pending_archivist') {
+    return {
+      action: 'archive',
+      action_name: '复核归档',
+      required_role: 'gas_archivist',
+      required_role_name: '燃气服务公司复核负责人',
+      next_user: { name: '王五', role: 'gas_archivist', role_name: '燃气服务公司复核负责人' },
+      hint: '复核负责人校验台账后归档'
+    };
+  } else if (status === 'archived') {
+    return {
+      action: 'done',
+      action_name: '已完成',
+      required_role: null,
+      required_role_name: null,
+      next_user: null,
+      hint: '流程已完成，已归档'
+    };
+  }
+
+  return null;
+}

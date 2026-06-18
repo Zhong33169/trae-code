@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { api } from '../../lib/api.js'
-import { STATUS, STATUS_NAMES, STATUS_COLORS, ROLES, ROLE_NAMES } from '../../lib/constants.js'
+import { STATUS, STATUS_NAMES, STATUS_COLORS, ROLES, ROLE_NAMES, SAMPLE_CASE_NAMES, SAMPLE_CASE_COLORS, ISSUE_TYPE_NAMES } from '../../lib/constants.js'
 import { useCurrentUser } from '../../lib/userContext.jsx'
 
 export const Route = createFileRoute('/applications/$id')({
@@ -162,6 +162,11 @@ function ApplicationDetail() {
             <span className="status-tag" style={{ backgroundColor: STATUS_COLORS[app.status] }}>
               {STATUS_NAMES[app.status]}
             </span>
+            {app.sample_case_name && (
+              <span className="sample-tag" style={{ backgroundColor: app.sample_case_color || '#64748b', color: '#fff', marginLeft: 8 }}>
+                {app.sample_case_name}
+              </span>
+            )}
             {app.is_timeout === 1 && <span className="abnormal-tag">超时</span>}
             {app.offline_ledger_failure_reason && <span className="abnormal-tag">台账异常</span>}
           </div>
@@ -300,6 +305,58 @@ function ApplicationDetail() {
             </div>
           </div>
         </div>
+
+        {(app.offline_expected_issue || app.next_action) && (
+          <div style={{ marginTop: 20 }}>
+            <h3 className="section-title">流程导览</h3>
+            <div className="grid grid-2">
+              {app.offline_expected_issue && (
+                <div className="card" style={{ margin: 0, padding: 16, border: '1px solid #fecaca', backgroundColor: '#fef2f2' }}>
+                  <div style={{ fontSize: 12, color: '#dc2626', marginBottom: 6, fontWeight: 500 }}>
+                    ⚠️ 预期异常（线上线下差异）
+                  </div>
+                  <div style={{ fontSize: 14, fontWeight: 500, color: '#dc2626', marginBottom: 8 }}>
+                    {app.offline_expected_issue_name || app.offline_expected_issue}
+                  </div>
+                  <div style={{ fontSize: 12, color: '#64748b' }}>
+                    {app.offline_expected_issue === 'offline_missing' && '离线台账中无此批次+表号的记录，归档时将校验失败'}
+                    {app.offline_expected_issue === 'status_inconsistency' && '线下台账已作废，但线上仍处于待归档状态'}
+                    {app.offline_expected_issue === 'batch_conflict' && '该批次号已被另一条已归档申请占用，表号不一致'}
+                  </div>
+                  {app.offline_ledger_record && (
+                    <div style={{ marginTop: 8, padding: 8, backgroundColor: '#fff', borderRadius: 4, fontSize: 12 }}>
+                      <div style={{ color: '#64748b', marginBottom: 4 }}>线下台账记录：</div>
+                      <div>状态：{app.offline_ledger_record.status === 'completed' ? '已完成' : app.offline_ledger_record.status === 'rejected' ? '已作废' : app.offline_ledger_record.status}</div>
+                      {app.offline_ledger_record.remark && <div>备注：{app.offline_ledger_record.remark}</div>}
+                    </div>
+                  )}
+                </div>
+              )}
+              {app.next_action && (
+                <div className="card" style={{ margin: 0, padding: 16, border: '1px solid #bfdbfe', backgroundColor: '#eff6ff' }}>
+                  <div style={{ fontSize: 12, color: '#3b82f6', marginBottom: 6, fontWeight: 500 }}>
+                    下一步操作
+                  </div>
+                  <div style={{ fontSize: 14, fontWeight: 500, color: '#1e40af', marginBottom: 8 }}>
+                    {app.next_action.action_name}
+                  </div>
+                  {app.next_action.next_user ? (
+                    <div style={{ fontSize: 12, color: '#64748b', marginBottom: 4 }}>
+                      办理人：<span style={{ color: '#1e40af', fontWeight: 500 }}>{app.next_action.next_user.name}</span>（{app.next_action.next_user.role_name}）
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: 12, color: '#64748b', marginBottom: 4 }}>
+                      流程已完成
+                    </div>
+                  )}
+                  <div style={{ fontSize: 12, color: '#64748b' }}>
+                    {app.next_action.hint}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         <div style={{ marginTop: 20 }}>
           <h3 className="section-title">经办人员</h3>
