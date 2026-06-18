@@ -10,26 +10,17 @@ from app.services.application_service import (
     audit_pass, audit_reject, review_pass, review_reject, archive_application,
     batch_action, check_all_overdue,
 )
+from app.services.validation_service import ActionError, check_role_permission
 from app.services.user_service import get_user_by_id
 from app.schemas import (
     ApplicationCreate, ApplicationUpdate, ApplicationResponse,
-    ApplicationDetailResponse, CorrectionRequest,
-    AuditRequest, BatchActionRequest, AuditLogResponse,
+    ApplicationDetailResponse, CorrectionRequest, StartAuditRequest,
+    AuditRequest, BatchActionRequest, AuditLogResponse, SubmitRequest,
 )
+from app.models import AuditActionEnum
+from app.utils.response import error_response
 
 router = Router()
-
-
-def check_overdue_and_validate(db, app_id, opinion: str = ""):
-    from app.models import ExhibitorApplication
-    application = db.query(ExhibitorApplication).filter(ExhibitorApplication.id == app_id).first()
-    if not application:
-        return application, "申请不存在"
-    application.check_overdue()
-    if application.is_overdue and not opinion:
-        db.commit()
-        return None, "该申请已逾期，请填写逾期处理意见后再操作"
-    return application, None
 
 
 async def get_applications(request: Request):
@@ -74,7 +65,7 @@ async def get_application(request: Request):
     try:
         application = get_application_by_id(db, app_id)
         if not application:
-            return JSONResponse(status_code=404, content={"detail": "申请不存在"})
+            return error_response("申请不存在", error_code="NOT_FOUND")
 
         application.check_overdue()
         db.commit()
@@ -96,15 +87,21 @@ async def get_application(request: Request):
         db.close()
 
 
+def _handle_action_error(e: ActionError) -> JSONResponse:
+    return error_response(e.message, error_code=e.error_code, data=e.data)
+
+
 async def create_new_application(request: Request):
-    if request.state.user_role != RoleEnum.REGISTRAR.value:
-        return JSONResponse(status_code=403, content={"detail": "只有登记员可以创建申请"})
+    try:
+        check_role_permission(request.state.user_role, AuditActionEnum.CREATE)
+    except ActionError as e:
+        return _handle_action_error(e)
 
     try:
         body = await request.json()
         app_data = ApplicationCreate(**body)
     except Exception as e:
-        return JSONResponse(status_code=400, content={"detail": f"请求参数错误: {str(e)}"})
+        return error_response(f"请求参数错误: {str(e)}", error_code="BAD_REQUEST")
 
     db = next(get_db())
     try:
@@ -117,22 +114,24 @@ async def create_new_application(request: Request):
 
 
 async def update_existing_application(request: Request):
-    if request.state.user_role != RoleEnum.REGISTRAR.value:
-        return JSONResponse(status_code=403, content={"detail": "只有登记员可以更新申请"})
+    try:
+        check_role_permission(request.state.user_role, AuditActionEnum.UPDATE)
+    except ActionError as e:
+        return _handle_action_error(e)
 
     app_id = request.path_params["app_id"]
     try:
         body = await request.json()
         app_data = ApplicationUpdate(**body)
     except Exception as e:
-        return JSONResponse(status_code=400, content={"detail": f"请求参数错误: {str(e)}"})
+        return error_response(f"请求参数错误: {str(e)}", error_code="BAD_REQUEST")
 
     db = next(get_db())
     try:
         user_id = request.state.user_id
         application = update_application(db, app_id, app_data, user_id)
         if not application:
-            return JSONResponse(status_code=400, content={"detail": "申请不存在或当前状态不可编辑"})
+            return error_response("申请不存在或当前状态不可编辑", error_code="INVALID_STATUS")
         result = ApplicationResponse.model_validate(application)
         return JSONResponse(result.model_dump(mode="json"))
     finally:
@@ -140,16 +139,26 @@ async def update_existing_application(request: Request):
 
 
 async def submit_existing_application(request: Request):
-    if request.state.user_role != RoleEnum.REGISTRAR.value:
-        return JSONResponse(status_code=403, content={"detail": "只有登记员可以提交申请"})
+    try:
+        check_role_permission(request.state.user_role, AuditActionEnum.SUBMIT)
+    except ActionError as e:
+        return _handle_action_error(e)
 
     app_id = request.path_params["app_id"]
+    try:
+        body = await request.json()
+        req_data = SubmitRequest(**body)
+    except Exception as e:
+        return error_response(f"请求参数错误: {str(e)}", error_code="BAD_REQUEST")
+
     db = next(get_db())
     try:
         user_id = request.state.user_id
-        application = submit_application(db, app_id, user_id)
-        if not application:
-            return JSONResponse(status_code=400, content={"detail": "申请不存在或当前状态不可提交"})
+        try:
+            application = submit_application(db, app_id, user_id, req_data.version)
+        except ActionError as e:
+            db.rollback()
+            return _handle_action_error(e)
         result = ApplicationResponse.model_validate(application)
         return JSONResponse(result.model_dump(mode="json"))
     finally:
@@ -157,34 +166,26 @@ async def submit_existing_application(request: Request):
 
 
 async def start_application_audit(request: Request):
-    if request.state.user_role != RoleEnum.AUDIT_SUPERVISOR.value:
-        return JSONResponse(status_code=403, content={"detail": "只有审核主管可以开始审核"})
+    try:
+        check_role_permission(request.state.user_role, AuditActionEnum.START_AUDIT)
+    except ActionError as e:
+        return _handle_action_error(e)
 
     app_id = request.path_params["app_id"]
-    
-    remark = ""
     try:
         body = await request.json()
-        remark = body.get("remark", "") or body.get("opinion", "") or ""
-    except Exception:
-        pass
+        req_data = StartAuditRequest(**body)
+    except Exception as e:
+        return error_response(f"请求参数错误: {str(e)}", error_code="BAD_REQUEST")
 
     db = next(get_db())
     try:
         user_id = request.state.user_id
-        from app.models import ExhibitorApplication
-        application = db.query(ExhibitorApplication).filter(ExhibitorApplication.id == app_id).first()
-        if not application:
-            return JSONResponse(status_code=404, content={"detail": "申请不存在"})
-        
-        application.check_overdue()
-        if application.is_overdue and not remark:
+        try:
+            application = start_audit(db, app_id, user_id, req_data.remark or "", req_data.version)
+        except ActionError as e:
             db.rollback()
-            return JSONResponse(status_code=400, content={"detail": "该申请已逾期，请填写逾期处理说明后再操作"})
-        
-        application = start_audit(db, app_id, user_id, remark)
-        if not application:
-            return JSONResponse(status_code=400, content={"detail": "申请不存在或当前状态不可审核"})
+            return _handle_action_error(e)
         result = ApplicationResponse.model_validate(application)
         return JSONResponse(result.model_dump(mode="json"))
     finally:
@@ -192,26 +193,31 @@ async def start_application_audit(request: Request):
 
 
 async def request_application_correction(request: Request):
-    if request.state.user_role != RoleEnum.AUDIT_SUPERVISOR.value:
-        return JSONResponse(status_code=403, content={"detail": "只有审核主管可以要求补正"})
+    try:
+        check_role_permission(request.state.user_role, AuditActionEnum.REQUEST_CORRECTION)
+    except ActionError as e:
+        return _handle_action_error(e)
 
     app_id = request.path_params["app_id"]
     try:
         body = await request.json()
         req_data = CorrectionRequest(**body)
     except Exception as e:
-        return JSONResponse(status_code=400, content={"detail": f"请求参数错误: {str(e)}"})
+        return error_response(f"请求参数错误: {str(e)}", error_code="BAD_REQUEST")
 
     db = next(get_db())
     try:
         user_id = request.state.user_id
-        application = request_correction(
-            db, app_id, user_id,
-            req_data.correction_request,
-            req_data.material_reviews or {}
-        )
-        if not application:
-            return JSONResponse(status_code=400, content={"detail": "申请不存在或当前状态不可操作"})
+        try:
+            application = request_correction(
+                db, app_id, user_id,
+                req_data.correction_request,
+                req_data.version,
+                req_data.material_reviews or {},
+            )
+        except ActionError as e:
+            db.rollback()
+            return _handle_action_error(e)
         result = ApplicationResponse.model_validate(application)
         return JSONResponse(result.model_dump(mode="json"))
     finally:
@@ -219,31 +225,31 @@ async def request_application_correction(request: Request):
 
 
 async def audit_pass_application(request: Request):
-    if request.state.user_role != RoleEnum.AUDIT_SUPERVISOR.value:
-        return JSONResponse(status_code=403, content={"detail": "只有审核主管可以审核通过"})
+    try:
+        check_role_permission(request.state.user_role, AuditActionEnum.AUDIT_PASS)
+    except ActionError as e:
+        return _handle_action_error(e)
 
     app_id = request.path_params["app_id"]
     try:
         body = await request.json()
         req_data = AuditRequest(**body)
     except Exception as e:
-        return JSONResponse(status_code=400, content={"detail": f"请求参数错误: {str(e)}"})
+        return error_response(f"请求参数错误: {str(e)}", error_code="BAD_REQUEST")
 
     db = next(get_db())
     try:
         user_id = request.state.user_id
         opinion = req_data.opinion or ""
-        _, error = check_overdue_and_validate(db, app_id, opinion)
-        if error:
-            return JSONResponse(status_code=400, content={"detail": error})
-        
-        application = audit_pass(
-            db, app_id, user_id,
-            opinion,
-            req_data.material_reviews or {}
-        )
-        if not application:
-            return JSONResponse(status_code=400, content={"detail": "申请不存在或当前状态不可操作"})
+        try:
+            application = audit_pass(
+                db, app_id, user_id, opinion,
+                req_data.version,
+                req_data.material_reviews or {},
+            )
+        except ActionError as e:
+            db.rollback()
+            return _handle_action_error(e)
         result = ApplicationResponse.model_validate(application)
         return JSONResponse(result.model_dump(mode="json"))
     finally:
@@ -252,21 +258,23 @@ async def audit_pass_application(request: Request):
 
 async def audit_reject_application(request: Request):
     if request.state.user_role != RoleEnum.AUDIT_SUPERVISOR.value:
-        return JSONResponse(status_code=403, content={"detail": "只有审核主管可以审核拒绝"})
+        return error_response("只有审核主管可以审核拒绝", error_code="FORBIDDEN")
 
     app_id = request.path_params["app_id"]
     try:
         body = await request.json()
         req_data = AuditRequest(**body)
     except Exception as e:
-        return JSONResponse(status_code=400, content={"detail": f"请求参数错误: {str(e)}"})
+        return error_response(f"请求参数错误: {str(e)}", error_code="BAD_REQUEST")
 
     db = next(get_db())
     try:
         user_id = request.state.user_id
-        application = audit_reject(db, app_id, user_id, req_data.opinion or "")
-        if not application:
-            return JSONResponse(status_code=400, content={"detail": "申请不存在或当前状态不可操作"})
+        try:
+            application = audit_reject(db, app_id, user_id, req_data.opinion or "", req_data.version)
+        except ActionError as e:
+            db.rollback()
+            return _handle_action_error(e)
         result = ApplicationResponse.model_validate(application)
         return JSONResponse(result.model_dump(mode="json"))
     finally:
@@ -274,27 +282,27 @@ async def audit_reject_application(request: Request):
 
 
 async def review_pass_application(request: Request):
-    if request.state.user_role != RoleEnum.REVIEW_LEADER.value:
-        return JSONResponse(status_code=403, content={"detail": "只有复核负责人可以复核通过"})
+    try:
+        check_role_permission(request.state.user_role, AuditActionEnum.REVIEW_PASS)
+    except ActionError as e:
+        return _handle_action_error(e)
 
     app_id = request.path_params["app_id"]
     try:
         body = await request.json()
         req_data = AuditRequest(**body)
     except Exception as e:
-        return JSONResponse(status_code=400, content={"detail": f"请求参数错误: {str(e)}"})
+        return error_response(f"请求参数错误: {str(e)}", error_code="BAD_REQUEST")
 
     db = next(get_db())
     try:
         user_id = request.state.user_id
         opinion = req_data.opinion or ""
-        _, error = check_overdue_and_validate(db, app_id, opinion)
-        if error:
-            return JSONResponse(status_code=400, content={"detail": error})
-        
-        application = review_pass(db, app_id, user_id, opinion)
-        if not application:
-            return JSONResponse(status_code=400, content={"detail": "申请不存在或当前状态不可操作"})
+        try:
+            application = review_pass(db, app_id, user_id, opinion, req_data.version)
+        except ActionError as e:
+            db.rollback()
+            return _handle_action_error(e)
         result = ApplicationResponse.model_validate(application)
         return JSONResponse(result.model_dump(mode="json"))
     finally:
@@ -303,21 +311,23 @@ async def review_pass_application(request: Request):
 
 async def review_reject_application(request: Request):
     if request.state.user_role != RoleEnum.REVIEW_LEADER.value:
-        return JSONResponse(status_code=403, content={"detail": "只有复核负责人可以复核拒绝"})
+        return error_response("只有复核负责人可以复核拒绝", error_code="FORBIDDEN")
 
     app_id = request.path_params["app_id"]
     try:
         body = await request.json()
         req_data = AuditRequest(**body)
     except Exception as e:
-        return JSONResponse(status_code=400, content={"detail": f"请求参数错误: {str(e)}"})
+        return error_response(f"请求参数错误: {str(e)}", error_code="BAD_REQUEST")
 
     db = next(get_db())
     try:
         user_id = request.state.user_id
-        application = review_reject(db, app_id, user_id, req_data.opinion or "")
-        if not application:
-            return JSONResponse(status_code=400, content={"detail": "申请不存在或当前状态不可操作"})
+        try:
+            application = review_reject(db, app_id, user_id, req_data.opinion or "", req_data.version)
+        except ActionError as e:
+            db.rollback()
+            return _handle_action_error(e)
         result = ApplicationResponse.model_validate(application)
         return JSONResponse(result.model_dump(mode="json"))
     finally:
@@ -325,27 +335,27 @@ async def review_reject_application(request: Request):
 
 
 async def archive_application_endpoint(request: Request):
-    if request.state.user_role != RoleEnum.REVIEW_LEADER.value:
-        return JSONResponse(status_code=403, content={"detail": "只有复核负责人可以归档"})
+    try:
+        check_role_permission(request.state.user_role, AuditActionEnum.ARCHIVE)
+    except ActionError as e:
+        return _handle_action_error(e)
 
     app_id = request.path_params["app_id"]
     try:
         body = await request.json()
         req_data = AuditRequest(**body)
     except Exception as e:
-        return JSONResponse(status_code=400, content={"detail": f"请求参数错误: {str(e)}"})
+        return error_response(f"请求参数错误: {str(e)}", error_code="BAD_REQUEST")
 
     db = next(get_db())
     try:
         user_id = request.state.user_id
-        opinion = req_data.opinion or ""
-        _, error = check_overdue_and_validate(db, app_id, opinion)
-        if error:
-            return JSONResponse(status_code=400, content={"detail": error})
-        
-        application = archive_application(db, app_id, user_id, opinion)
-        if not application:
-            return JSONResponse(status_code=400, content={"detail": "申请不存在或当前状态不可归档"})
+        opinion = req_data.opinion or req_data.remark or ""
+        try:
+            application = archive_application(db, app_id, user_id, opinion, req_data.version)
+        except ActionError as e:
+            db.rollback()
+            return _handle_action_error(e)
         result = ApplicationResponse.model_validate(application)
         return JSONResponse(result.model_dump(mode="json"))
     finally:
@@ -366,13 +376,14 @@ async def batch_process_applications(request: Request):
         body = await request.json()
         req_data = BatchActionRequest(**body)
     except Exception as e:
-        return JSONResponse(status_code=400, content={"detail": f"请求参数错误: {str(e)}"})
+        return error_response(f"请求参数错误: {str(e)}", error_code="BAD_REQUEST")
 
     db = next(get_db())
     try:
         user_id = request.state.user_id
         role = request.state.user_role
-        results = batch_action(db, req_data.ids, req_data.action, user_id, role, req_data.remark or "")
+        items = [{"id": item.id, "version": item.version} for item in req_data.items]
+        results = batch_action(db, items, req_data.action, user_id, role, req_data.remark or "")
         return JSONResponse(results)
     finally:
         db.close()

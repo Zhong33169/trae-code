@@ -32,11 +32,11 @@ ROLE_ACTIONS = {
         AuditActionEnum.START_AUDIT,
         AuditActionEnum.REQUEST_CORRECTION,
         AuditActionEnum.AUDIT_PASS,
-        AuditActionEnum.AUDIT_REJECT,
+        AuditActionEnum.REJECT,
     ],
     RoleEnum.REVIEW_LEADER: [
         AuditActionEnum.REVIEW_PASS,
-        AuditActionEnum.REVIEW_REJECT,
+        AuditActionEnum.REJECT,
         AuditActionEnum.ARCHIVE,
     ],
 }

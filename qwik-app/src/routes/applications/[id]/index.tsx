@@ -13,7 +13,6 @@ import {
   statusLabels,
   materialTypeLabels,
   formatDate,
-  roleLabels,
 } from '~/utils/api';
 
 export const useAppId = routeLoader$(({ params }) => {
@@ -76,16 +75,16 @@ export default component$(() => {
 
   const app = application.value;
 
-  // 角色权限
   const userStr =
     typeof localStorage !== 'undefined' ? localStorage.getItem('user') : null;
   const user = userStr ? JSON.parse(userStr) : null;
   const role = user?.role || 'registrar';
 
+  // 角色权限 - 严格按角色+状态显示按钮
   const canStartAudit = useComputed$(
     () =>
-      (role === 'audit_supervisor' && app?.status === 'submitted') ||
-      app?.status === 'corrected'
+      role === 'audit_supervisor' &&
+      (app?.status === 'submitted' || app?.status === 'corrected')
   );
   const canRequestCorrection = useComputed$(
     () => role === 'audit_supervisor' && app?.status === 'under_review'
@@ -106,24 +105,35 @@ export default component$(() => {
     () => role === 'review_leader' && app?.status === 'review_passed'
   );
 
+  const handleError = $((e: any) => {
+    if (e.code === 'VERSION_CONFLICT' || e.statusCode === 409) {
+      showMessage('error', '申请已被其他操作修改，正在刷新数据...');
+      loadDetail();
+    } else {
+      showMessage('error', e.message || '操作失败');
+    }
+  });
+
   // 操作处理
   const handleStartAudit = $(async () => {
-    if (app?.is_overdue && !startAuditRemark.value.trim()) {
+    if (!app) return;
+    if (app.is_overdue && !startAuditRemark.value.trim()) {
       showMessage('error', '该申请已逾期，请填写逾期处理说明');
       return;
     }
     try {
-      await startAudit(params.value.id, startAuditRemark.value || undefined);
+      await startAudit(params.value.id, app.version, startAuditRemark.value || undefined);
       showStartAuditModal.value = false;
       startAuditRemark.value = '';
       showMessage('success', '已开始审核');
       loadDetail();
     } catch (e: any) {
-      showMessage('error', e.message || '操作失败');
+      handleError(e);
     }
   });
 
   const handleRequestCorrection = $(async () => {
+    if (!app) return;
     if (!correctionRequest.value) {
       showMessage('error', '请填写补正要求');
       return;
@@ -131,6 +141,7 @@ export default component$(() => {
     try {
       await requestCorrection(
         params.value.id,
+        app.version,
         correctionRequest.value,
         materialReviews.value
       );
@@ -139,18 +150,20 @@ export default component$(() => {
       showMessage('success', '补正要求已发送');
       loadDetail();
     } catch (e: any) {
-      showMessage('error', e.message || '操作失败');
+      handleError(e);
     }
   });
 
   const handleAuditPass = $(async () => {
-    if (app?.is_overdue && !opinion.value.trim()) {
+    if (!app) return;
+    if (app.is_overdue && !opinion.value.trim()) {
       showMessage('error', '该申请已逾期，审核通过必须填写逾期处理说明');
       return;
     }
     try {
       await auditPass(
         params.value.id,
+        app.version,
         opinion.value || undefined,
         materialReviews.value
       );
@@ -159,71 +172,75 @@ export default component$(() => {
       showMessage('success', '审核通过');
       loadDetail();
     } catch (e: any) {
-      showMessage('error', e.message || '操作失败');
+      handleError(e);
     }
   });
 
   const handleAuditReject = $(async () => {
+    if (!app) return;
     if (!opinion.value) {
       showMessage('error', '请填写拒绝理由');
       return;
     }
     try {
-      await auditReject(params.value.id, opinion.value);
+      await auditReject(params.value.id, app.version, opinion.value);
       showAuditRejectModal.value = false;
       opinion.value = '';
       showMessage('success', '已拒绝');
       loadDetail();
     } catch (e: any) {
-      showMessage('error', e.message || '操作失败');
+      handleError(e);
     }
   });
 
   const handleReviewPass = $(async () => {
-    if (app?.is_overdue && !opinion.value.trim()) {
+    if (!app) return;
+    if (app.is_overdue && !opinion.value.trim()) {
       showMessage('error', '该申请已逾期，复核通过必须填写逾期处理说明');
       return;
     }
     try {
-      await reviewPass(params.value.id, opinion.value || undefined);
+      await reviewPass(params.value.id, app.version, opinion.value || undefined);
       showReviewPassModal.value = false;
       opinion.value = '';
       showMessage('success', '复核通过');
       loadDetail();
     } catch (e: any) {
-      showMessage('error', e.message || '操作失败');
+      handleError(e);
     }
   });
 
   const handleReviewReject = $(async () => {
+    if (!app) return;
     if (!opinion.value) {
       showMessage('error', '请填写复核退回意见');
       return;
     }
     try {
-      await reviewReject(params.value.id, opinion.value);
+      await reviewReject(params.value.id, app.version, opinion.value);
       showReviewRejectModal.value = false;
       opinion.value = '';
       showMessage('success', '已退回');
       loadDetail();
     } catch (e: any) {
-      showMessage('error', e.message || '操作失败');
+      handleError(e);
     }
   });
 
   const handleArchive = $(async () => {
-    if (app?.is_overdue && !opinion.value.trim()) {
+    if (!app) return;
+    if (app.is_overdue && !opinion.value.trim()) {
       showMessage('error', '该申请已逾期，归档必须填写逾期处理说明');
       return;
     }
     try {
-      await archiveApplication(params.value.id, opinion.value || undefined);
+      await archiveApplication(params.value.id, app.version, opinion.value || undefined);
       showArchiveModal.value = false;
       opinion.value = '';
       showMessage('success', '已归档');
       loadDetail();
     } catch (e: any) {
-      showMessage('error', e.message || '操作失败');
+      handleError(e);
     }
   });
 

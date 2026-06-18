@@ -92,6 +92,7 @@ class ApplicationResponse(ApplicationBase):
     correction_request: Optional[str] = None
     created_at: datetime
     updated_at: datetime
+    version: int
     materials: List[MaterialResponse] = []
 
     class Config:
@@ -114,22 +115,40 @@ class SubmitApplicationRequest(BaseModel):
 
 
 class AuditRequest(BaseModel):
+    version: int
     opinion: Optional[str] = None
+    remark: Optional[str] = None
     material_reviews: Optional[dict] = None
 
 
+class StartAuditRequest(BaseModel):
+    version: int
+    remark: Optional[str] = None
+
+
 class CorrectionRequest(BaseModel):
+    version: int
     correction_request: str
     material_reviews: Optional[dict] = None
 
 
 class CorrectRequest(BaseModel):
+    version: int
     materials: Optional[List[MaterialCreate]] = None
     remark: Optional[str] = None
 
 
+class SubmitRequest(BaseModel):
+    version: int
+
+
+class BatchItem(BaseModel):
+    id: int
+    version: int
+
+
 class BatchActionRequest(BaseModel):
-    ids: List[int]
+    items: List[BatchItem]
     action: str
     remark: Optional[str] = None
 

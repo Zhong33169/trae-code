@@ -71,6 +71,7 @@ export interface Application {
   correction_request?: string;
   created_at: string;
   updated_at: string;
+  version: number;
   materials: Material[];
   audit_logs?: AuditLog[];
 }
@@ -109,5 +110,5 @@ export interface LoginResponse {
 
 export interface BatchActionResult {
   success: number[];
-  failed: Array<{ id: number; reason: string }>;
+  failed: Array<{ id: number; code?: string; reason: string; data?: any }>;
 }

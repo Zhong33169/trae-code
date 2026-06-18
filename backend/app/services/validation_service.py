@@ -9,77 +9,77 @@ from app.models import (
 from app.utils.state_machine import can_transition, can_role_perform_action
 
 
-class ActionValidationError(Exception):
-    def __init__(self, message: str, code: int = 400):
+class ActionError(Exception):
+    def __init__(self, message: str, error_code: str = "BAD_REQUEST", data: Optional[dict] = None):
         self.message = message
-        self.code = code
+        self.error_code = error_code
+        self.data = data
         super().__init__(message)
 
 
-def validate_and_get_application(
-    db: Session,
-    app_id: int,
-    user_role: str,
-    action: AuditActionEnum,
-) -> ExhibitorApplication:
-    application = db.query(ExhibitorApplication).filter(
-        ExhibitorApplication.id == app_id
-    ).first()
-
-    if not application:
-        raise ActionValidationError("申请不存在", code=404)
-
+def check_role_permission(user_role: str, action: AuditActionEnum) -> None:
     try:
         role_enum = RoleEnum(user_role)
     except ValueError:
-        raise ActionValidationError("角色无效", code=403)
+        raise ActionError("角色无效", error_code="FORBIDDEN")
 
     if not can_role_perform_action(role_enum, action):
-        raise ActionValidationError("权限不足：该角色无此操作权限", code=403)
-
-    return application
-
-
-def validate_status_transition(
-    application: ExhibitorApplication,
-    target_status: ApplicationStatusEnum,
-) -> None:
-    if not can_transition(application.status, target_status):
-        raise ActionValidationError(
-            f"状态流转不合法：当前状态【{application.status.value}】不能转换为【{target_status.value}】",
-            code=400,
+        raise ActionError(
+            f"权限不足：{role_enum.value} 无权执行此操作",
+            error_code="FORBIDDEN",
         )
 
 
-def optimistic_update(
+def check_version(application: ExhibitorApplication, expected_version: int) -> None:
+    if application.version != expected_version:
+        raise ActionError(
+            "申请已被其他操作修改，请刷新后重试",
+            error_code="VERSION_CONFLICT",
+            data={
+                "current_version": application.version,
+                "expected_version": expected_version,
+                "current_status": application.status.value,
+            },
+        )
+
+
+def check_status_allowed(
+    application: ExhibitorApplication,
+    allowed_statuses: list,
+) -> None:
+    if application.status not in allowed_statuses:
+        allowed_str = "、".join(s.value for s in allowed_statuses)
+        raise ActionError(
+            f"当前状态【{application.status.value}】不支持此操作，仅【{allowed_str}】状态可操作",
+            error_code="INVALID_STATUS",
+            data={
+                "current_status": application.status.value,
+                "allowed_statuses": [s.value for s in allowed_statuses],
+            },
+        )
+
+
+def check_overdue_remark(application: ExhibitorApplication, remark: str, needs_remark: bool) -> None:
+    if needs_remark and application.is_overdue and not remark:
+        raise ActionError(
+            f"该申请已逾期（{application.overdue_reason or '原因未知'}），请填写逾期处理说明后再操作",
+            error_code="OVERDUE_REMARK_REQUIRED",
+            data={
+                "current_status": application.status.value,
+                "overdue_reason": application.overdue_reason,
+            },
+        )
+
+
+def atomic_status_update(
     db: Session,
     application: ExhibitorApplication,
-    update_fields: dict,
-) -> bool:
-    old_version = application.version
-    update_fields["version"] = old_version + 1
-
-    rows = db.query(ExhibitorApplication).filter(
-        ExhibitorApplication.id == application.id,
-        ExhibitorApplication.version == old_version,
-    ).update(update_fields, synchronize_session=False)
-
-    if rows == 0:
-        db.rollback()
-        return False
-
-    application.version = old_version + 1
-    return True
-
-
-def execute_status_transition(
-    db: Session,
-    application: ExhibitorApplication,
+    expected_version: int,
     target_status: ApplicationStatusEnum,
     extra_fields: Optional[dict] = None,
     recalculate_deadline: bool = True,
 ) -> bool:
-    validate_status_transition(application, target_status)
+    check_version(application, expected_version)
 
     old_version = application.version
     now = datetime.utcnow()
@@ -108,7 +108,11 @@ def execute_status_transition(
 
     if rows == 0:
         db.rollback()
-        return False
+        raise ActionError(
+            "申请已被其他操作修改，请刷新后重试",
+            error_code="VERSION_CONFLICT",
+            data={"current_status": application.status.value},
+        )
 
     db.refresh(application)
 
@@ -117,7 +121,24 @@ def execute_status_transition(
         ApplicationStatusEnum.ARCHIVED,
     ]:
         application.calculate_deadline()
-        db.commit()
-        db.refresh(application)
 
     return True
+
+
+def safe_commit_with_audit(
+    db: Session,
+    application: ExhibitorApplication,
+    user_id: int,
+    action: AuditActionEnum,
+    action_name: str,
+    old_status: ApplicationStatusEnum,
+    new_status: ApplicationStatusEnum,
+    remark: str = "",
+) -> None:
+    from app.services.application_service import add_audit_log
+    add_audit_log(
+        db, application.id, user_id, action, action_name,
+        old_status, new_status, remark,
+    )
+    db.commit()
+    db.refresh(application)

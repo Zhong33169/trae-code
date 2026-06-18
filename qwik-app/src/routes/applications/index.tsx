@@ -1,5 +1,5 @@
 import { component$, useSignal, useTask$, $, useComputed$ } from '@builder.io/qwik';
-import { useNavigate, useLocation } from '@builder.io/qwik-city';
+import { useNavigate } from '@builder.io/qwik-city';
 import { useAuthCheck } from '../layout';
 import type { Application, Statistics } from '~/types';
 import {
@@ -10,10 +10,10 @@ import {
   formatDate,
   getOverdueNextAction,
 } from '~/utils/api';
+import type { BatchItem } from '~/utils/api';
 
 export default component$(() => {
   const nav = useNavigate();
-  const loc = useLocation();
   const auth = useAuthCheck();
 
   const applications = useSignal<Application[]>([]);
@@ -120,6 +120,8 @@ export default component$(() => {
     }
   });
 
+  const batchResult = useSignal<{ success: number[]; failed: Array<{ id: number; code?: string; reason: string }> } | null>(null);
+
   const handleBatchSubmit = $(async () => {
     if (!batchActionType.value) {
       showMessage('error', '请选择批量操作');
@@ -131,21 +133,28 @@ export default component$(() => {
       return;
     }
 
+    const items: BatchItem[] = applications.value
+      .filter((a) => selectedIds.value.includes(a.id))
+      .map((a) => ({ id: a.id, version: a.version }));
+
     try {
       const result = await batchAction(
-        selectedIds.value,
+        items,
         batchActionType.value,
         batchRemark.value || undefined
       );
+      batchResult.value = result;
       const successCount = result.success.length;
       const failCount = result.failed.length;
       let msg = `批量操作完成：成功 ${successCount} 条`;
       if (failCount > 0) msg += `，失败 ${failCount} 条`;
       showMessage(failCount > 0 ? 'warning' : 'success', msg);
-      showBatchModal.value = false;
-      batchActionType.value = '';
-      batchRemark.value = '';
-      selectedIds.value = [];
+      if (failCount === 0) {
+        showBatchModal.value = false;
+        batchActionType.value = '';
+        batchRemark.value = '';
+        selectedIds.value = [];
+      }
       loadData();
     } catch (e: any) {
       showMessage('error', e.message || '批量操作失败');
@@ -258,6 +267,7 @@ export default component$(() => {
                   showBatchModal.value = true;
                   batchActionType.value = '';
                   batchRemark.value = '';
+                  batchResult.value = null;
                 }}
               >
                 批量处理 ({selectedIds.value.length})
@@ -419,6 +429,22 @@ export default component$(() => {
               </span>
             </div>
             <div class="modal-body">
+              {batchResult.value && batchResult.value.failed.length > 0 && (
+                <div
+                  class="alert alert-error"
+                  style={{ marginBottom: '16px', fontSize: '13px' }}
+                >
+                  <strong>失败明细：</strong>
+                  {batchResult.value.failed.map((f) => (
+                    <div key={f.id} style={{ marginTop: '4px' }}>
+                      申请 #{f.id}：{f.reason}
+                      {f.code === 'VERSION_CONFLICT' && (
+                        <span style={{ color: '#999', marginLeft: '4px' }}>(已被修改，请刷新)</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
               <p style={{ marginBottom: '12px' }}>
                 已选择 <strong>{selectedIds.value.length}</strong> 条申请进行批量处理
               </p>

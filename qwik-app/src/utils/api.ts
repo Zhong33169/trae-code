@@ -33,7 +33,12 @@ async function request<T>(
   const data = await res.json().catch(() => ({}));
 
   if (!res.ok) {
-    throw new Error(data.detail || data.message || `请求失败 (${res.status})`);
+    const message = data.message || data.detail || `请求失败 (${res.status})`;
+    const error = new Error(message) as Error & { code?: string; statusCode?: number; data?: any };
+    error.code = data.code;
+    error.statusCode = res.status;
+    error.data = data.data;
+    throw error;
   }
 
   return data as T;
@@ -105,25 +110,30 @@ export function getApplication(id: number): Promise<Application> {
   return request<Application>(`/applications/${id}`);
 }
 
-export function submitApplication(id: number): Promise<Application> {
-  return request<Application>(`/applications/${id}/submit`, { method: 'POST' });
+export function submitApplication(id: number, version: number): Promise<Application> {
+  return request<Application>(`/applications/${id}/submit`, {
+    method: 'POST',
+    body: JSON.stringify({ version }),
+  });
 }
 
-export function startAudit(id: number, remark?: string): Promise<Application> {
+export function startAudit(id: number, version: number, remark?: string): Promise<Application> {
   return request<Application>(`/applications/${id}/start-audit`, {
     method: 'POST',
-    body: JSON.stringify({ remark }),
+    body: JSON.stringify({ version, remark }),
   });
 }
 
 export function requestCorrection(
   id: number,
+  version: number,
   correctionRequest: string,
   materialReviews: Record<number, { is_approved: boolean; review_comment: string }>
 ): Promise<Application> {
   return request<Application>(`/applications/${id}/request-correction`, {
     method: 'POST',
     body: JSON.stringify({
+      version,
       correction_request: correctionRequest,
       material_reviews: materialReviews,
     }),
@@ -132,51 +142,57 @@ export function requestCorrection(
 
 export function auditPass(
   id: number,
+  version: number,
   opinion?: string,
   materialReviews?: Record<number, { is_approved: boolean; review_comment: string }>
 ): Promise<Application> {
   return request<Application>(`/applications/${id}/audit-pass`, {
     method: 'POST',
-    body: JSON.stringify({ opinion, material_reviews: materialReviews }),
+    body: JSON.stringify({ version, opinion, material_reviews: materialReviews }),
   });
 }
 
-export function auditReject(id: number, opinion: string): Promise<Application> {
+export function auditReject(id: number, version: number, opinion: string): Promise<Application> {
   return request<Application>(`/applications/${id}/audit-reject`, {
     method: 'POST',
-    body: JSON.stringify({ opinion }),
+    body: JSON.stringify({ version, opinion }),
   });
 }
 
-export function reviewPass(id: number, opinion?: string): Promise<Application> {
+export function reviewPass(id: number, version: number, opinion?: string): Promise<Application> {
   return request<Application>(`/applications/${id}/review-pass`, {
     method: 'POST',
-    body: JSON.stringify({ opinion }),
+    body: JSON.stringify({ version, opinion }),
   });
 }
 
-export function reviewReject(id: number, opinion: string): Promise<Application> {
+export function reviewReject(id: number, version: number, opinion: string): Promise<Application> {
   return request<Application>(`/applications/${id}/review-reject`, {
     method: 'POST',
-    body: JSON.stringify({ opinion }),
+    body: JSON.stringify({ version, opinion }),
   });
 }
 
-export function archiveApplication(id: number, opinion?: string): Promise<Application> {
+export function archiveApplication(id: number, version: number, opinion?: string): Promise<Application> {
   return request<Application>(`/applications/${id}/archive`, {
     method: 'POST',
-    body: JSON.stringify({ opinion }),
+    body: JSON.stringify({ version, opinion }),
   });
+}
+
+export interface BatchItem {
+  id: number;
+  version: number;
 }
 
 export function batchAction(
-  ids: number[],
+  items: BatchItem[],
   action: string,
   remark?: string
 ): Promise<BatchActionResult> {
   return request<BatchActionResult>('/applications/batch', {
     method: 'POST',
-    body: JSON.stringify({ ids, action, remark }),
+    body: JSON.stringify({ items, action, remark }),
   });
 }
 
