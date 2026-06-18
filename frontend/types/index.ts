@@ -58,6 +58,28 @@ export interface BatchItemResult {
   submitted_version: number
   responsible_role: string
   suggestion: string
+
+  batch_no: string
+  action: string
+  action_display: string
+  processed_at: string | null
+  resolved_status: 'unresolved' | 'corrected' | 'resubmitted'
+  resolved_status_display: string
+  resolved_batch_no: string | null
+  resolved_at: string | null
+  can_handle: boolean
+}
+
+export const ResolvedStatusLabels: Record<string, string> = {
+  unresolved: '未处理',
+  corrected: '已补正',
+  resubmitted: '已重新提交',
+}
+
+export const ResolvedStatusColors: Record<string, string> = {
+  unresolved: 'bg-red-100 text-red-700',
+  corrected: 'bg-amber-100 text-amber-700',
+  resubmitted: 'bg-green-100 text-green-700',
 }
 
 export interface BatchOrderItem {

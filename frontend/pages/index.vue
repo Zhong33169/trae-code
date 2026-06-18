@@ -134,8 +134,8 @@
                 </td>
                 <td class="px-3 py-3 text-xs text-gray-600">{{ order.created_by_name }}</td>
                 <td class="px-3 py-3">
-                  <div v-if="getLatestBatchItem(order.id)" class="text-xs space-y-0.5 max-w-xs">
-                    <div class="flex items-center gap-1">
+                  <div v-if="getLatestBatchItem(order.id)" class="text-xs space-y-1 max-w-xs">
+                    <div class="flex items-center gap-1 flex-wrap">
                       <span
                         :class="[
                           'inline-block px-1.5 py-0.5 rounded text-[10px] font-medium',
@@ -144,13 +144,39 @@
                       >
                         {{ getLatestBatchItem(order.id)!.item_status === 'failed' ? '失败' : '需重试' }}
                       </span>
+                      <span
+                        :class="[
+                          'inline-block px-1.5 py-0.5 rounded text-[10px] font-medium',
+                          ResolvedStatusColors[getLatestBatchItem(order.id)!.resolved_status]
+                        ]"
+                      >
+                        {{ getLatestBatchItem(order.id)!.resolved_status_display }}
+                      </span>
                       <span class="text-gray-500">v{{ getLatestBatchItem(order.id)!.submitted_version }}</span>
+                      <UButton
+                        v-if="getLatestBatchItem(order.id)!.can_handle"
+                        size="2xs"
+                        color="blue"
+                        variant="ghost"
+                        class="h-5 px-1.5"
+                        @click.stop="showDetail(order)"
+                      >
+                        办理
+                      </UButton>
                     </div>
                     <div class="text-gray-600 truncate" :title="getLatestBatchItem(order.id)!.error_message || ''">
                       {{ getLatestBatchItem(order.id)!.error_message }}
                     </div>
-                    <div v-if="getLatestBatchItem(order.id)!.responsible_role" class="text-gray-400">
-                      责任: {{ getRoleLabel(getLatestBatchItem(order.id)!.responsible_role) }}
+                    <div v-if="getLatestBatchItem(order.id)!.suggestion && getLatestBatchItem(order.id)!.resolved_status === 'unresolved'" class="text-blue-600 truncate" :title="getLatestBatchItem(order.id)!.suggestion">
+                      💡 {{ getLatestBatchItem(order.id)!.suggestion }}
+                    </div>
+                    <div class="flex items-center gap-2 text-gray-400">
+                      <span v-if="getLatestBatchItem(order.id)!.responsible_role">
+                        责任: {{ getRoleLabel(getLatestBatchItem(order.id)!.responsible_role) }}
+                      </span>
+                      <span v-if="getLatestBatchItem(order.id)!.resolved_batch_no">
+                        解决批次: {{ getLatestBatchItem(order.id)!.resolved_batch_no }}
+                      </span>
                     </div>
                   </div>
                   <span v-else class="text-xs text-gray-300">-</span>
@@ -554,7 +580,7 @@
 import { storeToRefs } from 'pinia'
 import { useAppStore } from '~/stores/app'
 import type { TradeOrder, Evidence, BatchItemResult } from '~/types'
-import { StatusColorClass, EvidenceTypeLabels, RoleLabels } from '~/types'
+import { StatusColorClass, EvidenceTypeLabels, RoleLabels, ResolvedStatusColors } from '~/types'
 
 const store = useAppStore()
 const { orders, selectedOrderIds, batchHistory } = storeToRefs(store)

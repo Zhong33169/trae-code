@@ -110,6 +110,16 @@ class BatchItemResult(BaseModel):
     responsible_role: str = ""
     suggestion: str = ""
 
+    batch_no: str = ""
+    action: str = ""
+    action_display: str = ""
+    processed_at: Optional[str] = None
+    resolved_status: str = "unresolved"
+    resolved_status_display: str = "未处理"
+    resolved_batch_no: Optional[str] = None
+    resolved_at: Optional[str] = None
+    can_handle: bool = False
+
 
 class BatchOperationOut(BaseModel):
     id: int

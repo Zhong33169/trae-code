@@ -6,7 +6,7 @@ from trade_order.models import (
     UserProfile, Role,
     TradeOrder, OrderStatus, OrderEvidence, EvidenceType,
     OrderHistory,
-    BatchOperation, BatchOperationItem, BatchAction, ItemStatus,
+    BatchOperation, BatchOperationItem, BatchAction, ItemStatus, ResolvedStatus,
 )
 
 
@@ -287,33 +287,33 @@ class Command(BaseCommand):
                 "batch_no_suffix": "BATCH-DEMO-001",
                 "action": BatchAction.APPROVE_DOC,
                 "operator": doc_user,
-                "remark": "首次批量单证复核",
+                "remark": "首次批量单证复核 - 暴露三类问题",
                 "items": [
                     {
                         "order_no": "PO202506180003",
                         "item_status": ItemStatus.FAILED,
                         "error_code": "VERSION_CONFLICT",
-                        "error_message": "订单已被其他人修改，当前版本不匹配",
+                        "error_message": "版本冲突：订单已被其他人修改，当前版本号不匹配",
                         "responsible_role": "operator",
-                        "suggestion": "刷新页面获取最新版本号后重新提交",
+                        "suggestion": "请刷新页面获取最新版本号后重新提交",
                         "version": 5,
                     },
                     {
                         "order_no": "PO202506180004",
                         "item_status": ItemStatus.RETRY,
                         "error_code": "EVIDENCE_INCOMPLETE",
-                        "error_message": "缺少合同证据，三类证据不完整",
+                        "error_message": "证据不完整：缺少销售合同(contract)类证据",
                         "responsible_role": "sales",
-                        "suggestion": "请上传销售合同/采购订单后再提交复核",
+                        "suggestion": "请由外贸业务员补齐销售合同或采购订单扫描件后再提交复核",
                         "version": 1,
                     },
                     {
                         "order_no": "PO202506180005",
                         "item_status": ItemStatus.FAILED,
-                        "error_code": "STATUS_INVALID",
-                        "error_message": "当前状态为待补正，不支持批量通过",
+                        "error_code": "INVALID_STATUS",
+                        "error_message": "状态错误：订单当前状态为'待补正(doc_correction)'，不能执行批量通过",
                         "responsible_role": "doc_supervisor",
-                        "suggestion": "请先在单条详情页处理补正，或使用批量退回操作",
+                        "suggestion": "请先在订单详情页使用'退回补正'或其他操作将订单流转到可批量处理的状态",
                         "version": 2,
                     },
                 ],
@@ -322,7 +322,7 @@ class Command(BaseCommand):
                 "batch_no_suffix": "BATCH-DEMO-002",
                 "action": BatchAction.APPROVE_DOC,
                 "operator": doc_user,
-                "remark": "补正后二次批量复核",
+                "remark": "版本冲突补正后：订单0003重新提交成功",
                 "items": [
                     {
                         "order_no": "PO202506180003",
@@ -332,6 +332,7 @@ class Command(BaseCommand):
                         "responsible_role": "",
                         "suggestion": "",
                         "version": 2,
+                        "_resolves": "PO202506180003",
                     },
                 ],
             },
@@ -339,7 +340,7 @@ class Command(BaseCommand):
                 "batch_no_suffix": "BATCH-DEMO-003",
                 "action": BatchAction.REJECT_DOC,
                 "operator": doc_user,
-                "remark": "批量退回待补正",
+                "remark": "缺证据场景：先批量退回业务员补正（标记corrected）",
                 "items": [
                     {
                         "order_no": "PO202506180004",
@@ -349,13 +350,71 @@ class Command(BaseCommand):
                         "responsible_role": "",
                         "suggestion": "",
                         "version": 1,
+                        "_corrected": "PO202506180004",
+                    },
+                ],
+            },
+            {
+                "batch_no_suffix": "BATCH-DEMO-004",
+                "action": BatchAction.SUBMIT_TO_DOC,
+                "operator": sales_user,
+                "remark": "缺证据补正后：业务员上传合同，重新提交单证",
+                "items": [
+                    {
+                        "order_no": "PO202506180004",
+                        "item_status": ItemStatus.SUCCESS,
+                        "error_code": "",
+                        "error_message": "",
+                        "responsible_role": "",
+                        "suggestion": "",
+                        "version": 2,
+                        "_resolves": "PO202506180004",
+                    },
+                ],
+            },
+            {
+                "batch_no_suffix": "BATCH-DEMO-005",
+                "action": BatchAction.REJECT_DOC,
+                "operator": doc_user,
+                "remark": "状态错误场景：先对订单0005做单条退回补正（此处用批量退回模拟纠正状态）",
+                "items": [
+                    {
+                        "order_no": "PO202506180005",
+                        "item_status": ItemStatus.SUCCESS,
+                        "error_code": "",
+                        "error_message": "",
+                        "responsible_role": "",
+                        "suggestion": "",
+                        "version": 2,
+                        "_corrected": "PO202506180005",
+                    },
+                ],
+            },
+            {
+                "batch_no_suffix": "BATCH-DEMO-006",
+                "action": BatchAction.SUBMIT_TO_DOC,
+                "operator": sales_user,
+                "remark": "状态纠正后：业务员重新提交订单0005到待单证",
+                "items": [
+                    {
+                        "order_no": "PO202506180005",
+                        "item_status": ItemStatus.SUCCESS,
+                        "error_code": "",
+                        "error_message": "",
+                        "responsible_role": "",
+                        "suggestion": "",
+                        "version": 3,
+                        "_resolves": "PO202506180005",
                     },
                 ],
             },
         ]
 
         import datetime
-        base_time = datetime.datetime.now() - datetime.timedelta(hours=6)
+        from django.utils import timezone
+        base_time = timezone.now() - datetime.timedelta(hours=8)
+
+        all_created_items = []
 
         for bi, bd in enumerate(demo_batches):
             existing = BatchOperation.objects.filter(batch_no__endswith=bd["batch_no_suffix"]).first()
@@ -363,7 +422,9 @@ class Command(BaseCommand):
                 self.stdout.write(f"  - 批次已存在, 跳过: {bd['batch_no_suffix']}")
                 continue
 
-            batch_time = base_time + datetime.timedelta(hours=bi * 2)
+            batch_time = base_time + datetime.timedelta(hours=bi * 1)
+            started_at = batch_time
+            finished_at = batch_time + datetime.timedelta(seconds=15)
             batch = BatchOperation.objects.create(
                 batch_no=f"DEMO{bi+1:03d}{bd['batch_no_suffix']}",
                 action=bd["action"],
@@ -373,13 +434,20 @@ class Command(BaseCommand):
                 success_count=sum(1 for it in bd["items"] if it["item_status"] == ItemStatus.SUCCESS),
                 failed_count=sum(1 for it in bd["items"] if it["item_status"] == ItemStatus.FAILED),
                 retry_count=sum(1 for it in bd["items"] if it["item_status"] == ItemStatus.RETRY),
+                status=BatchStatus.COMPLETED,
                 created_at=batch_time,
+                started_at=started_at,
+                completed_at=finished_at,
+                finished_at=finished_at,
             )
 
             for ii, item_data in enumerate(bd["items"]):
                 order = orders_by_no.get(item_data["order_no"])
                 item_time = batch_time + datetime.timedelta(seconds=ii * 5)
-                BatchOperationItem.objects.create(
+                resolved_status = ResolvedStatus.UNRESOLVED
+                if item_data.get("_corrected"):
+                    resolved_status = ResolvedStatus.CORRECTED
+                item = BatchOperationItem.objects.create(
                     batch=batch,
                     order=order,
                     order_id_tmp=order.id if order else 0,
@@ -390,9 +458,44 @@ class Command(BaseCommand):
                     suggestion=item_data["suggestion"],
                     version=item_data["version"],
                     processed_at=item_time,
+                    resolved_status=resolved_status,
+                    resolved_at=item_time if resolved_status != ResolvedStatus.UNRESOLVED else None,
                 )
+                item._resolves_order_no = item_data.get("_resolves")
+                item._corrected_order_no = item_data.get("_corrected")
+                all_created_items.append(item)
 
             self.stdout.write(self.style.SUCCESS(f"  ✓ 演示批次: {batch.batch_no} ({BatchAction(bd['action']).label})"))
+
+        resolves_map = {}
+        corrected_map = {}
+        for item in all_created_items:
+            if getattr(item, "_resolves_order_no", None) and item.item_status == ItemStatus.SUCCESS:
+                resolves_map[item._resolves_order_no] = item
+            if getattr(item, "_corrected_order_no", None) and item.item_status == ItemStatus.SUCCESS:
+                corrected_map[item._corrected_order_no] = item
+
+        for c_order_no, c_item in corrected_map.items():
+            for uitem in all_created_items:
+                if uitem.order and uitem.order.order_no == c_order_no and uitem.item_status != ItemStatus.SUCCESS and uitem.resolved_status == ResolvedStatus.UNRESOLVED:
+                    uitem.resolved_status = ResolvedStatus.CORRECTED
+                    uitem.resolved_by = c_item
+                    uitem.resolved_at = c_item.processed_at
+                    uitem.save(update_fields=["resolved_status", "resolved_by", "resolved_at"])
+                    self.stdout.write(f"    ↳ {c_order_no} 已标记补正(corrected), 关联: {c_item.batch.batch_no}")
+
+        unresolveds = [i for i in all_created_items if i.item_status != ItemStatus.SUCCESS and i.resolved_status == ResolvedStatus.UNRESOLVED]
+        for uitem in unresolveds:
+            if not uitem.order:
+                continue
+            order_no = uitem.order.order_no
+            resolver = resolves_map.get(order_no)
+            if resolver:
+                uitem.resolved_status = ResolvedStatus.RESUBMITTED
+                uitem.resolved_by = resolver
+                uitem.resolved_at = resolver.processed_at
+                uitem.save(update_fields=["resolved_status", "resolved_by", "resolved_at"])
+                self.stdout.write(f"    ↳ {order_no} 已关联解决批次: {resolver.batch.batch_no}")
 
         self.stdout.write(self.style.SUCCESS("演示数据初始化完成!"))
         self.stdout.write("")

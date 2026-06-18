@@ -40,6 +40,12 @@ class ItemStatus(models.TextChoices):
     RETRY = "retry", "需重试"
 
 
+class ResolvedStatus(models.TextChoices):
+    UNRESOLVED = "unresolved", "未处理"
+    CORRECTED = "corrected", "已补正"
+    RESUBMITTED = "resubmitted", "已重新提交"
+
+
 class BatchAction(models.TextChoices):
     SUBMIT_TO_DOC = "submit_to_doc", "提交单证处理"
     APPROVE_DOC = "approve_doc", "单证复核通过"
@@ -182,6 +188,16 @@ class BatchOperationItem(models.Model):
     suggestion = models.TextField(blank=True, verbose_name="处理建议")
     processed_at = models.DateTimeField(null=True, blank=True, verbose_name="处理时间")
     version = models.IntegerField(default=0, verbose_name="提交时的版本号")
+
+    resolved_status = models.CharField(
+        max_length=20, choices=ResolvedStatus.choices, default=ResolvedStatus.UNRESOLVED,
+        verbose_name="解决状态"
+    )
+    resolved_by = models.ForeignKey(
+        "self", on_delete=models.SET_NULL, related_name="resolved_prev_items",
+        null=True, blank=True, verbose_name="由哪个成功批次解决"
+    )
+    resolved_at = models.DateTimeField(null=True, blank=True, verbose_name="解决时间")
 
     class Meta:
         ordering = ["id"]

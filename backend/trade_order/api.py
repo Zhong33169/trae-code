@@ -21,6 +21,7 @@ def _e(status: int, code: str, message: str):
 from .models import (
     TradeOrder, OrderStatus, OrderEvidence, EvidenceType,
     BatchOperation, BatchAction, BatchStatus, BatchOperationItem, ItemStatus,
+    ResolvedStatus,
     OrderHistory, UserProfile, Role,
 )
 from .schemas import (
@@ -55,6 +56,71 @@ def _get_responsible_and_suggestion(error_code: str) -> tuple[str, str]:
         return "", ""
     role, suggestion = ERROR_RESPONSIBLE_MAP.get(error_code, ("operator", "请检查错误信息后重试"))
     return role, suggestion
+
+
+def _can_handle_item(user: User, item: BatchOperationItem) -> bool:
+    """判断当前用户是否可以办理该补正项"""
+    if item.item_status == ItemStatus.SUCCESS:
+        return False
+    if item.resolved_status != ResolvedStatus.UNRESOLVED:
+        return False
+    role = user.profile.role
+    resp_role = item.responsible_role
+    if not resp_role:
+        return True
+    if resp_role == "operator":
+        return True
+    if resp_role == "admin":
+        return role == Role.BIZ_MANAGER
+    return role == resp_role
+
+
+def _item_to_result(item: BatchOperationItem, current_user: User | None = None) -> BatchItemResult:
+    """将 BatchOperationItem 统一转换为 BatchItemResult"""
+    order = item.order
+    order_id = order.id if order else item.order_id_tmp
+    order_no = order.order_no if order else f"[不存在-{item.order_id_tmp}]"
+
+    resolved_batch_no = None
+    resolved_display = ResolvedStatus(item.resolved_status).label
+    if item.resolved_by_id:
+        try:
+            resolved_batch_no = item.resolved_by.batch.batch_no
+        except BatchOperationItem.DoesNotExist:
+            resolved_batch_no = None
+
+    can_handle = False
+    if current_user is not None:
+        can_handle = _can_handle_item(current_user, item)
+
+    processed_at_str = item.processed_at.strftime("%Y-%m-%d %H:%M:%S") if item.processed_at else None
+    resolved_at_str = item.resolved_at.strftime("%Y-%m-%d %H:%M:%S") if item.resolved_at else None
+
+    action_display = ""
+    try:
+        action_display = BatchAction(item.batch.action).label
+    except Exception:
+        pass
+
+    return BatchItemResult(
+        order_id=order_id,
+        order_no=order_no,
+        item_status=item.item_status,
+        error_code=item.error_code or None,
+        error_message=item.error_message or None,
+        submitted_version=item.version,
+        responsible_role=item.responsible_role,
+        suggestion=item.suggestion,
+        batch_no=item.batch.batch_no,
+        action=item.batch.action,
+        action_display=action_display,
+        processed_at=processed_at_str,
+        resolved_status=item.resolved_status,
+        resolved_status_display=resolved_display,
+        resolved_batch_no=resolved_batch_no,
+        resolved_at=resolved_at_str,
+        can_handle=can_handle,
+    )
 
 
 def _get_user_from_headers(x_user_id: str = Header(None), x_role: str = Header(None)) -> User:
@@ -736,14 +802,15 @@ def batch_operation(request, payload: BatchOperationIn, x_user_id: str = Header(
         success_count = 0
         failed_count = 0
         retry_count = 0
-        items_out = []
+        created_items = []
+        success_items = []
 
         for oid in order_ids:
             expected_version = version_map.get(oid, 0)
             if oid in missing_ids:
                 failed_count += 1
                 resp_role, resp_sug = _get_responsible_and_suggestion("ORDER_NOT_FOUND")
-                BatchOperationItem.objects.create(
+                item = BatchOperationItem.objects.create(
                     batch=batch,
                     order=None,
                     order_id_tmp=oid,
@@ -755,22 +822,13 @@ def batch_operation(request, payload: BatchOperationIn, x_user_id: str = Header(
                     processed_at=datetime.now(),
                     version=expected_version,
                 )
-                items_out.append(BatchItemResult(
-                    order_id=oid,
-                    order_no=f"[不存在-{oid}]",
-                    item_status=ItemStatus.FAILED,
-                    error_code="ORDER_NOT_FOUND",
-                    error_message=f"订单{oid}不存在",
-                    submitted_version=expected_version,
-                    responsible_role=resp_role,
-                    suggestion=resp_sug,
-                ))
+                created_items.append(item)
                 continue
 
             order = orders.get(id=oid)
             item_status, err_code, err_msg, resp_role, resp_sug = _process_single_action(order, payload.action, user, expected_version, payload.remark or "")
 
-            BatchOperationItem.objects.create(
+            item = BatchOperationItem.objects.create(
                 batch=batch,
                 order=order,
                 order_id_tmp=0,
@@ -782,31 +840,51 @@ def batch_operation(request, payload: BatchOperationIn, x_user_id: str = Header(
                 processed_at=datetime.now(),
                 version=expected_version,
             )
+            created_items.append(item)
 
             if item_status == ItemStatus.SUCCESS:
                 success_count += 1
+                success_items.append(item)
             elif item_status == ItemStatus.RETRY:
                 retry_count += 1
             else:
                 failed_count += 1
 
-            items_out.append(BatchItemResult(
-                order_id=order.id,
-                order_no=order.order_no,
-                item_status=item_status,
-                error_code=err_code,
-                error_message=err_msg,
-                submitted_version=expected_version,
-                responsible_role=resp_role,
-                suggestion=resp_sug,
-            ))
+        if success_items:
+            now = datetime.now()
+            success_oids = [it.order_id for it in success_items if it.order_id]
+            prev_unresolved = BatchOperationItem.objects.filter(
+                order_id__in=success_oids,
+                order__isnull=False,
+                resolved_status=ResolvedStatus.UNRESOLVED,
+            ).exclude(item_status=ItemStatus.SUCCESS)
+
+            prev_map = {}
+            for pit in prev_unresolved:
+                prev_map.setdefault(pit.order_id, []).append(pit)
+
+            for sitem in success_items:
+                if not sitem.order_id:
+                    continue
+                prevs = prev_map.get(sitem.order_id, [])
+                for pitem in prevs:
+                    pitem.resolved_status = ResolvedStatus.RESUBMITTED
+                    pitem.resolved_by = sitem
+                    pitem.resolved_at = now
+                    pitem.save(update_fields=["resolved_status", "resolved_by", "resolved_at"])
 
         batch.success_count = success_count
         batch.failed_count = failed_count
         batch.retry_count = retry_count
         batch.status = BatchStatus.COMPLETED
         batch.finished_at = datetime.now()
-        batch.save()
+        batch.save(update_fields=["success_count", "failed_count", "retry_count", "status", "finished_at"])
+
+        for item in created_items:
+            if item.resolved_status == ResolvedStatus.UNRESOLVED and item.resolved_by_id is None:
+                item.refresh_from_db()
+
+        items_out = [_item_to_result(it, user) for it in created_items]
 
     operator_name = ""
     try:
@@ -837,7 +915,7 @@ def batch_operation(request, payload: BatchOperationIn, x_user_id: str = Header(
 
 @router.get("/ops/batches", response=List[BatchOperationOut], tags=["外贸订单-批量操作"])
 def list_batch_operations(request, x_user_id: str = Header(None), x_role: str = Header(None)):
-    _get_user_from_headers(x_user_id, x_role)
+    user = _get_user_from_headers(x_user_id, x_role)
     batches = BatchOperation.objects.select_related("operator", "operator__profile").prefetch_related("items", "items__order").order_by("-created_at")[:50]
     result = []
     for b in batches:
@@ -846,20 +924,7 @@ def list_batch_operations(request, x_user_id: str = Header(None), x_role: str = 
             operator_name = b.operator.profile.display_name
         except UserProfile.DoesNotExist:
             operator_name = b.operator.username
-        items_out = []
-        for it in b.items.all():
-            real_order_id = it.order.id if it.order else it.order_id_tmp
-            real_order_no = it.order.order_no if it.order else f"[不存在-{it.order_id_tmp}]"
-            items_out.append(BatchItemResult(
-                order_id=real_order_id,
-                order_no=real_order_no,
-                item_status=it.item_status,
-                error_code=it.error_code or None,
-                error_message=it.error_message or None,
-                submitted_version=it.version,
-                responsible_role=it.responsible_role,
-                suggestion=it.suggestion,
-            ))
+        items_out = [_item_to_result(it, user) for it in b.items.all()]
         result.append(BatchOperationOut(
             id=b.id,
             batch_no=b.batch_no,
@@ -902,7 +967,7 @@ def get_latest_batch_items_by_orders(request, order_ids: str = "", x_user_id: st
     qs = (
         BatchOperationItem.objects
         .filter(order_id__in=oid_list, order__isnull=False)
-        .select_related("order", "batch", "batch__operator", "batch__operator__profile")
+        .select_related("order", "batch", "batch__operator", "batch__operator__profile", "resolved_by", "resolved_by__batch")
         .order_by("order_id", "-id")
     )
     
@@ -923,16 +988,7 @@ def get_latest_batch_items_by_orders(request, order_ids: str = "", x_user_id: st
     for it in latest_items:
         if it.item_status == ItemStatus.SUCCESS:
             continue
-        result.append(BatchItemResult(
-            order_id=it.order.id,
-            order_no=it.order.order_no,
-            item_status=it.item_status,
-            error_code=it.error_code or None,
-            error_message=it.error_message or None,
-            submitted_version=it.version,
-            responsible_role=it.responsible_role,
-            suggestion=it.suggestion,
-        ))
+        result.append(_item_to_result(it, user))
     
     return result
 
@@ -957,21 +1013,8 @@ def get_order_batch_items(request, order_id: int, x_user_id: str = Header(None),
     items = (
         BatchOperationItem.objects
         .filter(order=order)
-        .select_related("batch", "batch__operator", "batch__operator__profile")
+        .select_related("batch", "batch__operator", "batch__operator__profile", "resolved_by", "resolved_by__batch")
         .order_by("-id")[:20]
     )
     
-    result = []
-    for it in items:
-        result.append(BatchItemResult(
-            order_id=order.id,
-            order_no=order.order_no,
-            item_status=it.item_status,
-            error_code=it.error_code or None,
-            error_message=it.error_message or None,
-            submitted_version=it.version,
-            responsible_role=it.responsible_role,
-            suggestion=it.suggestion,
-        ))
-    
-    return result
+    return [_item_to_result(it, user) for it in items]

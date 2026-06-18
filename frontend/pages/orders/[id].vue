@@ -169,7 +169,7 @@
           </div>
 
           <!-- 业务员：提交单证 -->
-          <div v-if="canSalesSubmit" class="space-y-3">
+          <div id="order-action-area" v-if="canSalesSubmit" class="space-y-3">
             <div class="text-sm text-gray-600 mb-2">
               您是 <b>{{ store.currentUser?.display_name }}</b>（外贸业务员），订单已就绪，可提交给单证主管处理
             </div>
@@ -196,7 +196,7 @@
           </div>
 
           <!-- 单证主管操作区 -->
-          <div v-if="canDocApprove || canDocReject || canDocException" class="space-y-3">
+          <div id="order-action-area" v-if="canDocApprove || canDocReject || canDocException" class="space-y-3">
             <div class="text-sm text-gray-600 mb-2">
               您是 <b>{{ store.currentUser?.display_name }}</b>（单证主管），请复核单证
             </div>
@@ -223,7 +223,7 @@
           </div>
 
           <!-- 经理操作区 -->
-          <div v-if="canManagerApprove || canManagerReject || canManagerException" class="space-y-3">
+          <div id="order-action-area" v-if="canManagerApprove || canManagerReject || canManagerException" class="space-y-3">
             <div class="text-sm text-gray-600 mb-2">
               您是 <b>{{ store.currentUser?.display_name }}</b>（业务经理），请确认订单
             </div>
@@ -271,13 +271,14 @@
               :key="idx"
               class="border rounded-lg p-3"
               :class="{
-                'border-red-200 bg-red-50/30': item.item_status === 'failed',
-                'border-amber-200 bg-amber-50/30': item.item_status === 'retry',
-                'border-green-200 bg-green-50/30': item.item_status === 'success'
+                'border-red-200 bg-red-50/30': item.item_status === 'failed' && item.resolved_status === 'unresolved',
+                'border-amber-200 bg-amber-50/30': item.item_status === 'retry' && item.resolved_status === 'unresolved',
+                'border-green-200 bg-green-50/30': item.item_status === 'success' || item.resolved_status === 'resubmitted',
+                'border-blue-200 bg-blue-50/30': item.resolved_status === 'corrected',
               }"
             >
               <div class="flex items-center justify-between mb-2">
-                <div class="flex items-center gap-2">
+                <div class="flex items-center gap-2 flex-wrap">
                   <span
                     :class="[
                       'inline-block px-2 py-0.5 rounded text-[11px] font-medium',
@@ -288,20 +289,59 @@
                   >
                     {{ item.item_status === 'success' ? '成功' : item.item_status === 'failed' ? '失败' : '需重试' }}
                   </span>
+                  <span
+                    v-if="item.item_status !== 'success'"
+                    :class="[
+                      'inline-block px-2 py-0.5 rounded text-[11px] font-medium',
+                      ResolvedStatusColors[item.resolved_status]
+                    ]"
+                  >
+                    {{ item.resolved_status_display }}
+                  </span>
+                  <span
+                    class="inline-block px-2 py-0.5 rounded text-[11px] bg-gray-100 text-gray-600 font-medium"
+                  >
+                    {{ item.action_display || item.action }}
+                  </span>
                   <span class="text-xs text-gray-500">提交版本: v{{ item.submitted_version }}</span>
                 </div>
-                <span v-if="item.responsible_role" class="text-xs text-gray-500">
-                  责任: {{ getRoleLabel(item.responsible_role) }}
-                </span>
+                <UButton
+                  v-if="item.can_handle"
+                  size="xs"
+                  color="blue"
+                  variant="soft"
+                  @click="scrollToAction"
+                >
+                  立即办理
+                </UButton>
               </div>
+
+              <div v-if="item.batch_no || item.processed_at" class="text-xs text-gray-400 mb-1">
+                <span v-if="item.batch_no">批次: {{ item.batch_no }}</span>
+                <span v-if="item.batch_no && item.processed_at"> · </span>
+                <span v-if="item.processed_at">{{ item.processed_at }}</span>
+              </div>
+
               <div v-if="item.error_code" class="text-sm font-medium text-gray-700">
                 {{ item.error_code }}
               </div>
               <div v-if="item.error_message" class="text-sm text-gray-600 mt-0.5">
                 {{ item.error_message }}
               </div>
-              <div v-if="item.suggestion" class="text-sm text-blue-600 mt-1">
+              <div v-if="item.suggestion && item.resolved_status === 'unresolved'" class="text-sm text-blue-600 mt-1">
                 💡 {{ item.suggestion }}
+              </div>
+
+              <div class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-500">
+                <span v-if="item.responsible_role">
+                  责任岗位: <span class="text-gray-700">{{ getRoleLabel(item.responsible_role) }}</span>
+                </span>
+                <span v-if="item.resolved_batch_no">
+                  解决批次: <span class="text-green-700">{{ item.resolved_batch_no }}</span>
+                </span>
+                <span v-if="item.resolved_at">
+                  解决时间: <span class="text-gray-700">{{ item.resolved_at }}</span>
+                </span>
               </div>
             </div>
           </div>
@@ -419,7 +459,7 @@
 import { storeToRefs } from 'pinia'
 import { useAppStore } from '~/stores/app'
 import type { TradeOrder, Evidence, OrderHistory, BatchItemResult } from '~/types'
-import { StatusColorClass, EvidenceTypeLabels, RoleLabels } from '~/types'
+import { StatusColorClass, EvidenceTypeLabels, RoleLabels, ResolvedStatusColors } from '~/types'
 
 const route = useRoute()
 const store = useAppStore()
@@ -535,6 +575,13 @@ function getRoleLabel(role: string) {
   if (role === 'operator') return '操作人'
   if (role === 'admin') return '系统管理员'
   return RoleLabels[role] || role
+}
+
+function scrollToAction() {
+  const el = document.getElementById('order-action-area')
+  if (el) {
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }
 }
 
 async function loadData() {
