@@ -1,10 +1,10 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
-  import { browser } from '$app/environment';
+  import { onMount, afterUpdate } from 'svelte';
   import { page } from '$app/stores';
   import { goto } from '$app/navigation';
+  import { userStore } from '$lib/userStore';
   import { api } from '$lib/api';
-  import type { TradeReview, ReviewRecord, User } from '$lib/types';
+  import type { TradeReview, ReviewRecord } from '$lib/types';
   import {
     STATUS_LABEL, RISK_LABEL, ROLE_LABEL, ACTION_LABEL, statusColor, riskColor,
     fmtMoney, fmtDate, parseEvidence, RISK_REQUIRED_EVIDENCE,
@@ -12,11 +12,10 @@
 
   let review: TradeReview | null = null;
   let records: ReviewRecord[] = [];
-  let users: User[] = [];
-  let currentUserId = '';
   let loading = true;
   let errorMsg = '';
   let successMsg = '';
+  let lastUserId = '';
 
   let opinion = '';
   let result = '';
@@ -25,13 +24,24 @@
   let currentAction = '';
 
   onMount(async () => {
-    if (browser) currentUserId = localStorage.getItem('currentUserId') || '';
-    users = await api.getUsers();
-    await loadDetail();
+    if ($userStore.currentUserId) {
+      lastUserId = $userStore.currentUserId;
+      await loadDetail();
+    }
+  });
+
+  afterUpdate(() => {
+    if ($userStore.currentUserId && $userStore.currentUserId !== lastUserId && !$userStore.loading) {
+      lastUserId = $userStore.currentUserId;
+      loadDetail();
+      showActionPanel = false;
+    }
   });
 
   async function loadDetail() {
     loading = true;
+    errorMsg = '';
+    successMsg = '';
     try {
       const id = $page.params.id;
       const d = await api.getDetail(id);
@@ -44,7 +54,7 @@
     loading = false;
   }
 
-  $: currentUser = users.find(u => u.id === currentUserId);
+  $: currentUser = $userStore.users.find(u => u.id === $userStore.currentUserId);
   $: requiredEvidence = review ? (RISK_REQUIRED_EVIDENCE[review.risk_level] || []) : [];
   $: missingEvidence = requiredEvidence.filter(r => !selectedEvidence.some(e => e && e.includes(r)));
 
@@ -72,6 +82,9 @@
     result = '';
     errorMsg = '';
     successMsg = '';
+    if (review) {
+      selectedEvidence = parseEvidence(review.evidence_json);
+    }
   }
 
   function toggleEvidence(ev: string) {
@@ -83,14 +96,14 @@
   }
 
   async function doAction() {
-    if (!review) return;
+    if (!review || !currentUser) return;
     errorMsg = '';
     successMsg = '';
     try {
       const body = {
         review_id: review.id,
-        operator_id: currentUserId,
-        operator_role: currentUser!.role,
+        operator_id: $userStore.currentUserId,
+        operator_role: currentUser.role,
         expected_version: review.version,
         opinion,
         result,
@@ -106,16 +119,31 @@
       }
       successMsg = '操作成功！正在刷新...';
       showActionPanel = false;
-      setTimeout(loadDetail, 600);
+      setTimeout(loadDetail, 800);
     } catch (e: any) {
       errorMsg = e.message || '操作失败';
+      setTimeout(loadDetail, 800);
     }
   }
 
   function getPrevRecord(): ReviewRecord | null {
     if (records.length < 2) return null;
-    return records[1];
+    const notReject = records.filter(r => r.action !== 'REJECT');
+    return notReject.length >= 2 ? notReject[1] : records[1];
   }
+
+  function getHandlerName(id: string | null): string {
+    if (!id) return '-';
+    return $userStore.users.find(u => u.id === id)?.name || '-';
+  }
+
+  const actionLabelMap: Record<string, string> = {
+    submitReview: '核验通过 · 提交复核',
+    requestCorrection: '退回补正',
+    correct: '补正提交',
+    confirmComplete: '确认办结',
+    rejectReview: '驳回复核',
+  };
 </script>
 
 <div class="breadcrumb">
@@ -148,10 +176,16 @@
           <span class="tag" style="margin-left:8px; background:{statusColor(review.status)}20; color:{statusColor(review.status)}; border:1px solid {statusColor(review.status)}50">
             {STATUS_LABEL[review.status]}
           </span>
+          {#if review.current_handler_id === $userStore.currentUserId && review.status !== 'COMPLETED'}
+            <span class="tag" style="margin-left:8px; background:#dbeafe; color:#1e40af; border:1px solid #93c5fd">待我处理</span>
+          {/if}
         </h3>
         <div style="color:var(--text-muted); font-size:13px">
           版本 v{review.version} · 登记于 {fmtDate(review.created_at)} · 最后更新 {fmtDate(review.updated_at)}
         </div>
+      </div>
+      <div>
+        <button class="refresh-btn" on:click={loadDetail} title="刷新详情">↻ 刷新</button>
       </div>
     </div>
   </div>
@@ -172,8 +206,7 @@
         <div class="label">当前处理人</div>
         <div class="value">
           {#if review.current_role}
-            {users.find(u => u.id === review.current_handler_id)?.name || '-'}
-            （{ROLE_LABEL[review.current_role]}）
+            {getHandlerName(review.current_handler_id)}（{ROLE_LABEL[review.current_role]}）
           {:else}
             -（已办结）
           {/if}
@@ -185,7 +218,7 @@
       </div>
       <div class="field">
         <div class="label">登记人</div>
-        <div class="value">{users.find(u => u.id === review.created_by)?.name || '-'}</div>
+        <div class="value">{getHandlerName(review.created_by)}</div>
       </div>
 
       {#if getPrevRecord()}
@@ -266,12 +299,7 @@
 
   {#if showActionPanel}
     <div class="card">
-      <h3>
-        {currentAction === 'submitReview' ? '核验通过 · 提交复核' :
-         currentAction === 'requestCorrection' ? '退回补正' :
-         currentAction === 'correct' ? '补正提交' :
-         currentAction === 'confirmComplete' ? '确认办结' : '驳回复核'}
-      </h3>
+      <h3>{actionLabelMap[currentAction] || currentAction}</h3>
 
       {#if (currentAction === 'submitReview' || currentAction === 'correct' || currentAction === 'confirmComplete')}
         <div style="margin-bottom:14px">
@@ -285,6 +313,9 @@
             {/each}
             <div style="color:var(--text-muted); font-size:13px">
               已选 {selectedEvidence.length} / {requiredEvidence.length}
+              {#if missingEvidence.length > 0 && (currentAction === 'submitReview' || currentAction === 'correct' || currentAction === 'confirmComplete')}
+                <span style="color:var(--danger)"> · 缺少：{missingEvidence.join('、')}</span>
+              {/if}
             </div>
           </div>
         </div>
@@ -302,11 +333,17 @@
       </div>
 
       <div style="margin-top:14px; color:var(--text-muted); font-size:13px">
-        提交时将校验：处理人 {currentUser?.name}、角色 {currentUser ? ROLE_LABEL[currentUser.role] : '-'}、当前版本 v{review.version}、证据完整性
+        提交时将校验：处理人 {currentUser?.name}、角色 {currentUser ? ROLE_LABEL[currentUser.role] : '-'}、当前版本 v{review.version}、证据完整性。校验失败将保留原状态并写操作记录。
       </div>
 
       <div style="margin-top:14px; display:flex; gap:10px">
-        <button class="primary" on:click={doAction}>确认提交</button>
+        <button
+          class="primary"
+          on:click={doAction}
+          disabled={(currentAction === 'submitReview' || currentAction === 'correct' || currentAction === 'confirmComplete') && missingEvidence.length > 0}
+        >
+          确认提交
+        </button>
         <button on:click={() => showActionPanel = false}>取消</button>
       </div>
     </div>
@@ -316,11 +353,13 @@
     <h3>操作记录（倒查痕迹 · 共 {records.length} 条）</h3>
     <div class="timeline">
       {#each records as rec}
-        <div class="timeline-item">
+        <div class="timeline-item" class:failed={rec.action === 'REJECT' && rec.from_status === rec.to_status}>
           <div class="head">
             <span class="actor">
               {rec.operator_name}（{ROLE_LABEL[rec.operator_role]}）
-              <span class="tag" style="margin-left:8px; background:var(--primary); color:#fff">{ACTION_LABEL[rec.action]}</span>
+              <span class="tag" style="margin-left:8px; background:{rec.action === 'REJECT' && rec.from_status === rec.to_status ? 'var(--danger)' : 'var(--primary)'}; color:#fff">
+                {ACTION_LABEL[rec.action] || rec.action}
+              </span>
             </span>
             <span class="time">{fmtDate(rec.created_at)} · v{rec.version}</span>
           </div>
@@ -328,6 +367,9 @@
             {#if rec.from_status || rec.to_status}
               状态：{rec.from_status ? STATUS_LABEL[rec.from_status] : '无'}
               → <strong>{rec.to_status ? STATUS_LABEL[rec.to_status] : '-'}</strong>
+            {/if}
+            {#if rec.action === 'REJECT' && rec.from_status === rec.to_status}
+              <span style="color:var(--danger); margin-left:10px">（校验失败，未变更状态）</span>
             {/if}
           </div>
           <div class="body">
@@ -348,3 +390,14 @@
     </div>
   </div>
 {/if}
+
+<style>
+  .timeline-item.failed::before {
+    background: var(--danger) !important;
+    box-shadow: 0 0 0 2px var(--danger) !important;
+  }
+  .timeline-item.failed .body {
+    background: #fef2f2 !important;
+    border: 1px solid #fecaca;
+  }
+</style>

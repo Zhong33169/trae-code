@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
-  import { browser } from '$app/environment';
+  import { onMount, afterUpdate } from 'svelte';
   import { goto } from '$app/navigation';
+  import { userStore } from '$lib/userStore';
   import { api } from '$lib/api';
   import type { TradeReview, Statistics, User } from '$lib/types';
   import {
@@ -11,9 +11,8 @@
 
   let reviews: TradeReview[] = [];
   let stats: Statistics | null = null;
-  let users: User[] = [];
   let loading = true;
-  let currentUserId = '';
+  let lastUserId = '';
 
   let filterStatus = '';
   let filterRisk = '';
@@ -21,21 +20,37 @@
   let filterMineOnly = false;
   let keyword = '';
 
+  let autoRefreshTimer: any = null;
+
   onMount(async () => {
-    if (browser) currentUserId = localStorage.getItem('currentUserId') || '';
-    users = await api.getUsers();
-    await loadData();
+    if ($userStore.currentUserId) {
+      lastUserId = $userStore.currentUserId;
+      await loadData();
+    }
+    autoRefreshTimer = setInterval(loadData, 15000);
+  });
+
+  afterUpdate(() => {
+    if ($userStore.currentUserId && $userStore.currentUserId !== lastUserId && !$userStore.loading) {
+      lastUserId = $userStore.currentUserId;
+      loadData();
+    }
   });
 
   async function loadData() {
+    if (!$userStore.currentUserId) return;
     loading = true;
     const q: any = {};
     if (filterStatus) q.status = filterStatus;
     if (filterRisk) q.risk_level = filterRisk;
     if (filterRole) q.current_role = filterRole;
-    if (filterMineOnly && currentUserId) q.handler_id = currentUserId;
+    if (filterMineOnly) q.handler_id = $userStore.currentUserId;
     if (keyword) q.keyword = keyword;
-    [reviews, stats] = await Promise.all([api.getReviews(q), api.getStatistics()]);
+    try {
+      [reviews, stats] = await Promise.all([api.getReviews(q), api.getStatistics()]);
+    } catch (e: any) {
+      console.error('加载数据失败:', e.message);
+    }
     loading = false;
   }
 
@@ -50,7 +65,7 @@
 
   function getHandlerName(id: string | null): string {
     if (!id) return '-';
-    return users.find(u => u.id === id)?.name || '-';
+    return $userStore.users.find(u => u.id === id)?.name || '-';
   }
 
   function hasMissingEvidence(r: TradeReview): string[] {
@@ -58,9 +73,17 @@
     const ev = parseEvidence(r.evidence_json);
     return required.filter(req => !ev.some(e => e && e.includes(req)));
   }
+
+  $: currentUser = $userStore.users.find(u => u.id === $userStore.currentUserId);
+
+  function destroy() {
+    if (autoRefreshTimer) clearInterval(autoRefreshTimer);
+  }
 </script>
 
-{#if stats}
+<svelte:window on:destroy={destroy} />
+
+{#if stats && currentUser}
   <div class="stats">
     <div class="stat-card">
       <div class="label">核查单总数</div>
@@ -120,16 +143,16 @@
   </div>
   <div class="filter-item">
     <label for="fkw">关键词</label>
-    <input id="fkw" bind:value={keyword} placeholder="单号/客户/账号" on:keydown={(e: KeyboardEvent) => e.key === 'Enter' && loadData()} />
+    <input id="fkw" bind:value={keyword} placeholder="单号/客户/账号" on:keydown={(e) => e.key === 'Enter' && loadData()} />
   </div>
   <div class="filter-item" style="justify-content:flex-end">
     <label style="visibility:hidden">_</label>
-    <div style="display:flex; gap:8px">
-      <label style="display:flex; align-items:center; gap:6px; color:var(--text)">
+    <div style="display:flex; gap:8px; align-items:center">
+      <label style="display:flex; align-items:center; gap:6px; color:var(--text); margin:0">
         <input type="checkbox" bind:checked={filterMineOnly} on:change={loadData} style="width:auto" />
         只看我的
       </label>
-      <button on:click={loadData}>查询</button>
+      <button on:click={loadData} title="立即刷新">↻ 刷新</button>
       <button on:click={resetFilters}>重置</button>
       <button class="primary" on:click={() => goto('/register')}>+ 新登记</button>
     </div>
@@ -172,6 +195,9 @@
                 {#if missing.length > 0 && r.status !== 'COMPLETED'}
                   <span class="tag" style="background:#fff7ed; color:#c2410c; border:1px solid #fed7aa">缺证据</span>
                 {/if}
+                {#if r.current_handler_id === $userStore.currentUserId && r.status !== 'COMPLETED'}
+                  <span class="tag" style="background:#dbeafe; color:#1e40af; border:1px solid #93c5fd">待我处理</span>
+                {/if}
               </div>
             </td>
             <td>{r.customer_name}</td>
@@ -180,7 +206,7 @@
             <td>{fmtMoney(r.trade_amount)}</td>
             <td>
               <span class="tag" style="background:{riskColor(r.risk_level)}20; color:{riskColor(r.risk_level)}; border:1px solid {riskColor(r.risk_level)}50">
-                {RISK_LABEL[r.risk_level]}（优先级{r.priority}）
+                {RISK_LABEL[r.risk_level]}（{r.priority}）
               </span>
             </td>
             <td>
@@ -202,4 +228,8 @@
       </tbody>
     </table>
   {/if}
+</div>
+
+<div style="margin-top:12px; text-align:right; color:var(--text-muted); font-size:12px">
+  每 15 秒自动刷新 · 上次刷新：{new Date().toLocaleTimeString('zh-CN')}
 </div>

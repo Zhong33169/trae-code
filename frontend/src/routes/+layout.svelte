@@ -1,4 +1,4 @@
-<style>
+<style global>
   :root {
     --primary: #2563eb;
     --primary-dark: #1d4ed8;
@@ -75,6 +75,8 @@
     justify-content: space-between;
     align-items: center;
     margin-bottom: 24px;
+    flex-wrap: wrap;
+    gap: 12px;
   }
   .header h1 { font-size: 22px; }
   .stats {
@@ -199,36 +201,49 @@
   .role-switch select { width: auto; min-width: 150px; }
   .breadcrumb { margin-bottom: 16px; color: var(--text-muted); font-size: 13px; }
   .breadcrumb a { color: var(--primary); }
+  .user-info {
+    font-size: 13px;
+    color: var(--text-muted);
+    text-align: right;
+  }
+  .user-info strong { color: var(--primary); }
+  .refresh-btn {
+    margin-left: 8px;
+    padding: 4px 10px;
+    font-size: 12px;
+  }
 </style>
 
 <script lang="ts">
   import { page } from '$app/stores';
-  import { onMount } from 'svelte';
-  import { browser } from '$app/environment';
-  import { api } from '$lib/api';
-  import type { User } from '$lib/types';
+  import { onMount, afterUpdate } from 'svelte';
+  import { userStore } from '$lib/userStore';
   import { ROLE_LABEL } from '$lib/types';
+  import { goto } from '$app/navigation';
 
-  let users: User[] = [];
-  let currentUserId: string = '';
+  let storeInitialized = false;
 
   onMount(async () => {
-    users = await api.getUsers();
-    if (browser) {
-      const saved = localStorage.getItem('currentUserId');
-      currentUserId = saved && users.find(u => u.id === saved) ? saved : users[0]?.id || '';
-      if (!saved && currentUserId) localStorage.setItem('currentUserId', currentUserId);
-    }
+    await userStore.init();
+    storeInitialized = true;
   });
 
   function switchRole(e: Event) {
     const target = e.target as HTMLSelectElement;
-    currentUserId = target.value;
-    if (browser) localStorage.setItem('currentUserId', currentUserId);
-    location.reload();
+    userStore.switchUser(target.value);
   }
 
-  $: currentUser = users.find(u => u.id === currentUserId);
+  function refreshAll() {
+    userStore.refresh();
+  }
+
+  $: state = $userStore;
+  $: currentUser = state.users.find(u => u.id === state.currentUserId);
+  $: pageTitle = $page.url.pathname === '/'
+    ? '核查队列'
+    : $page.url.pathname === '/register'
+      ? '登记交易核查单'
+      : '核查单详情';
 </script>
 
 <div class="layout">
@@ -241,18 +256,37 @@
   </aside>
   <main class="main">
     <div class="header">
-      <h1>
-        {#if $page.url.pathname === '/'}核查队列{:else if $page.url.pathname === '/register'}登记交易核查单{:else}核查单详情{/if}
-      </h1>
-      <div class="role-switch">
-        <label for="roleSwitch">当前身份：</label>
-        <select id="roleSwitch" value={currentUserId} on:change={switchRole}>
-          {#each users as u}
-            <option value={u.id}>{u.name}（{ROLE_LABEL[u.role]}）</option>
-          {/each}
-        </select>
+      <h1>{pageTitle}</h1>
+      <div style="display:flex; flex-direction:column; align-items:flex-end; gap:6px">
+        {#if !state.loading && currentUser}
+          <div class="user-info">
+            当前：<strong>{currentUser.name}</strong>（{ROLE_LABEL[currentUser.role]}）
+          </div>
+        {/if}
+        <div class="role-switch">
+          <label for="roleSwitch">切换身份：</label>
+          <select
+            id="roleSwitch"
+            value={state.currentUserId}
+            on:change={switchRole}
+            disabled={state.loading}
+          >
+            {#if state.loading}
+              <option value="">加载中...</option>
+            {:else}
+              {#each state.users as u}
+                <option value={u.id}>{u.name}（{ROLE_LABEL[u.role]}）</option>
+              {/each}
+            {/if}
+          </select>
+          <button class="refresh-btn" on:click={refreshAll} title="刷新">↻</button>
+        </div>
       </div>
     </div>
-    <slot />
+    {#if storeInitialized}
+      <slot />
+    {:else}
+      <div class="card"><div style="padding:40px; text-align:center; color:var(--text-muted)">加载中...</div></div>
+    {/if}
   </main>
 </div>

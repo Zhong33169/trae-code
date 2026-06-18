@@ -7,6 +7,64 @@ import {
 } from './review.types';
 import { RegisterReviewDto, ProcessReviewDto, QueryReviewsDto } from './review.dto';
 
+interface ValidationResult {
+  ok: boolean;
+  error?: string;
+  errorType?: 'role' | 'version' | 'status' | 'handler' | 'evidence';
+}
+
+interface ActionConfig {
+  action: ReviewAction;
+  allowedRoles: UserRole[];
+  allowedStatuses: ReviewStatus[];
+  targetHandlerRole?: UserRole;
+  targetStatus?: ReviewStatus;
+  requiresEvidence: boolean;
+}
+
+const ACTION_CONFIGS: Record<string, ActionConfig> = {
+  submitReview: {
+    action: ReviewAction.SUBMIT_REVIEW,
+    allowedRoles: [UserRole.COMPLIANCE_OFFICER],
+    allowedStatuses: [ReviewStatus.REGISTERED, ReviewStatus.PENDING_CORRECTION],
+    targetHandlerRole: UserRole.BRANCH_MANAGER,
+    targetStatus: ReviewStatus.REVIEWING,
+    requiresEvidence: true,
+  },
+  requestCorrection: {
+    action: ReviewAction.REQUEST_CORRECTION,
+    allowedRoles: [UserRole.COMPLIANCE_OFFICER],
+    allowedStatuses: [ReviewStatus.REGISTERED, ReviewStatus.REVIEWING],
+    targetHandlerRole: UserRole.FINANCIAL_ADVISOR,
+    targetStatus: ReviewStatus.PENDING_CORRECTION,
+    requiresEvidence: false,
+  },
+  correct: {
+    action: ReviewAction.CORRECT,
+    allowedRoles: [UserRole.FINANCIAL_ADVISOR],
+    allowedStatuses: [ReviewStatus.PENDING_CORRECTION],
+    targetHandlerRole: UserRole.COMPLIANCE_OFFICER,
+    targetStatus: ReviewStatus.REGISTERED,
+    requiresEvidence: true,
+  },
+  confirmComplete: {
+    action: ReviewAction.CONFIRM_COMPLETE,
+    allowedRoles: [UserRole.BRANCH_MANAGER],
+    allowedStatuses: [ReviewStatus.REVIEWING],
+    targetHandlerRole: undefined,
+    targetStatus: ReviewStatus.COMPLETED,
+    requiresEvidence: true,
+  },
+  rejectReview: {
+    action: ReviewAction.REJECT,
+    allowedRoles: [UserRole.BRANCH_MANAGER],
+    allowedStatuses: [ReviewStatus.REVIEWING],
+    targetHandlerRole: UserRole.COMPLIANCE_OFFICER,
+    targetStatus: ReviewStatus.REGISTERED,
+    requiresEvidence: false,
+  },
+};
+
 @Injectable()
 export class ReviewService {
   constructor(private readonly db: DatabaseService) {}
@@ -31,12 +89,6 @@ export class ReviewService {
   }
 
   private updateOverdueFlag(reviewId: string) {
-    this.database.exec(
-      `UPDATE trade_reviews SET is_overdue = CASE
-        WHEN deadline IS NOT NULL AND deadline < datetime('now') AND status != 'COMPLETED' THEN 1
-        ELSE 0
-      END WHERE id = ?`,
-    );
     const stmt = this.database.prepare(
       `UPDATE trade_reviews SET is_overdue = CASE
         WHEN deadline IS NOT NULL AND deadline < datetime('now') AND status != 'COMPLETED' THEN 1
@@ -44,6 +96,183 @@ export class ReviewService {
       END WHERE id = ?`,
     );
     stmt.run(reviewId);
+  }
+
+  private validateProcess(
+    review: TradeReview,
+    operator: User,
+    dto: ProcessReviewDto,
+    config: ActionConfig,
+  ): ValidationResult {
+    if (!config.allowedRoles.includes(operator.role as UserRole)) {
+      return {
+        ok: false,
+        error: `仅${config.allowedRoles.map(r => this.roleLabel(r)).join('/')}可以执行此操作`,
+        errorType: 'role',
+      };
+    }
+    if (review.current_role && review.current_role !== operator.role) {
+      return {
+        ok: false,
+        error: `当前单据由${this.roleLabel(review.current_role)}处理，${this.roleLabel(operator.role)}无法操作`,
+        errorType: 'handler',
+      };
+    }
+    if (review.version !== dto.expected_version) {
+      return {
+        ok: false,
+        error: `版本冲突：当前版本 v${review.version}，请刷新后重试`,
+        errorType: 'version',
+      };
+    }
+    if (!config.allowedStatuses.includes(review.status as ReviewStatus)) {
+      return {
+        ok: false,
+        error: `当前状态「${this.statusLabel(review.status)}」不能执行此操作`,
+        errorType: 'status',
+      };
+    }
+    if (config.requiresEvidence) {
+      const evidence = dto.evidence || [];
+      const evCheck = this.checkEvidence(review.risk_level, evidence);
+      if (!evCheck.ok) {
+        return {
+          ok: false,
+          error: `缺少必填证据: ${evCheck.missing.join('、')}`,
+          errorType: 'evidence',
+        };
+      }
+    }
+    return { ok: true };
+  }
+
+  private roleLabel(role: string): string {
+    const map: Record<string, string> = {
+      FINANCIAL_ADVISOR: '理财顾问',
+      COMPLIANCE_OFFICER: '合规专员',
+      BRANCH_MANAGER: '营业部经理',
+    };
+    return map[role] || role;
+  }
+
+  private statusLabel(status: string): string {
+    const map: Record<string, string> = {
+      REGISTERED: '已登记',
+      PENDING_CORRECTION: '待补正',
+      REVIEWING: '复核中',
+      COMPLETED: '办结',
+    };
+    return map[status] || status;
+  }
+
+  private failWithRecord(
+    review: TradeReview,
+    operator: User,
+    dto: ProcessReviewDto,
+    result: ValidationResult,
+  ): never {
+    const evidence = dto.evidence || [];
+    this.insertRecord({
+      review_id: review.id,
+      operator_id: operator.id,
+      operator_name: operator.name,
+      operator_role: operator.role as UserRole,
+      action: ReviewAction.REJECT,
+      from_status: review.status,
+      to_status: review.status,
+      opinion: `${dto.opinion || ''} [校验失败] ${result.error}`.trim(),
+      result: `操作失败：${result.error}`,
+      evidence_json: evidence.length > 0 ? JSON.stringify(evidence) : null,
+      version: review.version,
+    });
+    if (result.errorType === 'role' || result.errorType === 'handler') {
+      throw new ForbiddenException(result.error);
+    } else if (result.errorType === 'version') {
+      throw new ConflictException(result.error);
+    } else {
+      throw new BadRequestException(result.error);
+    }
+  }
+
+  private executeProcess(
+    dto: ProcessReviewDto,
+    configKey: string,
+  ): TradeReview {
+    const config = ACTION_CONFIGS[configKey];
+    const review = this.findById(dto.review_id);
+    const operator = this.getUserById(dto.operator_id);
+
+    const validation = this.validateProcess(review, operator, dto, config);
+    if (!validation.ok) {
+      this.failWithRecord(review, operator, dto, validation);
+    }
+
+    const evidence = dto.evidence || (review.evidence_json ? JSON.parse(review.evidence_json) : []);
+    const newVersion = review.version + 1;
+
+    let targetHandlerId: string | null = null;
+    if (config.targetHandlerRole) {
+      const handler = this.database
+        .prepare(`SELECT id FROM users WHERE role = ? LIMIT 1`)
+        .get(config.targetHandlerRole) as { id: string } | undefined;
+      targetHandlerId = handler?.id || null;
+      if (!targetHandlerId && config.targetHandlerRole === UserRole.FINANCIAL_ADVISOR) {
+        targetHandlerId = review.created_by;
+      }
+    }
+
+    this.database.prepare(`
+      UPDATE trade_reviews SET
+        status = ?, current_handler_id = ?, current_role = ?,
+        version = ?, evidence_json = ?, updated_at = datetime('now')
+      WHERE id = ? AND version = ?
+    `).run(
+      config.targetStatus,
+      config.targetHandlerRole ? targetHandlerId : null,
+      config.targetHandlerRole || null,
+      newVersion,
+      config.requiresEvidence || evidence.length > 0 ? JSON.stringify(evidence) : review.evidence_json,
+      review.id,
+      review.version,
+    );
+
+    this.insertRecord({
+      review_id: review.id,
+      operator_id: operator.id,
+      operator_name: operator.name,
+      operator_role: operator.role as UserRole,
+      action: config.action,
+      from_status: review.status,
+      to_status: config.targetStatus,
+      opinion: dto.opinion || this.getDefaultOpinion(config.action, review.status, config.targetStatus),
+      result: dto.result || this.getDefaultResult(config.action, config.targetStatus),
+      evidence_json: evidence.length > 0 ? JSON.stringify(evidence) : null,
+      version: newVersion,
+    });
+
+    return this.findById(review.id);
+  }
+
+  private getDefaultOpinion(action: ReviewAction, from: string, to: string): string {
+    switch (action) {
+      case ReviewAction.SUBMIT_REVIEW: return '核验通过，提交营业部经理复核';
+      case ReviewAction.REQUEST_CORRECTION: return '请补正相关材料';
+      case ReviewAction.CORRECT: return '已补正相关材料';
+      case ReviewAction.CONFIRM_COMPLETE: return '复核通过，确认办结';
+      case ReviewAction.REJECT: return '复核不通过，请重新核验';
+      default: return `${this.statusLabel(from)} → ${this.statusLabel(to)}`;
+    }
+  }
+
+  private getDefaultResult(action: ReviewAction, to?: ReviewStatus): string {
+    switch (action) {
+      case ReviewAction.SUBMIT_REVIEW: return '提交复核成功';
+      case ReviewAction.REQUEST_CORRECTION: return '已退回补正';
+      case ReviewAction.CORRECT: return '补正完成，提交重新核验';
+      case ReviewAction.CONFIRM_COMPLETE: return '已办结归档';
+      case ReviewAction.REJECT: return '已驳回，退回合规专员';
+      default: return '操作成功';
+    }
   }
 
   getUsers(): User[] {
@@ -56,7 +285,7 @@ export class ReviewService {
     return user;
   }
 
-  async register(dto: RegisterReviewDto): Promise<TradeReview> {
+  register(dto: RegisterReviewDto): TradeReview {
     const creator = this.getUserById(dto.created_by);
     if (creator.role !== UserRole.FINANCIAL_ADVISOR) {
       throw new ForbiddenException('仅理财顾问可以登记交易核查单');
@@ -72,6 +301,10 @@ export class ReviewService {
     const id = uuidv4();
     const priority = RISK_PRIORITY[dto.risk_level];
 
+    const defaultHandler = this.database
+      .prepare("SELECT id FROM users WHERE role = 'COMPLIANCE_OFFICER' LIMIT 1")
+      .get() as { id: string } | undefined;
+
     const stmt = this.database.prepare(`
       INSERT INTO trade_reviews (
         id, code, customer_name, trade_type, trade_amount, trade_date, account_no,
@@ -79,11 +312,6 @@ export class ReviewService {
         evidence_json, deadline, created_by
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
-
-    const defaultHandler = this.database
-      .prepare("SELECT id FROM users WHERE role = 'COMPLIANCE_OFFICER' LIMIT 1")
-      .get() as { id: string } | undefined;
-
     stmt.run(
       id, code, dto.customer_name, dto.trade_type, dto.trade_amount,
       dto.trade_date, dto.account_no, dto.risk_level, ReviewStatus.REGISTERED,
@@ -163,14 +391,15 @@ export class ReviewService {
 
     sql += ' ORDER BY is_overdue DESC, priority DESC, created_at DESC';
 
-    const rows = this.database.prepare(sql).all(...params) as TradeReview[];
-    rows.forEach(r => this.updateOverdueFlag(r.id));
+    const preRows = this.database.prepare(sql).all(...params) as TradeReview[];
+    preRows.forEach(r => this.updateOverdueFlag(r.id));
+
     return this.database.prepare(sql).all(...params) as TradeReview[];
   }
 
   getStatistics(): any {
-    const rows = this.database.prepare('SELECT * FROM trade_reviews').all() as TradeReview[];
-    rows.forEach(r => this.updateOverdueFlag(r.id));
+    const preAll = this.database.prepare('SELECT * FROM trade_reviews').all() as TradeReview[];
+    preAll.forEach(r => this.updateOverdueFlag(r.id));
 
     const all = this.database.prepare('SELECT * FROM trade_reviews').all() as TradeReview[];
     const byStatus: Record<string, number> = {};
@@ -194,273 +423,23 @@ export class ReviewService {
   }
 
   submitReview(dto: ProcessReviewDto): TradeReview {
-    const review = this.findById(dto.review_id);
-    const operator = this.getUserById(dto.operator_id);
-
-    if (operator.role !== UserRole.COMPLIANCE_OFFICER) {
-      throw new ForbiddenException('仅合规专员可以提交复核');
-    }
-    if (review.version !== dto.expected_version) {
-      throw new ConflictException(`版本冲突：当前版本 ${review.version}，请刷新后重试`);
-    }
-    if (![ReviewStatus.REGISTERED, ReviewStatus.PENDING_CORRECTION].includes(review.status as any)) {
-      throw new BadRequestException(`当前状态 ${review.status} 不能提交复核`);
-    }
-    if (review.current_role !== UserRole.COMPLIANCE_OFFICER) {
-      throw new ForbiddenException('当前不由合规专员处理');
-    }
-
-    const evidence = dto.evidence || [];
-    const evidenceCheck = this.checkEvidence(review.risk_level, evidence);
-    if (!evidenceCheck.ok) {
-      this.insertRecord({
-        review_id: review.id,
-        operator_id: operator.id,
-        operator_name: operator.name,
-        operator_role: operator.role,
-        action: ReviewAction.REJECT,
-        from_status: review.status,
-        to_status: review.status,
-        opinion: dto.opinion || `证据不足，缺少: ${evidenceCheck.missing.join('、')}`,
-        result: '证据校验未通过',
-        evidence_json: JSON.stringify(evidence),
-        version: review.version,
-      });
-      throw new BadRequestException(`缺少必填证据: ${evidenceCheck.missing.join('、')}`);
-    }
-
-    const manager = this.database
-      .prepare("SELECT id, name FROM users WHERE role = 'BRANCH_MANAGER' LIMIT 1")
-      .get() as { id: string; name: string } | undefined;
-
-    const newVersion = review.version + 1;
-    this.database.prepare(`
-      UPDATE trade_reviews SET
-        status = ?, current_handler_id = ?, current_role = ?,
-        version = ?, evidence_json = ?, updated_at = datetime('now')
-      WHERE id = ? AND version = ?
-    `).run(
-      ReviewStatus.REVIEWING, manager?.id || null, UserRole.BRANCH_MANAGER,
-      newVersion, JSON.stringify(evidence), review.id, review.version,
-    );
-
-    this.insertRecord({
-      review_id: review.id,
-      operator_id: operator.id,
-      operator_name: operator.name,
-      operator_role: operator.role,
-      action: ReviewAction.SUBMIT_REVIEW,
-      from_status: review.status,
-      to_status: ReviewStatus.REVIEWING,
-      opinion: dto.opinion || '核验通过，提交营业部经理复核',
-      result: dto.result || '提交复核成功',
-      evidence_json: JSON.stringify(evidence),
-      version: newVersion,
-    });
-
-    return this.findById(review.id);
+    return this.executeProcess(dto, 'submitReview');
   }
 
   requestCorrection(dto: ProcessReviewDto): TradeReview {
-    const review = this.findById(dto.review_id);
-    const operator = this.getUserById(dto.operator_id);
-
-    if (operator.role !== UserRole.COMPLIANCE_OFFICER) {
-      throw new ForbiddenException('仅合规专员可以退回补正');
-    }
-    if (review.version !== dto.expected_version) {
-      throw new ConflictException(`版本冲突：当前版本 ${review.version}，请刷新后重试`);
-    }
-    if (review.status !== ReviewStatus.REGISTERED && review.status !== ReviewStatus.REVIEWING) {
-      throw new BadRequestException(`当前状态 ${review.status} 不能退回补正`);
-    }
-
-    const advisor = this.database
-      .prepare("SELECT id, name FROM users WHERE role = 'FINANCIAL_ADVISOR' LIMIT 1")
-      .get() as { id: string; name: string } | undefined;
-
-    const newVersion = review.version + 1;
-    this.database.prepare(`
-      UPDATE trade_reviews SET
-        status = ?, current_handler_id = ?, current_role = ?,
-        version = ?, updated_at = datetime('now')
-      WHERE id = ? AND version = ?
-    `).run(
-      ReviewStatus.PENDING_CORRECTION, advisor?.id || review.created_by,
-      UserRole.FINANCIAL_ADVISOR, newVersion, review.id, review.version,
-    );
-
-    this.insertRecord({
-      review_id: review.id,
-      operator_id: operator.id,
-      operator_name: operator.name,
-      operator_role: operator.role,
-      action: ReviewAction.REQUEST_CORRECTION,
-      from_status: review.status,
-      to_status: ReviewStatus.PENDING_CORRECTION,
-      opinion: dto.opinion || '请补正相关材料',
-      result: dto.result || '已退回补正',
-      evidence_json: dto.evidence ? JSON.stringify(dto.evidence) : null,
-      version: newVersion,
-    });
-
-    return this.findById(review.id);
+    return this.executeProcess(dto, 'requestCorrection');
   }
 
   correct(dto: ProcessReviewDto): TradeReview {
-    const review = this.findById(dto.review_id);
-    const operator = this.getUserById(dto.operator_id);
-
-    if (operator.role !== UserRole.FINANCIAL_ADVISOR) {
-      throw new ForbiddenException('仅理财顾问可以补正');
-    }
-    if (review.version !== dto.expected_version) {
-      throw new ConflictException(`版本冲突：当前版本 ${review.version}，请刷新后重试`);
-    }
-    if (review.status !== ReviewStatus.PENDING_CORRECTION) {
-      throw new BadRequestException(`当前状态 ${review.status} 不能补正`);
-    }
-
-    const evidence = dto.evidence || [];
-    const evidenceCheck = this.checkEvidence(review.risk_level, evidence);
-    if (!evidenceCheck.ok) {
-      this.insertRecord({
-        review_id: review.id,
-        operator_id: operator.id,
-        operator_name: operator.name,
-        operator_role: operator.role,
-        action: ReviewAction.REJECT,
-        from_status: review.status,
-        to_status: review.status,
-        opinion: dto.opinion || `补正证据不足，缺少: ${evidenceCheck.missing.join('、')}`,
-        result: '补正证据校验未通过',
-        evidence_json: JSON.stringify(evidence),
-        version: review.version,
-      });
-      throw new BadRequestException(`补正缺少必填证据: ${evidenceCheck.missing.join('、')}`);
-    }
-
-    const officer = this.database
-      .prepare("SELECT id, name FROM users WHERE role = 'COMPLIANCE_OFFICER' LIMIT 1")
-      .get() as { id: string; name: string } | undefined;
-
-    const newVersion = review.version + 1;
-    this.database.prepare(`
-      UPDATE trade_reviews SET
-        status = ?, current_handler_id = ?, current_role = ?,
-        version = ?, evidence_json = ?, updated_at = datetime('now')
-      WHERE id = ? AND version = ?
-    `).run(
-      ReviewStatus.REGISTERED, officer?.id || null, UserRole.COMPLIANCE_OFFICER,
-      newVersion, JSON.stringify(evidence), review.id, review.version,
-    );
-
-    this.insertRecord({
-      review_id: review.id,
-      operator_id: operator.id,
-      operator_name: operator.name,
-      operator_role: operator.role,
-      action: ReviewAction.CORRECT,
-      from_status: review.status,
-      to_status: ReviewStatus.REGISTERED,
-      opinion: dto.opinion || '已补正相关材料',
-      result: dto.result || '补正完成，提交重新核验',
-      evidence_json: JSON.stringify(evidence),
-      version: newVersion,
-    });
-
-    return this.findById(review.id);
+    return this.executeProcess(dto, 'correct');
   }
 
   confirmComplete(dto: ProcessReviewDto): TradeReview {
-    const review = this.findById(dto.review_id);
-    const operator = this.getUserById(dto.operator_id);
-
-    if (operator.role !== UserRole.BRANCH_MANAGER) {
-      throw new ForbiddenException('仅营业部经理可以确认办结');
-    }
-    if (review.version !== dto.expected_version) {
-      throw new ConflictException(`版本冲突：当前版本 ${review.version}，请刷新后重试`);
-    }
-    if (review.status !== ReviewStatus.REVIEWING) {
-      throw new BadRequestException(`当前状态 ${review.status} 不能办结`);
-    }
-
-    const evidence = dto.evidence || (review.evidence_json ? JSON.parse(review.evidence_json) : []);
-    const evidenceCheck = this.checkEvidence(review.risk_level, evidence);
-    if (!evidenceCheck.ok) {
-      throw new BadRequestException(`办结前缺少必填证据: ${evidenceCheck.missing.join('、')}`);
-    }
-
-    const newVersion = review.version + 1;
-    this.database.prepare(`
-      UPDATE trade_reviews SET
-        status = ?, current_handler_id = NULL, current_role = NULL,
-        version = ?, updated_at = datetime('now')
-      WHERE id = ? AND version = ?
-    `).run(ReviewStatus.COMPLETED, newVersion, review.id, review.version);
-
-    this.insertRecord({
-      review_id: review.id,
-      operator_id: operator.id,
-      operator_name: operator.name,
-      operator_role: operator.role,
-      action: ReviewAction.CONFIRM_COMPLETE,
-      from_status: review.status,
-      to_status: ReviewStatus.COMPLETED,
-      opinion: dto.opinion || '复核通过，确认办结',
-      result: dto.result || '已办结归档',
-      evidence_json: JSON.stringify(evidence),
-      version: newVersion,
-    });
-
-    return this.findById(review.id);
+    return this.executeProcess(dto, 'confirmComplete');
   }
 
   rejectReview(dto: ProcessReviewDto): TradeReview {
-    const review = this.findById(dto.review_id);
-    const operator = this.getUserById(dto.operator_id);
-
-    if (operator.role !== UserRole.BRANCH_MANAGER) {
-      throw new ForbiddenException('仅营业部经理可以驳回复核');
-    }
-    if (review.version !== dto.expected_version) {
-      throw new ConflictException(`版本冲突：当前版本 ${review.version}，请刷新后重试`);
-    }
-    if (review.status !== ReviewStatus.REVIEWING) {
-      throw new BadRequestException(`当前状态 ${review.status} 不能驳回`);
-    }
-
-    const officer = this.database
-      .prepare("SELECT id, name FROM users WHERE role = 'COMPLIANCE_OFFICER' LIMIT 1")
-      .get() as { id: string; name: string } | undefined;
-
-    const newVersion = review.version + 1;
-    this.database.prepare(`
-      UPDATE trade_reviews SET
-        status = ?, current_handler_id = ?, current_role = ?,
-        version = ?, updated_at = datetime('now')
-      WHERE id = ? AND version = ?
-    `).run(
-      ReviewStatus.REGISTERED, officer?.id || null, UserRole.COMPLIANCE_OFFICER,
-      newVersion, review.id, review.version,
-    );
-
-    this.insertRecord({
-      review_id: review.id,
-      operator_id: operator.id,
-      operator_name: operator.name,
-      operator_role: operator.role,
-      action: ReviewAction.REJECT,
-      from_status: review.status,
-      to_status: ReviewStatus.REGISTERED,
-      opinion: dto.opinion || '复核不通过，请重新核验',
-      result: dto.result || '已驳回，退回合规专员',
-      evidence_json: null,
-      version: newVersion,
-    });
-
-    return this.findById(review.id);
+    return this.executeProcess(dto, 'rejectReview');
   }
 
   getDetailWithRecords(id: string): { review: TradeReview; records: ReviewRecord[] } {

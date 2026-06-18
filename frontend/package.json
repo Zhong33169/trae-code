@@ -2,7 +2,7 @@
   "name": "trade-review-frontend",
   "version": "1.0.0",
   "scripts": {
-    "dev": "vite dev --port 3002",
+    "dev": "vite dev",
     "build": "vite build",
     "preview": "vite preview --port 3002"
   },

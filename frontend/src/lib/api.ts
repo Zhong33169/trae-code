@@ -1,4 +1,4 @@
-const API_BASE = '/api';
+const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api';
 
 async function handle<T>(p: Promise<Response>): Promise<T> {
   const r = await p;
@@ -41,3 +41,4 @@ export const api = {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
   })),
 };
+
