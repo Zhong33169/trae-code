@@ -3,9 +3,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tanstack start --port 3001",
+    "dev": "tanstack start",
     "build": "tanstack start build",
-    "start": "tanstack start start --port 3001"
+    "start": "tanstack start start"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.56.2",

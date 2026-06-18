@@ -96,9 +96,9 @@ pip install -r requirements.txt
 # 初始化数据库 + 导入样例数据
 python seed_data.py
 
-# 启动后端服务（默认端口 8001）
-# 默认端口读取自 app/config.py，可通过环境变量 BACKEND_PORT 修改
-python -m uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
+# 启动后端服务（端口由 backend/.env 的 BACKEND_PORT 统一驱动，默认 8001）
+python run.py
+# 或：python -m uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
 ```
 
 后端启动后访问：
@@ -107,13 +107,17 @@ python -m uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
 
 #### 修改后端端口
 
-```bash
-# 方式一：启动参数指定
-python -m uvicorn app.main:app --host 0.0.0.0 --port 8002 --reload
+端口由 `backend/.env` 统一驱动，修改 `BACKEND_PORT` 即可（CORS 允许来源会跟随 `FRONTEND_PORT`）：
 
-# 方式二：设置环境变量 BACKEND_PORT（同时也需要同步修改前端 .env 中的 API URL）
-export BACKEND_PORT=8002
-python -m uvicorn app.main:app --host 0.0.0.0 --port $BACKEND_PORT --reload
+```bash
+# backend/.env
+BACKEND_PORT=8002
+
+# 启动时也会读取该变量
+python run.py
+
+# 或临时覆盖
+BACKEND_PORT=8002 python run.py
 ```
 
 ### 3. 前端启动
@@ -136,21 +140,18 @@ npm run dev
 
 访问前端：http://localhost:3001
 
-#### 修改前端端口
+#### 修改前端端口 / 后端地址
 
-修改 `frontend/app.config.ts` 中的 `server.port`，或设置环境变量：
+端口与后端地址由 `frontend/.env` 统一驱动（`app.config.ts` 通过 `loadEnv` 读取）：
 
 ```bash
-export FRONTEND_PORT=3002
+# frontend/.env
+VITE_API_URL=http://localhost:8001/api   # 前端访问的后端 API 地址
+BACKEND_PORT=8001                          # 后端端口（若不设 VITE_API_URL，则据此推导）
+FRONTEND_PORT=3001                         # 前端端口
+
+# 改端口只需改 .env 后重启
 npm run dev
-```
-
-#### 修改前端访问的后端 API 地址
-
-编辑 `frontend/.env`：
-
-```
-VITE_API_URL=http://localhost:8001/api
 ```
 
 ## 样例数据说明
@@ -172,12 +173,13 @@ VITE_API_URL=http://localhost:8001/api
 | 项目 | 状态 | 场景 |
 |------|------|------|
 | 新员工入职技能培训项目 | 已归档 (archived) | ✅ **正常通过全流程**：需求→报价→合同→审核→复核→归档 |
-| 中层管理能力提升培训 | 草稿 (draft) | ⚠️ **缺证据**：在报价阶段，仅有需求文档，缺少报价单 |
+| 中层管理能力提升培训 | 草稿 (draft) | ⚠️ **缺证据**：报价阶段仅需求文档，少报价单；含一条「缺证据提交」状态冲突记录 |
 | 销售人员业绩冲刺培训 | 逾期 (overdue) | ❌ **逾期**：截止时间已过5天 |
 | 客户服务礼仪标准培训 | 退回补正 (returned) | 📝 **退回补正**：审核主管要求补充需求细节 |
 | 安全生产法规培训 | 申诉复核中 (appeal_under_review) | ⚖️ **状态冲突/申诉中**：合同被驳回，登记员已申诉，待复核 |
-| 技术研发人员技能升级培训 | 草稿 (draft) | 📄 新建草稿 |
+| 技术研发人员技能升级培训 | 草稿 (draft) | 📄 新建草稿；含一条「版本冲突」状态冲突记录 |
 | 品牌营销策划培训 | 审核中 (under_review) | ⏳ 审核主管待审核 |
+| 数字化转型管理培训 | 已提交 (submitted) | 🔁 **再次提交示例**：申诉通过→转回补正→登记员补正后再次提交 |
 
 ## 核心功能验证流程（推荐跑一遍）
 
@@ -202,13 +204,32 @@ VITE_API_URL=http://localhost:8001/api
 2. 打开 **安全生产法规培训**（申诉复核中）
 3. 在「申诉记录」Tab 查看登记员的申诉理由和意见
 4. 在「操作记录」Tab 查看完整的驳回原因
-5. 选择「申诉通过」或「申诉驳回」，填写复核意见后提交
+5. 选择「申诉通过」，填写复核意见后提交
+6. 项目状态变为「退回补正」，当前处理人交还登记员，可继续补正后「再次提交」
 
 ### 场景三：退回补正
 
 1. 以 **李华（登记员）** 身份打开 **客户服务礼仪标准培训**
 2. 在详情页顶部查看上一处理人（王芳）的退回原因
 3. 补充项目描述或证据材料后点击「补正提交」
+
+### 场景四：登记员发起项目
+
+1. 在列表页点击右上角「+ 发起项目」
+2. 选择登记员，填写项目名称、客户公司、阶段、预算、截止时间
+3. 可在「初始证据材料」区按当前阶段必填项添加证据（带 ★ 标记）
+4. 点击「创建项目」，自动跳转到项目详情页，可继续提交审核
+
+### 场景五：状态冲突记录（校验失败保留原状态）
+
+1. 打开 **中层管理能力提升培训**（草稿，缺报价单），在「操作记录」Tab 可见一条红色高亮的「状态冲突」记录，原草稿状态被保留
+2. 打开 **技术研发人员技能升级培训**（草稿），「操作记录」Tab 可见一条「版本冲突」状态冲突记录
+3. 也可在详情页对缺证据项目直接点「提交审核」，后端返回 400 并再写一条状态冲突记录，项目状态不变
+
+### 场景六：再次提交闭环（样例项目「数字化转型管理培训」）
+
+打开 **数字化转型管理培训**，在「操作记录」Tab 可见完整闭环：
+申诉通过(→退回补正) → 补正提交(→已提交)，即「申诉通过转回补正再提交」规则。
 
 ## 后端校验规则
 

@@ -83,7 +83,10 @@ function Index() {
             )}
           </p>
         </div>
-        <div>
+        <div style={{ display: "flex", gap: "0.5rem" }}>
+          <Link to="/projects/new" className="btn btn-primary">
+            + 发起项目
+          </Link>
           <button className="btn btn-secondary" onClick={refreshAll}>
             刷新数据
           </button>

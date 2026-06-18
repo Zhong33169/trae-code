@@ -1,4 +1,4 @@
-from typing import Optional, Tuple
+from typing import Optional
 from datetime import datetime
 from sqlalchemy.orm import Session
 
@@ -19,47 +19,97 @@ class BusinessError(Exception):
         super().__init__(message)
 
 
-def _validate_user_role(db: Session, user_id: int, allowed_roles: list[Role]) -> User:
+def _log_conflict(
+    db: Session,
+    project: Optional[TrainingProject],
+    user_id: int,
+    message: str,
+    error_type: str,
+) -> None:
+    """校验失败时写一条 STATE_CONFLICT 操作记录（保留项目原状态），再抛出业务异常。
+
+    之所以在写日志后 commit，是为了让冲突记录独立于失败的业务操作落库；
+    此时项目对象尚未被任何业务逻辑改写，原状态被完整保留。
+    """
+    if project is not None:
+        crud.add_operation_log(
+            db,
+            project_id=project.id,
+            user_id=user_id,
+            action=ActionType.STATE_CONFLICT,
+            from_status=project.status,
+            to_status=project.status,
+            stage=project.stage,
+            version=project.version,
+            comment=f"[{error_type}] {message}",
+        )
+        db.commit()
+    raise BusinessError(message, error_type)
+
+
+def _validate_user_role(
+    db: Session,
+    user_id: int,
+    allowed_roles: list[Role],
+    project: Optional[TrainingProject] = None,
+) -> User:
     user = crud.get_user(db, user_id)
     if not user:
-        raise BusinessError(f"用户 {user_id} 不存在", "user_not_found")
+        _log_conflict(db, project, user_id, f"用户 {user_id} 不存在", "user_not_found")
     if user.role not in allowed_roles:
         allowed_labels = [r.value for r in allowed_roles]
-        raise BusinessError(
+        _log_conflict(
+            db, project, user_id,
             f"用户角色不允许执行此操作，需要角色: {allowed_labels}",
-            "role_not_allowed"
+            "role_not_allowed",
         )
     return user
 
 
 def _validate_handler(db: Session, project: TrainingProject, user_id: int) -> None:
     if project.current_handler_id != user_id:
-        raise BusinessError(
+        _log_conflict(
+            db, project, user_id,
             f"当前处理人是用户 {project.current_handler_id}，用户 {user_id} 无权操作",
-            "not_current_handler"
+            "not_current_handler",
         )
 
 
-def _validate_version(project: TrainingProject, expected_version: Optional[int] = None) -> None:
+def _validate_version(
+    db: Session,
+    project: TrainingProject,
+    user_id: int,
+    expected_version: Optional[int] = None,
+) -> None:
     if expected_version is not None and project.version != expected_version:
-        raise BusinessError(
+        _log_conflict(
+            db, project, user_id,
             f"版本冲突：当前版本 {project.version}，期望版本 {expected_version}",
-            "version_conflict"
+            "version_conflict",
         )
 
 
-def _validate_status(project: TrainingProject, allowed_statuses: list[Status], op_name: str) -> None:
+def _validate_status(
+    db: Session,
+    project: TrainingProject,
+    user_id: int,
+    allowed_statuses: list[Status],
+    op_name: str,
+) -> None:
     if project.status not in allowed_statuses:
         allowed = [s.value for s in allowed_statuses]
-        raise BusinessError(
+        _log_conflict(
+            db, project, user_id,
             f"项目状态不允许{op_name}：当前状态 {project.status.value}，允许状态: {allowed}",
-            "status_not_allowed"
+            "status_not_allowed",
         )
 
 
-def _validate_project_not_overdue(project: TrainingProject) -> None:
+def _validate_project_not_overdue(
+    db: Session, project: TrainingProject, user_id: int
+) -> None:
     if project.status == Status.OVERDUE:
-        raise BusinessError("项目已逾期，无法执行操作", "project_overdue")
+        _log_conflict(db, project, user_id, "项目已逾期，无法执行操作", "project_overdue")
 
 
 def _check_overdue(project: TrainingProject) -> None:
@@ -79,17 +129,23 @@ def submit_project(
     if not project:
         raise BusinessError(f"项目 {project_id} 不存在", "project_not_found")
 
-    _validate_version(project, expected_version)
-    _validate_status(project, [Status.DRAFT, Status.RETURNED], "提交")
-    _validate_user_role(db, data.current_user_id, [Role.REGISTRAR])
+    _validate_version(db, project, data.current_user_id, expected_version)
+    # 申诉通过后允许登记员再次提交（转回补正或直接草稿再提交两条路径）
+    _validate_status(
+        db, project, data.current_user_id,
+        [Status.DRAFT, Status.RETURNED, Status.APPEAL_APPROVED],
+        "提交",
+    )
+    _validate_user_role(db, data.current_user_id, [Role.REGISTRAR], project)
     _validate_handler(db, project, data.current_user_id)
-    _validate_project_not_overdue(project)
+    _validate_project_not_overdue(db, project, data.current_user_id)
 
     has_evidence, missing = crud.check_required_evidences(db, project_id, project.stage)
     if not has_evidence:
-        raise BusinessError(
+        _log_conflict(
+            db, project, data.current_user_id,
             f"缺少必填证据材料: {[m.value for m in missing]}",
-            "missing_required_evidences"
+            "missing_required_evidences",
         )
 
     from_status = project.status
@@ -128,11 +184,11 @@ def review_project(
     if not project:
         raise BusinessError(f"项目 {project_id} 不存在", "project_not_found")
 
-    _validate_version(project, expected_version)
-    _validate_status(project, [Status.UNDER_REVIEW, Status.SUBMITTED], "审核")
-    _validate_user_role(db, data.current_user_id, [Role.SUPERVISOR, Role.REVIEWER])
+    _validate_version(db, project, data.current_user_id, expected_version)
+    _validate_status(db, project, data.current_user_id, [Status.UNDER_REVIEW, Status.SUBMITTED], "审核")
+    _validate_user_role(db, data.current_user_id, [Role.SUPERVISOR, Role.REVIEWER], project)
     _validate_handler(db, project, data.current_user_id)
-    _validate_project_not_overdue(project)
+    _validate_project_not_overdue(db, project, data.current_user_id)
 
     from_status = project.status
     from_stage = project.stage
@@ -181,7 +237,11 @@ def review_project(
         )
     else:
         if not data.reject_reason:
-            raise BusinessError("驳回必须填写驳回原因", "missing_reject_reason")
+            _log_conflict(
+                db, project, data.current_user_id,
+                "驳回必须填写驳回原因",
+                "missing_reject_reason",
+            )
         if project.stage == Stage.CONTRACT and data.current_user_id:
             reviewer = crud.get_user(db, data.current_user_id)
             if reviewer and reviewer.role == Role.REVIEWER:
@@ -222,11 +282,15 @@ def return_for_correction(
     if not project:
         raise BusinessError(f"项目 {project_id} 不存在", "project_not_found")
 
-    _validate_version(project, expected_version)
-    _validate_status(project, [Status.UNDER_REVIEW, Status.SUBMITTED, Status.APPEAL_UNDER_REVIEW], "退回补正")
-    _validate_user_role(db, data.current_user_id, [Role.SUPERVISOR, Role.REVIEWER])
+    _validate_version(db, project, data.current_user_id, expected_version)
+    _validate_status(
+        db, project, data.current_user_id,
+        [Status.UNDER_REVIEW, Status.SUBMITTED, Status.APPEAL_UNDER_REVIEW],
+        "退回补正",
+    )
+    _validate_user_role(db, data.current_user_id, [Role.SUPERVISOR, Role.REVIEWER], project)
     _validate_handler(db, project, data.current_user_id)
-    _validate_project_not_overdue(project)
+    _validate_project_not_overdue(db, project, data.current_user_id)
 
     from_status = project.status
     project.status = Status.RETURNED
@@ -261,17 +325,18 @@ def correct_project(
     if not project:
         raise BusinessError(f"项目 {project_id} 不存在", "project_not_found")
 
-    _validate_version(project, expected_version)
-    _validate_status(project, [Status.RETURNED], "补正")
-    _validate_user_role(db, data.current_user_id, [Role.REGISTRAR])
+    _validate_version(db, project, data.current_user_id, expected_version)
+    _validate_status(db, project, data.current_user_id, [Status.RETURNED], "补正")
+    _validate_user_role(db, data.current_user_id, [Role.REGISTRAR], project)
     _validate_handler(db, project, data.current_user_id)
-    _validate_project_not_overdue(project)
+    _validate_project_not_overdue(db, project, data.current_user_id)
 
     has_evidence, missing = crud.check_required_evidences(db, project_id, project.stage)
     if not has_evidence:
-        raise BusinessError(
+        _log_conflict(
+            db, project, data.current_user_id,
             f"缺少必填证据材料: {[m.value for m in missing]}",
-            "missing_required_evidences"
+            "missing_required_evidences",
         )
 
     from_status = project.status
@@ -309,13 +374,17 @@ def submit_appeal(
     if not project:
         raise BusinessError(f"项目 {project_id} 不存在", "project_not_found")
 
-    _validate_version(project, expected_version)
-    _validate_status(project, [Status.REJECTED], "提交申诉")
-    _validate_user_role(db, data.current_user_id, [Role.REGISTRAR])
-    _validate_project_not_overdue(project)
+    _validate_version(db, project, data.current_user_id, expected_version)
+    _validate_status(db, project, data.current_user_id, [Status.REJECTED], "提交申诉")
+    _validate_user_role(db, data.current_user_id, [Role.REGISTRAR], project)
+    _validate_project_not_overdue(db, project, data.current_user_id)
 
     if project.created_by_id != data.current_user_id:
-        raise BusinessError("仅项目创建人可提交申诉", "not_project_creator")
+        _log_conflict(
+            db, project, data.current_user_id,
+            "仅项目创建人可提交申诉",
+            "not_project_creator",
+        )
 
     from_status = project.status
     project.status = Status.APPEAL_SUBMITTED
@@ -365,16 +434,20 @@ def review_appeal(
     if not project:
         raise BusinessError(f"项目 {project_id} 不存在", "project_not_found")
 
-    _validate_version(project, expected_version)
-    _validate_status(project, [Status.APPEAL_UNDER_REVIEW, Status.APPEAL_SUBMITTED], "复核申诉")
-    _validate_user_role(db, data.current_user_id, [Role.REVIEWER])
+    _validate_version(db, project, data.current_user_id, expected_version)
+    _validate_status(
+        db, project, data.current_user_id,
+        [Status.APPEAL_UNDER_REVIEW, Status.APPEAL_SUBMITTED],
+        "复核申诉",
+    )
+    _validate_user_role(db, data.current_user_id, [Role.REVIEWER], project)
     _validate_handler(db, project, data.current_user_id)
-    _validate_project_not_overdue(project)
+    _validate_project_not_overdue(db, project, data.current_user_id)
 
     appeals = crud.get_project_appeals(db, project_id)
     pending_appeals = [a for a in appeals if a.result == AppealResult.PENDING]
     if not pending_appeals:
-        raise BusinessError("没有待处理的申诉", "no_pending_appeal")
+        _log_conflict(db, project, data.current_user_id, "没有待处理的申诉", "no_pending_appeal")
 
     appeal = pending_appeals[0]
     crud.review_appeal(
@@ -389,7 +462,9 @@ def review_appeal(
 
     from_status = project.status
     if data.result == AppealResult.APPROVED:
-        project.status = Status.APPEAL_APPROVED
+        # 申诉通过：转回退回补正（RETURNED），把当前处理人还给登记员，
+        # 由登记员补正后再次提交，形成「申诉通过 → 补正 → 再提交」闭环。
+        project.status = Status.RETURNED
         project.current_handler_id = project.created_by_id
         action = ActionType.APPEAL_APPROVE
     else:
@@ -426,10 +501,10 @@ def archive_project(
     if not project:
         raise BusinessError(f"项目 {project_id} 不存在", "project_not_found")
 
-    _validate_version(project, expected_version)
-    _validate_user_role(db, current_user_id, [Role.REVIEWER])
+    _validate_version(db, project, current_user_id, expected_version)
+    _validate_user_role(db, current_user_id, [Role.REVIEWER], project)
     _validate_status(
-        project,
+        db, project, current_user_id,
         [Status.APPROVED, Status.APPEAL_APPROVED, Status.APPEAL_REJECTED, Status.REJECTED],
         "归档",
     )
@@ -460,13 +535,12 @@ def mark_overdue(db: Session, project_id: int, current_user_id: int) -> Training
     if not project:
         raise BusinessError(f"项目 {project_id} 不存在", "project_not_found")
 
-    _validate_user_role(db, current_user_id, [Role.SUPERVISOR, Role.REVIEWER])
-
-    if project.status not in [Status.SUBMITTED, Status.UNDER_REVIEW, Status.APPEAL_UNDER_REVIEW]:
-        raise BusinessError(
-            f"当前状态 {project.status.value} 无法标记为逾期",
-            "status_not_allowed",
-        )
+    _validate_user_role(db, current_user_id, [Role.SUPERVISOR, Role.REVIEWER], project)
+    _validate_status(
+        db, project, current_user_id,
+        [Status.SUBMITTED, Status.UNDER_REVIEW, Status.APPEAL_UNDER_REVIEW],
+        "标记逾期",
+    )
 
     from_status = project.status
     project.status = Status.OVERDUE
@@ -499,9 +573,9 @@ def process_incoming_project(
     if not project:
         raise BusinessError(f"项目 {project_id} 不存在", "project_not_found")
 
-    _validate_version(project, expected_version)
+    _validate_version(db, project, current_user_id, expected_version)
     _validate_handler(db, project, current_user_id)
-    _validate_user_role(db, current_user_id, [Role.SUPERVISOR, Role.REVIEWER])
+    _validate_user_role(db, current_user_id, [Role.SUPERVISOR, Role.REVIEWER], project)
 
     if project.status == Status.SUBMITTED:
         from_status = project.status

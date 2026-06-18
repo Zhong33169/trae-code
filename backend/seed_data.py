@@ -12,6 +12,19 @@ from app.models import (
 from app import schemas, crud, services
 
 
+def _expect_conflict(label: str, fn, *args, **kwargs):
+    """调用一个预期会校验失败的业务操作，冲突记录已由 services 写入操作记录。
+
+    用于在样例数据中演示「保留原状态 + 写 STATE_CONFLICT 操作记录」的校验闭环。
+    """
+    try:
+        fn(*args, **kwargs)
+    except services.BusinessError as e:
+        print(f"  [预期冲突·{label}] {e.error_type}: {e.message}")
+        return None
+    return None
+
+
 def init_db():
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
@@ -120,6 +133,13 @@ def init_db():
             uploaded_by_id=registrar.id,
         ), project2.id)
         print(f"  [缺证据] {project2.project_no} - {project2.project_name} (处于报价阶段但缺少报价单)")
+        # 演示：登记员在缺报价单时尝试提交，后端校验失败保留草稿并写状态冲突记录
+        _expect_conflict(
+            "缺证据提交",
+            services.submit_project,
+            db, project2.id,
+            schemas.SubmitData(current_user_id=registrar.id, comment="材料好像齐了，提交试试"),
+        )
 
         project3 = crud.create_project(db, schemas.TrainingProjectCreate(
             project_name="销售人员业绩冲刺培训",
@@ -244,6 +264,14 @@ def init_db():
             created_by_id=registrar.id,
         ))
         print(f"  [草稿] {project6.project_no} - {project6.project_name}")
+        # 演示：用过期版本号提交，触发版本冲突，保留草稿并写状态冲突记录
+        _expect_conflict(
+            "版本冲突提交",
+            services.submit_project,
+            db, project6.id,
+            schemas.SubmitData(current_user_id=registrar.id, comment="基于旧版本提交"),
+            expected_version=999,
+        )
 
         project7 = crud.create_project(db, schemas.TrainingProjectCreate(
             project_name="品牌营销策划培训",
@@ -273,6 +301,68 @@ def init_db():
         services.process_incoming_project(db, project7.id, supervisor.id)
         print(f"  [审核中] {project7.project_no} - {project7.project_name}")
 
+        # 再次提交示例：申诉通过 → 转回补正 → 登记员补正后再次提交
+        project8 = crud.create_project(db, schemas.TrainingProjectCreate(
+            project_name="数字化转型管理培训",
+            client_company="武汉数字科技股份",
+            stage=Stage.CONTRACT,
+            description="面向中高管的数字化转型方法论培训，含咨询辅导。",
+            budget=320000.0,
+            deadline=datetime.utcnow() + timedelta(days=40),
+            created_by_id=registrar.id,
+        ))
+        crud.add_evidence(db, schemas.EvidenceCreate(
+            name="数字化转型需求确认书.pdf",
+            evidence_type=EvidenceType.NEED_DOCUMENT,
+            description="客户确认的数字化转型培训需求",
+            uploaded_by_id=registrar.id,
+        ), project8.id)
+        crud.add_evidence(db, schemas.EvidenceCreate(
+            name="数字化转型报价单.xlsx",
+            evidence_type=EvidenceType.QUOTATION_SHEET,
+            description="含讲师费、咨询费、材料费的报价",
+            uploaded_by_id=registrar.id,
+        ), project8.id)
+        crud.add_evidence(db, schemas.EvidenceCreate(
+            name="数字化转型服务合同.pdf",
+            evidence_type=EvidenceType.CONTRACT,
+            description="合同初版，付款条款待复核确认",
+            uploaded_by_id=registrar.id,
+        ), project8.id)
+        services.submit_project(db, project8.id, schemas.SubmitData(
+            current_user_id=registrar.id,
+            comment="合同材料齐全，申请审核"
+        ))
+        services.process_incoming_project(db, project8.id, supervisor.id)
+        services.review_project(db, project8.id, schemas.ReviewData(
+            current_user_id=supervisor.id,
+            opinion="材料完整，提交复核负责人确认",
+        ), approve=True)
+        # 复核负责人驳回（合同阶段），进入 rejected
+        services.review_project(db, project8.id, schemas.ReviewData(
+            current_user_id=reviewer.id,
+            opinion="合同第8条违约责任表述需调整，暂不通过。",
+            reject_reason="合同违约责任条款需重新拟定"
+        ), approve=False)
+        # 登记员提交申诉
+        services.submit_appeal(db, project8.id, schemas.AppealSubmitData(
+            current_user_id=registrar.id,
+            appeal_reason="已与法务沟通调整违约责任条款，客户认可，请求复核放行以便按新条款补正后再次提交。",
+            submitter_opinion="条款可补正，请给予再次提交机会"
+        ))
+        # 复核负责人申诉通过 → 转回 RETURNED，处理人交还登记员
+        services.review_appeal(db, project8.id, schemas.AppealReviewData(
+            current_user_id=reviewer.id,
+            reviewer_opinion="申诉理由成立，转回补正，请按调整后的条款补正后再次提交。",
+            result=AppealResult.APPROVED,
+        ))
+        # 登记员补正后再次提交（再次提交闭环）
+        services.correct_project(db, project8.id, schemas.CorrectData(
+            current_user_id=registrar.id,
+            comment="已按法务意见修正合同违约条款并补充说明，再次提交"
+        ))
+        print(f"  [再次提交] {project8.project_no} - {project8.project_name} (申诉通过→补正→再次提交)")
+
         print("\n初始化完成！")
         stats = crud.get_statistics(db)
         print(f"\n项目统计:")
@@ -284,6 +374,8 @@ def init_db():
         print(f"  通过: {stats['approved']}")
         print(f"  驳回: {stats['rejected']}")
         print(f"  申诉中: {stats['appeal_under_review']}")
+        print(f"  申诉通过: {stats['appeal_approved']}")
+        print(f"  申诉驳回: {stats['appeal_rejected']}")
         print(f"  逾期: {stats['overdue']}")
         print(f"  已归档: {stats['archived']}")
 

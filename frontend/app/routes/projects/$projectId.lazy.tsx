@@ -239,7 +239,9 @@ function ProjectDetail() {
   const canSubmit =
     currentUser.role === "registrar" &&
     isHandler &&
-    (project.status === "draft" || project.status === "returned");
+    (project.status === "draft" ||
+      project.status === "returned" ||
+      project.status === "appeal_approved");
 
   const canReviewApprove =
     (currentUser.role === "supervisor" || currentUser.role === "reviewer") &&
@@ -283,7 +285,9 @@ function ProjectDetail() {
 
   const canManageEvidence =
     (currentUser.role === "registrar" &&
-      (project.status === "draft" || project.status === "returned")) ||
+      (project.status === "draft" ||
+        project.status === "returned" ||
+        project.status === "appeal_approved")) ||
     currentUser.role === "supervisor" ||
     currentUser.role === "reviewer";
 
@@ -429,7 +433,9 @@ function ProjectDetail() {
           )}
           {canSubmit && (
             <button className="btn btn-primary" onClick={() => setShowSubmit(true)}>
-              提交审核
+              {project.status === "returned" || project.status === "appeal_approved"
+                ? "再次提交"
+                : "提交审核"}
             </button>
           )}
           {canReviewApprove && (
@@ -749,7 +755,18 @@ function ProjectDetail() {
                       new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
                   )
                   .map((log) => (
-                    <div key={log.id} className="timeline-item">
+                    <div
+                      key={log.id}
+                      className="timeline-item"
+                      style={
+                        log.action === "state_conflict"
+                          ? {
+                              borderLeft: "3px solid #ef4444",
+                              background: "#fef2f2",
+                            }
+                          : undefined
+                      }
+                    >
                       <div className="log-header">
                         <div className="log-user">
                           {log.user_name}
@@ -776,7 +793,7 @@ function ProjectDetail() {
                           {log.action === "appeal_reject" && "申诉驳回"}
                           {log.action === "archive" && "归档"}
                           {log.action === "mark_overdue" && "标记逾期"}
-                          {log.action === "state_conflict" && "状态冲突"}
+                          {log.action === "state_conflict" && "⚠️ 状态冲突（已保留原状态）"}
                         </strong>
                         {log.stage && (
                           <span style={{ color: "#6b7280", marginLeft: "0.5rem" }}>
@@ -791,23 +808,37 @@ function ProjectDetail() {
                       </div>
                       {log.from_status && log.to_status && (
                         <div style={{ fontSize: "0.875rem", color: "#374151", margin: "0.25rem 0" }}>
-                          状态：
+                          {log.action === "state_conflict" ? "保留状态：" : "状态："}
                           <span
                             className={`badge ${getStatusBadgeClass(log.from_status as any)}`}
                             style={{ margin: "0 0.25rem" }}
                           >
                             {labels.statuses[log.from_status]}
                           </span>
-                          →
-                          <span
-                            className={`badge ${getStatusBadgeClass(log.to_status as any)}`}
-                            style={{ margin: "0 0.25rem" }}
-                          >
-                            {labels.statuses[log.to_status]}
-                          </span>
+                          {log.action !== "state_conflict" && (
+                            <>
+                              →
+                              <span
+                                className={`badge ${getStatusBadgeClass(log.to_status as any)}`}
+                                style={{ margin: "0 0.25rem" }}
+                              >
+                                {labels.statuses[log.to_status]}
+                              </span>
+                            </>
+                          )}
                         </div>
                       )}
-                      {log.comment && <div className="log-comment">备注：{log.comment}</div>}
+                      {log.action === "state_conflict" && log.comment && (
+                        <div
+                          className="log-comment"
+                          style={{ color: "#991b1b", fontWeight: 500 }}
+                        >
+                          冲突原因：{log.comment}
+                        </div>
+                      )}
+                      {log.action !== "state_conflict" && log.comment && (
+                        <div className="log-comment">备注：{log.comment}</div>
+                      )}
                       {log.opinion && <div className="log-comment">意见：{log.opinion}</div>}
                       {log.reject_reason && (
                         <div className="log-comment">驳回/退回原因：{log.reject_reason}</div>
