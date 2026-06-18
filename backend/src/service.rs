@@ -205,6 +205,25 @@ pub async fn handle_submit(
         return Err(anyhow!(msg));
     }
 
+    let appeal_required = [
+        OrderStatus::VerifyReturned.as_str(),
+        OrderStatus::AppealRejectedCorrection.as_str(),
+        OrderStatus::ReviewReturned.as_str(),
+    ];
+    if appeal_required.contains(&order.status.as_str()) {
+        let reason = req.appeal_reason.as_deref().unwrap_or("").trim();
+        if reason.is_empty() {
+            let msg = match order.status.as_str() {
+                s if s == OrderStatus::VerifyReturned.as_str() => {
+                    "核验退回后提交申诉必须填写申诉理由".to_string()
+                }
+                _ => "补正重提必须填写补正说明".to_string(),
+            };
+            record_failure(pool, &order, &handler, "提交失败-理由为空", &msg).await;
+            return Err(anyhow!(msg));
+        }
+    }
+
     let evidence = if let Some(ev) = &req.evidence {
         let mut merged = order.evidence.clone();
         merged.extend(ev.clone());
@@ -250,7 +269,11 @@ pub async fn handle_submit(
             )
         };
 
-    let opinion = req.opinion.clone().unwrap_or_default();
+    let opinion = if appeal_required.contains(&order.status.as_str()) {
+        req.appeal_reason.clone().unwrap_or_default()
+    } else {
+        req.opinion.clone().unwrap_or_default()
+    };
 
     let original_status = if order.status == OrderStatus::VerifyReturned.as_str()
         || order.status == OrderStatus::AppealRejectedCorrection.as_str()

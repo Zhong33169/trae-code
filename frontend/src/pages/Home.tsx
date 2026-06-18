@@ -200,6 +200,7 @@ export default function Home() {
                 <th>状态</th>
                 <th>当前处理人</th>
                 <th>登记员</th>
+                <th>最近补正说明</th>
                 <th>更新时间</th>
                 <th>操作</th>
               </tr>
@@ -230,6 +231,15 @@ export default function Home() {
                     </span>
                   </td>
                   <td>{o.registrar_name}</td>
+                  <td style={{ fontSize: 12, maxWidth: 260 }}>
+                    {o.appeal_reason ? (
+                      <div style={{ color: '#92400e', background: '#fffbeb', padding: '4px 8px', borderRadius: 4, lineHeight: 1.5 }}>
+                        {o.appeal_reason.length > 60 ? o.appeal_reason.slice(0, 60) + '…' : o.appeal_reason}
+                      </div>
+                    ) : (
+                      <span style={{ color: '#9ca3af' }}>—</span>
+                    )}
+                  </td>
                   <td style={{ fontSize: 12 }}>{formatTime(o.updated_at)}</td>
                   <td>
                     <button className="link-btn" onClick={() => navigate(`/orders/${o.id}`)}>

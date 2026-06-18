@@ -119,12 +119,17 @@ export default function OrderDetail() {
     fn: () => Promise<any>,
     needOpinion = false,
     minEvidence = 0,
+    needAppealReason = false,
   ) => {
     setError('');
     if (!order || !currentUser) return;
     if (!checkPrereq()) return;
     if (needOpinion && !opinion.trim()) {
       setError('请填写处理意见');
+      return;
+    }
+    if (needAppealReason && !appealReason.trim()) {
+      setError('请填写申诉/补正说明');
       return;
     }
     const totalEvidence = (order?.evidence.length || 0) + newEvidence.length;
@@ -145,20 +150,23 @@ export default function OrderDetail() {
     }
   };
 
-  const doSubmit = () =>
-    handleAction(
+  const doSubmit = () => {
+    const needReason = ['verify_returned', 'appeal_rejected_correction', 'review_returned'].includes(status);
+    return handleAction(
       () =>
         orderApi.submit({
           order_id: order!.id,
           version: order!.version,
           handler_id: currentUser!.id,
-          opinion,
+          opinion: needReason ? appealReason : opinion,
           evidence: newEvidence.length ? newEvidence : undefined,
-          appeal_reason: appealReason || undefined,
+          appeal_reason: needReason ? appealReason : undefined,
         }),
       false,
       2,
+      needReason,
     );
+  };
 
   const doVerifyPass = () =>
     handleAction(
@@ -479,11 +487,12 @@ export default function OrderDetail() {
                             {status === 'appeal_rejected_correction' || status === 'review_returned'
                               ? '补正说明'
                               : '申诉理由'}
+                            <span style={{ color: '#dc2626' }}> *</span>
                           </label>
                           <textarea
                             value={appealReason}
                             onChange={(e) => setAppealReason(e.target.value)}
-                            placeholder={status === 'appeal_rejected_correction' || status === 'review_returned' ? '说明补正了哪些内容' : '说明申诉理由、补充了哪些证据'}
+                            placeholder={status === 'appeal_rejected_correction' || status === 'review_returned' ? '请填写补正说明（必填）' : '请填写申诉理由（必填）'}
                           />
                         </div>
                       )}

@@ -175,11 +175,11 @@ pub async fn seed_data(pool: &DbPool) -> Result<()> {
             is_overdue: false,
             is_evidence_missing: true,
             deadline_days: Some(3),
-            appeal_reason: Some("首次审核退回后，已补充现场照片，但缺少第三方检测报告".to_string()),
+            appeal_reason: Some("第二次补正：已补充现场照片和组件厂家分析报告，仍等待第三方电气检测报告，特再次申诉。".to_string()),
             review_opinion: None,
-            reject_reason: Some("缺少第三方电气检测报告，无法确认故障原因，需补充证据后重新提交。".to_string()),
-            original_status: Some(OrderStatus::AppealSubmitted.as_str().to_string()),
-            evidence: demo_evidence_partial(),
+            reject_reason: Some("第二次驳回：仍缺少第三方电气检测报告，无法确认是否为雷击导致，请补充后再次提交。".to_string()),
+            original_status: Some(OrderStatus::AppealResubmitted.as_str().to_string()),
+            evidence: demo_evidence_twice_corrected(),
         },
         DemoOrderSeed {
             order_no: "BJ-2026-0003".to_string(),
@@ -402,6 +402,22 @@ fn demo_evidence_partial() -> Vec<EvidenceItem> {
     }]
 }
 
+fn demo_evidence_twice_corrected() -> Vec<EvidenceItem> {
+    let t = Utc::now();
+    vec![
+        EvidenceItem {
+            name: "第一次补正-现场故障照片.jpg".to_string(),
+            url: "/demo/evidence/photo1.jpg".to_string(),
+            uploaded_at: t,
+        },
+        EvidenceItem {
+            name: "第二次补正-组件厂家分析报告.pdf".to_string(),
+            url: "/demo/evidence/vendor_report.pdf".to_string(),
+            uploaded_at: t,
+        },
+    ]
+}
+
 fn demo_evidence_full() -> Vec<EvidenceItem> {
     let t = Utc::now();
     vec![
@@ -496,7 +512,7 @@ async fn seed_demo_records(
                 "张登记员",
                 UserRole::Registrar.as_str(),
                 "提交登记",
-                "接线盒烧毁更换申请。",
+                "接线盒疑似雷击烧毁，申请更换 6 个接线盒。",
                 OrderStatus::Draft.as_str(),
                 OrderStatus::Registered.as_str(),
                 base,
@@ -508,8 +524,8 @@ async fn seed_demo_records(
                 "user_auditor_1",
                 "王审核主管",
                 UserRole::Auditor.as_str(),
-                "核验退回",
-                "证据不足，缺少故障检测报告，退回补正。",
+                "核验退回补正",
+                "证据不足：缺少故障检测报告和雷击证明，退回补正。",
                 OrderStatus::Registered.as_str(),
                 OrderStatus::VerifyReturned.as_str(),
                 base + Duration::hours(3),
@@ -522,10 +538,10 @@ async fn seed_demo_records(
                 "张登记员",
                 UserRole::Registrar.as_str(),
                 "申诉提交",
-                "已补充现场照片，申请复核。",
+                "第一次申诉：已补充现场故障照片，证明接线盒确已烧毁，请复核。",
                 OrderStatus::VerifyReturned.as_str(),
                 OrderStatus::AppealSubmitted.as_str(),
-                base + Duration::hours(20),
+                base + Duration::hours(8),
             )
             .await?;
             add_record(
@@ -535,10 +551,36 @@ async fn seed_demo_records(
                 "赵复核负责人",
                 UserRole::Reviewer.as_str(),
                 "复核驳回补正",
-                "仍缺少第三方电气检测报告，驳回补正。",
+                "第一次驳回：仅照片无法确认故障原因为雷击，请补充第三方电气检测报告。",
                 OrderStatus::AppealSubmitted.as_str(),
                 OrderStatus::AppealRejectedCorrection.as_str(),
-                base + Duration::hours(26),
+                base + Duration::hours(14),
+            )
+            .await?;
+            add_record(
+                pool,
+                order_id,
+                "user_registrar_1",
+                "张登记员",
+                UserRole::Registrar.as_str(),
+                "申诉补正后重新提交",
+                "第一次补正重提：已补充组件厂家分析报告，报告显示接线盒烧蚀痕迹与雷击特征一致，请复核。",
+                OrderStatus::AppealRejectedCorrection.as_str(),
+                OrderStatus::AppealResubmitted.as_str(),
+                base + Duration::hours(30),
+            )
+            .await?;
+            add_record(
+                pool,
+                order_id,
+                "user_reviewer_1",
+                "赵复核负责人",
+                UserRole::Reviewer.as_str(),
+                "复核驳回补正",
+                "第二次驳回：厂家分析报告仅为外观比对，仍缺少第三方权威机构出具的电气检测报告，请补充后再次提交。",
+                OrderStatus::AppealResubmitted.as_str(),
+                OrderStatus::AppealRejectedCorrection.as_str(),
+                base + Duration::hours(38),
             )
             .await?;
         }
