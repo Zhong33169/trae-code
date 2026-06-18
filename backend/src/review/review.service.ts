@@ -300,38 +300,43 @@ export class ReviewService {
     const code = this.generateCode();
     const id = uuidv4();
     const priority = RISK_PRIORITY[dto.risk_level];
+    const evidenceJson = JSON.stringify(evidence);
 
     const defaultHandler = this.database
       .prepare("SELECT id FROM users WHERE role = 'COMPLIANCE_OFFICER' LIMIT 1")
       .get() as { id: string } | undefined;
 
-    const stmt = this.database.prepare(`
+    const insertStmt = this.database.prepare(`
       INSERT INTO trade_reviews (
         id, code, customer_name, trade_type, trade_amount, trade_date, account_no,
         risk_level, status, priority, current_handler_id, current_role, version,
         evidence_json, deadline, created_by
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
-    stmt.run(
-      id, code, dto.customer_name, dto.trade_type, dto.trade_amount,
-      dto.trade_date, dto.account_no, dto.risk_level, ReviewStatus.REGISTERED,
-      priority, defaultHandler?.id || null, UserRole.COMPLIANCE_OFFICER,
-      1, JSON.stringify(evidence), dto.deadline || null, dto.created_by,
-    );
 
-    this.insertRecord({
-      review_id: id,
-      operator_id: creator.id,
-      operator_name: creator.name,
-      operator_role: creator.role,
-      action: ReviewAction.REGISTER,
-      from_status: null,
-      to_status: ReviewStatus.REGISTERED,
-      opinion: `交易核查单已登记，风险等级: ${dto.risk_level}`,
-      result: '登记成功',
-      evidence_json: JSON.stringify(evidence),
-      version: 1,
+    const insertRecordStmt = this.database.prepare(`
+      INSERT INTO review_records (
+        id, review_id, operator_id, operator_name, operator_role, action,
+        from_status, to_status, opinion, result, evidence_json, version
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    const tx = this.database.transaction(() => {
+      insertStmt.run(
+        id, code, dto.customer_name, dto.trade_type, dto.trade_amount,
+        dto.trade_date, dto.account_no, dto.risk_level, ReviewStatus.REGISTERED,
+        priority, defaultHandler?.id || null, UserRole.COMPLIANCE_OFFICER,
+        1, evidenceJson, dto.deadline || null, dto.created_by,
+      );
+
+      insertRecordStmt.run(
+        uuidv4(), id, creator.id, creator.name,
+        creator.role, ReviewAction.REGISTER, null, ReviewStatus.REGISTERED,
+        `交易核查单已登记，风险等级: ${dto.risk_level}`, '登记成功', evidenceJson, 1,
+      );
     });
+
+    tx();
 
     return this.findById(id);
   }

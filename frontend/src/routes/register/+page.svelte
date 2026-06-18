@@ -19,8 +19,8 @@
   let selectedEvidence: string[] = [];
 
   $: requiredEvidence = RISK_REQUIRED_EVIDENCE[risk_level] || [];
-  $: currentUser = $userStore.users.find(u => u.id === $userStore.currentUserId);
-  $: canRegister = currentUser?.role === 'FINANCIAL_ADVISOR';
+  $: currentUser = $userStore.loading ? undefined : $userStore.users.find(u => u.id === $userStore.currentUserId);
+  $: canRegister = !!currentUser && currentUser.role === 'FINANCIAL_ADVISOR';
   $: missingEvidence = requiredEvidence.filter(req => !selectedEvidence.some(e => e && e.includes(req)));
 
   afterUpdate(() => {
@@ -95,10 +95,15 @@
   {#if $userStore.loading}
     <div style="padding:20px; text-align:center; color:var(--text-muted)">加载中...</div>
   {:else}
-    {#if !currentUser && !canRegister}
+    {#if currentUser && !canRegister}
       <div class="alert warning">
-        当前身份为 <strong>{currentUser.name}（{ROLE_LABEL[currentUser.role]}），
+        当前身份为 <strong>{currentUser.name}（{ROLE_LABEL[currentUser.role]}）</strong>，
         仅理财顾问可以登记交易核查单，请在右上角切换身份。
+      </div>
+    {/if}
+    {#if !currentUser}
+      <div class="alert warning">
+        正在加载用户信息，请稍候或刷新页面。
       </div>
     {/if}
 

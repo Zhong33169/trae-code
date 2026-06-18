@@ -28,39 +28,53 @@
 
 | 风险 | 队列优先级 | 必填证据 |
 | --- | --- | --- |
-| 高 HIGH | 100 | 身份证明、授权书、风险揭示书、资金来源证明 |
-| 中 MEDIUM | 50 | 身份证明、授权书、风险揭示书 |
-| 低 LOW | 10 | 身份证明、授权书 |
+| 高 HIGH | 100 | 客户身份证明、交易授权书、风险揭示书、资金来源证明 |
+| 中 MEDIUM | 50 | 客户身份证明、交易授权书、风险揭示书 |
+| 低 LOW | 10 | 客户身份证明、交易授权书 |
 
 ## 三、启动说明
+
+### 0. 端口和 API 配置（环境变量联动）
+
+前后端端口均支持通过 `.env` 文件配置，默认值：前端 3002，后端 8002。
+
+**后端**（backend/.env）：
+```
+PORT=8002
+DB_PATH=./data/deviation.db
+```
+
+**前端**（frontend/.env）：
+```
+VITE_PORT=3002
+VITE_BACKEND_PORT=8002
+VITE_API_BASE_URL=/api
+```
+
+> 修改端口后需重启前后端服务。前端 Vite 代理会自动联动后端端口。
 
 ### 1. 初始化后端（建库 + 种子数据）
 
 ```bash
 cd backend
 npm install
-npm run seed     # 创建 SQLite 库并插入演示数据
-npm start        # 启动 NestJS 服务，默认端口 8002
+cp .env.example .env     # 如无 .env 文件请复制模板
+npm run seed             # 创建 SQLite 库并插入演示数据
+npm start                # 启动 NestJS 服务，默认端口 8002
 ```
 
-如要改端口：
-```bash
-PORT=8002 npm start
-```
+如需改端口：直接修改 `backend/.env` 中的 PORT。
 
 ### 2. 初始化前端
 
 ```bash
 cd frontend
 npm install
-npm run dev      # 启动 SvelteKit 开发服务，端口 3002
+cp .env.example .env     # 如无 .env 文件请复制模板
+npm run dev              # 启动 SvelteKit 开发服务，默认端口 3002
 ```
 
-如要改端口：
-```bash
-# 编辑 frontend/vite.config.js 的 server.port，或
-npm run dev -- --port 3002
-```
+如需改端口：直接修改 `frontend/.env` 中的 VITE_PORT（前端）和 VITE_BACKEND_PORT（后端代理目标）。
 
 ### 3. 访问
 
@@ -101,9 +115,14 @@ npm run dev -- --port 3002
 4. **版本冲突**：请求参数 `expected_version` 必须等于单据 `version`，防止并发覆盖
 5. **必填证据**：根据风险等级校验证据材料完整性
 
+**登记接口额外校验（失败不生成无效单）**：
+- 必须由理财顾问角色发起（其他角色 403 拒绝）
+- 按风险等级校验必填证据完整性（缺失返回 400，不写入任何数据）
+- 使用事务保护：`trade_reviews` 和 `review_records` 要么同时成功，要么同时回滚
+
 校验不通过时：
-- 原单据状态不变
-- 写入一条操作记录（含失败原因），前端可在"操作记录"时间线查看
+- 原单据状态不变（登记接口：完全不写入）
+- 处理接口：写入一条操作记录（含失败原因），前端可在"操作记录"时间线查看
 
 ---
 
