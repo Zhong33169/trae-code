@@ -2,6 +2,7 @@ import { Component, inject, signal, effect, untracked } from '@angular/core';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { ApiService } from '../../core/api.service';
 import { AuthService } from '../../core/auth.service';
+import { RefreshService } from '../../core/refresh.service';
 import {
   ActionType, ApiError, AuditLog, ROLE_LABELS, STATUS_LABELS, Task, TaskStatus,
   ACTION_LABELS,
@@ -162,6 +163,7 @@ export class TaskDetailComponent {
   private api = inject(ApiService);
   auth = inject(AuthService);
   private route = inject(ActivatedRoute);
+  private refresh = inject(RefreshService);
 
   task = signal<Task | null>(null);
   logs = signal<AuditLog[]>([]);
@@ -177,6 +179,7 @@ export class TaskDetailComponent {
   constructor() {
     effect(() => {
       this.auth.user();
+      this.refresh.generation();
       untracked(() => this.load());
     });
   }
@@ -261,7 +264,7 @@ export class TaskDetailComponent {
         evidence: a === 'reject' ? '' : this.actionInput(),
         reason: a === 'reject' ? this.actionInput() : undefined,
       });
-      await this.load();
+      this.refresh.markDirty();
     } catch (e) {
       this.actionErr.set(e as ApiError);
     } finally {

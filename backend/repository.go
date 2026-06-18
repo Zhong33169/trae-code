@@ -137,7 +137,7 @@ func (r *Repository) CreateTask(req CreateTaskRequest, submitterID int, submitte
 	res, err := r.db.Exec(`INSERT INTO tasks(task_no, policy_no, customer_name, product, renewal_type, original_premium, new_premium, status, version, submitter_id, current_handler_role, reg_evidence)
 		VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
 		taskNo, req.PolicyNo, req.CustomerName, req.Product, req.RenewalType, req.OriginalPremium, req.NewPremium,
-		StatusDraft, 1, submitterID, RoleUnderwritingSpecialist, reg)
+		StatusDraft, 1, submitterID, RoleCustomerManager, reg)
 	if err != nil {
 		return nil, err
 	}
@@ -218,15 +218,15 @@ func (r *Repository) UpdateBatchCounts(batchID, success, fail int) error {
 	return err
 }
 
-func (r *Repository) InsertBatchItem(batchID, taskID int, taskNo, status, reason string, retryCount int) error {
-	_, err := r.db.Exec(`INSERT INTO batch_items(batch_id, task_id, task_no, status, error_reason, retry_count) VALUES(?,?,?,?,?,?)`,
-		batchID, taskID, taskNo, status, reason, retryCount)
+func (r *Repository) InsertBatchItem(batchID, taskID, requestVersion int, taskNo, status, errorCode, reason string, retryCount int) error {
+	_, err := r.db.Exec(`INSERT INTO batch_items(batch_id, task_id, task_no, status, request_version, error_code, error_reason, retry_count) VALUES(?,?,?,?,?,?,?,?)`,
+		batchID, taskID, taskNo, status, requestVersion, errorCode, reason, retryCount)
 	return err
 }
 
-func (r *Repository) UpdateBatchItem(itemID int, status, reason string, retryCount int) error {
-	_, err := r.db.Exec(`UPDATE batch_items SET status=?, error_reason=?, retry_count=?, processed_at=CURRENT_TIMESTAMP WHERE id=?`,
-		status, reason, retryCount, itemID)
+func (r *Repository) UpdateBatchItem(itemID int, status, errorCode, reason string, retryCount, requestVersion int) error {
+	_, err := r.db.Exec(`UPDATE batch_items SET status=?, request_version=?, error_code=?, error_reason=?, retry_count=?, processed_at=CURRENT_TIMESTAMP WHERE id=?`,
+		status, requestVersion, errorCode, reason, retryCount, itemID)
 	return err
 }
 
@@ -280,7 +280,7 @@ func (r *Repository) GetBatch(id int) (*Batch, error) {
 }
 
 func (r *Repository) ListBatchItems(batchID int) ([]BatchItem, error) {
-	rows, err := r.db.Query(`SELECT id, batch_id, task_id, task_no, status, COALESCE(error_reason,''), retry_count, processed_at FROM batch_items WHERE batch_id=? ORDER BY id`, batchID)
+	rows, err := r.db.Query(`SELECT id, batch_id, task_id, task_no, status, request_version, COALESCE(error_code,''), COALESCE(error_reason,''), retry_count, processed_at FROM batch_items WHERE batch_id=? ORDER BY id`, batchID)
 	if err != nil {
 		return nil, err
 	}
@@ -288,9 +288,12 @@ func (r *Repository) ListBatchItems(batchID int) ([]BatchItem, error) {
 	var out []BatchItem
 	for rows.Next() {
 		var it BatchItem
-		if err := rows.Scan(&it.ID, &it.BatchID, &it.TaskID, &it.TaskNo, &it.Status, &it.ErrorReason, &it.RetryCount, &it.ProcessedAt); err != nil {
+		var errCode, errReason sql.NullString
+		if err := rows.Scan(&it.ID, &it.BatchID, &it.TaskID, &it.TaskNo, &it.Status, &it.RequestVersion, &errCode, &errReason, &it.RetryCount, &it.ProcessedAt); err != nil {
 			return nil, err
 		}
+		it.ErrorCode = errCode.String
+		it.ErrorReason = errReason.String
 		out = append(out, it)
 	}
 	return out, nil
@@ -298,11 +301,14 @@ func (r *Repository) ListBatchItems(batchID int) ([]BatchItem, error) {
 
 func (r *Repository) GetBatchItem(id int) (*BatchItem, error) {
 	var it BatchItem
-	err := r.db.QueryRow(`SELECT id, batch_id, task_id, task_no, status, COALESCE(error_reason,''), retry_count, processed_at FROM batch_items WHERE id=?`, id).
-		Scan(&it.ID, &it.BatchID, &it.TaskID, &it.TaskNo, &it.Status, &it.ErrorReason, &it.RetryCount, &it.ProcessedAt)
+	var errCode, errReason sql.NullString
+	err := r.db.QueryRow(`SELECT id, batch_id, task_id, task_no, status, request_version, COALESCE(error_code,''), COALESCE(error_reason,''), retry_count, processed_at FROM batch_items WHERE id=?`, id).
+		Scan(&it.ID, &it.BatchID, &it.TaskID, &it.TaskNo, &it.Status, &it.RequestVersion, &errCode, &errReason, &it.RetryCount, &it.ProcessedAt)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("批次明细不存在")
 	}
+	it.ErrorCode = errCode.String
+	it.ErrorReason = errReason.String
 	return &it, err
 }
 

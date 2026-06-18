@@ -49,6 +49,8 @@ export interface BatchItem {
   taskId: number;
   taskNo: string;
   status: 'success' | 'failed';
+  requestVersion: number;
+  errorCode: string;
   errorReason: string;
   retryCount: number;
   processedAt: string;

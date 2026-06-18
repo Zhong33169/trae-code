@@ -2,6 +2,7 @@ import { Component, inject, signal, effect, untracked } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { ApiService } from '../../core/api.service';
 import { AuthService } from '../../core/auth.service';
+import { RefreshService } from '../../core/refresh.service';
 import { Batch, ROLE_LABELS, ACTION_LABELS, ActionType } from '../../core/models';
 
 @Component({
@@ -68,6 +69,7 @@ import { Batch, ROLE_LABELS, ACTION_LABELS, ActionType } from '../../core/models
 export class BatchListComponent {
   private api = inject(ApiService);
   auth = inject(AuthService);
+  private refresh = inject(RefreshService);
 
   batches = signal<Batch[]>([]);
 
@@ -77,6 +79,7 @@ export class BatchListComponent {
   constructor() {
     effect(() => {
       this.auth.user();
+      this.refresh.generation();
       untracked(() => this.load());
     });
   }

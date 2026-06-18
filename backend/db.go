@@ -78,6 +78,8 @@ func migrate(db *sql.DB) {
 			task_id INTEGER REFERENCES tasks(id),
 			task_no TEXT,
 			status TEXT NOT NULL,
+			request_version INTEGER NOT NULL DEFAULT 0,
+			error_code TEXT,
 			error_reason TEXT,
 			retry_count INTEGER NOT NULL DEFAULT 0,
 			processed_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -100,6 +102,13 @@ func migrate(db *sql.DB) {
 		if _, err := db.Exec(s); err != nil {
 			log.Fatalf("迁移失败: %v\nSQL: %s", err, s)
 		}
+	}
+	alterStmts := []string{
+		`ALTER TABLE batch_items ADD COLUMN request_version INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE batch_items ADD COLUMN error_code TEXT`,
+	}
+	for _, s := range alterStmts {
+		_, _ = db.Exec(s)
 	}
 }
 

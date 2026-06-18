@@ -2,6 +2,7 @@ import { Component, inject, signal, effect, untracked } from '@angular/core';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { ApiService } from '../../core/api.service';
 import { AuthService } from '../../core/auth.service';
+import { RefreshService } from '../../core/refresh.service';
 import {
   ActionType, ApiError, AuditLog, Batch, BatchItem, ROLE_LABELS, ACTION_LABELS,
   STATUS_LABELS, TaskStatus, Task,
@@ -66,7 +67,9 @@ import { StatusBadgeComponent } from '../../components/status-badge.component';
                 <tr>
                   <th>任务号</th>
                   <th>状态</th>
-                  <th>错误原因</th>
+                  <th class="mono">请求版本</th>
+                  <th>错误码</th>
+                  <th>失败原因</th>
                   <th>重试次数</th>
                   <th>处理时间</th>
                 </tr>
@@ -79,8 +82,10 @@ import { StatusBadgeComponent } from '../../components/status-badge.component';
                       @if (it.status==='success') { <span class="pill st-confirmed"><span class="dot"></span>成功</span> }
                       @if (it.status==='failed') { <span class="pill st-rejected"><span class="dot"></span>失败</span> }
                     </td>
+                    <td class="mono">@if (it.requestVersion>0) { <span class="ver-badge">v{{ it.requestVersion }}</span> } @else { <span class="muted">—</span> }</td>
+                    <td>@if (it.errorCode) { <span class="err-tag">{{ it.errorCode }}</span> } @else { <span class="muted">—</span> }</td>
                     <td>
-                      @if (it.errorReason) { <span class="err-tag">ERROR</span> {{ it.errorReason }} }
+                      @if (it.errorReason) { <span>{{ it.errorReason }}</span> }
                       @else { <span class="muted">—</span> }
                     </td>
                     <td class="mono">{{ it.retryCount }}</td>
@@ -135,6 +140,21 @@ import { StatusBadgeComponent } from '../../components/status-badge.component';
                 <span class="ico">i</span>
                 <span>将对 <b>{{ failedItems().length }}</b> 个失败项重新执行「{{ actionLabel(batch()?.action ?? '') }}」，逐项校验。</span>
               </div>
+              <div>
+                <div class="section-title">失败项清单（携带最新版本重试）</div>
+                <table class="tbl">
+                  <thead><tr><th>任务号</th><th>错误码</th><th>失败原因</th></tr></thead>
+                  <tbody>
+                    @for (it of failedItems(); track it.id) {
+                      <tr class="row-failed">
+                        <td class="mono">{{ it.taskNo }}</td>
+                        <td><span class="err-tag">{{ it.errorCode || '—' }}</span></td>
+                        <td class="sub">{{ it.errorReason }}</td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+              </div>
               <div class="field">
                 <label>重试证据 / 备注（必填）</label>
                 <textarea [value]="retryEvidence()" (input)="retryEvidence.set($any($event.target).value)" placeholder="补充重试说明或更正后的证据"></textarea>
@@ -156,6 +176,7 @@ export class BatchDetailComponent {
   private api = inject(ApiService);
   auth = inject(AuthService);
   private route = inject(ActivatedRoute);
+  private refresh = inject(RefreshService);
 
   batch = signal<Batch | null>(null);
   items = signal<BatchItem[]>([]);
@@ -178,6 +199,7 @@ export class BatchDetailComponent {
   constructor() {
     effect(() => {
       this.auth.user();
+      this.refresh.generation();
       untracked(() => this.load());
     });
   }
@@ -212,6 +234,7 @@ export class BatchDetailComponent {
       this.batch.set(res.batch);
       this.items.set(res.items);
       this.retryOpen.set(false);
+      this.refresh.markDirty();
     } catch (e) {
       this.retryErr.set(e as ApiError);
     } finally {

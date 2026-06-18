@@ -2,6 +2,7 @@ import { Component, inject, signal, effect, untracked } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { ApiService } from '../../core/api.service';
 import { AuthService } from '../../core/auth.service';
+import { RefreshService } from '../../core/refresh.service';
 import {
   ActionType, ApiError, AppUser, Task, TaskStatus, STATUS_FILTERS,
   ROLE_LABELS, ACTION_LABELS, actionRequiredRole,
@@ -9,7 +10,7 @@ import {
 import { StatusBadgeComponent } from '../../components/status-badge.component';
 import { EvidenceCardComponent } from '../../components/evidence-card.component';
 
-interface BatchResult { batchNo: string; total: number; success: number; failed: number; failedItems: { taskNo: string; reason: string }[]; batchId: number; }
+interface BatchResult { batchNo: string; total: number; success: number; failed: number; failedItems: { taskNo: string; errorCode: string; requestVersion: number; reason: string }[]; batchId: number; }
 
 const PRODUCTS = ['车险-商业险', '车险-交强险', '家财险', '意外健康险', '企业财产险', '责任险'];
 const RENEWAL_TYPES = ['原险种续保', '降保额续保', '升保额续保', '转保'];
@@ -162,6 +163,24 @@ const RENEWAL_TYPES = ['原险种续保', '降保额续保', '升保额续保', 
               <span class="ico">i</span>
               <span>将对 <b>{{ selectedIds().length }}</b> 条任务执行「{{ actionLabel(batchAction()!) }}」；逐项校验，部分失败会留在结果中并可重试。</span>
             </div>
+
+            <div>
+              <div class="section-title">所选任务（携带当前版本提交，后端逐项强制校验）</div>
+              <table class="tbl">
+                <thead><tr><th>任务号</th><th>客户</th><th>状态</th><th class="mono">请求版本</th></tr></thead>
+                <tbody>
+                  @for (t of selectedTasks(); track t.id) {
+                    <tr>
+                      <td class="mono">{{ t.taskNo }}</td>
+                      <td>{{ t.customerName }}</td>
+                      <td><app-status-badge [status]="t.status" /></td>
+                      <td class="mono"><span class="ver-badge">v{{ t.version }}</span></td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+
             <div class="field">
               <label>{{ actionLabel(batchAction()!) }}证据 / 备注（必填）</label>
               <textarea [value]="batchEvidence()" (input)="batchEvidence.set($any($event.target).value)" placeholder="{{ evidencePlaceholder(batchAction()!) }}"></textarea>
@@ -199,12 +218,17 @@ const RENEWAL_TYPES = ['原险种续保', '降保额续保', '升保额续保', 
 
             @if (r.failedItems.length > 0) {
               <div>
-                <div class="section-title" style="color:var(--red)">失败明细（可重试，失败项已留痕）</div>
+                <div class="section-title" style="color:var(--red)">失败明细（失败项已留痕，可至批次明细页重试）</div>
                 <table class="tbl">
-                  <thead><tr><th>任务号</th><th>失败原因</th></tr></thead>
+                  <thead><tr><th>任务号</th><th>错误码</th><th class="mono">请求版本</th><th>失败原因</th></tr></thead>
                   <tbody>
                     @for (it of r.failedItems; track it.taskNo) {
-                      <tr class="row-failed"><td class="mono">{{ it.taskNo }}</td><td>{{ it.reason }}</td></tr>
+                      <tr class="row-failed">
+                        <td class="mono">{{ it.taskNo }}</td>
+                        <td><span class="err-tag">{{ it.errorCode }}</span></td>
+                        <td class="mono">v{{ it.requestVersion }}</td>
+                        <td>{{ it.reason }}</td>
+                      </tr>
                     }
                   </tbody>
                 </table>
@@ -261,6 +285,7 @@ const RENEWAL_TYPES = ['原险种续保', '降保额续保', '升保额续保', 
 export class QueueComponent {
   private api = inject(ApiService);
   auth = inject(AuthService);
+  private refresh = inject(RefreshService);
 
   statusFilters = STATUS_FILTERS;
   products = PRODUCTS;
@@ -294,6 +319,7 @@ export class QueueComponent {
   constructor() {
     effect(() => {
       this.auth.user();
+      this.refresh.generation();
       untracked(() => this.reload());
     });
   }
@@ -301,6 +327,11 @@ export class QueueComponent {
   curUser(): AppUser | null { return this.auth.user(); }
   roleLabel = (r: string | undefined) => ROLE_LABELS[r as keyof typeof ROLE_LABELS] ?? r ?? '';
   actionLabel = (a: ActionType) => ACTION_LABELS[a];
+
+  selectedTasks(): Task[] {
+    const s = this.selected();
+    return this.tasks().filter(t => s.has(t.id));
+  }
 
   canRegister(): boolean { return this.auth.user()?.role === 'customer_manager'; }
 
@@ -393,8 +424,11 @@ export class QueueComponent {
     this.batchBusy.set(true);
     this.batchErr.set(null);
     try {
-      const { batch, items } = await this.api.createBatch({ action, taskIds: this.selectedIds(), evidence: this.batchEvidence() });
-      const failedItems = items.filter(i => i.status === 'failed').map(i => ({ taskNo: i.taskNo, reason: i.errorReason }));
+      const ids = this.selectedIds();
+      const versions: Record<number, number> = {};
+      for (const t of this.selectedTasks()) versions[t.id] = t.version;
+      const { batch, items } = await this.api.createBatch({ action, taskIds: ids, evidence: this.batchEvidence(), versions });
+      const failedItems = items.filter(i => i.status === 'failed').map(i => ({ taskNo: i.taskNo, errorCode: i.errorCode, requestVersion: i.requestVersion, reason: i.errorReason }));
       this.result.set({
         batchNo: batch.batchNo,
         total: batch.total,
@@ -405,7 +439,7 @@ export class QueueComponent {
       });
       this.batchOpen.set(false);
       this.clearSelection();
-      this.reload();
+      this.refresh.markDirty();
     } catch (e) {
       this.batchErr.set(e as ApiError);
     } finally {
@@ -431,7 +465,7 @@ export class QueueComponent {
     try {
       const t = await this.api.createTask(this.form);
       this.createOpen.set(false);
-      await this.reload();
+      this.refresh.markDirty();
       this.activeId.set(t.id);
     } catch (e) {
       this.createErr.set(e as ApiError);

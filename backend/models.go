@@ -105,14 +105,16 @@ type Batch struct {
 }
 
 type BatchItem struct {
-	ID          int    `json:"id"`
-	BatchID     int    `json:"batchId"`
-	TaskID      int    `json:"taskId"`
-	TaskNo      string `json:"taskNo"`
-	Status      string `json:"status"`
-	ErrorReason string `json:"errorReason"`
-	RetryCount  int    `json:"retryCount"`
-	ProcessedAt string `json:"processedAt"`
+	ID             int    `json:"id"`
+	BatchID        int    `json:"batchId"`
+	TaskID         int    `json:"taskId"`
+	TaskNo         string `json:"taskNo"`
+	Status         string `json:"status"`
+	RequestVersion int    `json:"requestVersion"`
+	ErrorCode      string `json:"errorCode"`
+	ErrorReason    string `json:"errorReason"`
+	RetryCount     int    `json:"retryCount"`
+	ProcessedAt    string `json:"processedAt"`
 }
 
 type AuditLog struct {
@@ -147,12 +149,10 @@ func statusFor(code string) int {
 	switch code {
 	case "FORBIDDEN_ROLE":
 		return http.StatusForbidden
-	case "STALE_VERSION":
+	case "STALE_VERSION", "INVALID_STATUS":
 		return http.StatusConflict
-	case "MISSING_EVIDENCE":
+	case "MISSING_EVIDENCE", "MISSING_VERSION":
 		return http.StatusUnprocessableEntity
-	case "INVALID_STATUS":
-		return http.StatusConflict
 	case "UNAUTHORIZED":
 		return http.StatusUnauthorized
 	case "NOT_FOUND":
@@ -232,8 +232,9 @@ type BatchRequest struct {
 }
 
 type RetryRequest struct {
-	ItemIDs  []int  `json:"itemIds"`
-	Evidence string `json:"evidence"`
+	ItemIDs  []int       `json:"itemIds"`
+	Evidence string      `json:"evidence"`
+	Versions map[int]int `json:"versions"`
 }
 
 type TaskListQuery struct {
