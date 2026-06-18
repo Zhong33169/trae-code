@@ -17,7 +17,9 @@ import {
   FileText,
   History,
   MapPin,
+  MinusCircle,
   Phone,
+  PlusCircle,
   User as UserIcon,
   XCircle,
 } from "lucide-react";
@@ -148,14 +150,19 @@ export default function OrderDetailPage() {
     }
   };
 
-  const toggleMaterial = (stageRecId: number, matName: string) => {
+  const toggleMaterial = (
+    stageRecId: number,
+    matName: string,
+    currentProvided: boolean,
+  ) => {
     setMaterialsOverride((prev) => {
       const stageMap = prev[stageRecId] ?? {};
+      const effective = stageMap[matName] ?? currentProvided;
       return {
         ...prev,
         [stageRecId]: {
           ...stageMap,
-          [matName]: !stageMap[matName],
+          [matName]: !effective,
         },
       };
     });
@@ -422,7 +429,7 @@ function StageDetailCard({
   isCurrent: boolean;
   canAct: boolean;
   materialsOverride: Record<number, Record<string, boolean>>;
-  onToggleMaterial: (stageRecId: number, matName: string) => void;
+  onToggleMaterial: (stageRecId: number, matName: string, currentProvided: boolean) => void;
   opinion: string;
   setOpinion: (v: string) => void;
   reviewComment: string;
@@ -441,6 +448,14 @@ function StageDetailCard({
   const requiredMissing = stageRec.materials.filter(
     (m) => m.required && !(override[m.name] ?? m.provided),
   );
+
+  const pendingAdds = stageRec.materials.filter(
+    (m) => !m.provided && override[m.name] === true,
+  );
+  const pendingRemoves = stageRec.materials.filter(
+    (m) => m.provided && override[m.name] === false,
+  );
+  const hasPendingChange = pendingAdds.length > 0 || pendingRemoves.length > 0;
 
   const isRegistration = stage === "registration";
   const isTerminal = orderStatus === "synced";
@@ -483,7 +498,7 @@ function StageDetailCard({
                     <input
                       type="checkbox"
                       checked={isChecked}
-                      onChange={() => onToggleMaterial(stageRec.id, m.name)}
+                      onChange={() => onToggleMaterial(stageRec.id, m.name, m.provided)}
                       className="w-4 h-4 accent-deep-500"
                     />
                   ) : (
@@ -513,6 +528,21 @@ function StageDetailCard({
           {requiredMissing.length > 0 && (
             <div className="mt-2 text-xs text-crimson bg-crimson-soft/50 px-2 py-1 rounded">
               ⚠ 必填材料缺失：{requiredMissing.map((m) => m.name).join("、")}
+            </div>
+          )}
+          {canAct && hasPendingChange && (
+            <div className="mt-2 text-xs space-y-1 border-t border-deep-50 pt-2">
+              <div className="font-semibold text-deep-600">待提交变更</div>
+              {pendingAdds.length > 0 && (
+                <div className="text-emerald-ok">
+                  ＋ 补齐：{pendingAdds.map((m) => m.name).join("、")}
+                </div>
+              )}
+              {pendingRemoves.length > 0 && (
+                <div className="text-amber-warn">
+                  − 撤销：{pendingRemoves.map((m) => m.name).join("、")}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -750,53 +780,80 @@ function AuditTimeline({ logs }: { logs: AuditLog[] }) {
       <div className="relative pl-4">
         <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-deep-100" />
         <div className="space-y-3">
-          {logs.map((log, i) => (
-            <div key={log.id} className="relative" style={{ animationDelay: `${i * 40}ms` }}>
+          {logs.map((log, i) => {
+            const isReject = log.action.includes("reject");
+            const isSync = log.action.includes("sync");
+            const isCreate = log.action === "create";
+            const hasMaterialChange =
+              log.detail.includes("补齐") || log.detail.includes("撤销");
+            const dotColor = isReject
+              ? "bg-crimson border-crimson-soft"
+              : isSync
+              ? "bg-aqua border-blue-100"
+              : isCreate
+              ? "bg-deep-500 border-deep-100"
+              : "bg-emerald-ok border-emerald-soft";
+            return (
               <div
-                className={`absolute -left-4 w-2.5 h-2.5 rounded-full border-2 ${
-                  log.action.includes("reject")
-                    ? "bg-crimson border-crimson-soft"
-                    : log.action.includes("sync")
-                    ? "bg-aqua border-blue-100"
-                    : log.action === "create"
-                    ? "bg-deep-500 border-deep-100"
-                    : "bg-emerald-ok border-emerald-soft"
-                }`}
-              />
-              <div className="ml-3">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-semibold text-ink">
-                    {actionLabel(log.action)}
-                  </span>
-                  <span className="badge bg-deep-50 text-deep-600 text-[10px]">
-                    {ROLE_LABELS[log.actorRole]}
-                  </span>
-                  <span className="ml-auto text-[10px] font-mono text-ink-muted">
-                    {new Date(log.createdAt).toLocaleString("zh-CN")}
-                  </span>
-                </div>
-                <p className="text-xs text-ink-soft mt-0.5">{log.detail}</p>
-                <div className="flex items-center gap-2 mt-0.5 text-[10px] text-ink-muted font-mono">
-                  {log.actorName && <span>操作人：{log.actorName}</span>}
-                  {log.fromStage && log.toStage && (
-                    <span>
-                      {STAGE_LABELS[log.fromStage]} → {STAGE_LABELS[log.toStage]}
+                key={log.id}
+                className="relative"
+                style={{ animationDelay: `${i * 40}ms` }}
+              >
+                <div
+                  className={`absolute -left-4 w-2.5 h-2.5 rounded-full border-2 ${dotColor}`}
+                />
+                <div className="ml-3">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-semibold text-ink">
+                      {actionLabel(log.action)}
                     </span>
-                  )}
-                  {log.fromStatus && log.toStatus && (
-                    <span>
-                      {STATUS_LABELS[log.fromStatus]} → {STATUS_LABELS[log.toStatus]}
+                    <span className="badge bg-deep-50 text-deep-600 text-[10px]">
+                      {ROLE_LABELS[log.actorRole]}
                     </span>
-                  )}
-                  {log.versionBefore != null && log.versionAfter != null && (
-                    <span className="text-deep-500">
-                      v{log.versionBefore} → v{log.versionAfter}
+                    {isReject && (
+                      <span className="badge bg-crimson-soft text-crimson text-[10px]">
+                        退回
+                      </span>
+                    )}
+                    {hasMaterialChange && (
+                      <span className="badge bg-emerald-soft text-emerald-ok text-[10px] flex items-center gap-0.5">
+                        {log.detail.includes("撤销") ? (
+                          <MinusCircle className="w-2.5 h-2.5" />
+                        ) : (
+                          <PlusCircle className="w-2.5 h-2.5" />
+                        )}
+                        材料变更
+                      </span>
+                    )}
+                    <span className="ml-auto text-[10px] font-mono text-ink-muted">
+                      {new Date(log.createdAt).toLocaleString("zh-CN")}
                     </span>
-                  )}
+                  </div>
+                  <div className="mt-0.5">
+                    {renderAuditDetail(log.detail)}
+                  </div>
+                  <div className="flex items-center gap-2 mt-1 flex-wrap text-[10px] text-ink-muted font-mono">
+                    {log.actorName && <span>操作人：{log.actorName}</span>}
+                    {log.fromStage && log.toStage && (
+                      <span>
+                        {STAGE_LABELS[log.fromStage]} → {STAGE_LABELS[log.toStage]}
+                      </span>
+                    )}
+                    {log.fromStatus && log.toStatus && (
+                      <span>
+                        {STATUS_LABELS[log.fromStatus]} → {STATUS_LABELS[log.toStatus]}
+                      </span>
+                    )}
+                    {log.versionBefore != null && log.versionAfter != null && (
+                      <span className="px-1.5 py-0.5 rounded bg-deep-50 text-deep-600 font-semibold">
+                        v{log.versionBefore} → v{log.versionAfter}
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
           {logs.length === 0 && (
             <div className="text-center text-ink-muted text-sm py-4">
               暂无审计记录
@@ -804,6 +861,48 @@ function AuditTimeline({ logs }: { logs: AuditLog[] }) {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+function renderAuditDetail(detail: string) {
+  const segments: { text: string; cls: string }[] = [];
+  const re = /(材料变更：[^；]*补齐[^；]*)|(材料变更：[^；]*撤销[^；]*)|(退回原因：[^（]*)/g;
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(detail)) !== null) {
+    if (m.index > last) {
+      segments.push({ text: detail.slice(last, m.index), cls: "text-ink-soft" });
+    }
+    const seg = m[0];
+    if (seg.includes("补齐")) {
+      segments.push({
+        text: seg,
+        cls: "text-emerald-ok font-semibold",
+      });
+    } else if (seg.includes("撤销")) {
+      segments.push({
+        text: seg,
+        cls: "text-amber-warn font-semibold",
+      });
+    } else if (seg.includes("退回原因")) {
+      segments.push({
+        text: seg,
+        cls: "text-crimson font-semibold",
+      });
+    }
+    last = re.lastIndex;
+  }
+  if (last < detail.length) {
+    segments.push({ text: detail.slice(last), cls: "text-ink-soft" });
+  }
+  return (
+    <div className="text-xs leading-relaxed">
+      {segments.map((seg, i) => (
+        <span key={i} className={seg.cls}>
+          {seg.text}
+        </span>
+      ))}
     </div>
   );
 }

@@ -336,7 +336,7 @@ func (s *Service) ProcessStage(ctx context.Context, orderID int, stage Stage, re
 				return err
 			}
 			if affected == 0 {
-				return ErrConcurrency("")
+				return ErrConcurrency(fmt.Sprintf("并发冲突：提交版本 v%d 已过期，工单可能已被其他操作更新，请刷新后重试", req.Version))
 			}
 			vAfter := vBefore + 1
 			return q.InsertAuditLog(ctx, AuditLog{
@@ -384,7 +384,7 @@ func (s *Service) ProcessStage(ctx context.Context, orderID int, stage Stage, re
 				return err
 			}
 			if affected == 0 {
-				return ErrConcurrency("")
+				return ErrConcurrency(fmt.Sprintf("并发冲突：提交版本 v%d 已过期，工单可能已被其他操作更新，请刷新后重试", req.Version))
 			}
 			vAfter := vBefore + 1
 			return q.InsertAuditLog(ctx, AuditLog{
@@ -422,7 +422,7 @@ func (s *Service) ProcessStage(ctx context.Context, orderID int, stage Stage, re
 				return err
 			}
 			if affected == 0 {
-				return ErrConcurrency("")
+				return ErrConcurrency(fmt.Sprintf("并发冲突：提交版本 v%d 已过期，工单可能已被其他操作更新，请刷新后重试", req.Version))
 			}
 			vAfter := vBefore + 1
 			return q.InsertAuditLog(ctx, AuditLog{
@@ -491,14 +491,15 @@ func (s *Service) BatchProcess(ctx context.Context, req BatchRequest) ([]BatchRe
 					return err
 				}
 				if affected == 0 {
-					return ErrConcurrency("")
+					return ErrConcurrency(fmt.Sprintf("并发冲突：提交版本 v%d 已过期，工单可能已被其他操作更新，请刷新后重试", item.Version))
 				}
 				vAfter := vBefore + 1
 				return q.InsertAuditLog(ctx, AuditLog{
 					OrderID: item.ID, Action: action, ActorID: &req.ActorID, ActorRole: req.ActorRole,
 					FromStatus: ptr(order.Status), ToStatus: ptr(newStatus),
 					FromStage: ptr(stage), ToStage: ptr(newStage),
-					Detail: "批量处理意见：" + req.ReviewComment, VersionBefore: &vBefore, VersionAfter: &vAfter,
+					Detail:        materialChangeSummary(stageRec.Materials, stageRec.Materials) + "；批量处理意见：" + req.ReviewComment,
+					VersionBefore: &vBefore, VersionAfter: &vAfter,
 				})
 			case "reject":
 				if strings.TrimSpace(req.ReviewComment) == "" {
@@ -524,7 +525,7 @@ func (s *Service) BatchProcess(ctx context.Context, req BatchRequest) ([]BatchRe
 					return err
 				}
 				if affected == 0 {
-					return ErrConcurrency("")
+					return ErrConcurrency(fmt.Sprintf("并发冲突：提交版本 v%d 已过期，工单可能已被其他操作更新，请刷新后重试", item.Version))
 				}
 				vAfter := vBefore + 1
 				return q.InsertAuditLog(ctx, AuditLog{

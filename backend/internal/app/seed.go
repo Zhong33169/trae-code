@@ -230,6 +230,39 @@ func Seed(ctx context.Context, db *sql.DB) error {
 				StageArchiving:    {status: StageStatusPending, materials: materialsFor(StageArchiving, false), startOffsetH: 0, timeLimit: 72},
 			},
 		},
+		{
+			orderNo: "WX-DEMO-014", title: "青湖湾小区水表更换归档核验", customer: "青湖湾物业",
+			phone: "13800000014", address: "青湖湾小区3栋", repairType: "水表故障", priority: "普通",
+			slaHours: 72, deadlineH: 28, status: StatusApproved, currentStage: StageArchiving,
+			createdByRole: RoleWindowStaff,
+			stages: map[Stage]seedStage{
+				StageRegistration: {status: StageStatusSubmitted, materials: materialsFor(StageRegistration, true), opinion: "水表批量更换完成", startOffsetH: -20, submittedH: h(-20), timeLimit: 48},
+				StageVerification: {status: StageStatusApproved, materials: materialsFor(StageVerification, true), opinion: "抽检合格", startOffsetH: -20, submittedH: h(-16), reviewedH: h(-16), reviewComment: "核验通过", timeLimit: 48},
+				StageArchiving:    {status: StageStatusPending, materials: materialsFor(StageArchiving, true), startOffsetH: -16, timeLimit: 72},
+			},
+		},
+		{
+			orderNo: "WX-DEMO-015", title: "环城路主管抢修并发冲突演示", customer: "环城路管委会",
+			phone: "13800000015", address: "环城路主干管", repairType: "爆管", priority: "紧急",
+			slaHours: 72, deadlineH: 44, status: StatusPendingReview, currentStage: StageVerification,
+			createdByRole: RoleWindowStaff,
+			stages: map[Stage]seedStage{
+				StageRegistration: {status: StageStatusSubmitted, materials: materialsFor(StageRegistration, true), opinion: "主管爆管已抢修", startOffsetH: -5, submittedH: h(-5), timeLimit: 48},
+				StageVerification: {status: StageStatusPending, materials: materialsFor(StageVerification, true), startOffsetH: -5, timeLimit: 48},
+				StageArchiving:    {status: StageStatusPending, materials: materialsFor(StageArchiving, false), startOffsetH: 0, timeLimit: 72},
+			},
+		},
+		{
+			orderNo: "WX-DEMO-016", title: "工业园北区阀门更换跨岗混选", customer: "工业园北区物业",
+			phone: "13800000016", address: "工业园北一路", repairType: "漏水", priority: "普通",
+			slaHours: 72, deadlineH: 46, status: StatusApproved, currentStage: StageArchiving,
+			createdByRole: RoleWindowStaff,
+			stages: map[Stage]seedStage{
+				StageRegistration: {status: StageStatusSubmitted, materials: materialsFor(StageRegistration, true), opinion: "阀门更换完成", startOffsetH: -18, submittedH: h(-18), timeLimit: 48},
+				StageVerification: {status: StageStatusApproved, materials: materialsFor(StageVerification, true), opinion: "复测合格", startOffsetH: -18, submittedH: h(-14), reviewedH: h(-14), reviewComment: "核验通过", timeLimit: 48},
+				StageArchiving:    {status: StageStatusPending, materials: materialsFor(StageArchiving, true, "费用结算单"), startOffsetH: -14, timeLimit: 72},
+			},
+		},
 	}
 
 	for _, so := range orders {
