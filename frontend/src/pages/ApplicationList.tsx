@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api, statusLabels, formatDate } from '../utils/api';
 import type { Application, Statistics, User, Role } from '../types';
@@ -229,12 +229,21 @@ export default function ApplicationList({ user }: ApplicationListProps) {
       return;
     }
 
+    if (selectedHasOverdue && !batchRemark.trim()) {
+      showMessage('error', '选中的申请中包含逾期项，请填写逾期处理说明');
+      return;
+    }
+
     try {
       const result = await api.batchAction(selectedIds, batchAction, batchRemark || undefined);
       const successCount = result.success.length;
       const failCount = result.failed.length;
       let msg = `批量操作完成：成功 ${successCount} 条`;
       if (failCount > 0) msg += `，失败 ${failCount} 条`;
+      if (result.failed.length > 0) {
+        const failReasons = result.failed.map((f) => `申请${f.id}：${f.reason}`).join('；');
+        msg += `\n失败原因：${failReasons}`;
+      }
       showMessage(failCount > 0 ? 'warning' : 'success', msg);
       setShowBatchModal(false);
       setBatchAction('');
@@ -284,6 +293,35 @@ export default function ApplicationList({ user }: ApplicationListProps) {
       handleFilterChange();
     }
   };
+
+  const getOverdueNextAction = (app: Application): string => {
+    const role = user.role;
+    const status = app.status;
+    switch (status) {
+      case 'submitted':
+        return '请审核主管尽快开始审核，点击详情填写逾期处理说明后可推进';
+      case 'corrected':
+        return '请审核主管继续办理，点击详情填写逾期处理说明后可推进';
+      case 'under_review':
+        return '请审核主管尽快给出审核结论，通过/驳回均需填写逾期处理说明';
+      case 'correction_requested':
+        return '请登记员尽快按补正要求补充材料，重新提交后等待审核';
+      case 'audit_passed':
+        return '请复核负责人尽快复核，通过/退回均需填写逾期处理说明';
+      case 'review_passed':
+        return '请复核负责人尽快归档，归档需填写逾期处理说明';
+      default:
+        return '请尽快处理';
+    }
+  };
+
+  const selectedHasOverdue = useMemo(() => {
+    return applications.some((a) => selectedIds.includes(a.id) && a.is_overdue);
+  }, [applications, selectedIds]);
+
+  const selectedOverdueCount = useMemo(() => {
+    return applications.filter((a) => selectedIds.includes(a.id) && a.is_overdue).length;
+  }, [applications, selectedIds]);
 
   return (
     <div>
@@ -432,42 +470,58 @@ export default function ApplicationList({ user }: ApplicationListProps) {
               </thead>
               <tbody>
                 {applications.map((app) => (
-                  <tr key={app.id}>
-                    <td>
-                      {canBatch && (
-                        <input
-                          type="checkbox"
-                          className="checkbox"
-                          checked={selectedIds.includes(app.id)}
-                          onChange={(e) => toggleSelectOne(app.id, e.target.checked)}
-                        />
-                      )}
-                    </td>
-                    <td style={{ fontFamily: 'monospace' }}>{app.application_no}</td>
-                    <td>
-                      {app.company_name}
-                      {app.is_overdue && <span className="overdue-tag">逾期</span>}
-                    </td>
-                    <td>{app.contact_person}</td>
-                    <td>{app.contact_phone}</td>
-                    <td>{app.booth_type || '-'}</td>
-                    <td>
-                      <span className={`status-tag status-${app.status}`}>
-                        {statusLabels[app.status]}
-                      </span>
-                    </td>
-                    <td style={{ color: '#666', fontSize: '13px' }}>
-                      {formatDate(app.status_changed_at)}
-                    </td>
-                    <td>
-                      <button
-                        className="btn btn-primary btn-sm"
-                        onClick={() => navigate(`/applications/${app.id}`)}
-                      >
-                        查看
-                      </button>
-                    </td>
-                  </tr>
+                  <React.Fragment key={app.id}>
+                    <tr>
+                      <td rowSpan={app.is_overdue ? 2 : 1}>
+                        {canBatch && (
+                          <input
+                            type="checkbox"
+                            className="checkbox"
+                            checked={selectedIds.includes(app.id)}
+                            onChange={(e) => toggleSelectOne(app.id, e.target.checked)}
+                          />
+                        )}
+                      </td>
+                      <td rowSpan={app.is_overdue ? 2 : 1} style={{ fontFamily: 'monospace' }}>
+                        {app.application_no}
+                      </td>
+                      <td>
+                        {app.company_name}
+                        {app.is_overdue && <span className="overdue-tag">逾期</span>}
+                      </td>
+                      <td>{app.contact_person}</td>
+                      <td>{app.contact_phone}</td>
+                      <td>{app.booth_type || '-'}</td>
+                      <td>
+                        <span className={`status-tag status-${app.status}`}>
+                          {statusLabels[app.status]}
+                        </span>
+                      </td>
+                      <td style={{ color: '#666', fontSize: '13px' }}>
+                        {formatDate(app.status_changed_at)}
+                      </td>
+                      <td rowSpan={app.is_overdue ? 2 : 1}>
+                        <button
+                          className="btn btn-primary btn-sm"
+                          onClick={() => navigate(`/applications/${app.id}`)}
+                        >
+                          查看
+                        </button>
+                      </td>
+                    </tr>
+                    {app.is_overdue && (
+                      <tr style={{ background: '#fff7e6' }}>
+                        <td colSpan={6} style={{ padding: '8px 12px', borderBottom: '1px solid #ffe58f' }}>
+                          <div style={{ fontSize: '13px', lineHeight: 1.6 }}>
+                            <span style={{ color: '#cf1322', fontWeight: 600 }}>逾期原因：</span>
+                            <span style={{ color: '#873800' }}>{app.overdue_reason || '原因未知'}</span>
+                            <span style={{ marginLeft: '12px', color: '#1890ff', fontWeight: 600 }}>下一步：</span>
+                            <span style={{ color: '#0050b3' }}>{getOverdueNextAction(app)}</span>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
                 ))}
               </tbody>
             </table>
@@ -635,7 +689,7 @@ export default function ApplicationList({ user }: ApplicationListProps) {
 
       {showBatchModal && (
         <div className="modal-overlay" onClick={() => setShowBatchModal(false)}>
-          <div className="modal" style={{ width: '420px' }} onClick={(e) => e.stopPropagation()}>
+          <div className="modal" style={{ width: '460px' }} onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <span className="modal-title">批量操作</span>
               <span className="modal-close" onClick={() => setShowBatchModal(false)}>
@@ -643,9 +697,19 @@ export default function ApplicationList({ user }: ApplicationListProps) {
               </span>
             </div>
             <div className="modal-body">
-              <p style={{ marginBottom: '16px' }}>
+              <p style={{ marginBottom: '12px' }}>
                 已选择 <strong>{selectedIds.length}</strong> 条申请进行批量处理
               </p>
+              {selectedHasOverdue && (
+                <div
+                  className="alert alert-warning"
+                  style={{ marginBottom: '16px', fontSize: '13px' }}
+                >
+                  <strong>⚠ 注意：</strong>
+                  选中的 <strong style={{ color: '#cf1322' }}>{selectedOverdueCount}</strong> 条申请已逾期，
+                  必须在下方填写逾期处理说明后才能推进。
+                </div>
+              )}
               <div className="form-item">
                 <label className="form-label">操作类型</label>
                 <select
@@ -663,12 +727,19 @@ export default function ApplicationList({ user }: ApplicationListProps) {
                 </select>
               </div>
               <div className="form-item">
-                <label className="form-label">备注</label>
+                <label className="form-label">
+                  处理说明{selectedHasOverdue && <span style={{ color: '#ff4d4f' }}> *（逾期必填）</span>}
+                </label>
                 <textarea
                   className="form-input form-textarea"
                   value={batchRemark}
                   onChange={(e) => setBatchRemark(e.target.value)}
-                  placeholder="可选，填写批量处理备注"
+                  placeholder={
+                    selectedHasOverdue
+                      ? '请填写逾期处理说明（必填）...'
+                      : '可选，填写批量处理备注'
+                  }
+                  rows={selectedHasOverdue ? 4 : 3}
                 />
               </div>
             </div>

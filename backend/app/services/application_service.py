@@ -414,12 +414,22 @@ def batch_action(db: Session, ids: List[int], action: str, user_id: int, role: s
                 results["failed"].append({"id": app_id, "reason": "申请不存在"})
                 continue
 
+            app.check_overdue()
+
             success = False
             error = ""
 
+            needs_remark_actions = ["start_audit", "audit_pass", "review_pass", "archive"]
+            if app.is_overdue and action in needs_remark_actions and not remark:
+                results["failed"].append({
+                    "id": app_id,
+                    "reason": f"该申请已逾期（{app.overdue_reason or '原因未知'}），批量处理必须填写逾期处理说明"
+                })
+                continue
+
             if action == "start_audit" and role == RoleEnum.AUDIT_SUPERVISOR.value:
                 if app.status in [ApplicationStatusEnum.SUBMITTED, ApplicationStatusEnum.CORRECTED]:
-                    start_audit(db, app_id, user_id)
+                    start_audit(db, app_id, user_id, remark)
                     success = True
                 else:
                     error = f"当前状态{app.status.value}不支持该操作"
@@ -449,8 +459,6 @@ def batch_action(db: Session, ids: List[int], action: str, user_id: int, role: s
                 error = "不支持的批量操作或权限不足"
 
             if success:
-                add_audit_log(db, app_id, user_id, AuditActionEnum.BATCH_PROCESS, "批量处理",
-                              app.status, app.status, f"批量操作[{action}]：{remark}")
                 results["success"].append(app_id)
             else:
                 results["failed"].append({"id": app_id, "reason": error})
@@ -463,6 +471,8 @@ def batch_action(db: Session, ids: List[int], action: str, user_id: int, role: s
 
 
 def get_statistics(db: Session) -> dict:
+    check_all_overdue(db)
+
     total = db.query(ExhibitorApplication).count()
     draft = db.query(ExhibitorApplication).filter(
         ExhibitorApplication.status == ApplicationStatusEnum.DRAFT
@@ -514,6 +524,10 @@ def get_statistics(db: Session) -> dict:
     return {
         "total": total,
         "draft": draft,
+        "submitted": submitted,
+        "corrected": corrected,
+        "audit_passed": audit_passed,
+        "review_passed": review_passed,
         "pending_audit": pending_audit,
         "under_review": under_review,
         "pending_correction": pending_correction,

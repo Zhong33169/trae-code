@@ -22,6 +22,7 @@ export default function ApplicationDetail({ user }: ApplicationDetailProps) {
   const [message, setMessage] = useState<{ type: string; text: string } | null>(null);
 
   const [showSubmitModal, setShowSubmitModal] = useState(false);
+  const [showStartAuditModal, setShowStartAuditModal] = useState(false);
   const [showCorrectionModal, setShowCorrectionModal] = useState(false);
   const [showAuditPassModal, setShowAuditPassModal] = useState(false);
   const [showAuditRejectModal, setShowAuditRejectModal] = useState(false);
@@ -31,6 +32,7 @@ export default function ApplicationDetail({ user }: ApplicationDetailProps) {
   const [showEditModal, setShowEditModal] = useState(false);
 
   const [opinion, setOpinion] = useState('');
+  const [startAuditRemark, setStartAuditRemark] = useState('');
   const [correctionRequest, setCorrectionRequest] = useState('');
   const [materialReviews, setMaterialReviews] = useState<Record<number, { is_approved: boolean; review_comment: string }>>({});
   const [editForm, setEditForm] = useState<any>({});
@@ -101,10 +103,28 @@ export default function ApplicationDetail({ user }: ApplicationDetailProps) {
   };
 
   const handleStartAudit = async () => {
+    if (application?.is_overdue && !startAuditRemark.trim()) {
+      showMessage('error', '该申请已逾期，请填写逾期处理说明');
+      return;
+    }
     try {
-      await api.startAudit(application.id);
-      showMessage('success', '已开始审核');
-      loadDetail();
+      await (fetch as any)(`/api/applications/${application?.id}/start-audit`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token') || ''}`,
+        },
+        body: JSON.stringify({ remark: startAuditRemark || undefined }),
+      }).then(async (res: any) => {
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.detail || '操作失败');
+        }
+        setShowStartAuditModal(false);
+        setStartAuditRemark('');
+        showMessage('success', '已开始审核');
+        loadDetail();
+      });
     } catch (e: any) {
       showMessage('error', e.message || '操作失败');
     }
@@ -127,6 +147,10 @@ export default function ApplicationDetail({ user }: ApplicationDetailProps) {
   };
 
   const handleAuditPass = async () => {
+    if (application?.is_overdue && !opinion.trim()) {
+      showMessage('error', '该申请已逾期，审核通过必须填写逾期处理说明');
+      return;
+    }
     try {
       await api.auditPass(application.id, opinion || undefined, materialReviews);
       setShowAuditPassModal(false);
@@ -155,6 +179,10 @@ export default function ApplicationDetail({ user }: ApplicationDetailProps) {
   };
 
   const handleReviewPass = async () => {
+    if (application?.is_overdue && !opinion.trim()) {
+      showMessage('error', '该申请已逾期，复核通过必须填写逾期处理说明');
+      return;
+    }
     try {
       await api.reviewPass(application.id, opinion || undefined);
       setShowReviewPassModal(false);
@@ -183,6 +211,10 @@ export default function ApplicationDetail({ user }: ApplicationDetailProps) {
   };
 
   const handleArchive = async () => {
+    if (application?.is_overdue && !opinion.trim()) {
+      showMessage('error', '该申请已逾期，归档必须填写逾期处理说明');
+      return;
+    }
     try {
       await api.archiveApplication(application.id, opinion || undefined);
       setShowArchiveModal(false);
@@ -282,8 +314,8 @@ export default function ApplicationDetail({ user }: ApplicationDetailProps) {
             </button>
           )}
           {canStartAudit && (
-            <button className="btn btn-primary" onClick={handleStartAudit}>
-              开始审核
+            <button className="btn btn-primary" onClick={() => setShowStartAuditModal(true)}>
+              开始审核{application.is_overdue && '（逾期）'}
             </button>
           )}
           {canRequestCorrection && (
@@ -510,6 +542,46 @@ export default function ApplicationDetail({ user }: ApplicationDetailProps) {
         </div>
       )}
 
+      {showStartAuditModal && (
+        <div className="modal-overlay" onClick={() => setShowStartAuditModal(false)}>
+          <div className="modal" style={{ width: '480px' }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <span className="modal-title">
+                开始审核{application.is_overdue && <span style={{ color: '#cf1322', marginLeft: '8px' }}>（逾期，需填处理说明）</span>}
+              </span>
+              <span className="modal-close" onClick={() => setShowStartAuditModal(false)}>×</span>
+            </div>
+            <div className="modal-body">
+              {application.is_overdue && (
+                <div className="alert alert-warning" style={{ marginBottom: '16px', fontSize: '13px' }}>
+                  <strong>⚠ 注意：</strong>该申请已逾期，
+                  <span style={{ color: '#cf1322' }}>必须填写逾期处理说明</span>后才能开始审核。
+                  <div style={{ marginTop: '6px', color: '#873800' }}>
+                    逾期原因：{application.overdue_reason || '原因未知'}
+                  </div>
+                </div>
+              )}
+              <div className="form-item">
+                <label className="form-label">
+                  处理说明{application.is_overdue && <span style={{ color: '#ff4d4f' }}> *</span>}
+                </label>
+                <textarea
+                  className="form-input form-textarea"
+                  value={startAuditRemark}
+                  onChange={(e) => setStartAuditRemark(e.target.value)}
+                  placeholder={application.is_overdue ? '请填写逾期处理说明（必填）...' : '可选，填写审核备注'}
+                  rows={application.is_overdue ? 4 : 3}
+                />
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-default" onClick={() => setShowStartAuditModal(false)}>取消</button>
+              <button className="btn btn-primary" onClick={handleStartAudit}>确认开始审核</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showCorrectionModal && (
         <div className="modal-overlay" onClick={() => setShowCorrectionModal(false)}>
           <div className="modal" style={{ width: '560px' }} onClick={(e) => e.stopPropagation()}>
@@ -590,10 +662,21 @@ export default function ApplicationDetail({ user }: ApplicationDetailProps) {
         <div className="modal-overlay" onClick={() => setShowAuditPassModal(false)}>
           <div className="modal" style={{ width: '480px' }} onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <span className="modal-title">审核通过</span>
+              <span className="modal-title">
+                审核通过{application.is_overdue && <span style={{ color: '#cf1322', marginLeft: '8px' }}>（逾期，需填处理说明）</span>}
+              </span>
               <span className="modal-close" onClick={() => setShowAuditPassModal(false)}>×</span>
             </div>
             <div className="modal-body">
+              {application.is_overdue && (
+                <div className="alert alert-warning" style={{ marginBottom: '16px', fontSize: '13px' }}>
+                  <strong>⚠ 注意：</strong>该申请已逾期，
+                  <span style={{ color: '#cf1322' }}>必须填写逾期处理说明</span>后才能审核通过。
+                  <div style={{ marginTop: '6px', color: '#873800' }}>
+                    逾期原因：{application.overdue_reason || '原因未知'}
+                  </div>
+                </div>
+              )}
               <p style={{ marginBottom: '16px' }}>确认该展商申请审核通过？通过后将进入复核阶段。</p>
               {hasMaterials && (
                 <div className="form-item">
@@ -634,13 +717,15 @@ export default function ApplicationDetail({ user }: ApplicationDetailProps) {
                 </div>
               )}
               <div className="form-item">
-                <label className="form-label">审核意见</label>
+                <label className="form-label">
+                  审核意见{application.is_overdue && <span style={{ color: '#ff4d4f' }}> *（逾期必填）</span>}
+                </label>
                 <textarea
                   className="form-input form-textarea"
                   value={opinion}
                   onChange={(e) => setOpinion(e.target.value)}
-                  placeholder="请输入审核意见（可选）"
-                  rows={3}
+                  placeholder={application.is_overdue ? '请填写逾期处理说明（必填）...' : '请输入审核意见（可选）'}
+                  rows={application.is_overdue ? 4 : 3}
                 />
               </div>
             </div>
@@ -682,21 +767,34 @@ export default function ApplicationDetail({ user }: ApplicationDetailProps) {
 
       {showReviewPassModal && (
         <div className="modal-overlay" onClick={() => setShowReviewPassModal(false)}>
-          <div className="modal" style={{ width: '440px' }} onClick={(e) => e.stopPropagation()}>
+          <div className="modal" style={{ width: '480px' }} onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <span className="modal-title">复核通过</span>
+              <span className="modal-title">
+                复核通过{application.is_overdue && <span style={{ color: '#cf1322', marginLeft: '8px' }}>（逾期，需填处理说明）</span>}
+              </span>
               <span className="modal-close" onClick={() => setShowReviewPassModal(false)}>×</span>
             </div>
             <div className="modal-body">
+              {application.is_overdue && (
+                <div className="alert alert-warning" style={{ marginBottom: '16px', fontSize: '13px' }}>
+                  <strong>⚠ 注意：</strong>该申请已逾期，
+                  <span style={{ color: '#cf1322' }}>必须填写逾期处理说明</span>后才能复核通过。
+                  <div style={{ marginTop: '6px', color: '#873800' }}>
+                    逾期原因：{application.overdue_reason || '原因未知'}
+                  </div>
+                </div>
+              )}
               <p style={{ marginBottom: '16px' }}>确认复核通过？通过后可进行归档操作。</p>
               <div className="form-item">
-                <label className="form-label">复核意见</label>
+                <label className="form-label">
+                  复核意见{application.is_overdue && <span style={{ color: '#ff4d4f' }}> *（逾期必填）</span>}
+                </label>
                 <textarea
                   className="form-input form-textarea"
                   value={opinion}
                   onChange={(e) => setOpinion(e.target.value)}
-                  placeholder="请输入复核意见（可选）"
-                  rows={3}
+                  placeholder={application.is_overdue ? '请填写逾期处理说明（必填）...' : '请输入复核意见（可选）'}
+                  rows={application.is_overdue ? 4 : 3}
                 />
               </div>
             </div>
@@ -738,21 +836,34 @@ export default function ApplicationDetail({ user }: ApplicationDetailProps) {
 
       {showArchiveModal && (
         <div className="modal-overlay" onClick={() => setShowArchiveModal(false)}>
-          <div className="modal" style={{ width: '420px' }} onClick={(e) => e.stopPropagation()}>
+          <div className="modal" style={{ width: '460px' }} onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <span className="modal-title">归档</span>
+              <span className="modal-title">
+                归档{application.is_overdue && <span style={{ color: '#cf1322', marginLeft: '8px' }}>（逾期，需填处理说明）</span>}
+              </span>
               <span className="modal-close" onClick={() => setShowArchiveModal(false)}>×</span>
             </div>
             <div className="modal-body">
+              {application.is_overdue && (
+                <div className="alert alert-warning" style={{ marginBottom: '16px', fontSize: '13px' }}>
+                  <strong>⚠ 注意：</strong>该申请已逾期，
+                  <span style={{ color: '#cf1322' }}>必须填写逾期处理说明</span>后才能归档。
+                  <div style={{ marginTop: '6px', color: '#873800' }}>
+                    逾期原因：{application.overdue_reason || '原因未知'}
+                  </div>
+                </div>
+              )}
               <p style={{ marginBottom: '16px' }}>确认归档该申请？归档后流程结束。</p>
               <div className="form-item">
-                <label className="form-label">归档备注</label>
+                <label className="form-label">
+                  归档备注{application.is_overdue && <span style={{ color: '#ff4d4f' }}> *（逾期必填）</span>}
+                </label>
                 <textarea
                   className="form-input form-textarea"
                   value={opinion}
                   onChange={(e) => setOpinion(e.target.value)}
-                  placeholder="归档备注（可选）"
-                  rows={2}
+                  placeholder={application.is_overdue ? '请填写逾期处理说明（必填）...' : '归档备注（可选）'}
+                  rows={application.is_overdue ? 4 : 2}
                 />
               </div>
             </div>

@@ -85,6 +85,10 @@ export interface ApplicationListResponse {
 export interface Statistics {
   total: number;
   draft: number;
+  submitted: number;
+  corrected: number;
+  audit_passed: number;
+  review_passed: number;
   pending_audit: number;
   under_review: number;
   pending_correction: number;
@@ -95,6 +99,8 @@ export interface Statistics {
   overdue: number;
   correction_overdue: number;
   review_overdue: number;
+  by_status?: Record<string, number>;
+  by_role?: Record<string, number>;
 }
 
 export interface LoginResponse {
