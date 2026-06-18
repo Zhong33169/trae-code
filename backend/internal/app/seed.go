@@ -37,19 +37,21 @@ type seedStage struct {
 }
 
 type seedOrder struct {
-	orderNo       string
-	title         string
-	customer      string
-	phone         string
-	address       string
-	repairType    string
-	priority      string
-	slaHours      int
-	deadlineH     int
-	status        OrderStatus
-	currentStage  Stage
-	createdByRole Role
-	stages        map[Stage]seedStage
+	orderNo         string
+	title           string
+	customer        string
+	phone           string
+	address         string
+	repairType      string
+	priority        string
+	slaHours        int
+	deadlineH       int
+	status          OrderStatus
+	currentStage    Stage
+	createdByRole   Role
+	versionOverride int
+	rejectFrom      *Stage
+	stages          map[Stage]seedStage
 }
 
 func Seed(ctx context.Context, db *sql.DB) error {
@@ -195,12 +197,48 @@ func Seed(ctx context.Context, db *sql.DB) error {
 				StageArchiving:    {status: StageStatusPending, materials: materialsFor(StageArchiving, false), startOffsetH: 0, timeLimit: 72},
 			},
 		},
+		{
+			orderNo: "WX-DEMO-011", title: "江滨路阀门渗漏复测核验", customer: "江滨路社区物业",
+			phone: "13800000011", address: "江滨路77号", repairType: "漏水", priority: "普通",
+			slaHours: 72, deadlineH: 18, status: StatusPendingReview, currentStage: StageVerification,
+			createdByRole: RoleWindowStaff,
+			stages: map[Stage]seedStage{
+				StageRegistration: {status: StageStatusSubmitted, materials: materialsFor(StageRegistration, true), opinion: "阀门渗漏已初步处理", startOffsetH: -8, submittedH: h(-8), timeLimit: 48},
+				StageVerification: {status: StageStatusPending, materials: materialsFor(StageVerification, true, "复测照片"), startOffsetH: -8, timeLimit: 48},
+				StageArchiving:    {status: StageStatusPending, materials: materialsFor(StageArchiving, false), startOffsetH: 0, timeLimit: 72},
+			},
+		},
+		{
+			orderNo: "WX-DEMO-012", title: "开发区支管抢修退回重报", customer: "开发区物业中心",
+			phone: "13800000012", address: "开发区三路18号", repairType: "爆管", priority: "紧急",
+			slaHours: 72, deadlineH: 36, status: StatusPendingReview, currentStage: StageRegistration,
+			createdByRole: RoleWindowStaff, versionOverride: 3, rejectFrom: ptr(StageVerification),
+			stages: map[Stage]seedStage{
+				StageRegistration: {status: StageStatusPending, materials: materialsFor(StageRegistration, true, "客户报修单"), opinion: "已初步勘察并控压", startOffsetH: -2, timeLimit: 48},
+				StageVerification: {status: StageStatusRejected, materials: materialsFor(StageVerification, false), startOffsetH: -30, reviewedH: h(-2), reviewComment: "现场勘察照片模糊，核验记录单缺失，退回补充后重新提交", timeLimit: 48},
+				StageArchiving:    {status: StageStatusPending, materials: materialsFor(StageArchiving, false), startOffsetH: 0, timeLimit: 72},
+			},
+		},
+		{
+			orderNo: "WX-DEMO-013", title: "旧城区管网改造登记超期", customer: "旧城街道办",
+			phone: "13800000013", address: "旧城西街8号", repairType: "漏水", priority: "普通",
+			slaHours: 72, deadlineH: 20, status: StatusPendingReview, currentStage: StageRegistration,
+			createdByRole: RoleWindowStaff,
+			stages: map[Stage]seedStage{
+				StageRegistration: {status: StageStatusPending, materials: materialsFor(StageRegistration, false), startOffsetH: -50, timeLimit: 48},
+				StageVerification: {status: StageStatusPending, materials: materialsFor(StageVerification, false), startOffsetH: 0, timeLimit: 48},
+				StageArchiving:    {status: StageStatusPending, materials: materialsFor(StageArchiving, false), startOffsetH: 0, timeLimit: 72},
+			},
+		},
 	}
 
 	for _, so := range orders {
 		createdBy := userID[so.createdByRole]
 		deadline := now.Add(time.Duration(so.deadlineH) * time.Hour)
-		version := stageVersion(so.currentStage, so.status)
+		version := so.versionOverride
+		if version == 0 {
+			version = stageVersion(so.currentStage, so.status)
+		}
 		res, err := tx.ExecContext(ctx, `INSERT INTO work_orders
 			(order_no, title, customer_name, customer_phone, address, repair_type, priority, status, current_stage, deadline, sla_hours, created_by, version, created_at, updated_at)
 			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
@@ -263,13 +301,26 @@ func seedAudit(ctx context.Context, tx *sql.Tx, orderID int, so seedOrder, creat
 		{Action: "create", ActorID: &createdBy, ActorRole: so.createdByRole, ToStatus: ptr(StatusPendingReview), ToStage: ptr(StageRegistration), Detail: "窗口人员创建抢修工单", VersionBefore: nil, VersionAfter: ptr(1)},
 	}
 	t := now.Add(-72 * time.Hour)
-	if so.currentStage == StageVerification || so.currentStage == StageArchiving || so.status == StatusSynced {
+
+	pastRegistration := so.currentStage == StageVerification || so.currentStage == StageArchiving || so.status == StatusSynced || so.rejectFrom != nil
+	if pastRegistration {
 		audits = append(audits, AuditLog{Action: "submit_registration", ActorID: &createdBy, ActorRole: RoleWindowStaff, FromStatus: ptr(StatusPendingReview), ToStatus: ptr(StatusPendingReview), FromStage: ptr(StageRegistration), ToStage: ptr(StageVerification), Detail: "窗口人员提交登记材料", VersionBefore: ptr(1), VersionAfter: ptr(2)})
 	}
-	if so.currentStage == StageArchiving || so.status == StatusSynced {
+
+	if so.rejectFrom != nil && *so.rejectFrom == StageVerification {
+		supID := userID[RoleMeterSupervisor]
+		rejectDetail := so.stages[StageVerification].reviewComment
+		audits = append(audits, AuditLog{
+			Action: "reject_verification", ActorID: &supID, ActorRole: RoleMeterSupervisor,
+			FromStatus: ptr(StatusPendingReview), ToStatus: ptr(StatusPendingReview),
+			FromStage: ptr(StageVerification), ToStage: ptr(StageRegistration),
+			Detail: "退回原因：" + rejectDetail, VersionBefore: ptr(2), VersionAfter: ptr(3),
+		})
+	} else if so.currentStage == StageArchiving || so.status == StatusSynced {
 		supID := userID[RoleMeterSupervisor]
 		audits = append(audits, AuditLog{Action: "approve_verification", ActorID: &supID, ActorRole: RoleMeterSupervisor, FromStatus: ptr(StatusPendingReview), ToStatus: ptr(StatusApproved), FromStage: ptr(StageVerification), ToStage: ptr(StageArchiving), Detail: "抄表主管核验通过，推进至复核归档", VersionBefore: ptr(2), VersionAfter: ptr(3)})
 	}
+
 	if so.status == StatusSynced {
 		mgrID := userID[RoleBusinessManager]
 		audits = append(audits, AuditLog{Action: "sync_archiving", ActorID: &mgrID, ActorRole: RoleBusinessManager, FromStatus: ptr(StatusApproved), ToStatus: ptr(StatusSynced), FromStage: ptr(StageArchiving), ToStage: ptr(StageArchiving), Detail: "营业经理复核归档并同步", VersionBefore: ptr(3), VersionAfter: ptr(4)})

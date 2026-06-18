@@ -262,6 +262,29 @@ func mergeMaterials(src, stored []Material) []Material {
 	return out
 }
 
+func materialChangeSummary(merged, stored []Material) string {
+	changed := []string{}
+	storedMap := map[string]bool{}
+	for _, m := range stored {
+		storedMap[m.Name] = m.Provided
+	}
+	for _, m := range merged {
+		if prev, ok := storedMap[m.Name]; ok {
+			if prev != m.Provided {
+				if m.Provided {
+					changed = append(changed, "补齐"+m.Name)
+				} else {
+					changed = append(changed, "撤销"+m.Name)
+				}
+			}
+		}
+	}
+	if len(changed) == 0 {
+		return "材料无变更"
+	}
+	return "材料变更：" + strings.Join(changed, "、")
+}
+
 func overStageTime(stageRec StageRecord, now time.Time) bool {
 	if stageRec.TimeLimitHours <= 0 || stageRec.StartedAt.IsZero() {
 		return false
@@ -295,13 +318,17 @@ func (s *Service) ProcessStage(ctx context.Context, orderID int, stage Stage, re
 
 		switch req.Action {
 		case "submit":
+			if stage != StageRegistration {
+				return ErrWrongOrder("仅登记阶段支持 submit 提交操作")
+			}
 			if err := checkEvidence(req.Materials, stageRec.Materials, req.ProcessingOpinion, true); err != nil {
 				return err
 			}
 			if overStageTime(stageRec, now) {
 				return ErrStageTimeout(fmt.Sprintf("%s 阶段已超出 %d 小时时限，请退回后重新提交", StageLabel(stage), stageRec.TimeLimitHours))
 			}
-			if err := q.UpdateStageSubmit(ctx, orderID, stage, req.ActorID, mergeMaterials(req.Materials, stageRec.Materials), req.ProcessingOpinion); err != nil {
+			mergedMats := mergeMaterials(req.Materials, stageRec.Materials)
+			if err := q.UpdateStageSubmit(ctx, orderID, stage, req.ActorID, mergedMats, req.ProcessingOpinion); err != nil {
 				return err
 			}
 			affected, err := q.UpdateOrderState(ctx, orderID, req.Version, StageVerification, StatusPendingReview)
@@ -316,12 +343,15 @@ func (s *Service) ProcessStage(ctx context.Context, orderID int, stage Stage, re
 				OrderID: orderID, Action: "submit_registration", ActorID: &req.ActorID, ActorRole: req.ActorRole,
 				FromStatus: ptr(order.Status), ToStatus: ptr(StatusPendingReview),
 				FromStage: ptr(StageRegistration), ToStage: ptr(StageVerification),
-				Detail: "窗口人员提交登记材料：" + req.ProcessingOpinion, VersionBefore: &vBefore, VersionAfter: &vAfter,
+				Detail:        materialChangeSummary(mergedMats, stageRec.Materials) + "；处理意见：" + req.ProcessingOpinion,
+				VersionBefore: &vBefore, VersionAfter: &vAfter,
 			})
 
 		case "approve":
-			requireOpinion := req.Action == "approve"
-			if err := checkEvidence(req.Materials, stageRec.Materials, req.ProcessingOpinion, requireOpinion); err != nil {
+			if stage != StageVerification && stage != StageArchiving {
+				return ErrWrongOrder("仅核验/归档阶段支持 approve 审批操作")
+			}
+			if err := checkEvidence(req.Materials, stageRec.Materials, req.ProcessingOpinion, true); err != nil {
 				return err
 			}
 			if overStageTime(stageRec, now) {
@@ -342,7 +372,8 @@ func (s *Service) ProcessStage(ctx context.Context, orderID int, stage Stage, re
 			default:
 				return ErrWrongOrder("该阶段不支持 approve 操作")
 			}
-			if err := q.UpdateStageSubmit(ctx, orderID, stage, req.ActorID, mergeMaterials(req.Materials, stageRec.Materials), opinion); err != nil {
+			mergedMats := mergeMaterials(req.Materials, stageRec.Materials)
+			if err := q.UpdateStageSubmit(ctx, orderID, stage, req.ActorID, mergedMats, opinion); err != nil {
 				return err
 			}
 			if err := q.UpdateStageReview(ctx, orderID, stage, req.ActorID, StageStatusApproved, req.ReviewComment); err != nil {
@@ -360,11 +391,17 @@ func (s *Service) ProcessStage(ctx context.Context, orderID int, stage Stage, re
 				OrderID: orderID, Action: action, ActorID: &req.ActorID, ActorRole: req.ActorRole,
 				FromStatus: ptr(order.Status), ToStatus: ptr(newStatus),
 				FromStage: ptr(stage), ToStage: ptr(newStage),
-				Detail:        "处理意见：" + opinion + "；复核备注：" + req.ReviewComment,
+				Detail:        materialChangeSummary(mergedMats, stageRec.Materials) + "；处理意见：" + opinion + "；复核备注：" + req.ReviewComment,
 				VersionBefore: &vBefore, VersionAfter: &vAfter,
 			})
 
 		case "reject":
+			if stage != StageVerification && stage != StageArchiving {
+				return ErrWrongOrder("仅核验/归档阶段支持 reject 退回操作")
+			}
+			if strings.TrimSpace(req.ReviewComment) == "" {
+				return ErrMissingEvidence("退回原因不能为空")
+			}
 			var newStage Stage
 			switch stage {
 			case StageVerification:
@@ -392,7 +429,8 @@ func (s *Service) ProcessStage(ctx context.Context, orderID int, stage Stage, re
 				OrderID: orderID, Action: "reject_" + string(stage), ActorID: &req.ActorID, ActorRole: req.ActorRole,
 				FromStatus: ptr(order.Status), ToStatus: ptr(StatusPendingReview),
 				FromStage: ptr(stage), ToStage: ptr(newStage),
-				Detail: "退回原因：" + req.ReviewComment, VersionBefore: &vBefore, VersionAfter: &vAfter,
+				Detail:        "退回原因：" + req.ReviewComment + "（v" + fmt.Sprintf("%d", vBefore) + "→v" + fmt.Sprintf("%d", vAfter) + "）",
+				VersionBefore: &vBefore, VersionAfter: &vAfter,
 			})
 		}
 		return nil
@@ -463,6 +501,9 @@ func (s *Service) BatchProcess(ctx context.Context, req BatchRequest) ([]BatchRe
 					Detail: "批量处理意见：" + req.ReviewComment, VersionBefore: &vBefore, VersionAfter: &vAfter,
 				})
 			case "reject":
+				if strings.TrimSpace(req.ReviewComment) == "" {
+					return ErrMissingEvidence("退回原因不能为空")
+				}
 				var newStage Stage
 				switch stage {
 				case StageVerification:
@@ -490,7 +531,7 @@ func (s *Service) BatchProcess(ctx context.Context, req BatchRequest) ([]BatchRe
 					OrderID: item.ID, Action: "batch_reject_" + string(stage), ActorID: &req.ActorID, ActorRole: req.ActorRole,
 					FromStatus: ptr(order.Status), ToStatus: ptr(StatusPendingReview),
 					FromStage: ptr(stage), ToStage: ptr(newStage),
-					Detail: "批量退回原因：" + req.ReviewComment, VersionBefore: &vBefore, VersionAfter: &vAfter,
+					Detail: "批量退回原因：" + req.ReviewComment + "（v" + fmt.Sprintf("%d", vBefore) + "→v" + fmt.Sprintf("%d", vAfter) + "）", VersionBefore: &vBefore, VersionAfter: &vAfter,
 				})
 			default:
 				return ErrInvalidInput("批量 action 必须为 approve/reject")

@@ -126,7 +126,7 @@ export default function OrderDetailPage() {
         action,
         actorRole: actingRole,
         actorId: actingUser.id,
-        materials: action === "submit" ? materials : undefined,
+        materials: action === "reject" ? undefined : materials,
         processingOpinion: opinion || undefined,
         reviewComment: reviewComment || undefined,
         version: order.version,
@@ -479,7 +479,7 @@ function StageDetailCard({
                     missing ? "text-crimson" : "text-ink-soft"
                   }`}
                 >
-                  {canAct && isRegistration ? (
+                  {canAct ? (
                     <input
                       type="checkbox"
                       checked={isChecked}
@@ -579,23 +579,27 @@ function StageDetailCard({
             <span className="font-semibold text-deep-600">
               当前岗位：{ROLE_LABELS[actingRole]}
             </span>
-            <span>可执行以下操作：</span>
+            <span>可编辑材料并执行以下操作：</span>
           </div>
-          {isRegistration && (
-            <input
-              type="text"
-              value={opinion}
-              onChange={(e) => setOpinion(e.target.value)}
-              placeholder="处理意见（必填）"
-              className="input-field"
-            />
-          )}
+          <input
+            type="text"
+            value={opinion}
+            onChange={(e) => setOpinion(e.target.value)}
+            placeholder={
+              isRegistration
+                ? "处理意见（必填，描述登记结论）"
+                : stage === "verification"
+                ? "处理意见（必填，描述核验结论）"
+                : "处理意见（必填，描述归档结论）"
+            }
+            className="input-field"
+          />
           {!isRegistration && (
             <input
               type="text"
               value={reviewComment}
               onChange={(e) => setReviewComment(e.target.value)}
-              placeholder="复核备注 / 退回原因"
+              placeholder="复核备注 / 退回原因（退回时必填）"
               className="input-field"
             />
           )}
