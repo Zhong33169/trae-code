@@ -33,6 +33,23 @@ var rejectRoles = map[string]string{
 	StatusReviewed:  RoleBusinessOwner,
 }
 
+func canRejectTask(status string, currentHandlerRole string, userRole string) (bool, string) {
+	// 1. 状态不允许驳回
+	reqRole, ok := rejectRoles[status]
+	if !ok {
+		return false, fmt.Sprintf("任务状态为【%s】，不允许驳回", statusLabel(status))
+	}
+	// 2. 当前办理岗位必须与用户角色一致（草稿除外，但草稿根本不会到 reject）
+	if status != StatusDraft && currentHandlerRole != userRole {
+		return false, fmt.Sprintf("当前办理岗位为【%s】，您的角色无权办理", roleLabel(currentHandlerRole))
+	}
+	// 3. 用户角色必须是该状态下允许驳回的角色
+	if userRole != reqRole {
+		return false, fmt.Sprintf("驳回【%s】状态要求【%s】角色，当前角色无权驳回", statusLabel(status), roleLabel(reqRole))
+	}
+	return true, ""
+}
+
 var actionLabels = map[string]string{
 	"submit": "提交", "review": "复核", "confirm": "确认", "archive": "归档", "reject": "驳回",
 }
@@ -230,16 +247,12 @@ func (s *Service) BatchTransition(req BatchRequest, user principal) (*Batch, []B
 			continue
 		}
 		if isReject {
-			reqRole, ok := rejectRoles[task.Status]
-			if !ok {
-				msg := fmt.Sprintf("任务【%s】状态为【%s】，不允许驳回", task.TaskNo, statusLabel(task.Status))
-				_ = s.repo.InsertBatchItem(batchID, task.ID, version, task.TaskNo, "failed", "INVALID_STATUS", msg, 0)
-				fail++
-				continue
-			}
-			if user.Role != reqRole {
-				msg := fmt.Sprintf("任务【%s】驳回要求【%s】角色，当前角色无权驳回", task.TaskNo, roleLabel(reqRole))
-				_ = s.repo.InsertBatchItem(batchID, task.ID, version, task.TaskNo, "failed", "FORBIDDEN_ROLE", msg, 0)
+			if ok, msg := canRejectTask(task.Status, task.CurrentHandlerRole, user.Role); !ok {
+				code := "INVALID_STATUS"
+				if strings.Contains(msg, "角色") || strings.Contains(msg, "无权办理") {
+					code = "FORBIDDEN_ROLE"
+				}
+				_ = s.repo.InsertBatchItem(batchID, task.ID, version, task.TaskNo, "failed", code, msg, 0)
 				fail++
 				continue
 			}
@@ -323,17 +336,13 @@ func (s *Service) RetryBatch(batchID int, req RetryRequest, user principal) (*Ba
 			continue
 		}
 		if isReject {
-			reqRole, ok := rejectRoles[task.Status]
-			if !ok {
-				msg := fmt.Sprintf("任务【%s】状态为【%s】，不允许驳回", task.TaskNo, statusLabel(task.Status))
-				_ = s.repo.UpdateBatchItem(itemID, "failed", "INVALID_STATUS", msg, nextRetry, requestVersion)
-				_ = s.repo.InsertAudit(batchRef, task.ID, task.TaskNo, "retry_fail", user, task.Status, task.Status, fmt.Sprintf("重试#%d：INVALID_STATUS（%s）", nextRetry, task.Status))
-				continue
-			}
-			if user.Role != reqRole {
-				msg := fmt.Sprintf("任务【%s】驳回要求【%s】角色，当前角色无权驳回", task.TaskNo, roleLabel(reqRole))
-				_ = s.repo.UpdateBatchItem(itemID, "failed", "FORBIDDEN_ROLE", msg, nextRetry, requestVersion)
-				_ = s.repo.InsertAudit(batchRef, task.ID, task.TaskNo, "retry_fail", user, task.Status, task.Status, fmt.Sprintf("重试#%d：FORBIDDEN_ROLE（驳回角色不符）", nextRetry))
+			if ok, msg := canRejectTask(task.Status, task.CurrentHandlerRole, user.Role); !ok {
+				code := "INVALID_STATUS"
+				if strings.Contains(msg, "角色") || strings.Contains(msg, "无权办理") {
+					code = "FORBIDDEN_ROLE"
+				}
+				_ = s.repo.UpdateBatchItem(itemID, "failed", code, msg, nextRetry, requestVersion)
+				_ = s.repo.InsertAudit(batchRef, task.ID, task.TaskNo, "retry_fail", user, task.Status, task.Status, fmt.Sprintf("重试#%d：%s %s", nextRetry, code, msg))
 				continue
 			}
 			if strings.TrimSpace(req.Reason) == "" {

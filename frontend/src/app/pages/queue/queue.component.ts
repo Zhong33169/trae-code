@@ -4,8 +4,8 @@ import { ApiService } from '../../core/api.service';
 import { AuthService } from '../../core/auth.service';
 import { RefreshService } from '../../core/refresh.service';
 import {
-  ActionType, ApiError, AppUser, Task, TaskStatus, STATUS_FILTERS,
-  ROLE_LABELS, ACTION_LABELS, actionRequiredRole,
+  ActionType, ApiError, AppUser, Task, TaskStatus, STATUS_FILTERS, Role,
+  ROLE_LABELS, ACTION_LABELS, actionRequiredRole, canBatchAction, canRejectByStatus, canRejectByStatusFn,
 } from '../../core/models';
 import { StatusBadgeComponent } from '../../components/status-badge.component';
 import { EvidenceCardComponent } from '../../components/evidence-card.component';
@@ -167,7 +167,17 @@ const RENEWAL_TYPES = ['原险种续保', '降保额续保', '升保额续保', 
             <div>
               <div class="section-title">所选任务（携带当前版本提交，后端逐项强制校验）</div>
               <table class="tbl">
-                <thead><tr><th>任务号</th><th>客户</th><th>状态</th><th class="mono">请求版本</th></tr></thead>
+                <thead>
+                  <tr>
+                    <th>任务号</th>
+                    <th>客户</th>
+                    <th>状态</th>
+                    <th class="mono">请求版本</th>
+                    @if (batchAction() === 'reject') {
+                      <th>驳回资格</th>
+                    }
+                  </tr>
+                </thead>
                 <tbody>
                   @for (t of selectedTasks(); track t.id) {
                     <tr>
@@ -175,6 +185,15 @@ const RENEWAL_TYPES = ['原险种续保', '降保额续保', '升保额续保', 
                       <td>{{ t.customerName }}</td>
                       <td><app-status-badge [status]="t.status" /></td>
                       <td class="mono"><span class="ver-badge">v{{ t.version }}</span></td>
+                      @if (batchAction() === 'reject') {
+                        <td>
+                          @if (canRejectByStatus(t.status, curUser()?.role)) {
+                            <span class="tag-ok" style="display:inline-block;padding:2px 8px;border-radius:12px;background:#d1fae5;color:#065f46;font-size:12px">✓ 可驳回</span>
+                          } @else {
+                            <span class="tag-no" style="display:inline-block;padding:2px 8px;border-radius:12px;background:#fee2e2;color:#991b1b;font-size:12px">✗ 无资格</span>
+                          }
+                        </td>
+                      }
                     </tr>
                   }
                 </tbody>
@@ -390,6 +409,10 @@ export class QueueComponent {
     return (have / 3) * 100;
   }
 
+  canRejectByStatus(status: TaskStatus, role?: Role): boolean {
+    return !!role && canRejectByStatusFn(status, role);
+  }
+
   selectedIds(): number[] { return Array.from(this.selected()); }
 
   batchActions(): ActionType[] {
@@ -398,10 +421,7 @@ export class QueueComponent {
     const tasks = this.selectedTasks();
     if (tasks.length === 0) return [];
     const all: ActionType[] = ['submit', 'review', 'confirm', 'archive', 'reject'];
-    return all.filter(a => {
-      // 至少存在一个任务，当前角色可做动作 a
-      return tasks.some(t => role === actionRequiredRole(a, t.status));
-    });
+    return all.filter(a => canBatchAction(a, tasks, role));
   }
 
   openBatch(a: ActionType) {

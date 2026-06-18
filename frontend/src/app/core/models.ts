@@ -143,13 +143,26 @@ export function actionRequiredRole(action: ActionType, status?: TaskStatus): Rol
     case 'confirm':
     case 'archive': return 'business_owner';
     case 'reject':
-      // 按任务状态匹配可驳回角色
       switch (status) {
         case 'submitted': return 'underwriting_specialist';
         case 'reviewed':  return 'business_owner';
         default:          return 'customer_manager';
       }
   }
+}
+
+export function canRejectByStatusFn(status: TaskStatus, role: Role): boolean {
+  if (status === 'submitted') return role === 'underwriting_specialist';
+  if (status === 'reviewed')  return role === 'business_owner';
+  return false;
+}
+export const canRejectByStatus = canRejectByStatusFn;
+
+export function canBatchAction(action: ActionType, tasks: Task[], role: Role): boolean {
+  if (action === 'reject') {
+    return tasks.some(t => canRejectByStatusFn(t.status, role));
+  }
+  return tasks.some(t => actionRequiredRole(action, t.status) === role);
 }
 
 export function evidenceKeyForAction(action: ActionType): keyof Task | null {
