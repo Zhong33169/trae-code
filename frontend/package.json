@@ -1,0 +1,25 @@
+{
+  "name": "training-project-frontend",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tanstack start --port 3001",
+    "build": "tanstack start build",
+    "start": "tanstack start start --port 3001"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5.56.2",
+    "@tanstack/react-router": "^1.76.3",
+    "@tanstack/react-router-server": "^1.76.3",
+    "@tanstack/start": "^1.76.3",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.5",
+    "@types/react-dom": "^18.3.0",
+    "typescript": "^5.5.3",
+    "vite": "^5.4.6",
+    "@tanstack/start-devtools": "^1.76.3"
+  }
+}
