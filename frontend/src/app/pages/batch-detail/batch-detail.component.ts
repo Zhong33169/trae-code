@@ -229,8 +229,18 @@ export class BatchDetailComponent {
     this.retryBusy.set(true);
     this.retryErr.set(null);
     try {
-      const failedIds = this.failedItems().map(i => i.id);
-      const res = await this.api.retryBatch(this.batchId, { itemIds: failedIds, evidence: this.retryEvidence() });
+      const failed = this.failedItems();
+      const failedIds = failed.map(i => i.id);
+      const versions: Record<number, number> = {};
+      for (const it of failed) {
+        try {
+          const t = await this.api.getTask(it.taskId);
+          versions[it.taskId] = t.task.version;
+        } catch {
+          versions[it.taskId] = 0;
+        }
+      }
+      const res = await this.api.retryBatch(this.batchId, { itemIds: failedIds, evidence: this.retryEvidence(), versions });
       this.batch.set(res.batch);
       this.items.set(res.items);
       this.retryOpen.set(false);

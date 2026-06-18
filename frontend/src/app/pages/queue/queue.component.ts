@@ -182,7 +182,7 @@ const RENEWAL_TYPES = ['原险种续保', '降保额续保', '升保额续保', 
             </div>
 
             <div class="field">
-              <label>{{ actionLabel(batchAction()!) }}证据 / 备注（必填）</label>
+              <label>{{ batchAction() === 'reject' ? '驳回原因（必填）' : (actionLabel(batchAction()!) + '证据 / 备注（必填）') }}</label>
               <textarea [value]="batchEvidence()" (input)="batchEvidence.set($any($event.target).value)" placeholder="{{ evidencePlaceholder(batchAction()!) }}"></textarea>
             </div>
             <div class="muted tiny">执行人：{{ curUser()?.displayName }}（{{ roleLabel(curUser()?.role) }}）</div>
@@ -427,7 +427,13 @@ export class QueueComponent {
       const ids = this.selectedIds();
       const versions: Record<number, number> = {};
       for (const t of this.selectedTasks()) versions[t.id] = t.version;
-      const { batch, items } = await this.api.createBatch({ action, taskIds: ids, evidence: this.batchEvidence(), versions });
+      const payload: any = { action, taskIds: ids, versions };
+      if (action === 'reject') {
+        payload.reason = this.batchEvidence();
+      } else {
+        payload.evidence = this.batchEvidence();
+      }
+      const { batch, items } = await this.api.createBatch(payload);
       const failedItems = items.filter(i => i.status === 'failed').map(i => ({ taskNo: i.taskNo, errorCode: i.errorCode, requestVersion: i.requestVersion, reason: i.errorReason }));
       this.result.set({
         batchNo: batch.batchNo,

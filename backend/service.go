@@ -190,8 +190,10 @@ func (s *Service) BatchTransition(req BatchRequest, user principal) (*Batch, []B
 	if len(req.TaskIDs) == 0 {
 		return nil, nil, apiErr("BAD_REQUEST", "请选择至少一个任务")
 	}
-	if _, ok := transitionSpecs[req.Action]; !ok {
-		return nil, nil, apiErr("BAD_REQUEST", "批量仅支持 submit/review/confirm/archive")
+	_, isNormal := transitionSpecs[req.Action]
+	isReject := req.Action == "reject"
+	if !isNormal && !isReject {
+		return nil, nil, apiErr("BAD_REQUEST", "批量仅支持 submit/review/confirm/archive/reject")
 	}
 
 	batchNo := s.repo.nextBatchNo()
@@ -227,7 +229,7 @@ func (s *Service) BatchTransition(req BatchRequest, user principal) (*Batch, []B
 			fail++
 			continue
 		}
-		res, aerr := s.validate(req.Action, task, user, version, req.Evidence, "")
+		res, aerr := s.validate(req.Action, task, user, version, req.Evidence, req.Reason)
 		if aerr != nil {
 			_ = s.repo.InsertBatchItem(batchID, task.ID, version, task.TaskNo, "failed", aerr.Code, aerr.Message, 0)
 			fail++
@@ -254,12 +256,15 @@ func (s *Service) RetryBatch(batchID int, req RetryRequest, user principal) (*Ba
 	if err != nil {
 		return nil, nil, apiErr("NOT_FOUND", "批次不存在")
 	}
-	if _, ok := transitionSpecs[batch.Action]; !ok {
+	_, isNormal := transitionSpecs[batch.Action]
+	isReject := batch.Action == "reject"
+	if !isNormal && !isReject {
 		return nil, nil, apiErr("BAD_REQUEST", "该批次动作不支持重试")
 	}
 	if len(req.ItemIDs) == 0 {
 		return nil, nil, apiErr("BAD_REQUEST", "请选择需要重试的失败项")
 	}
+	batchRef := sql.NullInt64{Int64: int64(batchID), Valid: true}
 
 	for _, itemID := range req.ItemIDs {
 		item, err := s.repo.GetBatchItem(itemID)
@@ -270,39 +275,42 @@ func (s *Service) RetryBatch(batchID int, req RetryRequest, user principal) (*Ba
 			continue
 		}
 		task, err := s.repo.GetTaskByID(item.TaskID)
+		nextRetry := item.RetryCount + 1
 		if err != nil {
-			_ = s.repo.UpdateBatchItem(itemID, "failed", "NOT_FOUND", "任务不存在", item.RetryCount+1, 0)
+			_ = s.repo.UpdateBatchItem(itemID, "failed", "NOT_FOUND", "任务不存在", nextRetry, 0)
+			_ = s.repo.InsertAudit(batchRef, item.TaskID, item.TaskNo, "retry_fail", user, "", "", fmt.Sprintf("重试#%d：任务不存在", nextRetry))
 			continue
 		}
-		requestVersion := task.Version
-		if req.Versions != nil {
-			if v, ok := req.Versions[task.ID]; ok {
-				requestVersion = v
-			} else {
-				msg := fmt.Sprintf("缺少任务【%s】的请求版本（重试 versions map 未提供该任务的版本号）", task.TaskNo)
-				_ = s.repo.UpdateBatchItem(itemID, "failed", "MISSING_VERSION", msg, item.RetryCount+1, 0)
-				continue
-			}
-			if requestVersion != task.Version {
-				msg := fmt.Sprintf("任务【%s】版本已过期（请求 v%d，服务端 v%d），请刷新后重试", task.TaskNo, requestVersion, task.Version)
-				_ = s.repo.UpdateBatchItem(itemID, "failed", "STALE_VERSION", msg, item.RetryCount+1, requestVersion)
-				continue
-			}
-			if task.Status != StatusDraft && task.CurrentHandlerRole != user.Role {
-				msg := fmt.Sprintf("任务【%s】当前办理岗位为【%s】，当前角色无权办理", task.TaskNo, roleLabel(task.CurrentHandlerRole))
-				_ = s.repo.UpdateBatchItem(itemID, "failed", "FORBIDDEN_ROLE", msg, item.RetryCount+1, requestVersion)
-				continue
-			}
+		// 强制校验 versions：缺版本 / 旧版本 / 错角色
+		requestVersion, hasVersion := req.Versions[task.ID]
+		if !hasVersion {
+			msg := fmt.Sprintf("缺少任务【%s】的请求版本（重试 versions map 未提供该任务的版本号）", task.TaskNo)
+			_ = s.repo.UpdateBatchItem(itemID, "failed", "MISSING_VERSION", msg, nextRetry, 0)
+			_ = s.repo.InsertAudit(batchRef, task.ID, task.TaskNo, "retry_fail", user, task.Status, task.Status, fmt.Sprintf("重试#%d：MISSING_VERSION", nextRetry))
+			continue
+		}
+		if requestVersion != task.Version {
+			msg := fmt.Sprintf("任务【%s】版本已过期（请求 v%d，服务端 v%d），请刷新后重试", task.TaskNo, requestVersion, task.Version)
+			_ = s.repo.UpdateBatchItem(itemID, "failed", "STALE_VERSION", msg, nextRetry, requestVersion)
+			_ = s.repo.InsertAudit(batchRef, task.ID, task.TaskNo, "retry_fail", user, task.Status, task.Status, fmt.Sprintf("重试#%d：STALE_VERSION v%d→v%d", nextRetry, requestVersion, task.Version))
+			continue
+		}
+		if task.Status != StatusDraft && task.CurrentHandlerRole != user.Role {
+			msg := fmt.Sprintf("任务【%s】当前办理岗位为【%s】，当前角色无权办理", task.TaskNo, roleLabel(task.CurrentHandlerRole))
+			_ = s.repo.UpdateBatchItem(itemID, "failed", "FORBIDDEN_ROLE", msg, nextRetry, requestVersion)
+			_ = s.repo.InsertAudit(batchRef, task.ID, task.TaskNo, "retry_fail", user, task.Status, task.Status, fmt.Sprintf("重试#%d：FORBIDDEN_ROLE", nextRetry))
+			continue
 		}
 		res, aerr := s.validate(batch.Action, task, user, requestVersion, req.Evidence, "")
 		if aerr != nil {
-			_ = s.repo.UpdateBatchItem(itemID, "failed", aerr.Code, aerr.Message, item.RetryCount+1, requestVersion)
+			_ = s.repo.UpdateBatchItem(itemID, "failed", aerr.Code, aerr.Message, nextRetry, requestVersion)
+			_ = s.repo.InsertAudit(batchRef, task.ID, task.TaskNo, "retry_fail", user, task.Status, task.Status, fmt.Sprintf("重试#%d：%s %s", nextRetry, aerr.Code, aerr.Message))
 			continue
 		}
 		_ = s.repo.ApplyTransition(task.ID, res.evidenceCol, res.evidenceVal, res.newStatus, res.nextHandler)
 		_ = s.repo.SetTaskLastBatch(task.ID, batchID)
-		_ = s.repo.InsertAudit(sql.NullInt64{Int64: int64(batchID), Valid: true}, task.ID, task.TaskNo, batch.Action, user, task.Status, res.newStatus, "重试"+actionLabel(batch.Action))
-		_ = s.repo.UpdateBatchItem(itemID, "success", "", "", item.RetryCount+1, requestVersion)
+		_ = s.repo.InsertAudit(batchRef, task.ID, task.TaskNo, batch.Action, user, task.Status, res.newStatus, fmt.Sprintf("重试#%d：%s成功", nextRetry, actionLabel(batch.Action)))
+		_ = s.repo.UpdateBatchItem(itemID, "success", "", "", nextRetry, requestVersion)
 	}
 
 	_ = s.repo.RecomputeBatchCounts(batchID)

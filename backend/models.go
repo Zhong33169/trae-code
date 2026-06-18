@@ -228,6 +228,7 @@ type BatchRequest struct {
 	TaskIDs  []int       `json:"taskIds"`
 	Action   string      `json:"action"`
 	Evidence string      `json:"evidence"`
+	Reason   string      `json:"reason"`
 	Versions map[int]int `json:"versions"`
 }
 
