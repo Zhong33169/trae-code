@@ -126,10 +126,10 @@ const { get, put } = useApi()
 const userStore = useUserStore()
 
 interface Application {
-  id: string
+  id: number
   application_no: string
   borrower_name: string
-  id_card: string
+  borrower_id_card: string
   loan_contract_no: string
   extension_days: number
   status: string
@@ -236,11 +236,11 @@ const handleReset = () => {
 }
 
 const handleCreate = () => {
-  alert('新建申请功能开发中...')
+  navigateTo('/applications/new')
 }
 
 const handleEdit = (item: Application) => {
-  alert(`编辑申请 ${item.application_no} 功能开发中...`)
+  navigateTo(`/applications/${item.id}/edit`)
 }
 
 const handleSubmit = async (item: Application) => {
@@ -284,6 +284,10 @@ const nextPage = () => {
 }
 
 onMounted(() => {
+  loadData()
+})
+
+onActivated(() => {
   loadData()
 })
 </script>

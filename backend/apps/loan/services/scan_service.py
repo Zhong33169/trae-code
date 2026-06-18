@@ -13,6 +13,10 @@ def scan_qr_code(user, qr_code, location=''):
         'scan_result_display': '',
         'error_message': '',
         'application': None,
+        'last_scan_time': None,
+        'last_scan_user': '',
+        'current_handler_role': '',
+        'current_handler_role_name': '',
     }
 
     try:
@@ -53,6 +57,8 @@ def scan_qr_code(user, qr_code, location=''):
         result['scan_result_display'] = '非当前处理人'
         result['error_message'] = f'该展期申请当前处理角色为「{_get_role_name(app.current_handler_role)}」，您的角色为「{_get_role_name(user_role)}」，无权处理此申请。'
         result['application'] = serialize_application_detail(app)
+        result['current_handler_role'] = app.current_handler_role
+        result['current_handler_role_name'] = _get_role_name(app.current_handler_role)
 
         log_action(
             user,
@@ -78,6 +84,8 @@ def scan_qr_code(user, qr_code, location=''):
         result['scan_result_display'] = '状态不匹配'
         result['error_message'] = f'该展期申请状态为「{app.get_status_display()}」，无需再次扫码核验。'
         result['application'] = serialize_application_detail(app)
+        result['current_handler_role'] = app.current_handler_role
+        result['current_handler_role_name'] = _get_role_name(app.current_handler_role) if app.current_handler_role else ''
 
         log_action(
             user,
@@ -93,7 +101,7 @@ def scan_qr_code(user, qr_code, location=''):
         qr_code=qr_code,
         scan_result=QrCodeRecord.SCAN_RESULT_SUCCESS,
         scan_time__gte=timezone.now() - timezone.timedelta(minutes=30),
-    ).exclude(scanner=user).first()
+    ).first()
 
     if recent_scan:
         scan_record = QrCodeRecord.objects.create(
@@ -108,6 +116,10 @@ def scan_qr_code(user, qr_code, location=''):
         result['scan_result_display'] = '重复扫码'
         result['error_message'] = f'该二维码已在 {recent_scan.scan_time.strftime("%Y-%m-%d %H:%M:%S")} 由「{recent_scan.scanner.username}」扫码核验通过，请勿重复扫码。'
         result['application'] = serialize_application_detail(app)
+        result['last_scan_time'] = recent_scan.scan_time
+        result['last_scan_user'] = recent_scan.scanner.username
+        result['current_handler_role'] = app.current_handler_role
+        result['current_handler_role_name'] = _get_role_name(app.current_handler_role) if app.current_handler_role else ''
 
         log_action(
             user,
@@ -133,6 +145,8 @@ def scan_qr_code(user, qr_code, location=''):
     result['scan_result_display'] = '核验通过'
     result['error_message'] = ''
     result['application'] = serialize_application_detail(app)
+    result['current_handler_role'] = app.current_handler_role
+    result['current_handler_role_name'] = _get_role_name(app.current_handler_role) if app.current_handler_role else ''
 
     log_action(
         user,

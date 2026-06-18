@@ -181,6 +181,9 @@
                 <th>材料名称</th>
                 <th>是否必填</th>
                 <th>核验状态</th>
+                <th>核验人</th>
+                <th>核验时间</th>
+                <th>操作</th>
               </tr>
             </thead>
             <tbody>
@@ -195,9 +198,20 @@
                   <span v-if="item.is_verified" class="status-tag status-final_approved">已核验</span>
                   <span v-else class="status-tag status-draft">未核验</span>
                 </td>
+                <td>{{ item.verified_by_name || '-' }}</td>
+                <td>{{ item.verified_at ? formatDateTime(item.verified_at) : '-' }}</td>
+                <td>
+                  <button
+                    v-if="canVerifyMaterial"
+                    class="btn-link"
+                    @click="handleVerifyMaterial(item, !item.is_verified)"
+                  >
+                    {{ item.is_verified ? '取消核验' : '核验通过' }}
+                  </button>
+                </td>
               </tr>
               <tr v-if="application.materials.length === 0">
-                <td colspan="4" class="empty-row">暂无材料</td>
+                <td colspan="7" class="empty-row">暂无材料</td>
               </tr>
             </tbody>
           </table>
@@ -238,20 +252,27 @@
       <div class="section-title">
         <span class="section-icon">⏱️</span>
         <h3>审计日志</h3>
+        <span class="audit-count">共 {{ auditLogs.length }} 条</span>
       </div>
       <div class="timeline">
-        <div v-for="(log, index) in auditLogs" :key="log.id" class="timeline-item">
-          <div class="timeline-dot"></div>
+        <div v-for="(log, index) in auditLogs" :key="log.id" :class="['timeline-item', { 'timeline-item-warning': isWarningLog(log) }]">
+          <div :class="['timeline-dot', { 'timeline-dot-warning': isWarningLog(log) }]"></div>
           <div class="timeline-content">
             <div class="timeline-header">
-              <span class="timeline-title">{{ log.action_display }}</span>
+              <div class="timeline-title-wrap">
+                <span class="timeline-title">{{ log.action_display }}</span>
+                <span v-if="isWarningLog(log)" class="warning-tag">异常</span>
+              </div>
               <span class="timeline-time">{{ formatDateTime(log.created_at) }}</span>
             </div>
             <div class="timeline-desc">{{ log.action_detail || log.remark || '-' }}</div>
+            <div v-if="log.remark && log.action_detail && log.remark !== log.action_detail" class="timeline-remark">
+              {{ log.remark }}
+            </div>
             <div class="timeline-meta">
               <span>操作人：{{ log.operator_name }}</span>
               <span v-if="log.old_status">原状态：{{ statusMap[log.old_status] || log.old_status }}</span>
-              <span v-if="log.new_status">新状态：{{ statusMap[log.new_status] || log.new_status }}</span>
+              <span v-if="log.new_status && log.new_status !== log.old_status">新状态：{{ statusMap[log.new_status] || log.new_status }}</span>
             </div>
           </div>
         </div>
@@ -353,6 +374,8 @@ interface Material {
   material_name: string
   is_required: boolean
   is_verified: boolean
+  verified_by_name: string
+  verified_at: string
   upload_time: string
 }
 
@@ -432,6 +455,12 @@ const showActionBar = computed(() => {
   return false
 })
 
+const canVerifyMaterial = computed(() => {
+  if (!application.value) return false
+  if (!isRegistrar.value) return false
+  return canSubmitStatus.value
+})
+
 const statusMap: Record<string, string> = {
   draft: '草稿',
   pending_review: '待审核',
@@ -464,6 +493,12 @@ const formatNumber = (num: string | number): string => {
   if (num === undefined || num === null) return '0'
   const n = typeof num === 'string' ? parseFloat(num) : num
   return n.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
+const isWarningLog = (log: AuditLog): boolean => {
+  const warningKeywords = ['越权', '异常', '失败', '冲突', '错误', '拦截', '无效', '重复']
+  const text = (log.action_detail + log.remark + log.action_display).toLowerCase()
+  return warningKeywords.some(keyword => text.includes(keyword))
 }
 
 const loadDetail = async () => {
@@ -585,11 +620,32 @@ const handleArchive = async () => {
   }
 }
 
+const handleVerifyMaterial = async (material: Material, verified: boolean) => {
+  const actionText = verified ? '核验通过' : '取消核验'
+  if (!confirm(`确定${actionText}材料「${material.material_name}」？`)) return
+  try {
+    await put(`/applications/${id.value}/materials/verify`, {
+      material_id: material.id,
+      verified: verified
+    })
+    alert(`${actionText}成功`)
+    await loadDetail()
+    await loadAuditLogs()
+  } catch (error: any) {
+    alert(error.message || '操作失败')
+  }
+}
+
 const goBack = () => {
   navigateTo('/applications')
 }
 
 onMounted(() => {
+  loadDetail()
+  loadAuditLogs()
+})
+
+onActivated(() => {
   loadDetail()
   loadAuditLogs()
 })
@@ -765,6 +821,22 @@ onMounted(() => {
   padding: 20px;
 }
 
+.section-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #f3f4f6;
+}
+
+.audit-count {
+  margin-left: auto;
+  font-size: 12px;
+  color: #9ca3af;
+  font-weight: normal;
+}
+
 .timeline {
   position: relative;
   padding-left: 30px;
@@ -779,6 +851,13 @@ onMounted(() => {
   padding-bottom: 0;
 }
 
+.timeline-item.timeline-item-warning .timeline-content {
+  background: #fef2f2;
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid #fecaca;
+}
+
 .timeline-dot {
   position: absolute;
   left: -30px;
@@ -791,6 +870,11 @@ onMounted(() => {
   box-shadow: 0 0 0 2px #3b82f6;
 }
 
+.timeline-dot.timeline-dot-warning {
+  background: #ef4444;
+  box-shadow: 0 0 0 2px #ef4444;
+}
+
 .timeline-content {
   padding-left: 8px;
 }
@@ -798,14 +882,29 @@ onMounted(() => {
 .timeline-header {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
   margin-bottom: 4px;
+}
+
+.timeline-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .timeline-title {
   font-size: 14px;
   font-weight: 600;
   color: #1f2937;
+}
+
+.warning-tag {
+  font-size: 11px;
+  padding: 2px 8px;
+  background: #fee2e2;
+  color: #dc2626;
+  border-radius: 12px;
+  font-weight: 500;
 }
 
 .timeline-time {
@@ -817,6 +916,16 @@ onMounted(() => {
   font-size: 13px;
   color: #6b7280;
   margin-bottom: 4px;
+}
+
+.timeline-remark {
+  font-size: 12px;
+  color: #dc2626;
+  background: #fff;
+  padding: 6px 8px;
+  border-radius: 4px;
+  margin-bottom: 6px;
+  line-height: 1.5;
 }
 
 .timeline-meta {
@@ -946,6 +1055,19 @@ onMounted(() => {
 .form-textarea:focus {
   border-color: #3b82f6;
   box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.btn-link {
+  background: none;
+  border: none;
+  color: #3b82f6;
+  cursor: pointer;
+  font-size: 13px;
+  padding: 0;
+}
+
+.btn-link:hover {
+  text-decoration: underline;
 }
 
 .status-urgent {

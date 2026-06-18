@@ -106,6 +106,7 @@ class ApplicationUpdateSchema(Schema):
     extension_days: Optional[int] = None
     extension_reason: Optional[str] = None
     is_urgent: Optional[bool] = None
+    version: Optional[int] = None
 
 
 class RepaymentPlanSchema(Schema):
@@ -125,7 +126,14 @@ class MaterialSchema(Schema):
     material_name: str
     is_required: bool
     is_verified: bool
+    verified_by_name: str = ''
+    verified_at: Optional[datetime] = None
     upload_time: datetime
+
+
+class MaterialVerifySchema(Schema):
+    material_id: int
+    verified: bool
 
 
 class ApplicationDetailSchema(ApplicationSchema):
@@ -138,12 +146,14 @@ class ReviewSchema(Schema):
     approved: bool
     opinion: str
     new_interest_rate: Optional[Decimal] = None
+    version: Optional[int] = None
 
 
 class FinalReviewSchema(Schema):
     application_id: int
     approved: bool
     opinion: str
+    version: Optional[int] = None
 
 
 class QrCodeScanSchema(Schema):
@@ -157,6 +167,10 @@ class QrCodeScanResultSchema(Schema):
     scan_result_display: str
     error_message: str
     application: Optional[ApplicationDetailSchema] = None
+    last_scan_time: Optional[datetime] = None
+    last_scan_user: str = ''
+    current_handler_role: str = ''
+    current_handler_role_name: str = ''
 
 
 class AuditLogSchema(Schema):

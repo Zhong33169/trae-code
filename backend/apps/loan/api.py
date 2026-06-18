@@ -83,9 +83,9 @@ def create_application(request, payload: schemas.ApplicationCreateSchema):
 
 
 @api.put('/applications/{application_id}/submit', tags=['展期申请'], response=schemas.ApplicationDetailSchema, auth=auth)
-def submit_application(request, application_id: int):
+def submit_application(request, application_id: int, version: int = None):
     try:
-        return application_service.submit_application(request.user, application_id)
+        return application_service.submit_application(request.user, application_id, version=version)
     except ValueError as e:
         return api.create_response(request, {'code': 'INVALID_OPERATION', 'message': str(e)}, status=400)
     except PermissionError as e:
@@ -101,6 +101,7 @@ def review_application(request, application_id: int, payload: schemas.ReviewSche
             approved=payload.approved,
             opinion=payload.opinion,
             new_interest_rate=payload.new_interest_rate,
+            version=payload.version if hasattr(payload, 'version') else None,
         )
     except ValueError as e:
         return api.create_response(request, {'code': 'INVALID_OPERATION', 'message': str(e)}, status=400)
@@ -111,7 +112,12 @@ def review_application(request, application_id: int, payload: schemas.ReviewSche
 @api.put('/applications/{application_id}/correct', tags=['展期申请'], response=schemas.ApplicationDetailSchema, auth=auth)
 def correct_application(request, application_id: int, payload: schemas.ApplicationUpdateSchema):
     try:
-        return application_service.correct_application(request.user, application_id, payload.dict(exclude_unset=True))
+        return application_service.correct_application(
+            request.user,
+            application_id,
+            payload.dict(exclude_unset=True),
+            version=payload.version if hasattr(payload, 'version') else None,
+        )
     except ValueError as e:
         return api.create_response(request, {'code': 'INVALID_OPERATION', 'message': str(e)}, status=400)
     except PermissionError as e:
@@ -126,6 +132,7 @@ def final_review_application(request, application_id: int, payload: schemas.Fina
             application_id,
             approved=payload.approved,
             opinion=payload.opinion,
+            version=payload.version if hasattr(payload, 'version') else None,
         )
     except ValueError as e:
         return api.create_response(request, {'code': 'INVALID_OPERATION', 'message': str(e)}, status=400)
@@ -134,9 +141,23 @@ def final_review_application(request, application_id: int, payload: schemas.Fina
 
 
 @api.put('/applications/{application_id}/archive', tags=['展期申请'], response=schemas.ApplicationDetailSchema, auth=auth)
-def archive_application(request, application_id: int):
+def archive_application(request, application_id: int, version: int = None):
     try:
-        return application_service.archive_application(request.user, application_id)
+        return application_service.archive_application(request.user, application_id, version=version)
+    except ValueError as e:
+        return api.create_response(request, {'code': 'INVALID_OPERATION', 'message': str(e)}, status=400)
+    except PermissionError as e:
+        return api.create_response(request, {'code': 'PERMISSION_DENIED', 'message': str(e)}, status=403)
+
+
+@api.put('/applications/{application_id}/materials/verify', tags=['展期申请'], response=schemas.MaterialSchema, auth=auth)
+def verify_material(request, application_id: int, payload: schemas.MaterialVerifySchema):
+    try:
+        return application_service.verify_material(
+            request.user,
+            payload.material_id,
+            payload.verified,
+        )
     except ValueError as e:
         return api.create_response(request, {'code': 'INVALID_OPERATION', 'message': str(e)}, status=400)
     except PermissionError as e:

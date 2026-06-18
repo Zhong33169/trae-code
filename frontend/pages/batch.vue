@@ -124,31 +124,51 @@
         </div>
 
         <div class="card result-card" v-if="batchResult">
-          <h3 class="card-title">处理结果</h3>
+          <div class="result-header">
+            <h3 class="card-title">处理结果</h3>
+            <span class="result-task-no">{{ batchResult.task_no }}</span>
+          </div>
           <div class="result-summary">
             <div class="result-stat success">
               <span class="stat-number">{{ batchResult.success_count || 0 }}</span>
               <span class="stat-label">成功</span>
             </div>
             <div class="result-stat fail">
-              <span class="stat-number">{{ batchResult.fail_count || 0 }}</span>
+              <span class="stat-number">{{ batchResult.failed_count || 0 }}</span>
               <span class="stat-label">失败</span>
+            </div>
+            <div class="result-stat total">
+              <span class="stat-number">{{ batchResult.total_count || 0 }}</span>
+              <span class="stat-label">总计</span>
             </div>
           </div>
           <div class="result-list">
-            <div v-for="(item, index) in batchResult.items" :key="index" class="result-item">
+            <div v-for="(item, index) in batchResult.items" :key="index" :class="['result-item', { 'result-item-fail': item.status !== 'success' }]">
               <div class="result-item-header">
-                <span class="result-app-no">{{ item.application_no }}</span>
-                <span :class="['result-status', item.success ? 'success' : 'fail']">
-                  {{ item.success ? '成功' : '失败' }}
+                <div class="result-item-title">
+                  <span class="result-app-no">{{ item.application_no }}</span>
+                  <span class="result-borrower">{{ item.borrower_name }}</span>
+                </div>
+                <span :class="['result-status', item.status === 'success' ? 'success' : 'fail']">
+                  {{ item.status_display }}
                 </span>
               </div>
-              <div class="result-item-info">借款人：{{ item.borrower_name }}</div>
-              <div v-if="!item.success" class="result-item-error">
-                失败原因：{{ item.fail_reason }}
+              <div v-if="item.status !== 'success'" class="result-item-detail">
+                <div class="error-code">
+                  <span class="detail-label">错误码：</span>
+                  <span class="detail-value code">{{ item.error_code }}</span>
+                </div>
+                <div class="error-message">
+                  <span class="detail-label">失败原因：</span>
+                  <span class="detail-value">{{ item.error_message }}</span>
+                </div>
+                <div class="next-step">
+                  <span class="detail-label">下一步建议：</span>
+                  <span class="detail-value suggestion">{{ item.next_step }}</span>
+                </div>
               </div>
-              <div v-if="item.next_step" class="result-item-next">
-                下一步：{{ item.next_step }}
+              <div v-if="item.processed_at" class="result-item-time">
+                处理时间：{{ formatDate(item.processed_at) }}
               </div>
             </div>
           </div>
@@ -161,12 +181,16 @@
           <div class="history-list">
             <div v-for="task in batchTasks" :key="task.id" class="history-item" @click="viewTaskDetail(task)">
               <div class="history-item-header">
-                <span class="history-task-id">{{ task.id }}</span>
-                <span :class="['history-status', `status-${task.status}`]">{{ task.status_name }}</span>
+                <span class="history-task-id">{{ task.task_no }}</span>
+                <span :class="['history-status', `status-${task.status}`]">{{ task.status_display }}</span>
               </div>
               <div class="history-item-info">
-                <span>{{ task.operation_type_name }}</span>
+                <span>{{ task.action_display }}</span>
                 <span>共 {{ task.total_count }} 项</span>
+              </div>
+              <div class="history-item-stats">
+                <span class="stat-success">成功 {{ task.success_count }}</span>
+                <span class="stat-fail">失败 {{ task.failed_count }}</span>
               </div>
               <div class="history-item-time">{{ formatDate(task.created_at) }}</div>
             </div>
@@ -192,16 +216,16 @@
           <template v-else-if="modalType === 'taskDetail' && selectedTaskDetail">
             <div class="task-detail">
               <div class="task-detail-item">
-                <span class="detail-label">任务ID</span>
-                <span class="detail-value">{{ selectedTaskDetail.id }}</span>
+                <span class="detail-label">任务编号</span>
+                <span class="detail-value">{{ selectedTaskDetail.task_no }}</span>
               </div>
               <div class="task-detail-item">
                 <span class="detail-label">操作类型</span>
-                <span class="detail-value">{{ selectedTaskDetail.operation_type_name }}</span>
+                <span class="detail-value">{{ selectedTaskDetail.action_display }}</span>
               </div>
               <div class="task-detail-item">
                 <span class="detail-label">任务状态</span>
-                <span :class="['status-tag', `status-${selectedTaskDetail.status}`]">{{ selectedTaskDetail.status_name }}</span>
+                <span :class="['status-tag', `status-${selectedTaskDetail.status}`]">{{ selectedTaskDetail.status_display }}</span>
               </div>
               <div class="task-detail-item">
                 <span class="detail-label">创建时间</span>
@@ -209,20 +233,41 @@
               </div>
               <div class="task-detail-item">
                 <span class="detail-label">处理数量</span>
-                <span class="detail-value">共 {{ selectedTaskDetail.total_count }} 项，成功 {{ selectedTaskDetail.success_count }} 项，失败 {{ selectedTaskDetail.fail_count }} 项</span>
+                <span class="detail-value">共 {{ selectedTaskDetail.total_count }} 项，成功 {{ selectedTaskDetail.success_count }} 项，失败 {{ selectedTaskDetail.failed_count }} 项</span>
+              </div>
+              <div v-if="selectedTaskDetail.remark" class="task-detail-item">
+                <span class="detail-label">备注</span>
+                <span class="detail-value">{{ selectedTaskDetail.remark }}</span>
               </div>
 
               <div class="task-result-title">处理详情</div>
               <div class="task-result-list">
-                <div v-for="(item, index) in selectedTaskDetail.items" :key="index" class="task-result-item">
+                <div v-for="(item, index) in selectedTaskDetail.items" :key="index" :class="['task-result-item', { 'task-result-fail': item.status !== 'success' }]">
                   <div class="task-result-header">
-                    <span>{{ item.application_no }}</span>
-                    <span :class="['result-status', item.success ? 'success' : 'fail']">
-                      {{ item.success ? '成功' : '失败' }}
+                    <div class="task-result-title-inner">
+                      <span>{{ item.application_no }}</span>
+                      <span class="task-result-borrower">{{ item.borrower_name }}</span>
+                    </div>
+                    <span :class="['result-status', item.status === 'success' ? 'success' : 'fail']">
+                      {{ item.status_display }}
                     </span>
                   </div>
-                  <div v-if="!item.success" class="task-result-error">
-                    失败原因：{{ item.fail_reason }}
+                  <div v-if="item.status !== 'success'" class="task-result-detail">
+                    <div class="error-line">
+                      <span class="error-label">错误码：</span>
+                      <span class="error-code-val">{{ item.error_code }}</span>
+                    </div>
+                    <div class="error-line">
+                      <span class="error-label">失败原因：</span>
+                      <span>{{ item.error_message }}</span>
+                    </div>
+                    <div class="error-line suggestion-line">
+                      <span class="error-label">下一步建议：</span>
+                      <span>{{ item.next_step }}</span>
+                    </div>
+                  </div>
+                  <div v-if="item.processed_at" class="task-result-time">
+                    处理时间：{{ formatDate(item.processed_at) }}
                   </div>
                 </div>
               </div>
@@ -259,29 +304,44 @@ interface Application {
 }
 
 interface BatchResultItem {
+  id: number
+  application_id: number
   application_no: string
   borrower_name: string
-  success: boolean
-  fail_reason: string
+  status: string
+  status_display: string
+  error_code: string
+  error_message: string
   next_step: string
+  processed_at: string
 }
 
 interface BatchResult {
+  id: number
+  task_no: string
+  action: string
+  action_display: string
+  total_count: number
   success_count: number
-  fail_count: number
+  failed_count: number
+  status: string
+  status_display: string
   items: BatchResultItem[]
 }
 
 interface BatchTask {
-  id: string
-  operation_type: string
-  operation_type_name: string
-  status: string
-  status_name: string
+  id: number
+  task_no: string
+  action: string
+  action_display: string
   total_count: number
   success_count: number
-  fail_count: number
+  failed_count: number
+  status: string
+  status_display: string
+  remark: string
   created_at: string
+  completed_at: string
 }
 
 interface BatchTaskDetail extends BatchTask {
@@ -305,7 +365,7 @@ const total = ref(0)
 const totalPages = computed(() => Math.ceil(total.value / pageSize.value))
 
 const applicationList = ref<Application[]>([])
-const selectedIds = ref<string[]>([])
+const selectedIds = ref<number[]>([])
 const batchResult = ref<BatchResult | null>(null)
 const batchTasks = ref<BatchTask[]>([])
 const selectedTaskDetail = ref<BatchTaskDetail | null>(null)
@@ -403,7 +463,7 @@ const toggleSelectAll = () => {
   }
 }
 
-const toggleSelect = (id: string) => {
+const toggleSelect = (id: number) => {
   const index = selectedIds.value.indexOf(id)
   if (index > -1) {
     selectedIds.value.splice(index, 1)
@@ -449,9 +509,9 @@ const handleBatchOperation = async (operation: string, comment?: string) => {
   batchResult.value = null
   try {
     const data = await post<BatchResult>('/batch', {
-      operation_type: operation,
       application_ids: selectedIds.value,
-      comment: comment
+      action: operation,
+      remark: comment || ''
     })
     batchResult.value = data
     selectedIds.value = []
@@ -464,7 +524,7 @@ const handleBatchOperation = async (operation: string, comment?: string) => {
   }
 }
 
-const goToDetail = (id: string) => {
+const goToDetail = (id: number) => {
   navigateTo(`/applications/${id}`)
 }
 
@@ -719,9 +779,28 @@ tbody tr.selected {
   cursor: not-allowed;
 }
 
+.result-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #f3f4f6;
+}
+
+.result-header .card-title {
+  margin: 0;
+}
+
+.result-task-no {
+  font-size: 12px;
+  color: #6b7280;
+  font-family: monospace;
+}
+
 .result-summary {
   display: flex;
-  gap: 20px;
+  gap: 12px;
   margin-bottom: 16px;
   padding-bottom: 16px;
   border-bottom: 1px solid #f3f4f6;
@@ -762,31 +841,56 @@ tbody tr.selected {
   color: #6b7280;
 }
 
+.result-stat.total {
+  background: #e0e7ff;
+}
+
+.result-stat.total .stat-number {
+  color: #4f46e5;
+}
+
 .result-list {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  max-height: 300px;
+  max-height: 350px;
   overflow-y: auto;
 }
 
 .result-item {
-  padding: 10px 12px;
+  padding: 12px;
   background: #f9fafb;
   border-radius: 8px;
+  border-left: 4px solid #10b981;
+}
+
+.result-item.result-item-fail {
+  background: #fef2f2;
+  border-left-color: #ef4444;
 }
 
 .result-item-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 4px;
+  margin-bottom: 8px;
+}
+
+.result-item-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .result-app-no {
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 600;
   color: #1f2937;
+}
+
+.result-borrower {
+  font-size: 12px;
+  color: #6b7280;
 }
 
 .result-status {
@@ -811,15 +915,55 @@ tbody tr.selected {
   color: #6b7280;
 }
 
-.result-item-error,
-.result-item-next {
-  font-size: 12px;
-  color: #dc2626;
-  margin-top: 4px;
+.result-item-detail {
+  background: #fff;
+  border-radius: 6px;
+  padding: 10px;
+  margin-top: 8px;
+  border: 1px solid #fecaca;
 }
 
-.result-item-next {
+.result-item-detail .detail-label {
+  font-size: 12px;
   color: #6b7280;
+  font-weight: 500;
+}
+
+.result-item-detail .detail-value {
+  font-size: 12px;
+  color: #374151;
+}
+
+.result-item-detail .error-code,
+.result-item-detail .error-message,
+.result-item-detail .next-step {
+  margin-bottom: 6px;
+}
+
+.result-item-detail .error-code:last-child,
+.result-item-detail .error-message:last-child,
+.result-item-detail .next-step:last-child {
+  margin-bottom: 0;
+}
+
+.result-item-detail .detail-value.code {
+  font-family: monospace;
+  background: #fef2f2;
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: #dc2626;
+  font-weight: 500;
+}
+
+.result-item-detail .detail-value.suggestion {
+  color: #059669;
+  font-weight: 500;
+}
+
+.result-item-time {
+  font-size: 11px;
+  color: #9ca3af;
+  margin-top: 6px;
 }
 
 .history-list {
@@ -868,6 +1012,21 @@ tbody tr.selected {
   font-size: 12px;
   color: #6b7280;
   margin-bottom: 4px;
+}
+
+.history-item-stats {
+  display: flex;
+  gap: 12px;
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+
+.history-item-stats .stat-success {
+  color: #059669;
+}
+
+.history-item-stats .stat-fail {
+  color: #dc2626;
 }
 
 .history-item-time {
@@ -1017,6 +1176,12 @@ tbody tr.selected {
   padding: 10px 12px;
   background: #f9fafb;
   border-radius: 6px;
+  border-left: 3px solid #10b981;
+}
+
+.task-result-item.task-result-fail {
+  background: #fef2f2;
+  border-left-color: #ef4444;
 }
 
 .task-result-header {
@@ -1024,12 +1189,60 @@ tbody tr.selected {
   justify-content: space-between;
   align-items: center;
   font-size: 13px;
+  margin-bottom: 6px;
 }
 
-.task-result-error {
+.task-result-title-inner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.task-result-borrower {
   font-size: 12px;
+  color: #6b7280;
+}
+
+.task-result-detail {
+  background: #fff;
+  padding: 8px 10px;
+  border-radius: 4px;
+  border: 1px solid #fecaca;
+  margin-bottom: 6px;
+}
+
+.task-result-detail .error-line {
+  font-size: 12px;
+  margin-bottom: 4px;
+  color: #374151;
+}
+
+.task-result-detail .error-line:last-child {
+  margin-bottom: 0;
+}
+
+.task-result-detail .error-label {
+  color: #6b7280;
+  font-weight: 500;
+}
+
+.task-result-detail .error-code-val {
+  font-family: monospace;
+  background: #fef2f2;
+  padding: 1px 4px;
+  border-radius: 3px;
   color: #dc2626;
-  margin-top: 4px;
+  font-weight: 500;
+}
+
+.task-result-detail .suggestion-line {
+  color: #059669;
+  font-weight: 500;
+}
+
+.task-result-time {
+  font-size: 11px;
+  color: #9ca3af;
 }
 
 .link-text {

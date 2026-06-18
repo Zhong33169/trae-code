@@ -97,6 +97,8 @@ def serialize_application_detail(app):
             'material_name': mat.material_name,
             'is_required': mat.is_required,
             'is_verified': mat.is_verified,
+            'verified_by_name': mat.verified_by.username if mat.verified_by else '',
+            'verified_at': mat.verified_at,
             'upload_time': mat.upload_time,
         })
     data['materials'] = materials
@@ -245,7 +247,7 @@ def create_application(user, data):
 
 
 @transaction.atomic
-def submit_application(user, application_id):
+def submit_application(user, application_id, version=None):
     if not auth_service.has_role(user, [auth_service.ROLE_REGISTRAR, auth_service.ROLE_ADMIN]):
         raise PermissionError('无权提交展期申请')
 
@@ -253,6 +255,9 @@ def submit_application(user, application_id):
         app = ExtensionApplication.objects.select_for_update().get(id=application_id)
     except ExtensionApplication.DoesNotExist:
         raise ValueError('展期申请不存在')
+
+    if version is not None and app.version != version:
+        raise ValueError('版本冲突：该申请已被他人修改，请刷新页面后重试')
 
     if app.status not in [ExtensionApplication.STATUS_DRAFT, ExtensionApplication.STATUS_RETURNED_FOR_CORRECTION]:
         raise ValueError(f'当前状态「{app.get_status_display()}」不允许提交')
@@ -283,7 +288,7 @@ def submit_application(user, application_id):
 
 
 @transaction.atomic
-def review_application(user, application_id, approved, opinion, new_interest_rate=None):
+def review_application(user, application_id, approved, opinion, new_interest_rate=None, version=None):
     if not auth_service.has_role(user, [auth_service.ROLE_REVIEWER, auth_service.ROLE_ADMIN]):
         raise PermissionError('无权审核展期申请')
 
@@ -291,6 +296,9 @@ def review_application(user, application_id, approved, opinion, new_interest_rat
         app = ExtensionApplication.objects.select_for_update().get(id=application_id)
     except ExtensionApplication.DoesNotExist:
         raise ValueError('展期申请不存在')
+
+    if version is not None and app.version != version:
+        raise ValueError('版本冲突：该申请已被他人修改，请刷新页面后重试')
 
     if app.status != ExtensionApplication.STATUS_PENDING_REVIEW:
         raise ValueError(f'当前状态「{app.get_status_display()}」不允许审核')
@@ -332,7 +340,7 @@ def review_application(user, application_id, approved, opinion, new_interest_rat
 
 
 @transaction.atomic
-def correct_application(user, application_id, data):
+def correct_application(user, application_id, data, version=None):
     if not auth_service.has_role(user, [auth_service.ROLE_REGISTRAR, auth_service.ROLE_ADMIN]):
         raise PermissionError('无权补正展期申请')
 
@@ -340,6 +348,9 @@ def correct_application(user, application_id, data):
         app = ExtensionApplication.objects.select_for_update().get(id=application_id)
     except ExtensionApplication.DoesNotExist:
         raise ValueError('展期申请不存在')
+
+    if version is not None and app.version != version:
+        raise ValueError('版本冲突：该申请已被他人修改，请刷新页面后重试')
 
     if app.status != ExtensionApplication.STATUS_RETURNED_FOR_CORRECTION:
         raise ValueError(f'当前状态「{app.get_status_display()}」不允许补正')
@@ -394,7 +405,7 @@ def correct_application(user, application_id, data):
 
 
 @transaction.atomic
-def final_review_application(user, application_id, approved, opinion):
+def final_review_application(user, application_id, approved, opinion, version=None):
     if not auth_service.has_role(user, [auth_service.ROLE_FINAL_REVIEWER, auth_service.ROLE_ADMIN]):
         raise PermissionError('无权复核展期申请')
 
@@ -402,6 +413,9 @@ def final_review_application(user, application_id, approved, opinion):
         app = ExtensionApplication.objects.select_for_update().get(id=application_id)
     except ExtensionApplication.DoesNotExist:
         raise ValueError('展期申请不存在')
+
+    if version is not None and app.version != version:
+        raise ValueError('版本冲突：该申请已被他人修改，请刷新页面后重试')
 
     if app.status != ExtensionApplication.STATUS_REVIEW_APPROVED:
         raise ValueError(f'当前状态「{app.get_status_display()}」不允许复核')
@@ -436,7 +450,7 @@ def final_review_application(user, application_id, approved, opinion):
 
 
 @transaction.atomic
-def archive_application(user, application_id):
+def archive_application(user, application_id, version=None):
     if not auth_service.has_role(user, [auth_service.ROLE_FINAL_REVIEWER, auth_service.ROLE_ADMIN]):
         raise PermissionError('无权归档展期申请')
 
@@ -444,6 +458,9 @@ def archive_application(user, application_id):
         app = ExtensionApplication.objects.select_for_update().get(id=application_id)
     except ExtensionApplication.DoesNotExist:
         raise ValueError('展期申请不存在')
+
+    if version is not None and app.version != version:
+        raise ValueError('版本冲突：该申请已被他人修改，请刷新页面后重试')
 
     if app.status != ExtensionApplication.STATUS_FINAL_APPROVED:
         raise ValueError(f'当前状态「{app.get_status_display()}」不允许归档')
@@ -503,6 +520,8 @@ def verify_material(user, material_id, verified):
         'material_name': material.material_name,
         'is_required': material.is_required,
         'is_verified': material.is_verified,
+        'verified_by_name': material.verified_by.username if material.verified_by else '',
+        'verified_at': material.verified_at.isoformat() if material.verified_at else None,
         'upload_time': material.upload_time,
     }
 

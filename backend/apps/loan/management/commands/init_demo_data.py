@@ -11,6 +11,9 @@ from apps.loan.models import (
     RepaymentPlan,
     Material,
     AuditLog,
+    QrCodeRecord,
+    BatchTask,
+    BatchTaskItem,
 )
 
 
@@ -23,6 +26,9 @@ class Command(BaseCommand):
         self._create_roles()
         self._create_users()
         self._create_applications()
+        self._create_scan_records()
+        self._create_exception_audit_logs()
+        self._create_batch_task_samples()
 
         self.stdout.write(self.style.SUCCESS('演示数据初始化完成！'))
         self.stdout.write('登录账号：')
@@ -30,6 +36,15 @@ class Command(BaseCommand):
         self.stdout.write('  - 展期审核主管: lisi')
         self.stdout.write('  - 小贷公司复核负责人: wangwu')
         self.stdout.write('  - 系统管理员: admin')
+        self.stdout.write('')
+        self.stdout.write('扫码测试码：')
+        self.stdout.write('  - 正常待审核: QRDEMO0000000002')
+        self.stdout.write('  - 正常待复核: QRDEMO0000000003')
+        self.stdout.write('  - 退回补正: QRDEMO0000000004')
+        self.stdout.write('  - 无效码测试: QRINVALID')
+        self.stdout.write('  - 重复码测试(30分钟内已扫): QRDEMO0000000002')
+        self.stdout.write('  - 非当前处理人测试(用登记员扫待复核): QRDEMO0000000003')
+        self.stdout.write('  - 状态不匹配(已归档): QRDEMO0000000007')
 
     def _create_roles(self):
         roles = [
@@ -102,6 +117,7 @@ class Command(BaseCommand):
                 'registrar': registrar,
                 'is_urgent': True,
                 'materials_verified': False,
+                'version': 1,
             },
             {
                 'application_no': 'EA20250102000002',
@@ -120,6 +136,7 @@ class Command(BaseCommand):
                 'registrar': registrar,
                 'is_urgent': False,
                 'materials_verified': True,
+                'version': 2,
             },
             {
                 'application_no': 'EA20250103000003',
@@ -141,6 +158,7 @@ class Command(BaseCommand):
                 'new_interest_rate': Decimal('12.00'),
                 'is_urgent': True,
                 'materials_verified': True,
+                'version': 3,
             },
             {
                 'application_no': 'EA20250104000004',
@@ -160,7 +178,8 @@ class Command(BaseCommand):
                 'reviewer': reviewer,
                 'review_opinion': '收入证明材料不清晰，请重新提交清晰的收入证明。',
                 'is_urgent': False,
-                'materials_verified': True,
+                'materials_verified': False,
+                'version': 3,
             },
             {
                 'application_no': 'EA20250105000005',
@@ -184,6 +203,7 @@ class Command(BaseCommand):
                 'new_interest_rate': Decimal('11.50'),
                 'is_urgent': False,
                 'materials_verified': True,
+                'version': 4,
             },
             {
                 'application_no': 'EA20250106000006',
@@ -206,6 +226,7 @@ class Command(BaseCommand):
                 'final_review_opinion': '风险较高，不符合展期条件，拒绝申请',
                 'is_urgent': False,
                 'materials_verified': True,
+                'version': 4,
             },
             {
                 'application_no': 'EA20250107000007',
@@ -229,6 +250,7 @@ class Command(BaseCommand):
                 'new_interest_rate': Decimal('9.50'),
                 'is_urgent': False,
                 'materials_verified': True,
+                'version': 5,
             },
             {
                 'application_no': 'EA20250108000008',
@@ -247,6 +269,7 @@ class Command(BaseCommand):
                 'registrar': registrar,
                 'is_urgent': True,
                 'materials_verified': True,
+                'version': 2,
             },
             {
                 'application_no': 'EA20250109000009',
@@ -265,6 +288,7 @@ class Command(BaseCommand):
                 'registrar': registrar,
                 'is_urgent': False,
                 'materials_verified': True,
+                'version': 2,
             },
             {
                 'application_no': 'EA20250110000010',
@@ -285,6 +309,51 @@ class Command(BaseCommand):
                 'review_opinion': '经营情况良好，同意展期',
                 'is_urgent': False,
                 'materials_verified': True,
+                'version': 3,
+            },
+            {
+                'application_no': 'EA20250111000011',
+                'qr_code': 'QRDEMO0000000011',
+                'borrower_name': '林晓峰',
+                'borrower_id_card': '360101199104236789',
+                'borrower_phone': '13900139011',
+                'loan_contract_no': 'JK2024120011',
+                'original_principal': Decimal('95000.00'),
+                'original_interest_rate': Decimal('10.00'),
+                'original_due_date': date(2025, 2, 5),
+                'extension_days': 35,
+                'extension_reason': '电商备货，资金周转',
+                'status': ExtensionApplication.STATUS_REVIEW_APPROVED,
+                'current_handler_role': 'final_reviewer',
+                'registrar': registrar,
+                'reviewer': reviewer,
+                'review_opinion': '材料齐全，同意展期',
+                'is_urgent': True,
+                'materials_verified': True,
+                'version': 3,
+            },
+            {
+                'application_no': 'EA20250112000012',
+                'qr_code': 'QRDEMO0000000012',
+                'borrower_name': '徐美玲',
+                'borrower_id_card': '230101198612154321',
+                'borrower_phone': '13900139012',
+                'loan_contract_no': 'JK2024120012',
+                'original_principal': Decimal('120000.00'),
+                'original_interest_rate': Decimal('9.80'),
+                'original_due_date': date(2025, 1, 18),
+                'extension_days': 45,
+                'extension_reason': '医疗费用支出，申请展期',
+                'status': ExtensionApplication.STATUS_FINAL_APPROVED,
+                'current_handler_role': 'final_reviewer',
+                'registrar': registrar,
+                'reviewer': reviewer,
+                'final_reviewer': final_reviewer,
+                'review_opinion': '情况特殊，建议通过',
+                'final_review_opinion': '复核通过',
+                'is_urgent': True,
+                'materials_verified': True,
+                'version': 4,
             },
         ]
 
@@ -320,6 +389,7 @@ class Command(BaseCommand):
                     'review_opinion': data.get('review_opinion', ''),
                     'final_review_opinion': data.get('final_review_opinion', ''),
                     'is_urgent': data['is_urgent'],
+                    'version': data.get('version', 1),
                 }
             )
             if created:
@@ -339,15 +409,18 @@ class Command(BaseCommand):
                 )
 
             if not app.materials.exists():
-                for mat in material_types:
+                for idx, mat in enumerate(material_types):
+                    is_verified = data['materials_verified']
+                    if not is_verified and idx == 3:
+                        is_verified = False
                     Material.objects.create(
                         application=app,
                         material_type=mat['type'],
                         material_name=mat['name'],
                         is_required=True,
-                        is_verified=data['materials_verified'],
-                        verified_by=data['registrar'] if data['materials_verified'] else None,
-                        verified_at=timezone.now() if data['materials_verified'] else None,
+                        is_verified=is_verified,
+                        verified_by=data['registrar'] if is_verified else None,
+                        verified_at=timezone.now() - timedelta(hours=2) if is_verified else None,
                     )
 
             if not app.audit_logs.exists():
@@ -420,3 +493,244 @@ class Command(BaseCommand):
                         new_status=ExtensionApplication.STATUS_ARCHIVED,
                         created_at=timezone.now() - timedelta(hours=6),
                     )
+
+    def _create_scan_records(self):
+        registrar = User.objects.get(username='zhangsan')
+        reviewer = User.objects.get(username='lisi')
+        final_reviewer = User.objects.get(username='wangwu')
+
+        scan_samples = [
+            {
+                'qr_code': 'QRINVALID',
+                'application': None,
+                'scanner': reviewer,
+                'scan_result': QrCodeRecord.SCAN_RESULT_INVALID,
+                'error_message': '无效二维码：系统中不存在对应的展期申请',
+                'location': '业务大厅A区',
+                'minutes_ago': 120,
+            },
+            {
+                'qr_code': 'QRDEMO0000000002',
+                'application_qs': 'EA20250102000002',
+                'scanner': reviewer,
+                'scan_result': QrCodeRecord.SCAN_RESULT_SUCCESS,
+                'error_message': '',
+                'location': '业务大厅A区',
+                'minutes_ago': 15,
+            },
+            {
+                'qr_code': 'QRDEMO0000000003',
+                'application_qs': 'EA20250103000003',
+                'scanner': registrar,
+                'scan_result': QrCodeRecord.SCAN_RESULT_WRONG_HANDLER,
+                'error_message': '非当前处理人：当前处理角色为final_reviewer，您的角色为registrar',
+                'location': '外勤现场',
+                'minutes_ago': 45,
+            },
+            {
+                'qr_code': 'QRDEMO0000000007',
+                'application_qs': 'EA20250107000007',
+                'scanner': final_reviewer,
+                'scan_result': QrCodeRecord.SCAN_RESULT_WRONG_STATUS,
+                'error_message': '状态不匹配：申请已归档',
+                'location': '档案室',
+                'minutes_ago': 90,
+            },
+        ]
+
+        for sample in scan_samples:
+            if QrCodeRecord.objects.filter(qr_code=sample['qr_code'], scanner=sample['scanner']).exists():
+                continue
+
+            app = None
+            if sample.get('application_qs'):
+                try:
+                    app = ExtensionApplication.objects.get(application_no=sample['application_qs'])
+                except ExtensionApplication.DoesNotExist:
+                    pass
+
+            QrCodeRecord.objects.create(
+                qr_code=sample['qr_code'],
+                application=app,
+                scanner=sample['scanner'],
+                scan_result=sample['scan_result'],
+                error_message=sample['error_message'],
+                location=sample['location'],
+                scan_time=timezone.now() - timedelta(minutes=sample['minutes_ago']),
+            )
+            self.stdout.write(f'  创建扫码记录: {sample["qr_code"]} - {sample["scan_result"]}')
+
+    def _create_exception_audit_logs(self):
+        registrar = User.objects.get(username='zhangsan')
+        reviewer = User.objects.get(username='lisi')
+        final_reviewer = User.objects.get(username='wangwu')
+
+        app1 = ExtensionApplication.objects.get(application_no='EA20250102000002')
+
+        exception_logs = [
+            {
+                'application': app1,
+                'operator': final_reviewer,
+                'action': 'scan',
+                'action_detail': '越权操作尝试 - 复核负责人尝试审核待审核申请',
+                'old_status': 'pending_review',
+                'new_status': 'pending_review',
+                'remark': '越权操作被拦截：用户角色为复核负责人，无权审核待审核状态的申请',
+                'hours_ago': 8,
+            },
+            {
+                'application': app1,
+                'operator': registrar,
+                'action': 'review',
+                'action_detail': '顺序错误尝试 - 登记员直接审核自己提交的申请',
+                'old_status': 'pending_review',
+                'new_status': 'pending_review',
+                'remark': '操作顺序错误：待审核状态应由审核主管进行审核，登记员无权审核',
+                'hours_ago': 6,
+            },
+            {
+                'application': app1,
+                'operator': reviewer,
+                'action': 'review',
+                'action_detail': '并发冲突 - 版本号不一致',
+                'old_status': 'pending_review',
+                'new_status': 'pending_review',
+                'remark': '版本冲突：该申请已被他人修改，请刷新页面后重试（预期版本2，实际版本3）',
+                'hours_ago': 4,
+            },
+            {
+                'application': None,
+                'operator': reviewer,
+                'action': 'scan',
+                'action_detail': '扫码核验失败 - 无效码',
+                'old_status': '',
+                'new_status': '',
+                'remark': '无效二维码 QRINVALID：系统中不存在对应的展期申请，请核对后重试',
+                'hours_ago': 2,
+            },
+            {
+                'application': app1,
+                'operator': reviewer,
+                'action': 'scan',
+                'action_detail': '扫码核验 - 重复扫码',
+                'old_status': 'pending_review',
+                'new_status': 'pending_review',
+                'remark': '重复扫码：该码已在30分钟内由lisi扫码核验通过',
+                'hours_ago': 1,
+            },
+        ]
+
+        for log_data in exception_logs:
+            log_count = AuditLog.objects.filter(
+                action=log_data['action'],
+                action_detail=log_data['action_detail'],
+            ).count()
+            if log_count > 0:
+                continue
+
+            AuditLog.objects.create(
+                application=log_data['application'],
+                operator=log_data['operator'],
+                action=log_data['action'],
+                action_detail=log_data['action_detail'],
+                old_status=log_data['old_status'],
+                new_status=log_data['new_status'],
+                remark=log_data['remark'],
+                ip_address='192.168.1.100',
+                user_agent='Mozilla/5.0',
+                created_at=timezone.now() - timedelta(hours=log_data['hours_ago']),
+            )
+            self.stdout.write(f'  创建异常审计日志: {log_data["action_detail"]}')
+
+    def _create_batch_task_samples(self):
+        reviewer = User.objects.get(username='lisi')
+        final_reviewer = User.objects.get(username='wangwu')
+
+        task_no_1 = f'BATCH{timezone.now().strftime("%Y%m%d")}0001'
+        task_no_2 = f'BATCH{timezone.now().strftime("%Y%m%d")}0002'
+
+        task1, created1 = BatchTask.objects.get_or_create(
+            task_no=task_no_1,
+            defaults={
+                'operator': reviewer,
+                'action': 'review_approve',
+                'total_count': 3,
+                'success_count': 2,
+                'failed_count': 1,
+                'status': BatchTask.STATUS_PARTIAL_FAILED,
+                'remark': '批量审核通过 - 2025年1月第一批',
+                'completed_at': timezone.now() - timedelta(hours=5),
+            }
+        )
+        if created1:
+            self.stdout.write(f'  创建批量任务: {task_no_1}')
+
+            app2 = ExtensionApplication.objects.get(application_no='EA20250102000002')
+            app8 = ExtensionApplication.objects.get(application_no='EA20250108000008')
+            app4 = ExtensionApplication.objects.get(application_no='EA20250104000004')
+
+            BatchTaskItem.objects.create(
+                batch_task=task1,
+                application=app2,
+                status=BatchTaskItem.STATUS_SUCCESS,
+                error_code='',
+                error_message='',
+                next_step='',
+                processed_at=timezone.now() - timedelta(hours=5, minutes=2),
+            )
+            BatchTaskItem.objects.create(
+                batch_task=task1,
+                application=app8,
+                status=BatchTaskItem.STATUS_SUCCESS,
+                error_code='',
+                error_message='',
+                next_step='',
+                processed_at=timezone.now() - timedelta(hours=5, minutes=1),
+            )
+            BatchTaskItem.objects.create(
+                batch_task=task1,
+                application=app4,
+                status=BatchTaskItem.STATUS_FAILED,
+                error_code='NOT_REVIEWABLE',
+                error_message='申请不在待审核状态',
+                next_step='该申请当前为退回补正状态，请由登记员补正后重新提交再进行审核',
+                processed_at=timezone.now() - timedelta(hours=5),
+            )
+
+        task2, created2 = BatchTask.objects.get_or_create(
+            task_no=task_no_2,
+            defaults={
+                'operator': final_reviewer,
+                'action': 'archive',
+                'total_count': 2,
+                'success_count': 1,
+                'failed_count': 1,
+                'status': BatchTask.STATUS_PARTIAL_FAILED,
+                'remark': '批量归档 - 月度归档',
+                'completed_at': timezone.now() - timedelta(hours=3),
+            }
+        )
+        if created2:
+            self.stdout.write(f'  创建批量任务: {task_no_2}')
+
+            app7 = ExtensionApplication.objects.get(application_no='EA20250107000007')
+            app6 = ExtensionApplication.objects.get(application_no='EA20250106000006')
+
+            BatchTaskItem.objects.create(
+                batch_task=task2,
+                application=app7,
+                status=BatchTaskItem.STATUS_SUCCESS,
+                error_code='',
+                error_message='',
+                next_step='',
+                processed_at=timezone.now() - timedelta(hours=3, minutes=1),
+            )
+            BatchTaskItem.objects.create(
+                batch_task=task2,
+                application=app6,
+                status=BatchTaskItem.STATUS_FAILED,
+                error_code='NOT_ARCHIVABLE',
+                error_message='申请不在待归档状态',
+                next_step='该申请已被拒绝，无法归档。如需重新处理请发起新的展期申请。',
+                processed_at=timezone.now() - timedelta(hours=3),
+            )
