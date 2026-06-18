@@ -98,28 +98,67 @@ export function canViewAllReports(user: User | null | undefined): boolean {
 
 export function canCreateWeeklyReport(user: User | null | undefined, report: ProgressReport): boolean {
   if (!user) return false;
-  if (user.role === Role.SUPERVISOR_ENGINEER) return true;
-  return user.role === Role.REGISTRAR && report.responsiblePersonId === user.id;
+  if (report.status === ProgressStatus.ARCHIVED) return false;
+  if (user.role === Role.REGISTRAR && report.responsiblePersonId === user.id) return true;
+  return false;
 }
 
-export function canCreateDeviationAnalysis(user: User | null | undefined): boolean {
-  return !!user && (user.role === Role.SUPERVISOR || user.role === Role.SUPERVISOR_ENGINEER);
+export function canCreateDeviationAnalysis(
+  user: User | null | undefined,
+  report: ProgressReport,
+): boolean {
+  if (!user) return false;
+  if (user.role !== Role.SUPERVISOR) return false;
+  return [
+    ProgressStatus.UNDER_REVIEW,
+    ProgressStatus.UNDER_VERIFICATION,
+    ProgressStatus.PENDING_REVIEW,
+    ProgressStatus.PENDING_VERIFICATION,
+  ].includes(report.status);
 }
 
-export function canApproveDeviationAnalysis(user: User | null | undefined): boolean {
-  return !!user && user.role === Role.SUPERVISOR_ENGINEER;
+export function canApproveDeviationAnalysis(
+  user: User | null | undefined,
+  report: ProgressReport,
+): boolean {
+  if (!user) return false;
+  if (user.role !== Role.SUPERVISOR_ENGINEER) return false;
+  return [ProgressStatus.REVIEW_REJECTED, ProgressStatus.VERIFICATION_REJECTED].includes(
+    report.status,
+  );
 }
 
-export function canCreateOwnerReport(user: User | null | undefined): boolean {
-  return !!user && (user.role === Role.SUPERVISOR || user.role === Role.SUPERVISOR_ENGINEER);
+export function canCreateOwnerReport(
+  user: User | null | undefined,
+  report: ProgressReport,
+): boolean {
+  if (!user) return false;
+  if (user.role !== Role.SUPERVISOR) return false;
+  return [ProgressStatus.PENDING_VERIFICATION, ProgressStatus.UNDER_VERIFICATION].includes(
+    report.status,
+  );
 }
 
-export function canAcknowledgeOwnerReport(user: User | null | undefined): boolean {
-  return !!user && user.role === Role.SUPERVISOR_ENGINEER;
+export function canAcknowledgeOwnerReport(
+  user: User | null | undefined,
+  report: ProgressReport,
+): boolean {
+  if (!user) return false;
+  if (user.role !== Role.SUPERVISOR_ENGINEER) return false;
+  return report.status === ProgressStatus.UNDER_VERIFICATION;
 }
 
-export function canBatchProcess(user: User | null | undefined): boolean {
-  return !!user && user.role === Role.REGISTRAR;
+export function canBatchProcess(user: User | null | undefined, report: ProgressReport): boolean {
+  if (!user) return false;
+  if (user.role === Role.REGISTRAR) {
+    return [ProgressStatus.DRAFT, ProgressStatus.REVIEW_REJECTED, ProgressStatus.VERIFICATION_REJECTED].includes(
+      report.status,
+    );
+  }
+  if (user.role === Role.SUPERVISOR || user.role === Role.SUPERVISOR_ENGINEER) {
+    return report.timeoutStatus === TimeoutStatus.OVERDUE;
+  }
+  return false;
 }
 
 export function getAvailableActions(user: User | null | undefined, report: ProgressReport) {

@@ -14,11 +14,13 @@
 
   export let data: PageData;
 
-  $: reports = data.reports;
+  $: reports = data.reports || { list: [], total: 0 };
   $: users = data.users;
   $: statistics = data.statistics;
   $: queryParams = data.queryParams;
   $: user = $currentUser;
+  $: batchableReports = reports?.list?.filter((r) => canBatchProcess(user, r)) || [];
+  $: hasBatchAccess = batchableReports.length > 0;
 
   let filters = {
     status: queryParams?.status || '',
@@ -143,12 +145,19 @@
   }
 
   function toggleSelectAll() {
-    if (selectedIds.size === reports.list.length) {
-      selectedIds = new Set();
+    const batchableIds = batchableReports.map((r) => r.id);
+    const allBatchableSelected = batchableIds.every((id) => selectedIds.has(id));
+    if (allBatchableSelected || batchableIds.length === 0) {
+      for (const id of batchableIds) selectedIds.delete(id);
     } else {
-      selectedIds = new Set(reports.list.map((r: any) => r.id));
+      for (const id of batchableIds) selectedIds.add(id);
     }
+    selectedIds = selectedIds;
   }
+
+  $: allBatchableSelected =
+    batchableReports.length > 0 &&
+    batchableReports.every((r) => selectedIds.has(r.id));
 
   function openBatchModal() {
     if (selectedIds.size === 0) {
@@ -288,9 +297,9 @@
     </div>
   </div>
 
-  {#if canBatchProcess(user) && selectedIds.size > 0}
+  {#if hasBatchAccess && selectedIds.size > 0}
     <div class="batch-bar">
-      <span class="batch-info">已选择 {selectedIds.size} 项</span>
+      <span class="batch-info">已选择 {selectedIds.size} 项 / 可批量办理 {batchableReports.length} 项</span>
       <button class="btn btn-primary btn-sm" on:click={openBatchModal}>批量办理</button>
       <button class="btn btn-outline btn-sm" on:click={() => { selectedIds = new Set(); }}>取消选择</button>
     </div>
@@ -301,11 +310,11 @@
       <table class="data-table">
         <thead>
           <tr>
-            {#if canBatchProcess(user)}
+            {#if hasBatchAccess}
               <th class="checkbox-col">
                 <input
                   type="checkbox"
-                  checked={selectedIds.size === reports.list.length && reports.list.length > 0}
+                  checked={allBatchableSelected}
                   on:change={toggleSelectAll}
                 />
               </th>
@@ -324,16 +333,17 @@
         <tbody>
           {#if reports.list.length === 0}
             <tr>
-              <td colspan={canBatchProcess(user) ? "10" : "9"} class="empty-cell">暂无数据</td>
+              <td colspan={hasBatchAccess ? "10" : "9"} class="empty-cell">暂无数据</td>
             </tr>
           {/if}
           {#each reports.list as report (report.id)}
             <tr class:timeout-row={report.timeoutStatus === TimeoutStatus.OVERDUE}>
-              {#if canBatchProcess(user)}
+              {#if hasBatchAccess}
                 <td class="checkbox-col">
                   <input
                     type="checkbox"
                     checked={selectedIds.has(report.id)}
+                    disabled={!canBatchProcess(user, report)}
                     on:change={() => toggleSelect(report.id)}
                   />
                 </td>
@@ -373,8 +383,18 @@
                 </div>
               </td>
               <td>
-                <div class="result-cell" title={report.lastProcessResult}>
-                  {report.lastProcessResult || '-'}
+                <div class="result-cell">
+                  {#if report.lastProcessResult}
+                    <div class="result-row" title={report.lastProcessResult}>
+                      {report.lastProcessResult}
+                    </div>
+                  {/if}
+                  {#if report.batchResult}
+                    <div class="result-row result-batch" title={report.batchResult}>
+                      <span class="batch-tag">批量</span>{report.batchResult}
+                    </div>
+                  {/if}
+                  {#if !report.lastProcessResult && !report.batchResult}-{/if}
                 </div>
               </td>
               <td>
@@ -724,12 +744,32 @@
 
   .abnormal-cell,
   .result-cell {
-    max-width: 150px;
+    max-width: 180px;
+    font-size: 13px;
+    color: #6b7280;
+  }
+
+  .result-row {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: 13px;
-    color: #6b7280;
+    line-height: 1.6;
+  }
+
+  .result-batch {
+    color: #8b5cf6;
+    font-size: 12px;
+  }
+
+  .batch-tag {
+    display: inline-block;
+    padding: 1px 6px;
+    margin-right: 4px;
+    background: #8b5cf6;
+    color: #fff;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 500;
   }
 
   .text-danger {

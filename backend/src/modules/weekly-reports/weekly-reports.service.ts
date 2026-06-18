@@ -1,10 +1,11 @@
-import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { WeeklyReport } from './entities/weekly-report.entity';
 import { ProgressReportsService } from '../progress-reports/progress-reports.service';
 import { OperationType } from '../../common/enums/operation-type.enum';
 import { Role } from '../../common/enums/role.enum';
+import { ProgressStatus } from '../../common/enums/progress-status.enum';
 import { User } from '../users/entities/user.entity';
 
 @Injectable()
@@ -20,6 +21,11 @@ export class WeeklyReportsService {
       throw new ForbiddenException('只有进度登记员可以创建周报');
     }
 
+    const progressReport = await this.progressReportsService.findOne(data.progressReportId);
+    if (progressReport.status === ProgressStatus.ARCHIVED) {
+      throw new BadRequestException('已归档的进度报告不能创建周报');
+    }
+
     const report = this.weeklyReportsRepository.create({
       ...data,
       weekStartDate: new Date(data.weekStartDate),
@@ -32,7 +38,7 @@ export class WeeklyReportsService {
       OperationType.WEEKLY_REPORT_CREATE,
       `新增周报（${data.weekStartDate} 至 ${data.weekEndDate}），完成率 ${data.completionRate}%`,
       user,
-      `周报内容：${data.weekProgress || ''}`,
+      `周报内容：${data.weekProgress || ''}；下周计划：${data.nextWeekPlan || ''}；问题：${data.existingProblems || ''}`,
     );
 
     return saved;
@@ -60,6 +66,11 @@ export class WeeklyReportsService {
     }
 
     const report = await this.findOne(id);
+    const progressReport = await this.progressReportsService.findOne(report.progressReportId);
+    if (progressReport.status === ProgressStatus.ARCHIVED) {
+      throw new BadRequestException('已归档的进度报告不能修改周报');
+    }
+
     Object.assign(report, {
       ...data,
       weekStartDate: data.weekStartDate ? new Date(data.weekStartDate) : report.weekStartDate,
@@ -70,9 +81,9 @@ export class WeeklyReportsService {
     await this.progressReportsService.updateStatusByRelatedModule(
       saved.progressReportId,
       OperationType.WEEKLY_REPORT_UPDATE,
-      `更新周报（${saved.weekStartDate.toISOString().split('T')[0]} 至 ${saved.weekEndDate.toISOString().split('T')[0]}）`,
+      `更新周报（${saved.weekStartDate.toISOString().split('T')[0]} 至 ${saved.weekEndDate.toISOString().split('T')[0]}），完成率 ${saved.completionRate}%`,
       user,
-      `周报内容：${saved.weekProgress || ''}`,
+      `周报内容：${saved.weekProgress || ''}；下周计划：${saved.nextWeekPlan || ''}；问题：${saved.existingProblems || ''}`,
     );
 
     return saved;

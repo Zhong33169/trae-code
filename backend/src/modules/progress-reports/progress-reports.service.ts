@@ -519,6 +519,44 @@ export class ProgressReportsService {
     await this.progressReportsRepository.remove(report);
   }
 
+  private getNextStatusForRelatedModule(
+    currentStatus: ProgressStatus,
+    operationType: OperationType,
+  ): ProgressStatus {
+    switch (operationType) {
+      case OperationType.WEEKLY_REPORT_CREATE:
+      case OperationType.WEEKLY_REPORT_UPDATE:
+        return currentStatus;
+
+      case OperationType.DEVIATION_CREATE:
+        if (currentStatus === ProgressStatus.UNDER_REVIEW) return ProgressStatus.REVIEW_REJECTED;
+        if (currentStatus === ProgressStatus.UNDER_VERIFICATION) return ProgressStatus.VERIFICATION_REJECTED;
+        return currentStatus;
+
+      case OperationType.DEVIATION_APPROVE:
+        if (currentStatus === ProgressStatus.REVIEW_REJECTED) return ProgressStatus.PENDING_REVIEW;
+        if (currentStatus === ProgressStatus.VERIFICATION_REJECTED) return ProgressStatus.PENDING_VERIFICATION;
+        return currentStatus;
+
+      case OperationType.DEVIATION_UPDATE:
+        return currentStatus;
+
+      case OperationType.OWNER_REPORT_CREATE:
+        if (currentStatus === ProgressStatus.PENDING_VERIFICATION) return ProgressStatus.UNDER_VERIFICATION;
+        return currentStatus;
+
+      case OperationType.OWNER_REPORT_ACKNOWLEDGE:
+        if (currentStatus === ProgressStatus.UNDER_VERIFICATION) return ProgressStatus.ARCHIVED;
+        return currentStatus;
+
+      case OperationType.OWNER_REPORT_UPDATE:
+        return currentStatus;
+
+      default:
+        return currentStatus;
+    }
+  }
+
   async updateStatusByRelatedModule(
     progressReportId: string,
     operationType: OperationType,
@@ -528,7 +566,12 @@ export class ProgressReportsService {
   ): Promise<void> {
     const report = await this.findOne(progressReportId);
     const fromStatus = report.status;
+    const toStatus = this.getNextStatusForRelatedModule(fromStatus, operationType);
+
+    report.status = toStatus;
     report.lastProcessResult = detail;
+    report.updatedAt = new Date();
+    report.currentNodeEnteredAt = fromStatus !== toStatus ? new Date() : report.currentNodeEnteredAt;
 
     await this.progressReportsRepository.save(report);
     await this.operationLogsService.create(
@@ -538,7 +581,7 @@ export class ProgressReportsService {
       detail,
       remarks,
       fromStatus,
-      fromStatus,
+      toStatus,
     );
   }
 

@@ -590,7 +590,7 @@
                 <span class="count-badge">{deviationAnalyses.length}</span>
               {/if}
             </h3>
-            {#if canCreateDeviationAnalysis(user)}
+            {#if canCreateDeviationAnalysis(user, report)}
               <button class="btn btn-sm btn-outline" on:click={() => showDeviationModal = true}>
                 + 新增偏差分析
               </button>
@@ -608,7 +608,7 @@
                       <span class="status-badge" class:approved={da.isApproved}>
                         {da.isApproved ? '已批准' : '待批准'}
                       </span>
-                      {#if !da.isApproved && canApproveDeviationAnalysis(user)}
+                      {#if !da.isApproved && canApproveDeviationAnalysis(user, report)}
                         <button class="btn btn-sm btn-primary" on:click={() => { activeDeviationId = da.id; showDeviationApproveModal = true; }}>
                           审批
                         </button>
@@ -636,7 +636,7 @@
                 <span class="count-badge">{ownerReports.length}</span>
               {/if}
             </h3>
-            {#if canCreateOwnerReport(user)}
+            {#if canCreateOwnerReport(user, report)}
               <button class="btn btn-sm btn-outline" on:click={() => showOwnerReportModal = true}>
                 + 新增业主汇报
               </button>
@@ -654,7 +654,7 @@
                       <span class="status-badge" class:acknowledged={or.ownerAcknowledged}>
                         {or.ownerAcknowledged ? '已确认' : '待确认'}
                       </span>
-                      {#if !or.ownerAcknowledged && canAcknowledgeOwnerReport(user)}
+                      {#if !or.ownerAcknowledged && canAcknowledgeOwnerReport(user, report)}
                         <button class="btn btn-sm btn-primary" on:click={() => { activeOwnerReportId = or.id; showOwnerAckModal = true; }}>
                           确认
                         </button>
