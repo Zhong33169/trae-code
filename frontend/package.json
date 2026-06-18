@@ -1,0 +1,25 @@
+{
+  "name": "loan-workbench-frontend",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "nuxt build",
+    "dev": "nuxt dev",
+    "generate": "nuxt generate",
+    "preview": "nuxt preview",
+    "postinstall": "nuxt prepare"
+  },
+  "dependencies": {
+    "@pinia/nuxt": "^0.5.1",
+    "nuxt": "^3.10.0",
+    "pinia": "^2.1.7",
+    "vue": "^3.4.0",
+    "vue-router": "^4.2.5"
+  },
+  "devDependencies": {
+    "@nuxt/types": "^2.17.2",
+    "@types/node": "^20.11.0",
+    "typescript": "^5.9.3",
+    "vue-tsc": "^3.3.5"
+  }
+}
