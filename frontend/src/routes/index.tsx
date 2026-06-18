@@ -2,12 +2,14 @@ import { useState, useEffect } from 'react'
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { api } from '../lib/api.js'
 import { STATUS, STATUS_NAMES, STATUS_COLORS, ROLES, ISSUE_TYPE_NAMES } from '../lib/constants.js'
+import { useCurrentUser } from '../lib/userContext.jsx'
 
 export const Route = createFileRoute('/')({
   component: ApplicationsList,
 })
 
 function ApplicationsList() {
+  const { currentUser } = useCurrentUser()
   const [data, setData] = useState({ list: [], current_user: null })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -30,6 +32,7 @@ function ApplicationsList() {
   })
 
   const loadData = () => {
+    if (!currentUser) return
     setLoading(true)
     setError(null)
     const params = {}
@@ -44,7 +47,7 @@ function ApplicationsList() {
 
   useEffect(() => {
     loadData()
-  }, [filters])
+  }, [filters, currentUser?.id])
 
   const handleFilterChange = (key, value) => {
     setFilters(prev => ({ ...prev, [key]: value }))
@@ -104,8 +107,8 @@ function ApplicationsList() {
     }
   }
 
-  const canCreate = data.current_user?.role === ROLES.METER_OPERATOR
-  const canBatchArchive = data.current_user?.role === ROLES.GAS_ARCHIVIST
+  const canCreate = currentUser?.role === ROLES.METER_OPERATOR
+  const canBatchArchive = currentUser?.role === ROLES.GAS_ARCHIVIST
   const archivableCount = data.list.filter(a =>
     a.status === STATUS.PENDING_ARCHIVIST && selectedIds.has(a.id)
   ).length

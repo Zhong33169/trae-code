@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { api } from '../../lib/api.js'
 import { STATUS, STATUS_NAMES, STATUS_COLORS, ROLES, ROLE_NAMES } from '../../lib/constants.js'
+import { useCurrentUser } from '../../lib/userContext.jsx'
 
 export const Route = createFileRoute('/applications/$id')({
   component: ApplicationDetail,
@@ -9,10 +10,10 @@ export const Route = createFileRoute('/applications/$id')({
 
 function ApplicationDetail() {
   const { id } = Route.useParams()
+  const { currentUser } = useCurrentUser()
   const [app, setApp] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-  const [currentUser, setCurrentUser] = useState(null)
 
   const [showRejectModal, setShowRejectModal] = useState(false)
   const [showApproveModal, setShowApproveModal] = useState(false)
@@ -29,14 +30,10 @@ function ApplicationDetail() {
   const [archiveIssues, setArchiveIssues] = useState(null)
 
   const loadData = async () => {
+    if (!currentUser) return
     setLoading(true)
     setError(null)
     try {
-      const users = await api.getUsers()
-      const savedId = localStorage.getItem('currentUserId')
-      if (savedId) {
-        setCurrentUser(users.find(u => u.id === parseInt(savedId)))
-      }
       const data = await api.getApplication(id)
       setApp(data)
     } catch (err) {
@@ -48,12 +45,12 @@ function ApplicationDetail() {
 
   useEffect(() => {
     loadData()
-  }, [id])
+  }, [id, currentUser?.id])
 
   const handleSubmit = async () => {
     try {
-      await api.submitApplication(id)
-      loadData()
+      const data = await api.submitApplication(id)
+      setApp(data)
     } catch (err) {
       alert(err.message)
     }
@@ -62,10 +59,10 @@ function ApplicationDetail() {
   const handleApprove = async (e) => {
     e.preventDefault()
     try {
-      await api.approveApplication(id, approveForm)
+      const data = await api.approveApplication(id, approveForm)
+      setApp(data)
       setShowApproveModal(false)
       setApproveForm({ review_comment: '' })
-      loadData()
     } catch (err) {
       alert(err.message)
     }
@@ -74,10 +71,10 @@ function ApplicationDetail() {
   const handleReject = async (e) => {
     e.preventDefault()
     try {
-      await api.rejectApplication(id, rejectForm)
+      const data = await api.rejectApplication(id, rejectForm)
+      setApp(data)
       setShowRejectModal(false)
       setRejectForm({ reject_reason: '', review_comment: '' })
-      loadData()
     } catch (err) {
       alert(err.message)
     }
@@ -86,11 +83,11 @@ function ApplicationDetail() {
   const handleArchive = async (e) => {
     e.preventDefault()
     try {
-      await api.archiveApplication(id, archiveForm)
+      const data = await api.archiveApplication(id, archiveForm)
+      setApp(data)
       setShowArchiveModal(false)
       setArchiveForm({ review_comment: '', audit_remark: '' })
       setArchiveIssues(null)
-      loadData()
     } catch (err) {
       if (err.status === 422 && err.data?.issues) {
         setArchiveIssues(err.data)
@@ -103,10 +100,10 @@ function ApplicationDetail() {
   const handleAddAttachment = async (e) => {
     e.preventDefault()
     try {
-      await api.addAttachment(id, attachmentForm)
+      const data = await api.addAttachment(id, attachmentForm)
+      setApp(data)
       setShowAttachmentModal(false)
       setAttachmentForm({ filename: '', file_type: '' })
-      loadData()
     } catch (err) {
       alert(err.message)
     }
@@ -115,8 +112,8 @@ function ApplicationDetail() {
   const handleDeleteAttachment = async (attachId) => {
     if (!confirm('确定删除此附件？')) return
     try {
-      await api.deleteAttachment(id, attachId)
-      loadData()
+      const data = await api.deleteAttachment(id, attachId)
+      setApp(data)
     } catch (err) {
       alert(err.message)
     }
@@ -125,9 +122,9 @@ function ApplicationDetail() {
   const handleUpdateAuditRemark = async (e) => {
     e.preventDefault()
     try {
-      await api.updateAuditRemark(id, auditRemarkForm)
+      const data = await api.updateAuditRemark(id, auditRemarkForm)
+      setApp(data)
       setShowAuditRemarkModal(false)
-      loadData()
     } catch (err) {
       alert(err.message)
     }

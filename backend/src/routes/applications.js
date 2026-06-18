@@ -10,6 +10,16 @@ const app = new Hono();
 
 app.use('*', authMiddleware);
 
+function wrapWithCurrentUser(data, user) {
+  return {
+    ...data,
+    current_user: {
+      ...user,
+      role_name: ROLE_NAMES[user.role]
+    }
+  };
+}
+
 function buildApplicationDetail(appData) {
   const processRecords = db.prepare(`
     SELECT pr.*, u.name as actor_name
@@ -180,13 +190,7 @@ app.get('/', (c) => {
       (a.status === STATUS.ARCHIVED && a.offline_ledger_backfilled === 0)
   }));
 
-  return c.json({
-    list: applications,
-    current_user: {
-      ...user,
-      role_name: ROLE_NAMES[user.role]
-    }
-  });
+  return c.json(wrapWithCurrentUser({ list: applications }, user));
 });
 
 app.get('/validate/ledger', (c) => {
@@ -212,11 +216,13 @@ app.get('/validate/ledger', (c) => {
 });
 
 app.get('/:id', (c) => {
+  const user = c.get('user');
   const appData = db.prepare('SELECT * FROM applications WHERE id = ?').get(c.req.param('id'));
   if (!appData) {
     return c.json({ error: '申请不存在' }, 404);
   }
-  return c.json(buildApplicationDetail(appData));
+  const detail = buildApplicationDetail(appData);
+  return c.json(wrapWithCurrentUser(detail, user));
 });
 
 app.post('/', requireRole(ROLES.METER_OPERATOR), async (c) => {
@@ -259,7 +265,7 @@ app.post('/', requireRole(ROLES.METER_OPERATOR), async (c) => {
   }
 
   const appData = db.prepare('SELECT * FROM applications WHERE id = ?').get(id);
-  return c.json(buildApplicationDetail(appData), 201);
+  return c.json(wrapWithCurrentUser(buildApplicationDetail(appData), user), 201);
 });
 
 app.post('/:id/submit', requireRole(ROLES.METER_OPERATOR), async (c) => {
@@ -303,7 +309,7 @@ app.post('/:id/submit', requireRole(ROLES.METER_OPERATOR), async (c) => {
   }
 
   const updated = db.prepare('SELECT * FROM applications WHERE id = ?').get(appId);
-  return c.json(buildApplicationDetail(updated));
+  return c.json(wrapWithCurrentUser(buildApplicationDetail(updated), user));
 });
 
 app.post('/:id/approve', requireRole(ROLES.METER_SUPERVISOR), async (c) => {
@@ -341,7 +347,7 @@ app.post('/:id/approve', requireRole(ROLES.METER_SUPERVISOR), async (c) => {
   }
 
   const updated = db.prepare('SELECT * FROM applications WHERE id = ?').get(appId);
-  return c.json(buildApplicationDetail(updated));
+  return c.json(wrapWithCurrentUser(buildApplicationDetail(updated), user));
 });
 
 app.post('/:id/reject', requireRole(ROLES.METER_SUPERVISOR), async (c) => {
@@ -384,7 +390,7 @@ app.post('/:id/reject', requireRole(ROLES.METER_SUPERVISOR), async (c) => {
   }
 
   const updated = db.prepare('SELECT * FROM applications WHERE id = ?').get(appId);
-  return c.json(buildApplicationDetail(updated));
+  return c.json(wrapWithCurrentUser(buildApplicationDetail(updated), user));
 });
 
 function executeArchive(appId, appData, user, reviewComment, auditRemark, actionLabel) {
@@ -480,11 +486,15 @@ app.post('/:id/archive', requireRole(ROLES.GAS_ARCHIVIST), async (c) => {
       error: '归档校验未通过，申请保持待处理状态',
       issues: result.issues,
       summary: result.summary,
-      application: detail
+      application: detail,
+      current_user: {
+        ...user,
+        role_name: ROLE_NAMES[user.role]
+      }
     }, 422);
   }
 
-  return c.json(detail);
+  return c.json(wrapWithCurrentUser(detail, user));
 });
 
 app.post('/batch-archive', requireRole(ROLES.GAS_ARCHIVIST), async (c) => {
@@ -548,13 +558,13 @@ app.post('/batch-archive', requireRole(ROLES.GAS_ARCHIVIST), async (c) => {
     blockedCount > 0 ? results.filter(r => !r.archived && r.issues.length > 0).map(r => `${r.id}: ${r.summary || r.error}`).join('；') : null,
     audit_remark || null);
 
-  return c.json({
+  return c.json(wrapWithCurrentUser({
     total: ids.length,
     success: archivedCount,
     blocked: blockedCount,
     failed: ids.length - archivedCount - blockedCount,
     results: results
-  });
+  }, user));
 });
 
 app.post('/:id/attachments', requireRole(ROLES.METER_OPERATOR, ROLES.METER_SUPERVISOR, ROLES.GAS_ARCHIVIST), async (c) => {
@@ -577,7 +587,7 @@ app.post('/:id/attachments', requireRole(ROLES.METER_OPERATOR, ROLES.METER_SUPER
     `上传附件：${body.filename}`, null, body.remark || null);
 
   const updated = db.prepare('SELECT * FROM applications WHERE id = ?').get(appId);
-  return c.json(buildApplicationDetail(updated));
+  return c.json(wrapWithCurrentUser(buildApplicationDetail(updated), user));
 });
 
 app.delete('/:id/attachments/:attachId', requireRole(ROLES.METER_OPERATOR, ROLES.METER_SUPERVISOR, ROLES.GAS_ARCHIVIST), (c) => {
@@ -595,7 +605,7 @@ app.delete('/:id/attachments/:attachId', requireRole(ROLES.METER_OPERATOR, ROLES
     `删除附件：${attach.filename}`, null, null);
 
   const updated = db.prepare('SELECT * FROM applications WHERE id = ?').get(appId);
-  return c.json(buildApplicationDetail(updated));
+  return c.json(wrapWithCurrentUser(buildApplicationDetail(updated), user));
 });
 
 app.post('/:id/audit-remark', requireRole(ROLES.METER_OPERATOR, ROLES.METER_SUPERVISOR, ROLES.GAS_ARCHIVIST), async (c) => {
@@ -617,7 +627,7 @@ app.post('/:id/audit-remark', requireRole(ROLES.METER_OPERATOR, ROLES.METER_SUPE
     null, body.audit_remark || null);
 
   const updated = db.prepare('SELECT * FROM applications WHERE id = ?').get(appId);
-  return c.json(buildApplicationDetail(updated));
+  return c.json(wrapWithCurrentUser(buildApplicationDetail(updated), user));
 });
 
 export default app;

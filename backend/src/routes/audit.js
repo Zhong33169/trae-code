@@ -8,6 +8,7 @@ const app = new Hono();
 app.use('*', authMiddleware);
 
 app.get('/', (c) => {
+  const user = c.get('user');
   const { application_id, user_role, action, keyword, has_failure } = c.req.query();
 
   let query = `
@@ -49,7 +50,13 @@ app.get('/', (c) => {
     has_failure: !!(l.failure_reason && l.failure_reason.trim() !== '')
   }));
 
-  return c.json(logs);
+  return c.json({
+    list: logs,
+    current_user: {
+      ...user,
+      role_name: ROLE_NAMES[user.role]
+    }
+  });
 });
 
 app.get('/failures', (c) => {

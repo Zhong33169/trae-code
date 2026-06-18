@@ -156,50 +156,66 @@ const insertAudit = db.prepare(`
 insertApp.run('APP001', 'BATCH202501001', '北京燃气公司第一分公司', '北京市朝阳区建国路88号', 'OLD-001', 'NEW-A001', '到期更换', 'pending_supervisor', 1, null, null, 0, null, null, 0, '2025-01-11', '2025-01-10 09:00:00');
 insertAttachment.run('ATT001', 'APP001', '旧表照片.jpg', 'image/jpeg', 1, '2025-01-10 09:05:00');
 insertProcess.run('PROC001', 'APP001', 'create', 'meter_operator', 1, '发起换表申请', null, null, '2025-01-10 09:00:00');
+insertAudit.run('AUD001', 'APP001', 1, 'meter_operator', 'create', '创建换表申请，批次号：BATCH202501001，旧表号：OLD-001，新表号：NEW-A001', null, '登记员张三发起申请，待主管李四审核', '2025-01-10 09:00:00');
+insertAudit.run('AUD001B', 'APP001', 1, 'meter_operator', 'update_attachment', '上传附件：旧表照片.jpg', null, '登记员张三上传附件', '2025-01-10 09:05:00');
 
 insertApp.run('APP002', 'BATCH202501001', '北京燃气公司第二分公司', '北京市海淀区中关村大街1号', 'OLD-002', 'NEW-A002', '故障更换', 'pending_archivist', 1, 2, null, 0, null, null, 0, '2025-01-14', '2025-01-11 10:00:00');
 insertProcess.run('PROC002', 'APP002', 'create', 'meter_operator', 1, '发起换表申请', null, null, '2025-01-11 10:00:00');
-insertProcess.run('PROC003', 'APP002', 'approve', 'meter_supervisor', 2, '审核通过', null, null, '2025-01-12 14:00:00');
+insertProcess.run('PROC003', 'APP002', 'approve', 'meter_supervisor', 2, '审核通过，资料齐全', null, null, '2025-01-12 14:00:00');
+insertAudit.run('AUD002', 'APP002', 1, 'meter_operator', 'create', '创建换表申请，批次号：BATCH202501001，旧表号：OLD-002，新表号：NEW-A002', null, '登记员张三发起申请', '2025-01-11 10:00:00');
+insertAudit.run('AUD002B', 'APP002', 2, 'meter_supervisor', 'approve', '审核通过，资料齐全', null, '主管李四审核通过，待复核负责人王五归档', '2025-01-12 14:00:00');
 
-insertApp.run('APP003', 'BATCH202501002', '北京燃气公司第三分公司', '北京市西城区金融街15号', 'OLD-003', 'NEW-A003', '到期更换', 'pending_operator', 1, 2, null, 0, null, '退回原因：缺少旧表照片，请补正后重新提交', 0, '2025-01-13', '2025-01-11 11:00:00');
+insertApp.run('APP003', 'BATCH202501002', '北京燃气公司第三分公司', '北京市西城区金融街15号', 'OLD-003', 'NEW-A003', '到期更换', 'pending_operator', 1, 2, null, 0, null, '退回原因：缺少旧表照片和换表现场记录，请补正后重新提交', 0, '2025-01-13', '2025-01-11 11:00:00');
 insertProcess.run('PROC004', 'APP003', 'create', 'meter_operator', 1, '发起换表申请', null, null, '2025-01-11 11:00:00');
-insertProcess.run('PROC005', 'APP003', 'reject', 'meter_supervisor', 2, '审核退回', '缺少旧表照片', null, '2025-01-12 09:30:00');
-insertAudit.run('AUD001', 'APP003', 2, 'meter_supervisor', 'reject', '审核退回：缺少旧表照片', '缺少旧表照片', '登记员需补传旧表照片后重新提交', '2025-01-12 09:30:00');
+insertProcess.run('PROC005', 'APP003', 'reject', 'meter_supervisor', 2, '审核退回，资料不全', '缺少旧表照片和换表现场记录', null, '2025-01-12 09:30:00');
+insertAudit.run('AUD003', 'APP003', 1, 'meter_operator', 'create', '创建换表申请，批次号：BATCH202501002，旧表号：OLD-003，新表号：NEW-A003', null, '登记员张三发起申请', '2025-01-11 11:00:00');
+insertAudit.run('AUD003B', 'APP003', 2, 'meter_supervisor', 'reject', '退回原因：缺少旧表照片和换表现场记录；备注：资料不全，退回补正', '缺少旧表照片和换表现场记录', '主管李四退回，登记员张三需补正后重新提交', '2025-01-12 09:30:00');
 
-insertApp.run('APP004', 'BATCH202501004', '北京燃气公司第四分公司', '北京市东城区王府井大街100号', 'OLD-004', 'NEW-A004', '故障更换', 'pending_supervisor', 1, null, null, 0, null, '缺材料：未上传新表安装记录和现场照片，待审核主管退回', 0, '2025-01-15', '2025-01-12 14:00:00');
+insertApp.run('APP004', 'BATCH202501004', '北京燃气公司第四分公司', '北京市东城区王府井大街100号', 'OLD-004', 'NEW-A004', '故障更换', 'pending_supervisor', 1, null, null, 0, null, '缺材料：未上传新表安装记录和现场照片，待审核主管核验退回', 0, '2025-01-15', '2025-01-12 14:00:00');
 insertProcess.run('PROC006', 'APP004', 'create', 'meter_operator', 1, '发起换表申请（缺材料）', null, null, '2025-01-12 14:00:00');
-insertAudit.run('AUD002', 'APP004', 1, 'meter_operator', 'create', '创建换表申请，但未上传新表安装记录等材料', null, '缺材料单，待审核主管核验退回', '2025-01-12 14:00:00');
+insertAudit.run('AUD004', 'APP004', 1, 'meter_operator', 'create', '创建换表申请，但未上传新表安装记录等材料', null, '缺材料单，待审核主管核验退回', '2025-01-12 14:00:00');
 
-insertApp.run('APP005', 'BATCH202501003', '北京燃气公司第五分公司', '北京市丰台区南三环西路16号', 'OLD-005', 'NEW-A005', '到期更换', 'archived', 1, 2, 3, 1, null, '正常归档完成', 0, '2025-01-13', '2025-01-11 15:00:00');
+insertApp.run('APP005', 'BATCH202501003', '北京燃气公司第五分公司', '北京市丰台区南三环西路16号', 'OLD-005', 'NEW-A005', '到期更换', 'archived', 1, 2, 3, 1, null, '正常归档完成，全流程示例', 0, '2025-01-13', '2025-01-11 15:00:00');
 insertAttachment.run('ATT002', 'APP005', '旧表照片.jpg', 'image/jpeg', 1, '2025-01-11 15:05:00');
 insertAttachment.run('ATT003', 'APP005', '新表安装记录.pdf', 'application/pdf', 1, '2025-01-11 15:06:00');
 insertProcess.run('PROC007', 'APP005', 'create', 'meter_operator', 1, '发起换表申请', null, null, '2025-01-11 15:00:00');
-insertProcess.run('PROC008', 'APP005', 'approve', 'meter_supervisor', 2, '审核通过', null, null, '2025-01-12 16:00:00');
-insertProcess.run('PROC009', 'APP005', 'archive', 'gas_archivist', 3, '复核归档完成', null, '台账匹配成功，已归档', '2025-01-13 10:00:00');
-insertAudit.run('AUD003', 'APP005', 3, 'gas_archivist', 'archive', '复核归档完成，台账匹配成功', null, '正常单完整流程归档', '2025-01-13 10:00:00');
+insertProcess.run('PROC008', 'APP005', 'approve', 'meter_supervisor', 2, '审核通过，资料完整', null, null, '2025-01-12 16:00:00');
+insertProcess.run('PROC009', 'APP005', 'archive', 'gas_archivist', 3, '复核归档完成，台账匹配', null, '台账匹配成功，已归档', '2025-01-13 10:00:00');
+insertAudit.run('AUD005', 'APP005', 1, 'meter_operator', 'create', '创建换表申请，批次号：BATCH202501003，旧表号：OLD-005，新表号：NEW-A005', null, '登记员张三发起申请', '2025-01-11 15:00:00');
+insertAudit.run('AUD005B', 'APP005', 2, 'meter_supervisor', 'approve', '审核通过，资料完整', null, '主管李四审核通过', '2025-01-12 16:00:00');
+insertAudit.run('AUD005C', 'APP005', 3, 'gas_archivist', 'archive', '复核归档完成，台账匹配成功', null, '复核负责人王五归档，正常单完整流程示例', '2025-01-13 10:00:00');
 
 insertApp.run('APP006', 'BATCH202501006', '北京燃气公司第六分公司', '北京市石景山区八角西街66号', 'OLD-006', 'NEW-A006', '到期更换', 'pending_archivist', 1, 2, null, 0, null, '超时：待归档已超过 SLA（应于2025-01-14完成）', 1, '2025-01-14', '2025-01-09 08:00:00');
 insertProcess.run('PROC010', 'APP006', 'create', 'meter_operator', 1, '发起换表申请', null, null, '2025-01-09 08:00:00');
 insertProcess.run('PROC011', 'APP006', 'approve', 'meter_supervisor', 2, '审核通过', null, null, '2025-01-10 09:00:00');
-insertAudit.run('AUD004', 'APP006', 2, 'meter_supervisor', 'approve', '审核通过', null, '该单随后超时，待复核负责人归档', '2025-01-10 09:00:00');
+insertAudit.run('AUD006', 'APP006', 1, 'meter_operator', 'create', '创建换表申请，批次号：BATCH202501006，旧表号：OLD-006，新表号：NEW-A006', null, '登记员张三发起申请', '2025-01-09 08:00:00');
+insertAudit.run('AUD006B', 'APP006', 2, 'meter_supervisor', 'approve', '审核通过', null, '主管李四审核通过，该单随后超时，待复核负责人归档', '2025-01-10 09:00:00');
 
 insertApp.run('APP007', 'BATCH202501007', '北京燃气公司第七分公司', '北京市通州区新华西街58号', 'OLD-007', 'NEW-A007', '故障更换', 'pending_archivist', 1, 2, null, 0, null, '离线台账无此记录，归档将校验失败', 0, '2025-01-16', '2025-01-13 09:00:00');
 insertProcess.run('PROC012', 'APP007', 'create', 'meter_operator', 1, '发起换表申请', null, null, '2025-01-13 09:00:00');
 insertProcess.run('PROC013', 'APP007', 'approve', 'meter_supervisor', 2, '审核通过', null, null, '2025-01-14 10:00:00');
+insertAudit.run('AUD007', 'APP007', 1, 'meter_operator', 'create', '创建换表申请，批次号：BATCH202501007，旧表号：OLD-007，新表号：NEW-A007', null, '登记员张三发起申请，线下台账缺失', '2025-01-13 09:00:00');
+insertAudit.run('AUD007B', 'APP007', 2, 'meter_supervisor', 'approve', '审核通过', null, '主管李四审核通过，待复核负责人归档（线下台账缺失将校验失败）', '2025-01-14 10:00:00');
 
 insertApp.run('APP008', 'BATCH202501008', '北京燃气公司第八分公司', '北京市昌平区回龙观西大街118号', 'OLD-008', 'NEW-A008', '到期更换', 'pending_archivist', 1, 2, null, 0, null, '状态不一致：线下台账已作废，归档将校验失败', 0, '2025-01-16', '2025-01-13 10:00:00');
 insertProcess.run('PROC014', 'APP008', 'create', 'meter_operator', 1, '发起换表申请', null, null, '2025-01-13 10:00:00');
 insertProcess.run('PROC015', 'APP008', 'approve', 'meter_supervisor', 2, '审核通过', null, null, '2025-01-14 11:00:00');
+insertAudit.run('AUD008', 'APP008', 1, 'meter_operator', 'create', '创建换表申请，批次号：BATCH202501008，旧表号：OLD-008，新表号：NEW-A008', null, '登记员张三发起申请', '2025-01-13 10:00:00');
+insertAudit.run('AUD008B', 'APP008', 2, 'meter_supervisor', 'approve', '审核通过', null, '主管李四审核通过，待复核负责人归档（线下状态不一致将校验失败）', '2025-01-14 11:00:00');
 
 insertApp.run('APP009', 'BATCH202501009', '北京燃气公司第九分公司', '北京市顺义区府前东街11号', 'OLD-009', 'NEW-A009', '到期更换', 'archived', 1, 2, 3, 1, null, '正常归档（批次已占用）', 0, '2025-01-20', '2025-01-14 09:00:00');
 insertProcess.run('PROC016', 'APP009', 'create', 'meter_operator', 1, '发起换表申请', null, null, '2025-01-14 09:00:00');
 insertProcess.run('PROC017', 'APP009', 'approve', 'meter_supervisor', 2, '审核通过', null, null, '2025-01-15 09:00:00');
 insertProcess.run('PROC018', 'APP009', 'archive', 'gas_archivist', 3, '复核归档完成', null, '台账匹配成功，已归档', '2025-01-16 09:00:00');
-insertAudit.run('AUD005', 'APP009', 3, 'gas_archivist', 'archive', '复核归档完成，台账匹配成功', null, '该批次已占用 OLD-009', '2025-01-16 09:00:00');
+insertAudit.run('AUD009', 'APP009', 1, 'meter_operator', 'create', '创建换表申请，批次号：BATCH202501009，旧表号：OLD-009，新表号：NEW-A009', null, '登记员张三发起申请', '2025-01-14 09:00:00');
+insertAudit.run('AUD009B', 'APP009', 2, 'meter_supervisor', 'approve', '审核通过', null, '主管李四审核通过', '2025-01-15 09:00:00');
+insertAudit.run('AUD009C', 'APP009', 3, 'gas_archivist', 'archive', '复核归档完成，台账匹配成功', null, '复核负责人王五归档，该批次 OLD-009 已占用，APP010 将批次冲突', '2025-01-16 09:00:00');
 
 insertApp.run('APP010', 'BATCH202501009', '北京燃气公司第十分公司', '北京市大兴区兴政街20号', 'OLD-010', 'NEW-A010', '故障更换', 'pending_archivist', 1, 2, null, 0, null, '重复批次：与 APP009 同批次但表号不同，归档将校验失败', 0, '2025-01-20', '2025-01-15 09:00:00');
 insertProcess.run('PROC019', 'APP010', 'create', 'meter_operator', 1, '发起换表申请', null, null, '2025-01-15 09:00:00');
 insertProcess.run('PROC020', 'APP010', 'approve', 'meter_supervisor', 2, '审核通过', null, null, '2025-01-16 09:00:00');
+insertAudit.run('AUD010', 'APP010', 1, 'meter_operator', 'create', '创建换表申请，批次号：BATCH202501009，旧表号：OLD-010，新表号：NEW-A010', null, '登记员张三发起申请，与 APP009 同批次', '2025-01-15 09:00:00');
+insertAudit.run('AUD010B', 'APP010', 2, 'meter_supervisor', 'approve', '审核通过', null, '主管李四审核通过，待复核负责人归档（批次冲突将校验失败）', '2025-01-16 09:00:00');
 
 console.log('数据库初始化完成');
 console.log('数据文件位置:', dbPath);

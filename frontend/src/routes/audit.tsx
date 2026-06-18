@@ -1,33 +1,35 @@
 import { useState, useEffect } from 'react'
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { api } from '../lib/api.js'
+import { useCurrentUser } from '../lib/userContext.jsx'
 
 export const Route = createFileRoute('/audit')({
   component: AuditLogs,
 })
 
 function AuditLogs() {
+  const { currentUser } = useCurrentUser()
   const [logs, setLogs] = useState([])
   const [loading, setLoading] = useState(true)
   const [showFailuresOnly, setShowFailuresOnly] = useState(false)
   const [keyword, setKeyword] = useState('')
 
   const loadData = () => {
+    if (!currentUser) return
     setLoading(true)
     const params = {}
     if (showFailuresOnly) params.has_failure = 'true'
     if (keyword) params.keyword = keyword
 
-    const req = showFailuresOnly || keyword ? api.getAuditLogs(params) : api.getAuditLogs(params)
-    req
-      .then(data => setLogs(data))
+    api.getAuditLogs(params)
+      .then(data => setLogs(data.list || []))
       .catch(err => console.error(err))
       .finally(() => setLoading(false))
   }
 
   useEffect(() => {
     loadData()
-  }, [showFailuresOnly])
+  }, [showFailuresOnly, currentUser?.id])
 
   const handleSearch = (e) => {
     e.preventDefault()
