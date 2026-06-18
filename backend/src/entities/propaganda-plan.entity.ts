@@ -90,6 +90,8 @@ export class PropagandaPlan {
   @OneToMany(() => HandoverRecord, (r) => r.plan)
   handovers: HandoverRecord[];
 
+  latestHandover?: HandoverRecord;
+
   @OneToMany(() => OperationLog, (l) => l.plan)
   logs: OperationLog[];
 

@@ -77,6 +77,7 @@ export interface PlanItem {
   currentHandlerRole?: string;
   currentHandlerRoleName?: string;
   awaitingAccept: HandoverItem | null;
+  latestHandover: HandoverItem | null;
 }
 
 export interface PlanDetail extends PlanItem {

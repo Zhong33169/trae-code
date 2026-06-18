@@ -75,6 +75,10 @@ export class PlanService {
       .leftJoinAndSelect('p.awaitingAccept', 'awa')
       .leftJoinAndSelect('awa.handFrom', 'awaF')
       .leftJoinAndSelect('awa.handTo', 'awaT')
+      .leftJoinAndMapOne('p.latestHandover', HandoverRecord, 'lh',
+        'lh.planId = p.id AND lh.id = (SELECT MAX(h2.id) FROM handover_records h2 WHERE h2.planId = p.id)')
+      .leftJoinAndSelect('lh.handFrom', 'lhF')
+      .leftJoinAndSelect('lh.handTo', 'lhT')
       .skip((page - 1) * pageSize)
       .take(pageSize)
       .orderBy('p.id', 'DESC');
@@ -116,6 +120,7 @@ export class PlanService {
       .addOrderBy('l.id', 'DESC')
       .getOne();
     if (!plan) throw new NotFoundException('传播计划单不存在');
+    if (!plan.latestHandover && plan.handovers?.length) plan.latestHandover = plan.handovers[0];
     return this.serializePlanDetail(plan, user);
   }
 
@@ -160,6 +165,7 @@ export class PlanService {
       currentHandlerRole: p.currentHandlerRole,
       currentHandlerRoleName: p.currentHandlerRole ? ROLE_NAME[p.currentHandlerRole] : null,
       awaitingAccept: p.awaitingAccept ? this.serializeHandover(p.awaitingAccept) : null,
+      latestHandover: p.latestHandover ? this.serializeHandover(p.latestHandover) : null,
     };
   }
 
@@ -209,14 +215,16 @@ export class PlanService {
       return result;
     }
     if (role === UserRole.REGISTER) {
-      if (s === PlanStatus.DRAFT || s === PlanStatus.NEED_CORRECT) {
-        result.canEdit = true; result.canSubmitAudit = true;
-      }
-      if (s === PlanStatus.MATERIAL_REJECTED) {
-        result.canEdit = true; result.canMaterialSubmit = true;
-      }
-      if (p.currentHandlerId === user.id && !this.isClosed(s)) {
-        result.canHandover = true;
+      if (p.currentHandlerId === user.id) {
+        if (s === PlanStatus.DRAFT || s === PlanStatus.NEED_CORRECT) {
+          result.canEdit = true; result.canSubmitAudit = true;
+        }
+        if (s === PlanStatus.MATERIAL_REJECTED) {
+          result.canEdit = true; result.canMaterialSubmit = true;
+        }
+        if (!this.isClosed(s)) {
+          result.canHandover = true;
+        }
       }
     } else if (role === UserRole.AUDIT) {
       if (s === PlanStatus.PENDING_AUDIT && p.currentHandlerId === user.id) {
@@ -280,14 +288,16 @@ export class PlanService {
   }
 
   async update(id: number, user: User, data: any) {
-    const plan = await this.planRepo.findOne({ where: { id }, relations: ['awaitingAccept', 'awaitingAccept.handTo'] });
+    const plan = await this.planRepo.findOne({ where: { id }, relations: ['currentHandler', 'awaitingAccept', 'awaitingAccept.handTo'] });
     if (!plan) throw new NotFoundException('传播计划单不存在');
     this.ensureNotAwaitingAccept(plan, user.id, '编辑');
     const perms = this.getPermissions(plan, user);
     if (!perms.canEdit) {
       const why = user.role !== UserRole.REGISTER
         ? `当前岗位【${ROLE_NAME[user.role]}】无编辑权限（仅登记员可编辑草稿/补正单）`
-        : `当前状态【${STATUS_NAME[plan.status]}】不允许编辑；仅草稿、需补正、素材不通过状态允许编辑`;
+        : plan.currentHandlerId !== user.id
+          ? `该单据当前处理人为【${plan.currentHandler?.realName || plan.currentHandlerId}】，您不是当前处理人，无法编辑`
+          : `当前状态【${STATUS_NAME[plan.status]}】不允许编辑；仅草稿、需补正、素材不通过状态允许编辑`;
       throw new ForbiddenException('无法编辑：' + why);
     }
     const before = { ...plan };
@@ -304,7 +314,7 @@ export class PlanService {
 
   async submitAudit(id: number, user: User) {
     return this.dataSource.transaction(async (mgr) => {
-      const plan = await mgr.findOne(PropagandaPlan, { where: { id }, relations: ['awaitingAccept', 'awaitingAccept.handTo'] });
+      const plan = await mgr.findOne(PropagandaPlan, { where: { id }, relations: ['currentHandler', 'awaitingAccept', 'awaitingAccept.handTo'] });
       if (!plan) throw new NotFoundException('传播计划单不存在');
       this.ensureNotAwaitingAccept(plan, user.id, '提交审核');
       if (user.role !== UserRole.REGISTER) {
@@ -312,6 +322,9 @@ export class PlanService {
       }
       if (plan.status !== PlanStatus.DRAFT && plan.status !== PlanStatus.NEED_CORRECT) {
         throw new BadRequestException(`当前状态【${STATUS_NAME[plan.status]}】不允许提交审核；仅草稿或需补正状态可提交审核`);
+      }
+      if (plan.currentHandlerId !== user.id) {
+        throw new ForbiddenException(`仅当前处理人可提交审核；当前处理人为【${plan.currentHandler?.realName || plan.currentHandlerId}】，您不是当前处理人`);
       }
       const before = { status: plan.status };
       plan.status = PlanStatus.PENDING_AUDIT;
@@ -372,8 +385,8 @@ export class PlanService {
       if (plan.status !== PlanStatus.AUDIT_PASSED && plan.status !== PlanStatus.MATERIAL_REJECTED) {
         throw new BadRequestException(`当前状态【${STATUS_NAME[plan.status]}】不允许提交素材审核；仅审核通过 / 素材不通过状态可提交`);
       }
-      if (user.role === UserRole.REGISTER && plan.createdById !== user.id) {
-        throw new ForbiddenException(`登记员仅可提交自己创建单据的素材；该单据创建人ID为 ${plan.createdById}`);
+      if (user.role === UserRole.REGISTER && plan.currentHandlerId !== user.id) {
+        throw new ForbiddenException(`登记员仅可提交自己当前持有的单据素材；当前处理人为【${plan.currentHandler?.realName || plan.currentHandlerId}】，您不是当前处理人`);
       }
       if (user.role === UserRole.AUDIT && plan.currentHandlerId !== user.id) {
         throw new ForbiddenException(`审核主管仅可提交自己持有的待办单据；当前处理人为【${plan.currentHandler?.realName || plan.currentHandlerId}】`);

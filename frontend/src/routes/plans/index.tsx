@@ -203,6 +203,11 @@ export default function PlansIndex() {
                         ⏳ {p.awaitingAccept.stateName}
                       </span>
                     </Show>
+                    <Show when={!p.awaitingAccept && p.latestHandover && p.latestHandover.state === 'ACCEPTED'}>
+                      <span class="badge" style={{ marginLeft: 8, background: '#dbeafe', color: '#1e40af' }}>
+                        ✅ 已接收
+                      </span>
+                    </Show>
                   </td>
                   <td><Badge status={p.status} label={p.statusName} /></td>
                   <td>
@@ -210,6 +215,12 @@ export default function PlansIndex() {
                       <div style={{ fontSize: 12, color: '#92400e', marginBottom: 2 }}>
                         {p.awaitingAccept.fromShiftName}{p.awaitingAccept.handFrom?.realName}
                         → {p.awaitingAccept.toShiftName}{p.awaitingAccept.handTo?.realName}
+                      </div>
+                    </Show>
+                    <Show when={!p.awaitingAccept && p.latestHandover}>
+                      <div style={{ fontSize: 12, color: '#1e40af', marginBottom: 2 }}>
+                        {p.latestHandover.fromShiftName}{p.latestHandover.handFrom?.realName}
+                        → {p.latestHandover.toShiftName}{p.latestHandover.handTo?.realName}
                       </div>
                     </Show>
                     {p.currentHandler
