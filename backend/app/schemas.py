@@ -98,6 +98,7 @@ class OperationLog(OperationLogBase):
     comment: Optional[str] = None
     opinion: Optional[str] = None
     reject_reason: Optional[str] = None
+    audit_note: Optional[str] = None
     created_at: datetime
     model_config = ConfigDict(from_attributes=True)
 
@@ -160,6 +161,12 @@ class ReturnForCorrectionData(BaseModel):
 class CorrectData(BaseModel):
     current_user_id: int
     comment: Optional[str] = None
+
+
+class ConflictRecoveryData(BaseModel):
+    current_user_id: int
+    comment: Optional[str] = None
+    audit_note: Optional[str] = None
 
 
 class AppealSubmitData(BaseModel):
@@ -275,6 +282,8 @@ class Statistics(BaseModel):
     appeal_rejected: int = 0
     overdue: int = 0
     archived: int = 0
+    pending_conflict: int = 0
+    conflict_recovered: int = 0
     by_stage_need: int = 0
     by_stage_quotation: int = 0
     by_stage_contract: int = 0

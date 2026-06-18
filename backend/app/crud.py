@@ -154,6 +154,7 @@ def add_operation_log(
     comment: Optional[str] = None,
     opinion: Optional[str] = None,
     reject_reason: Optional[str] = None,
+    audit_note: Optional[str] = None,
 ) -> OperationLog:
     user = get_user(db, user_id)
     log = OperationLog(
@@ -169,6 +170,7 @@ def add_operation_log(
         comment=comment,
         opinion=opinion,
         reject_reason=reject_reason,
+        audit_note=audit_note,
     )
     db.add(log)
     db.flush()
@@ -231,6 +233,27 @@ def get_statistics(db: Session) -> dict:
 
     total = db.query(func.count(TrainingProject.id)).scalar() or 0
 
+    pending_conflict = (
+        db.query(func.count(func.distinct(OperationLog.project_id)))
+        .filter(
+            OperationLog.action == ActionType.STATE_CONFLICT,
+            OperationLog.project_id.in_(
+                db.query(TrainingProject.id).filter(
+                    TrainingProject.status.in_([
+                        Status.DRAFT, Status.RETURNED, Status.APPEAL_APPROVED
+                    ])
+                )
+            )
+        )
+        .scalar() or 0
+    )
+
+    conflict_recovered = (
+        db.query(func.count(func.distinct(OperationLog.project_id)))
+        .filter(OperationLog.action == ActionType.CONFLICT_RECOVERED)
+        .scalar() or 0
+    )
+
     return {
         "total": total,
         "draft": count_status(Status.DRAFT),
@@ -245,6 +268,8 @@ def get_statistics(db: Session) -> dict:
         "appeal_rejected": count_status(Status.APPEAL_REJECTED),
         "overdue": count_status(Status.OVERDUE),
         "archived": count_status(Status.ARCHIVED),
+        "pending_conflict": pending_conflict,
+        "conflict_recovered": conflict_recovered,
         "by_stage_need": count_stage(Stage.NEED),
         "by_stage_quotation": count_stage(Stage.QUOTATION),
         "by_stage_contract": count_stage(Stage.CONTRACT),

@@ -62,6 +62,7 @@ class ActionType(str, enum.Enum):
     ARCHIVE = "archive"
     MARK_OVERDUE = "mark_overdue"
     STATE_CONFLICT = "state_conflict"
+    CONFLICT_RECOVERED = "conflict_recovered"
 
 
 ROLE_LABELS = {
@@ -197,6 +198,7 @@ class OperationLog(Base):
     comment = Column(Text)
     opinion = Column(Text)
     reject_reason = Column(Text)
+    audit_note = Column(Text)
 
     created_at = Column(DateTime, default=datetime.utcnow)
 

@@ -363,6 +363,44 @@ def init_db():
         ))
         print(f"  [再次提交] {project8.project_no} - {project8.project_name} (申诉通过→补正→再次提交)")
 
+        # 冲突恢复示例：缺证据提交失败 → 补齐证据 → 冲突恢复提交 → 已提交
+        project9 = crud.create_project(db, schemas.TrainingProjectCreate(
+            project_name="团队协作效能提升培训",
+            client_company="西安创新科技",
+            stage=Stage.QUOTATION,
+            description="提升团队协作效率与沟通能力的全员培训项目。",
+            budget=120000.0,
+            deadline=datetime.utcnow() + timedelta(days=28),
+            created_by_id=registrar2.id,
+        ))
+        crud.add_evidence(db, schemas.EvidenceCreate(
+            name="团队协作培训需求.pdf",
+            evidence_type=EvidenceType.NEED_DOCUMENT,
+            description="客户提供的团队协作培训需求",
+            uploaded_by_id=registrar2.id,
+        ), project9.id)
+        print(f"  [冲突恢复] {project9.project_no} - {project9.project_name} (缺证据冲突→补齐→恢复提交)")
+        # 步骤1：缺证据提交 → state_conflict（缺报价单）
+        _expect_conflict(
+            "缺证据-冲突前",
+            services.submit_project,
+            db, project9.id,
+            schemas.SubmitData(current_user_id=registrar2.id, comment="以为齐了，先提交看看"),
+        )
+        # 步骤2：登记员补齐证据
+        crud.add_evidence(db, schemas.EvidenceCreate(
+            name="团队协作报价单-修订版.xlsx",
+            evidence_type=EvidenceType.QUOTATION_SHEET,
+            description="补充了讲师与场地费用的详细报价",
+            uploaded_by_id=registrar2.id,
+        ), project9.id)
+        # 步骤3：冲突恢复提交（audit_note 记录审计备注）
+        services.recover_from_conflict(db, project9.id, schemas.ConflictRecoveryData(
+            current_user_id=registrar2.id,
+            comment="已补齐报价单，执行冲突恢复提交",
+            audit_note="审计：缺证据冲突恢复，补全报价单后重新提交，版本v2",
+        ))
+
         print("\n初始化完成！")
         stats = crud.get_statistics(db)
         print(f"\n项目统计:")
@@ -378,6 +416,8 @@ def init_db():
         print(f"  申诉驳回: {stats['appeal_rejected']}")
         print(f"  逾期: {stats['overdue']}")
         print(f"  已归档: {stats['archived']}")
+        print(f"  待补救（冲突）: {stats['pending_conflict']}")
+        print(f"  已恢复（冲突）: {stats['conflict_recovered']}")
 
     finally:
         db.close()

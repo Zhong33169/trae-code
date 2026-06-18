@@ -11,6 +11,7 @@ import type {
   ReviewData,
   ReturnForCorrectionData,
   CorrectData,
+  ConflictRecoveryData,
   AppealSubmitData,
   AppealReviewData,
   ProjectCreate,
@@ -123,6 +124,14 @@ export const api = {
   correctProject: (projectId: number, data: CorrectData, version?: number) => {
     const qs = version !== undefined ? `?version=${version}` : "";
     return request<TrainingProject>(`/projects/${projectId}/correct${qs}`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+
+  recoverConflict: (projectId: number, data: ConflictRecoveryData, version?: number) => {
+    const qs = version !== undefined ? `?version=${version}` : "";
+    return request<TrainingProject>(`/projects/${projectId}/recover${qs}`, {
       method: "POST",
       body: JSON.stringify(data),
     });

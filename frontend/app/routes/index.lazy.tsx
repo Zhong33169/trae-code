@@ -146,6 +146,22 @@ function Index() {
             <div className="stat-value">{statistics.archived}</div>
             <div className="stat-label">已归档</div>
           </div>
+          <div className="stat-card" style={{ background: "#fff7ed", borderTop: "3px solid #f97316" }}>
+            <div className="stat-value" style={{ color: "#c2410c" }}>
+              {statistics.pending_conflict}
+            </div>
+            <div className="stat-label" style={{ color: "#9a3412" }}>
+              待补救（冲突）
+            </div>
+          </div>
+          <div className="stat-card" style={{ background: "#f0fdf4", borderTop: "3px solid #22c55e" }}>
+            <div className="stat-value" style={{ color: "#166534" }}>
+              {statistics.conflict_recovered}
+            </div>
+            <div className="stat-label" style={{ color: "#166534" }}>
+              已恢复（冲突）
+            </div>
+          </div>
         </div>
       )}
 

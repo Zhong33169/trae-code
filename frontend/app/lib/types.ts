@@ -27,7 +27,8 @@ export type ActionType =
   | "appeal_reject"
   | "archive"
   | "mark_overdue"
-  | "state_conflict";
+  | "state_conflict"
+  | "conflict_recovered";
 export type AppealResult = "pending" | "approved" | "rejected";
 
 export interface User {
@@ -78,6 +79,7 @@ export interface OperationLog {
   comment?: string;
   opinion?: string;
   reject_reason?: string;
+  audit_note?: string;
   created_at: string;
 }
 
@@ -133,6 +135,8 @@ export interface Statistics {
   appeal_rejected: number;
   overdue: number;
   archived: number;
+  pending_conflict: number;
+  conflict_recovered: number;
   by_stage_need: number;
   by_stage_quotation: number;
   by_stage_contract: number;
@@ -166,6 +170,12 @@ export interface ReturnForCorrectionData {
 export interface CorrectData {
   current_user_id: number;
   comment?: string;
+}
+
+export interface ConflictRecoveryData {
+  current_user_id: number;
+  comment?: string;
+  audit_note?: string;
 }
 
 export interface AppealSubmitData {

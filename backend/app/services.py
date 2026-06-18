@@ -7,7 +7,8 @@ from .models import (
 )
 from .schemas import (
     SubmitData, ReviewData, ReturnForCorrectionData, CorrectData,
-    AppealSubmitData, AppealReviewData, AppealRecordCreate, AppealRecordReview
+    AppealSubmitData, AppealReviewData, AppealRecordCreate, AppealRecordReview,
+    ConflictRecoveryData
 )
 from . import crud
 
@@ -357,6 +358,60 @@ def correct_project(
         stage=project.stage,
         version=project.version,
         comment=data.comment,
+    )
+
+    db.commit()
+    db.refresh(project)
+    return project
+
+
+def recover_from_conflict(
+    db: Session,
+    project_id: int,
+    data: ConflictRecoveryData,
+    expected_version: Optional[int] = None,
+) -> TrainingProject:
+    project = crud.get_project(db, project_id)
+    if not project:
+        raise BusinessError(f"项目 {project_id} 不存在", "project_not_found")
+
+    _validate_version(db, project, data.current_user_id, expected_version)
+    _validate_status(
+        db, project, data.current_user_id,
+        [Status.DRAFT, Status.RETURNED, Status.APPEAL_APPROVED],
+        "冲突恢复",
+    )
+    _validate_user_role(db, data.current_user_id, [Role.REGISTRAR], project)
+    _validate_handler(db, project, data.current_user_id)
+    _validate_project_not_overdue(db, project, data.current_user_id)
+
+    has_evidence, missing = crud.check_required_evidences(db, project_id, project.stage)
+    if not has_evidence:
+        _log_conflict(
+            db, project, data.current_user_id,
+            f"缺少必填证据材料: {[m.value for m in missing]}",
+            "missing_required_evidences",
+        )
+
+    from_status = project.status
+    project.status = Status.SUBMITTED
+    project.version += 1
+
+    supervisors = crud.get_users_by_role(db, Role.SUPERVISOR)
+    if supervisors:
+        project.current_handler_id = supervisors[0].id
+
+    crud.add_operation_log(
+        db,
+        project_id=project_id,
+        user_id=data.current_user_id,
+        action=ActionType.CONFLICT_RECOVERED,
+        from_status=from_status,
+        to_status=Status.SUBMITTED,
+        stage=project.stage,
+        version=project.version,
+        comment=data.comment,
+        audit_note=data.audit_note,
     )
 
     db.commit()

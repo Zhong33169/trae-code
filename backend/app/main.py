@@ -253,6 +253,19 @@ def correct_project(
         _handle_business_error(e)
 
 
+@app.post("/api/projects/{project_id}/recover", response_model=schemas.TrainingProject, tags=["流程操作"])
+def recover_conflict(
+    project_id: int,
+    data: schemas.ConflictRecoveryData,
+    version: Optional[int] = Query(None, description="期望版本号，用于乐观锁"),
+    db: Session = Depends(get_db),
+):
+    try:
+        return services.recover_from_conflict(db, project_id, data, expected_version=version)
+    except services.BusinessError as e:
+        _handle_business_error(e)
+
+
 @app.post("/api/projects/{project_id}/appeal", response_model=schemas.TrainingProject, tags=["流程操作"])
 def submit_appeal(
     project_id: int,

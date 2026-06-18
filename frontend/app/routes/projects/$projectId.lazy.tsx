@@ -9,6 +9,7 @@ import type {
   ReviewData,
   ReturnForCorrectionData,
   CorrectData,
+  ConflictRecoveryData,
   AppealSubmitData,
   AppealReviewData,
   EvidenceCreate,
@@ -55,6 +56,10 @@ function ProjectDetail() {
 
   const [showCorrect, setShowCorrect] = useState(false);
   const [correctComment, setCorrectComment] = useState("");
+
+  const [showRecover, setShowRecover] = useState(false);
+  const [recoverComment, setRecoverComment] = useState("");
+  const [recoverAuditNote, setRecoverAuditNote] = useState("");
 
   const [showAppeal, setShowAppeal] = useState(false);
   const [appealReason, setAppealReason] = useState("");
@@ -155,6 +160,19 @@ function ProjectDetail() {
       show("success", "补正已提交");
       setShowCorrect(false);
       setCorrectComment("");
+      invalidateAll();
+    },
+    onError: (e: any) => show("error", e.message),
+  });
+
+  const recoverMutation = useMutation({
+    mutationFn: (data: ConflictRecoveryData) =>
+      api.recoverConflict(id, data, project?.version),
+    onSuccess: () => {
+      show("success", "冲突恢复，已重新提交");
+      setShowRecover(false);
+      setRecoverComment("");
+      setRecoverAuditNote("");
       invalidateAll();
     },
     onError: (e: any) => show("error", e.message),
@@ -290,6 +308,17 @@ function ProjectDetail() {
         project.status === "appeal_approved")) ||
     currentUser.role === "supervisor" ||
     currentUser.role === "reviewer";
+
+  const canRecover =
+    currentUser.role === "registrar" &&
+    isHandler &&
+    (project.status === "draft" ||
+      project.status === "returned" ||
+      project.status === "appeal_approved");
+
+  const hasStateConflict = project.operation_logs.some(
+    (log) => log.action === "state_conflict"
+  );
 
   const missingEvidences = getMissingEvidences(project.stage, project.evidences);
 
@@ -764,6 +793,11 @@ function ProjectDetail() {
                               borderLeft: "3px solid #ef4444",
                               background: "#fef2f2",
                             }
+                          : log.action === "conflict_recovered"
+                          ? {
+                              borderLeft: "3px solid #16a34a",
+                              background: "#f0fdf4",
+                            }
                           : undefined
                       }
                     >
@@ -794,6 +828,7 @@ function ProjectDetail() {
                           {log.action === "archive" && "归档"}
                           {log.action === "mark_overdue" && "标记逾期"}
                           {log.action === "state_conflict" && "⚠️ 状态冲突（已保留原状态）"}
+                          {log.action === "conflict_recovered" && "✅ 冲突恢复提交"}
                         </strong>
                         {log.stage && (
                           <span style={{ color: "#6b7280", marginLeft: "0.5rem" }}>
@@ -842,6 +877,60 @@ function ProjectDetail() {
                       {log.opinion && <div className="log-comment">意见：{log.opinion}</div>}
                       {log.reject_reason && (
                         <div className="log-comment">驳回/退回原因：{log.reject_reason}</div>
+                      )}
+                      {log.audit_note && (
+                        <div
+                          className="log-comment"
+                          style={{
+                            color: "#166534",
+                            fontWeight: 500,
+                            borderLeft: "3px solid #16a34a",
+                            paddingLeft: "0.5rem",
+                            marginTop: "0.5rem",
+                          }}
+                        >
+                          📋 审计备注：{log.audit_note}
+                        </div>
+                      )}
+                      {log.action === "state_conflict" && canRecover && (
+                        <div
+                          style={{
+                            marginTop: "0.75rem",
+                            paddingTop: "0.75rem",
+                            borderTop: "1px dashed #fca5a5",
+                            display: "flex",
+                            gap: "0.5rem",
+                            flexWrap: "wrap",
+                          }}
+                        >
+                          <span style={{ fontSize: "0.8rem", color: "#991b1b", alignSelf: "center" }}>
+                            🔧 冲突补救：
+                          </span>
+                          <button
+                            className="btn btn-secondary"
+                            style={{
+                              padding: "0.25rem 0.75rem",
+                              fontSize: "0.8rem",
+                            }}
+                            onClick={() => setActiveTab("evidences")}
+                          >
+                            补齐证据
+                          </button>
+                          <button
+                            className="btn btn-primary"
+                            style={{
+                              padding: "0.25rem 0.75rem",
+                              fontSize: "0.8rem",
+                            }}
+                            onClick={() => {
+                              setRecoverComment("");
+                              setRecoverAuditNote("");
+                              setShowRecover(true);
+                            }}
+                          >
+                            重新提交
+                          </button>
+                        </div>
                       )}
                     </div>
                   ))}
@@ -1143,6 +1232,60 @@ function ProjectDetail() {
                 disabled={correctMutation.isPending}
               >
                 提交补正
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showRecover && (
+        <div className="modal-overlay" onClick={() => setShowRecover(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 className="modal-title">冲突恢复提交</h3>
+              <button className="modal-close" onClick={() => setShowRecover(false)}>
+                ×
+              </button>
+            </div>
+            <div style={{ marginBottom: "1rem", padding: "0.75rem", background: "#fef2f2", borderRadius: "0.375rem", fontSize: "0.875rem", color: "#991b1b" }}>
+              <strong>⚠️ 注意：</strong>提交后项目将流转到审核主管处。
+              请确保已补齐当前阶段所有必填证据材料。
+            </div>
+            <div className="form-group">
+              <label className="form-label">补正说明</label>
+              <textarea
+                className="form-textarea"
+                value={recoverComment}
+                onChange={(e) => setRecoverComment(e.target.value)}
+                placeholder="请输入补正说明（可选）..."
+              />
+            </div>
+            <div className="form-group">
+              <label className="form-label">审计备注</label>
+              <textarea
+                className="form-textarea"
+                value={recoverAuditNote}
+                onChange={(e) => setRecoverAuditNote(e.target.value)}
+                placeholder="请输入审计备注（可选，用于记录审计追踪信息）..."
+                style={{ background: "#f0fdf4" }}
+              />
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setShowRecover(false)}>
+                取消
+              </button>
+              <button
+                className="btn btn-primary"
+                onClick={() =>
+                  recoverMutation.mutate({
+                    current_user_id: currentUser.id,
+                    comment: recoverComment || undefined,
+                    audit_note: recoverAuditNote || undefined,
+                  })
+                }
+                disabled={recoverMutation.isPending}
+              >
+                {recoverMutation.isPending ? "提交中..." : "确认恢复提交"}
               </button>
             </div>
           </div>
