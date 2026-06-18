@@ -186,11 +186,11 @@ export const useAppStore = defineStore('app', {
       this.selectedOrderIds = ids
     },
 
-    async batchOperation(action: string, orderIds: number[], remark = ''): Promise<BatchOperation> {
+    async batchOperation(action: string, orderItems: { order_id: number; version: number }[], remark = ''): Promise<BatchOperation> {
       const res = await fetch(`${API_BASE}/orders/ops/batches`, {
         method: 'POST',
         headers: getHeaders(this.currentUser),
-        body: JSON.stringify({ action, order_ids: orderIds, remark }),
+        body: JSON.stringify({ action, order_items: orderItems, remark }),
       })
       if (!res.ok) await handleApiError(res)
       const batch = await res.json()

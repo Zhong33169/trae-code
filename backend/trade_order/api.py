@@ -537,91 +537,125 @@ def list_histories(request, order_id: int, x_user_id: str = Header(None), x_role
     return result
 
 
-def _process_single_action(order: TradeOrder, action: str, user: User) -> tuple[str, Optional[str], Optional[str]]:
+def _process_single_action(order: TradeOrder, action: str, user: User, expected_version: int, remark: str = "") -> tuple[str, Optional[str], Optional[str]]:
     try:
+        if order.version != expected_version:
+            _add_history(order, user, "批量-版本冲突", remark)
+            return ItemStatus.FAILED, "VERSION_CONFLICT", f"版本冲突：当前版本为{order.version}，你提供的版本为{expected_version}，请刷新后重试"
+
         if action == BatchAction.SUBMIT_TO_DOC:
             _require_role(user, Role.SALES)
             if order.created_by_id != user.id:
+                _add_history(order, user, "批量-提交失败(非本人)", remark)
                 return ItemStatus.FAILED, "NOT_OWNER", "只能提交自己创建的订单"
             if order.status not in (OrderStatus.DRAFT, OrderStatus.DOC_CORRECTION):
+                _add_history(order, user, "批量-提交失败(状态错误)", remark)
                 return ItemStatus.FAILED, "INVALID_STATUS", f"状态{OrderStatus(order.status).label}不允许提交单证"
             try:
                 _check_evidences(order)
             except APIError as e:
+                _add_history(order, user, "批量-提交需重试(缺证据)", remark)
                 return ItemStatus.RETRY, e.code, e.message
             order.submitted_at = datetime.now()
-            _transition_status(order, OrderStatus.PENDING_DOC, user, "批量-提交单证处理")
+            _transition_status(order, OrderStatus.PENDING_DOC, user, "批量-提交单证处理", remark)
             return ItemStatus.SUCCESS, None, "提交成功"
 
         elif action == BatchAction.APPROVE_DOC:
             _require_role(user, Role.DOC_SUPERVISOR)
             if order.status not in (OrderStatus.PENDING_DOC, OrderStatus.DOC_PROCESSING, OrderStatus.CONFIRM_CORRECTION):
+                _add_history(order, user, "批量-单证复核失败(状态错误)", remark)
                 return ItemStatus.FAILED, "INVALID_STATUS", f"状态{OrderStatus(order.status).label}不允许单证复核通过"
             order.doc_handler = user
             order.doc_processed_at = datetime.now()
-            _transition_status(order, OrderStatus.PENDING_CONFIRM, user, "批量-单证复核通过")
+            _transition_status(order, OrderStatus.PENDING_CONFIRM, user, "批量-单证复核通过", remark)
             return ItemStatus.SUCCESS, None, "单证复核通过"
 
         elif action == BatchAction.REJECT_DOC:
             _require_role(user, Role.DOC_SUPERVISOR)
+            if not remark or not remark.strip():
+                _add_history(order, user, "批量-退回失败(缺备注)", "")
+                return ItemStatus.FAILED, "REMARK_REQUIRED", "批量退回必须填写备注说明"
             if order.status not in (OrderStatus.PENDING_DOC, OrderStatus.DOC_PROCESSING):
+                _add_history(order, user, "批量-退回失败(状态错误)", remark)
                 return ItemStatus.FAILED, "INVALID_STATUS", f"状态{OrderStatus(order.status).label}不允许退回补正"
             order.doc_handler = user
-            _transition_status(order, OrderStatus.DOC_CORRECTION, user, "批量-退回业务员补正")
+            order.doc_remark = remark
+            _transition_status(order, OrderStatus.DOC_CORRECTION, user, "批量-退回业务员补正", remark)
             return ItemStatus.SUCCESS, None, "已退回业务员补正"
 
         elif action == BatchAction.MARK_EXCEPTION_DOC:
             _require_role(user, Role.DOC_SUPERVISOR)
+            if not remark or not remark.strip():
+                _add_history(order, user, "批量-标记异常失败(缺备注)", "")
+                return ItemStatus.FAILED, "REMARK_REQUIRED", "批量标记异常必须填写备注说明"
             if order.status not in (OrderStatus.PENDING_DOC, OrderStatus.DOC_PROCESSING):
+                _add_history(order, user, "批量-标记异常失败(状态错误)", remark)
                 return ItemStatus.FAILED, "INVALID_STATUS", f"状态{OrderStatus(order.status).label}不允许标记异常"
             order.doc_handler = user
-            _transition_status(order, OrderStatus.DOC_EXCEPTION, user, "批量-单证标记异常")
+            order.exception_remark = remark
+            _transition_status(order, OrderStatus.DOC_EXCEPTION, user, "批量-单证标记异常", remark)
             return ItemStatus.SUCCESS, None, "已标记异常"
 
         elif action == BatchAction.SUBMIT_TO_CONFIRM:
             _require_role(user, Role.DOC_SUPERVISOR)
             if order.status not in (OrderStatus.PENDING_DOC, OrderStatus.DOC_PROCESSING, OrderStatus.CONFIRM_CORRECTION):
+                _add_history(order, user, "批量-提交确认失败(状态错误)", remark)
                 return ItemStatus.FAILED, "INVALID_STATUS", f"状态{OrderStatus(order.status).label}不允许提交确认"
             order.doc_handler = user
             order.doc_processed_at = datetime.now()
-            _transition_status(order, OrderStatus.PENDING_CONFIRM, user, "批量-提交经理确认")
+            _transition_status(order, OrderStatus.PENDING_CONFIRM, user, "批量-提交经理确认", remark)
             return ItemStatus.SUCCESS, None, "已提交经理确认"
 
         elif action == BatchAction.APPROVE_CONFIRM:
             _require_role(user, Role.BIZ_MANAGER)
             if order.status not in (OrderStatus.PENDING_CONFIRM, OrderStatus.CONFIRM_EXCEPTION):
+                _add_history(order, user, "批量-确认失败(状态错误)", remark)
                 return ItemStatus.FAILED, "INVALID_STATUS", f"状态{OrderStatus(order.status).label}不允许确认通过"
             try:
                 _check_evidences(order)
             except APIError as e:
+                _add_history(order, user, "批量-确认需重试(缺证据)", remark)
                 return ItemStatus.RETRY, e.code, e.message
             order.confirm_handler = user
             order.confirmed_at = datetime.now()
-            _transition_status(order, OrderStatus.COMPLETED, user, "批量-经理确认通过")
+            _transition_status(order, OrderStatus.COMPLETED, user, "批量-经理确认通过", remark)
             return ItemStatus.SUCCESS, None, "经理确认通过"
 
         elif action == BatchAction.REJECT_CONFIRM:
             _require_role(user, Role.BIZ_MANAGER)
+            if not remark or not remark.strip():
+                _add_history(order, user, "批量-退回失败(缺备注)", "")
+                return ItemStatus.FAILED, "REMARK_REQUIRED", "批量退回必须填写备注说明"
             if order.status not in (OrderStatus.PENDING_CONFIRM,):
+                _add_history(order, user, "批量-退回失败(状态错误)", remark)
                 return ItemStatus.FAILED, "INVALID_STATUS", f"状态{OrderStatus(order.status).label}不允许退回补正"
             order.confirm_handler = user
-            _transition_status(order, OrderStatus.CONFIRM_CORRECTION, user, "批量-退回单证补正")
+            order.confirm_remark = remark
+            _transition_status(order, OrderStatus.CONFIRM_CORRECTION, user, "批量-退回单证补正", remark)
             return ItemStatus.SUCCESS, None, "已退回单证补正"
 
         elif action == BatchAction.MARK_EXCEPTION_CONFIRM:
             _require_role(user, Role.BIZ_MANAGER)
+            if not remark or not remark.strip():
+                _add_history(order, user, "批量-标记异常失败(缺备注)", "")
+                return ItemStatus.FAILED, "REMARK_REQUIRED", "批量标记异常必须填写备注说明"
             if order.status not in (OrderStatus.PENDING_CONFIRM,):
+                _add_history(order, user, "批量-标记异常失败(状态错误)", remark)
                 return ItemStatus.FAILED, "INVALID_STATUS", f"状态{OrderStatus(order.status).label}不允许标记异常"
             order.confirm_handler = user
-            _transition_status(order, OrderStatus.CONFIRM_EXCEPTION, user, "批量-确认环节标记异常")
+            order.exception_remark = remark
+            _transition_status(order, OrderStatus.CONFIRM_EXCEPTION, user, "批量-确认环节标记异常", remark)
             return ItemStatus.SUCCESS, None, "已标记异常"
 
         else:
+            _add_history(order, user, "批量-操作失败(不支持的操作)", remark)
             return ItemStatus.FAILED, "INVALID_ACTION", f"不支持的批量操作: {action}"
 
     except APIError as e:
+        _add_history(order, user, f"批量-操作失败({e.code})", remark)
         return ItemStatus.FAILED, e.code, e.message
     except Exception as e:
+        _add_history(order, user, f"批量-系统错误", remark)
         return ItemStatus.FAILED, "SYSTEM_ERROR", str(e)
 
 
@@ -633,9 +667,15 @@ def batch_operation(request, payload: BatchOperationIn, x_user_id: str = Header(
     if payload.action not in valid_actions:
         _e(400, "INVALID_ACTION", f"不支持的批量操作: {payload.action}")
 
-    orders = TradeOrder.objects.filter(id__in=payload.order_ids).order_by("id")
+    if len(payload.order_items) == 0:
+        _e(400, "INVALID_ACTION", "请至少选择一条订单")
+
+    order_ids = [item.order_id for item in payload.order_items]
+    version_map = {item.order_id: item.version for item in payload.order_items}
+
+    orders = TradeOrder.objects.filter(id__in=order_ids).order_by("id")
     existing_ids = set(orders.values_list("id", flat=True))
-    missing_ids = set(payload.order_ids) - existing_ids
+    missing_ids = set(order_ids) - existing_ids
 
     batch_no = f"BATCH{datetime.now().strftime('%Y%m%d%H%M%S')}{uuid.uuid4().hex[:4].upper()}"
 
@@ -645,7 +685,7 @@ def batch_operation(request, payload: BatchOperationIn, x_user_id: str = Header(
             action=payload.action,
             operator=user,
             status=BatchStatus.RUNNING,
-            total_count=len(payload.order_ids),
+            total_count=len(order_ids),
             remark=payload.remark or "",
             started_at=datetime.now(),
         )
@@ -655,7 +695,8 @@ def batch_operation(request, payload: BatchOperationIn, x_user_id: str = Header(
         retry_count = 0
         items_out = []
 
-        for oid in payload.order_ids:
+        for oid in order_ids:
+            expected_version = version_map.get(oid, 0)
             if oid in missing_ids:
                 failed_count += 1
                 BatchOperationItem.objects.create(
@@ -666,6 +707,7 @@ def batch_operation(request, payload: BatchOperationIn, x_user_id: str = Header(
                     error_code="ORDER_NOT_FOUND",
                     error_message=f"订单{oid}不存在",
                     processed_at=datetime.now(),
+                    version=expected_version,
                 )
                 items_out.append(BatchItemResult(
                     order_id=oid,
@@ -677,7 +719,7 @@ def batch_operation(request, payload: BatchOperationIn, x_user_id: str = Header(
                 continue
 
             order = orders.get(id=oid)
-            item_status, err_code, err_msg = _process_single_action(order, payload.action, user)
+            item_status, err_code, err_msg = _process_single_action(order, payload.action, user, expected_version, payload.remark or "")
 
             BatchOperationItem.objects.create(
                 batch=batch,
@@ -686,6 +728,7 @@ def batch_operation(request, payload: BatchOperationIn, x_user_id: str = Header(
                 error_code=err_code or "",
                 error_message=err_msg or "",
                 processed_at=datetime.now(),
+                version=expected_version,
             )
 
             if item_status == ItemStatus.SUCCESS:

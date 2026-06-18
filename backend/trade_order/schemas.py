@@ -131,9 +131,14 @@ class BatchOperationOut(BaseModel):
         from_attributes = True
 
 
+class BatchOrderItem(BaseModel):
+    order_id: int
+    version: int
+
+
 class BatchOperationIn(BaseModel):
     action: str
-    order_ids: List[int]
+    order_items: List[BatchOrderItem]
     remark: Optional[str] = ""
 
 

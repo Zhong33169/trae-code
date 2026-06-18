@@ -93,7 +93,7 @@
                 :key="order.id"
                 class="hover:bg-blue-50 cursor-pointer transition-colors"
                 :class="{ 'bg-blue-50': detailOrderId === order.id, 'bg-gray-50': store.selectedOrderIds.includes(order.id) }"
-                @click="showDetail(order)"
+                @click="showOrderEvidence(order)"
               >
                 <td class="px-3 py-3" @click.stop>
                   <input
@@ -373,7 +373,7 @@
     </UModal>
 
     <!-- 批量操作弹窗 -->
-    <UModal v-model="openBatchModal" :ui="{ width: 'w-full max-w-3xl' }">
+    <UModal v-model="openBatchModal" :ui="{ width: 'w-full max-w-4xl' }">
       <div class="p-6">
         <h2 class="text-lg font-bold mb-4">⚡ 批量变更复核 ({{ store.selectedOrderIds.length }} 条)</h2>
 
@@ -387,29 +387,63 @@
                 size="md"
                 class="w-full"
                 placeholder="请选择要执行的批量操作"
+                @change="batchForm.remark = ''"
               />
             </div>
             <div>
-              <label class="block text-sm text-gray-600 mb-1">备注说明</label>
-              <UTextarea v-model="batchForm.remark" rows="2" placeholder="退回/标记异常时建议填写说明" />
+              <label class="block text-sm text-gray-600 mb-1">
+                备注说明
+                <span v-if="isRemarkRequired" class="text-red-500 ml-1">* (当前操作必须填写)</span>
+                <span v-else class="text-gray-400 ml-1">(退回/标记异常时建议填写)</span>
+              </label>
+              <UTextarea v-model="batchForm.remark" rows="2" :placeholder="isRemarkRequired ? '请填写备注说明（必填）' : '退回/标记异常时建议填写说明'" />
+              <div v-if="isRemarkRequired && !batchForm.remark.trim() && batchForm.action" class="text-red-500 text-xs mt-1">
+                ⚠️ 该操作必须填写备注说明
+              </div>
             </div>
 
             <div class="bg-gray-50 rounded border border-gray-200 p-3">
               <div class="text-xs text-gray-500 mb-2">将对以下 {{ store.selectedOrderIds.length }} 条订单执行操作：</div>
-              <div class="space-y-1 max-h-40 overflow-y-auto text-xs">
-                <div
-                  v-for="oid in store.selectedOrderIds"
-                  :key="oid"
-                  class="flex gap-2"
-                >
-                  <template v-if="getOrderById(oid)">
-                    <span class="font-mono">{{ getOrderById(oid)!.order_no }}</span>
-                    <span>{{ getOrderById(oid)!.customer_name }}</span>
-                    <span :class="['status-badge ml-auto', StatusColorClass[getOrderById(oid)!.status]]">
-                      {{ getOrderById(oid)!.status_display }}
-                    </span>
-                  </template>
-                </div>
+              <div class="max-h-64 overflow-y-auto">
+                <table class="w-full text-xs">
+                  <thead class="bg-gray-100 sticky top-0">
+                    <tr>
+                      <th class="px-2 py-1.5 text-left">订单号</th>
+                      <th class="px-2 py-1.5 text-left">客户</th>
+                      <th class="px-2 py-1.5 text-left">当前状态</th>
+                      <th class="px-2 py-1.5 text-center">版本号</th>
+                      <th class="px-2 py-1.5 text-left">证据</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-gray-100">
+                    <tr v-for="oid in store.selectedOrderIds" :key="oid" class="hover:bg-white">
+                      <template v-if="getOrderById(oid)">
+                        <td class="px-2 py-1.5 font-mono">{{ getOrderById(oid)!.order_no }}</td>
+                        <td class="px-2 py-1.5">{{ getOrderById(oid)!.customer_name }}</td>
+                        <td class="px-2 py-1.5">
+                          <span :class="['status-badge', StatusColorClass[getOrderById(oid)!.status]]" style="padding: 1px 6px; font-size: 11px;">
+                            {{ getOrderById(oid)!.status_display }}
+                          </span>
+                        </td>
+                        <td class="px-2 py-1.5 text-center font-mono text-gray-600">v{{ getOrderById(oid)!.version }}</td>
+                        <td class="px-2 py-1.5">
+                          <div class="flex gap-0.5">
+                            <span
+                              v-for="tag in evidenceTags(getOrderById(oid)!)"
+                              :key="tag.type"
+                              :class="[
+                                'inline-block w-4 h-4 rounded text-center leading-4 text-[9px] font-medium',
+                                tag.ok ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-400'
+                              ]"
+                            >
+                              {{ tag.letter }}
+                            </span>
+                          </div>
+                        </td>
+                      </template>
+                    </tr>
+                  </tbody>
+                </table>
               </div>
             </div>
 
@@ -419,7 +453,7 @@
 
             <div class="flex justify-end gap-2">
               <UButton variant="ghost" @click="openBatchModal = false">取消</UButton>
-              <UButton color="blue" :disabled="!batchForm.action" @click="doBatch" :loading="batchLoading">
+              <UButton color="blue" :disabled="!canSubmitBatch" @click="doBatch" :loading="batchLoading">
                 执行批量操作
               </UButton>
             </div>
@@ -452,6 +486,7 @@
               <thead class="bg-gray-50">
                 <tr>
                   <th class="px-3 py-2 text-left">订单号</th>
+                  <th class="px-3 py-2 text-center">提交版本</th>
                   <th class="px-3 py-2 text-left">结果</th>
                   <th class="px-3 py-2 text-left">错误码</th>
                   <th class="px-3 py-2 text-left">说明</th>
@@ -460,6 +495,7 @@
               <tbody class="divide-y divide-gray-100">
                 <tr v-for="item in batchResult.items" :key="item.order_id">
                   <td class="px-3 py-2 font-mono">{{ item.order_no }}</td>
+                  <td class="px-3 py-2 text-center font-mono text-gray-500">{{ getOrderById(item.order_id)?.version || '-' }}</td>
                   <td class="px-3 py-2">
                     <span
                       :class="[
@@ -574,6 +610,19 @@ const pagedOrders = computed(() => {
 const allSelected = computed(() => store.orders.length > 0 && store.orders.every(o => selectedOrderIds.value.includes(o.id)))
 const someSelected = computed(() => selectedOrderIds.value.length > 0 && !allSelected.value)
 
+const REMARK_REQUIRED_ACTIONS = ['reject_doc', 'mark_exception_doc', 'reject_confirm', 'mark_exception_confirm']
+
+const isRemarkRequired = computed(() => {
+  return REMARK_REQUIRED_ACTIONS.includes(batchForm.value.action)
+})
+
+const canSubmitBatch = computed(() => {
+  if (!batchForm.value.action) return false
+  if (selectedOrderIds.value.length === 0) return false
+  if (isRemarkRequired.value && !batchForm.value.remark.trim()) return false
+  return true
+})
+
 const canAddEvidence = computed(() => {
   if (!selectedOrder.value || !store.currentUser) return false
   if (store.isSales) return selectedOrder.value.created_by_id === store.currentUser.id && ['draft', 'doc_correction'].includes(selectedOrder.value.status)
@@ -596,6 +645,11 @@ function resetFilter() {
   keyword.value = ''
   page.value = 1
   store.loadOrders()
+}
+
+function showOrderEvidence(order: TradeOrder) {
+  selectedOrder.value = order
+  detailOrderId.value = order.id
 }
 
 function showDetail(order: TradeOrder) {
@@ -709,9 +763,30 @@ async function doBatch() {
     batchError.value = '请先选择订单'
     return
   }
+  if (isRemarkRequired.value && !batchForm.value.remark.trim()) {
+    batchError.value = '该操作必须填写备注说明'
+    return
+  }
+
+  const orderItems = selectedOrderIds.value
+    .map(id => {
+      const order = getOrderById(id)
+      if (!order) return null
+      return { order_id: order.id, version: order.version }
+    })
+    .filter(Boolean) as { order_id: number; version: number }[]
+
   try {
     batchLoading.value = true
-    batchResult.value = await store.batchOperation(batchForm.value.action, selectedOrderIds.value, batchForm.value.remark)
+    batchResult.value = await store.batchOperation(
+      batchForm.value.action,
+      orderItems,
+      batchForm.value.remark
+    )
+
+    if (selectedOrder.value) {
+      selectedOrder.value = await store.getOrder(selectedOrder.value.id)
+    }
   } catch (e: any) {
     batchError.value = e.message
   } finally {
@@ -732,6 +807,15 @@ function resetBatchAndRetry() {
 watch(selectedOrderIds, (ids) => {
   if (ids.length > 0 && selectedOrder.value && !ids.includes(selectedOrder.value.id)) {
     // keep selection
+  }
+}, { deep: true })
+
+watch(() => store.orders, () => {
+  if (selectedOrder.value) {
+    const updated = store.orders.find(o => o.id === selectedOrder.value!.id)
+    if (updated) {
+      selectedOrder.value = updated
+    }
   }
 }, { deep: true })
 </script>

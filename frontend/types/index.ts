@@ -57,6 +57,11 @@ export interface BatchItemResult {
   error_message: string | null
 }
 
+export interface BatchOrderItem {
+  order_id: number
+  version: number
+}
+
 export interface BatchOperation {
   id: number
   batch_no: string

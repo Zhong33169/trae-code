@@ -168,14 +168,16 @@ class BatchOperationItem(models.Model):
         BatchOperation, on_delete=models.CASCADE, related_name="items", verbose_name="批处理"
     )
     order = models.ForeignKey(
-        TradeOrder, on_delete=models.PROTECT, related_name="batch_items", verbose_name="订单"
+        TradeOrder, on_delete=models.PROTECT, related_name="batch_items", verbose_name="订单", null=True, blank=True
     )
+    order_id_tmp = models.IntegerField(default=0, verbose_name="临时订单ID(用于不存在的订单)")
     item_status = models.CharField(
         max_length=20, choices=ItemStatus.choices, verbose_name="处理结果"
     )
     error_code = models.CharField(max_length=50, blank=True, verbose_name="错误码")
     error_message = models.TextField(blank=True, verbose_name="错误/结果说明")
     processed_at = models.DateTimeField(null=True, blank=True, verbose_name="处理时间")
+    version = models.IntegerField(default=0, verbose_name="提交时的版本号")
 
     class Meta:
         ordering = ["id"]
