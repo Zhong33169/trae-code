@@ -81,10 +81,12 @@ fn load_attachments(db: &Connection, material_id: &str) -> Vec<Attachment> {
         "SELECT a.id, a.material_id, a.file_name, a.file_type, a.file_size,
                 a.uploaded_by, u1.real_name, a.uploaded_at,
                 a.is_required, a.status, a.reject_reason,
-                a.rejected_by, u2.real_name, a.rejected_at
+                a.rejected_by, u2.real_name, a.rejected_at,
+                a.replaces_attachment_id, rp.file_name
          FROM attachments a
          LEFT JOIN users u1 ON a.uploaded_by = u1.id
          LEFT JOIN users u2 ON a.rejected_by = u2.id
+         LEFT JOIN attachments rp ON a.replaces_attachment_id = rp.id
          WHERE a.material_id = ?1
          ORDER BY a.is_required DESC, a.uploaded_at ASC"
     ).unwrap();
@@ -105,6 +107,8 @@ fn load_attachments(db: &Connection, material_id: &str) -> Vec<Attachment> {
             rejected_by: row.get(11)?,
             rejected_by_name: row.get(12)?,
             rejected_at: row.get(13)?,
+            replaces_attachment_id: row.get(14)?,
+            replaces_file_name: row.get(15)?,
         })
     }).unwrap().filter_map(|r| r.ok()).collect()
 }
@@ -344,7 +348,16 @@ pub fn update_material(
     conn: &State<DbConn>, id: String, req: Json<UpdateMaterialRequest>,
 ) -> Json<ApiResponse<LitigationMaterial>> {
     let db = conn.conn.lock().unwrap();
-    
+
+    if let Some(oid) = &req.operator_id {
+        let role = get_user_role(&db, oid);
+        if !role_can(&role, "edit_material") {
+            return Json(ApiResponse::err(&format!("当前角色({})无权修改材料信息", role)));
+        }
+        let operator_name = get_user_name(&db, oid);
+        insert_audit(&db, Some(&id), None, oid, &operator_name, &role, "update_material", Some("修改材料基础信息"), "success", None, None);
+    }
+
     let cur_status: String = db.query_row(
         "SELECT status FROM litigation_materials WHERE id = ?1",
         params![id],
@@ -412,7 +425,7 @@ pub fn take_review_task(conn: &State<DbConn>, id: String, req: Json<TakeTaskRequ
     let attachments = load_attachments(&db, &id);
     if cur_status == "returned" && !has_required_attachments(&attachments) {
         let missing = missing_required_count(&attachments);
-        return Json(ApiResponse::err(&format!("仍有 {} 个必填附件缺失或被驳回，请先补正后再提交审核", missing)));
+        return Json(ApiResponse::err(&format!("仍有 {} 个必填附件缺失或被驳回且无有效替代件，请先补正后再提交审核", missing)));
     }
 
     let now = Local::now().to_rfc3339();
@@ -459,7 +472,7 @@ pub fn review_material(conn: &State<DbConn>, id: String, req: Json<ReviewMateria
     if req.pass {
         let attachments = load_attachments(&db, &id);
         if !has_required_attachments(&attachments) {
-            return Json(ApiResponse::err("存在必填附件缺失或被驳回，审核不能通过"));
+            return Json(ApiResponse::err("存在必填附件缺失或被驳回且无有效替代件，审核不能通过"));
         }
 
         db.execute(
@@ -656,7 +669,9 @@ pub fn resubmit_material(conn: &State<DbConn>, id: String, req: Json<TakeTaskReq
     let attachments = load_attachments(&db, &id);
     if !has_required_attachments(&attachments) {
         let missing = missing_required_count(&attachments);
-        return Json(ApiResponse::err(&format!("仍有 {} 个必填附件缺失或被驳回，请先补正", missing)));
+        let unreplaced: Vec<String> = crate::models::attachment::get_rejected_without_replacement(&attachments)
+            .iter().map(|a| a.file_name.clone()).collect();
+        return Json(ApiResponse::err(&format!("仍有 {} 个必填附件缺失或被驳回且无有效替代件，请先补正。缺替代件附件：{}", missing, unreplaced.join("、"))));
     }
 
     let operator_name = get_user_name(&db, &req.operator_id);
@@ -668,7 +683,7 @@ pub fn resubmit_material(conn: &State<DbConn>, id: String, req: Json<TakeTaskReq
     insert_status_log(&db, &id, Some("returned"), "registered", &req.operator_id, &operator_name,
         "resubmit", Some("补齐附件后重新提交"));
     insert_audit(&db, Some(&id), None, &req.operator_id, &operator_name, &role,
-        "resubmit", Some("补正后重新提交审核"), "success", None, None);
+        "resubmit", Some("补正后重新提交审核，被驳回原件可用有效替代件满足"), "success", None, None);
 
     let mut stmt = db.prepare(&format!("{} WHERE m.id = ?1", material_select_sql())).unwrap();
     match stmt.query_row(params![id], |row| load_material_from_row(&db, row)) {
@@ -708,22 +723,31 @@ pub fn add_attachment(conn: &State<DbConn>, id: String, req: Json<AddAttachmentR
     let is_required = req.is_required.unwrap_or(true);
 
     db.execute(
-        "INSERT INTO attachments (id, material_id, file_name, file_type, file_size, uploaded_by, uploaded_at, is_required, status)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'valid')",
+        "INSERT INTO attachments (id, material_id, file_name, file_type, file_size, uploaded_by, uploaded_at, is_required, status, replaces_attachment_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'valid', ?9)",
         params![att_id, id, req.file_name, req.file_type, req.file_size.unwrap_or(1024),
-                req.operator_id, now, if is_required { 1 } else { 0 }],
+                req.operator_id, now, if is_required { 1 } else { 0 }, req.replaces_attachment_id],
     ).ok();
 
+    let action_detail = if let Some(ref rid) = req.replaces_attachment_id {
+        let replaced_name: String = db.query_row("SELECT file_name FROM attachments WHERE id = ?1", params![rid], |row| row.get(0)).unwrap_or_default();
+        format!("添加替代件附件：{}（替代被驳回的{}）", req.file_name, replaced_name)
+    } else {
+        format!("添加附件：{}", req.file_name)
+    };
     insert_audit(&db, Some(&id), Some(&att_id), &req.operator_id, &operator_name, &role,
-        "add_attachment", Some(&format!("添加附件：{}", req.file_name)),
+        "add_attachment", Some(&action_detail),
         "success", None, None);
 
     let result = db.query_row(
         "SELECT a.id, a.material_id, a.file_name, a.file_type, a.file_size,
                 a.uploaded_by, u.real_name, a.uploaded_at,
                 a.is_required, a.status, a.reject_reason,
-                a.rejected_by, NULL, a.rejected_at
-         FROM attachments a LEFT JOIN users u ON a.uploaded_by = u.id
+                a.rejected_by, NULL, a.rejected_at,
+                a.replaces_attachment_id, rp.file_name
+         FROM attachments a
+         LEFT JOIN users u ON a.uploaded_by = u.id
+         LEFT JOIN attachments rp ON a.replaces_attachment_id = rp.id
          WHERE a.id = ?1",
         params![att_id],
         |row| Ok(Attachment {
@@ -741,6 +765,8 @@ pub fn add_attachment(conn: &State<DbConn>, id: String, req: Json<AddAttachmentR
             rejected_by: row.get(11)?,
             rejected_by_name: row.get(12)?,
             rejected_at: row.get(13)?,
+            replaces_attachment_id: row.get(14)?,
+            replaces_file_name: row.get(15)?,
         }),
     );
 
@@ -750,10 +776,22 @@ pub fn add_attachment(conn: &State<DbConn>, id: String, req: Json<AddAttachmentR
     }
 }
 
-#[delete("/<id>/attachments/<att_id>")]
-pub fn delete_attachment(conn: &State<DbConn>, id: String, att_id: String) -> Json<ApiResponse<()>> {
+#[delete("/<id>/attachments/<att_id>?<operator_id>")]
+pub fn delete_attachment(conn: &State<DbConn>, id: String, att_id: String, operator_id: Option<String>) -> Json<ApiResponse<()>> {
     let db = conn.conn.lock().unwrap();
-    
+
+    if let Some(oid) = &operator_id {
+        let role = get_user_role(&db, oid);
+        if !role_can(&role, "manage_attachment") {
+            return Json(ApiResponse::err("当前角色无权删除附件"));
+        }
+        let operator_name = get_user_name(&db, oid);
+        let file_name: String = db.query_row("SELECT file_name FROM attachments WHERE id = ?1", params![att_id], |row| row.get(0)).unwrap_or_default();
+        insert_audit(&db, Some(&id), Some(&att_id), oid, &operator_name, &role, "delete_attachment", Some(&format!("删除附件：{}", file_name)), "success", None, None);
+    } else {
+        return Json(ApiResponse::err("缺少操作人身份信息"));
+    }
+
     let (m_status, is_rejected): (String, String) = db.query_row(
         "SELECT m.status, a.status FROM attachments a JOIN litigation_materials m ON a.material_id = m.id WHERE a.id = ?1",
         params![att_id],
@@ -802,10 +840,12 @@ pub fn reject_attachment(
         "SELECT a.id, a.material_id, a.file_name, a.file_type, a.file_size,
                 a.uploaded_by, u1.real_name, a.uploaded_at,
                 a.is_required, a.status, a.reject_reason,
-                a.rejected_by, u2.real_name, a.rejected_at
+                a.rejected_by, u2.real_name, a.rejected_at,
+                a.replaces_attachment_id, rp.file_name
          FROM attachments a
          LEFT JOIN users u1 ON a.uploaded_by = u1.id
          LEFT JOIN users u2 ON a.rejected_by = u2.id
+         LEFT JOIN attachments rp ON a.replaces_attachment_id = rp.id
          WHERE a.id = ?1",
         params![att_id],
         |row| Ok(Attachment {
@@ -823,6 +863,8 @@ pub fn reject_attachment(
             rejected_by: row.get(11)?,
             rejected_by_name: row.get(12)?,
             rejected_at: row.get(13)?,
+            replaces_attachment_id: row.get(14)?,
+            replaces_file_name: row.get(15)?,
         }),
     );
 
@@ -852,10 +894,12 @@ pub fn validate_attachment(
         "SELECT a.id, a.material_id, a.file_name, a.file_type, a.file_size,
                 a.uploaded_by, u1.real_name, a.uploaded_at,
                 a.is_required, a.status, a.reject_reason,
-                a.rejected_by, u2.real_name, a.rejected_at
+                a.rejected_by, u2.real_name, a.rejected_at,
+                a.replaces_attachment_id, rp.file_name
          FROM attachments a
          LEFT JOIN users u1 ON a.uploaded_by = u1.id
          LEFT JOIN users u2 ON a.rejected_by = u2.id
+         LEFT JOIN attachments rp ON a.replaces_attachment_id = rp.id
          WHERE a.id = ?1",
         params![att_id],
         |row| Ok(Attachment {
@@ -873,6 +917,8 @@ pub fn validate_attachment(
             rejected_by: row.get(11)?,
             rejected_by_name: row.get(12)?,
             rejected_at: row.get(13)?,
+            replaces_attachment_id: row.get(14)?,
+            replaces_file_name: row.get(15)?,
         }),
     );
 
@@ -987,7 +1033,7 @@ pub fn batch_process(conn: &State<DbConn>, req: Json<BatchProcessRequest>) -> Js
                 if !att_ok {
                     fail_count += 1;
                     let missing = missing_required_count(&attachments);
-                    let reason = format!("必填附件异常：{} 项缺失或被驳回，需补正后才能批量通过", missing);
+                    let reason = format!("必填附件异常：{} 项缺失或被驳回且无有效替代件，需补正后才能批量通过", missing);
                     insert_audit(&db, Some(mid), None, &req.operator_id, &operator_name, &role,
                         "batch_pass_review", Some("批量审核"), "fail", Some(&reason), Some(&batch_id));
                     details.push(BatchResultItem {

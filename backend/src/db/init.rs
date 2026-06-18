@@ -12,6 +12,7 @@ pub fn init_database() -> Result<Connection, Box<dyn std::error::Error>> {
     let conn = Connection::open(&db_path)?;
     
     create_tables(&conn)?;
+    migrate(&conn)?;
     seed_data(&conn)?;
     
     Ok(conn)
@@ -70,6 +71,7 @@ fn create_tables(conn: &Connection) -> Result<(), Box<dyn std::error::Error>> {
             reject_reason TEXT,
             rejected_by TEXT,
             rejected_at TEXT,
+            replaces_attachment_id TEXT,
             FOREIGN KEY (material_id) REFERENCES litigation_materials(id),
             FOREIGN KEY (uploaded_by) REFERENCES users(id)
         );
@@ -130,6 +132,18 @@ fn create_tables(conn: &Connection) -> Result<(), Box<dyn std::error::Error>> {
         CREATE INDEX IF NOT EXISTS idx_status_logs_material ON material_status_logs(material_id);
         "
     )?;
+    Ok(())
+}
+
+fn migrate(conn: &Connection) -> Result<(), Box<dyn std::error::Error>> {
+    let has_replaces: bool = conn.query_row(
+        "SELECT COUNT(*) FROM pragma_table_info('attachments') WHERE name = 'replaces_attachment_id'",
+        [],
+        |row| row.get::<_, i64>(0),
+    ).unwrap_or(0) > 0;
+    if !has_replaces {
+        conn.execute_batch("ALTER TABLE attachments ADD COLUMN replaces_attachment_id TEXT;")?;
+    }
     Ok(())
 }
 
@@ -209,35 +223,39 @@ fn seed_data(conn: &Connection) -> Result<(), Box<dyn std::error::Error>> {
     conn.execute(
         "INSERT INTO attachments 
          (id, material_id, file_name, file_type, file_size, uploaded_by, uploaded_at, 
-          is_required, status, reject_reason, rejected_by, rejected_at)
+          is_required, status, reject_reason, rejected_by, rejected_at, replaces_attachment_id)
          VALUES 
-         ('a1', 'm1', '起诉状.pdf', 'application/pdf', 2048576, 'u1', '2026-06-17T09:32:00+08:00', 1, 'valid', NULL, NULL, NULL),
-         ('a2', 'm1', '买卖合同原件.pdf', 'application/pdf', 3145728, 'u1', '2026-06-17T09:35:00+08:00', 1, 'valid', NULL, NULL, NULL),
-         ('a3', 'm1', '送货凭证.pdf', 'application/pdf', 1572864, 'u1', '2026-06-17T09:38:00+08:00', 1, 'valid', NULL, NULL, NULL),
-         ('a4', 'm1', '被告工商信息.pdf', 'application/pdf', 524288, 'u1', '2026-06-17T09:40:00+08:00', 0, 'valid', NULL, NULL, NULL),
+         ('a1', 'm1', '起诉状.pdf', 'application/pdf', 2048576, 'u1', '2026-06-17T09:32:00+08:00', 1, 'valid', NULL, NULL, NULL, NULL),
+         ('a2', 'm1', '买卖合同原件.pdf', 'application/pdf', 3145728, 'u1', '2026-06-17T09:35:00+08:00', 1, 'valid', NULL, NULL, NULL, NULL),
+         ('a3', 'm1', '送货凭证.pdf', 'application/pdf', 1572864, 'u1', '2026-06-17T09:38:00+08:00', 1, 'valid', NULL, NULL, NULL, NULL),
+         ('a4', 'm1', '被告工商信息.pdf', 'application/pdf', 524288, 'u1', '2026-06-17T09:40:00+08:00', 0, 'valid', NULL, NULL, NULL, NULL),
 
-         ('a5', 'm2', '再审申请书.pdf', 'application/pdf', 2621440, 'u1', '2026-06-16T14:22:00+08:00', 1, 'valid', NULL, NULL, NULL),
-         ('a6', 'm2', '一审判决书.pdf', 'application/pdf', 4194304, 'u1', '2026-06-16T14:25:00+08:00', 1, 'valid', NULL, NULL, NULL),
+         ('a5', 'm2', '再审申请书.pdf', 'application/pdf', 2621440, 'u1', '2026-06-16T14:22:00+08:00', 1, 'valid', NULL, NULL, NULL, NULL),
+         ('a6', 'm2', '一审判决书.pdf', 'application/pdf', 4194304, 'u1', '2026-06-16T14:25:00+08:00', 1, 'valid', NULL, NULL, NULL, NULL),
 
-         ('a7', 'm3', '仲裁裁决书.pdf', 'application/pdf', 3670016, 'u2', '2026-06-15T10:18:00+08:00', 1, 'valid', NULL, NULL, NULL),
-         ('a8', 'm3', '劳动合同.pdf', 'application/pdf', 2097152, 'u2', '2026-06-15T10:20:00+08:00', 1, 'valid', NULL, NULL, NULL),
-         ('a9', 'm3', '工资银行流水.pdf', 'application/pdf', 1048576, 'u2', '2026-06-15T10:22:00+08:00', 1, 'rejected', '银行流水缺少离职前3个月完整记录，仅有复印件无银行盖章', 'u4', '2026-06-17T08:55:00+08:00'),
+         ('a7', 'm3', '仲裁裁决书.pdf', 'application/pdf', 3670016, 'u2', '2026-06-15T10:18:00+08:00', 1, 'valid', NULL, NULL, NULL, NULL),
+         ('a8', 'm3', '劳动合同.pdf', 'application/pdf', 2097152, 'u2', '2026-06-15T10:20:00+08:00', 1, 'valid', NULL, NULL, NULL, NULL),
+         ('a9', 'm3', '工资银行流水.pdf', 'application/pdf', 1048576, 'u2', '2026-06-15T10:22:00+08:00', 1, 'rejected', '银行流水缺少离职前3个月完整记录，仅有复印件无银行盖章', 'u4', '2026-06-17T08:55:00+08:00', NULL),
 
-         ('a10', 'm4', '起诉状.pdf', 'application/pdf', 2097152, 'u1', '2026-06-14T11:02:00+08:00', 1, 'valid', NULL, NULL, NULL),
-         ('a11', 'm4', '建设工程施工合同.pdf', 'application/pdf', 5242880, 'u1', '2026-06-14T11:05:00+08:00', 1, 'valid', NULL, NULL, NULL),
-         ('a12', 'm4', '竣工验收报告.pdf', 'application/pdf', 4194304, 'u1', '2026-06-14T11:10:00+08:00', 1, 'rejected', '仅提交复印件，无建设单位、施工单位、监理单位三方盖章原件', 'u4', '2026-06-16T16:32:00+08:00'),
+         ('a10', 'm4', '起诉状.pdf', 'application/pdf', 2097152, 'u1', '2026-06-14T11:02:00+08:00', 1, 'valid', NULL, NULL, NULL, NULL),
+         ('a11', 'm4', '建设工程施工合同.pdf', 'application/pdf', 5242880, 'u1', '2026-06-14T11:05:00+08:00', 1, 'valid', NULL, NULL, NULL, NULL),
+         ('a12', 'm4', '竣工验收报告.pdf', 'application/pdf', 4194304, 'u1', '2026-06-14T11:10:00+08:00', 1, 'rejected', '仅提交复印件，无建设单位、施工单位、监理单位三方盖章原件', 'u4', '2026-06-16T16:32:00+08:00', NULL),
 
-         ('a13', 'm5', '起诉状.pdf', 'application/pdf', 3145728, 'u2', '2026-06-13T15:48:00+08:00', 1, 'valid', NULL, NULL, NULL),
-         ('a14', 'm5', '专利证书.pdf', 'application/pdf', 2097152, 'u2', '2026-06-13T15:50:00+08:00', 1, 'valid', NULL, NULL, NULL),
-         ('a15', 'm5', '侵权比对分析报告.pdf', 'application/pdf', 5242880, 'u2', '2026-06-13T15:55:00+08:00', 1, 'valid', NULL, NULL, NULL),
+         ('a13', 'm5', '起诉状.pdf', 'application/pdf', 3145728, 'u2', '2026-06-13T15:48:00+08:00', 1, 'valid', NULL, NULL, NULL, NULL),
+         ('a14', 'm5', '专利证书.pdf', 'application/pdf', 2097152, 'u2', '2026-06-13T15:50:00+08:00', 1, 'valid', NULL, NULL, NULL, NULL),
+         ('a15', 'm5', '侵权比对分析报告.pdf', 'application/pdf', 5242880, 'u2', '2026-06-13T15:55:00+08:00', 1, 'valid', NULL, NULL, NULL, NULL),
 
-         ('a16', 'm6', '起诉状.pdf', 'application/pdf', 1572864, 'u1', '2026-06-12T09:02:00+08:00', 1, 'valid', NULL, NULL, NULL),
-         ('a17', 'm6', '房屋租赁合同.pdf', 'application/pdf', 2097152, 'u1', '2026-06-12T09:05:00+08:00', 1, 'valid', NULL, NULL, NULL),
+         ('a16', 'm6', '起诉状.pdf', 'application/pdf', 1572864, 'u1', '2026-06-12T09:02:00+08:00', 1, 'valid', NULL, NULL, NULL, NULL),
+         ('a17', 'm6', '房屋租赁合同.pdf', 'application/pdf', 2097152, 'u1', '2026-06-12T09:05:00+08:00', 1, 'valid', NULL, NULL, NULL, NULL),
 
-         ('a18', 'm7', '起诉状.pdf', 'application/pdf', 2621440, 'u2', '2026-06-10T13:32:00+08:00', 1, 'valid', NULL, NULL, NULL),
-         ('a19', 'm7', '股权转让协议.pdf', 'application/pdf', 3145728, 'u2', '2026-06-10T13:35:00+08:00', 1, 'valid', NULL, NULL, NULL),
+         ('a18', 'm7', '起诉状.pdf', 'application/pdf', 2621440, 'u2', '2026-06-10T13:32:00+08:00', 1, 'valid', NULL, NULL, NULL, NULL),
+         ('a19', 'm7', '股权转让协议.pdf', 'application/pdf', 3145728, 'u2', '2026-06-10T13:35:00+08:00', 1, 'valid', NULL, NULL, NULL, NULL),
 
-         ('a20', 'm8', '起诉状.pdf', 'application/pdf', 1048576, 'u2', '2026-06-17T11:02:00+08:00', 1, 'valid', NULL, NULL, NULL)",
+         ('a20', 'm8', '起诉状.pdf', 'application/pdf', 1048576, 'u2', '2026-06-17T11:02:00+08:00', 1, 'valid', NULL, NULL, NULL, NULL),
+
+         ('a21', 'm3', '工资银行流水（盖章版）.pdf', 'application/pdf', 1572864, 'u2', '2026-06-17T15:30:00+08:00', 1, 'valid', NULL, NULL, NULL, 'a9'),
+         ('a22', 'm4', '竣工验收报告（盖章版）.pdf', 'application/pdf', 5242880, 'u1', '2026-06-17T10:20:00+08:00', 1, 'valid', NULL, NULL, NULL, 'a12'),
+         ('a23', 'm4', '工程结算对账单原件.pdf', 'application/pdf', 3145728, 'u1', '2026-06-17T10:25:00+08:00', 1, 'valid', NULL, NULL, NULL, NULL)",
         [],
     )?;
 
@@ -266,7 +284,8 @@ fn seed_data(conn: &Connection) -> Result<(), Box<dyn std::error::Error>> {
          ('l19', 'm7', 'review_passed', 'verifying', 'u6', '刘归档', 'start_verify', '领取复核任务', '2026-06-12T09:00:00+08:00'),
          ('l20', 'm7', 'verifying', 'verified', 'u6', '刘归档', 'pass_verify', '全部材料核验无误', '2026-06-12T16:00:00+08:00'),
          ('l21', 'm7', 'verified', 'archived', 'u6', '刘归档', 'archive', '已归档至2026年诉讼案卷第12号柜', '2026-06-12T17:30:00+08:00'),
-         ('l22', 'm8', NULL, 'registered', 'u2', '李补正', 'register', '新建诉讼材料登记', '2026-06-17T11:02:00+08:00')",
+         ('l22', 'm8', NULL, 'registered', 'u2', '李补正', 'register', '新建诉讼材料登记', '2026-06-17T11:02:00+08:00'),
+         ('l23', 'm4', 'returned', 'registered', 'u1', '张登记', 'resubmit', '补齐竣工验收报告盖章版和工程结算对账单，替代件有效，重新提交', '2026-06-17T10:30:00+08:00')",
         [],
     )?;
 
@@ -292,7 +311,27 @@ fn seed_data(conn: &Connection) -> Result<(), Box<dyn std::error::Error>> {
           '材料已超期未审核，超期约48小时', NULL, '2026-06-16T14:25:00+08:00'),
 
          ('au5', 'm7', NULL, 'u6', '刘归档', 'verifier',
-          'archive', '归档CASE-2026-0007', 'success', NULL, 'b1', '2026-06-12T17:30:00+08:00')",
+          'archive', '归档CASE-2026-0007', 'success', NULL, 'b1', '2026-06-12T17:30:00+08:00'),
+
+         ('au6', 'm4', 'a22', 'u1', '张登记', 'registrar',
+          'add_attachment', '添加替代件附件：竣工验收报告（盖章版）.pdf（替代被驳回的a12）', 'success', NULL, NULL, '2026-06-17T10:20:00+08:00'),
+
+         ('au7', 'm4', 'a23', 'u1', '张登记', 'registrar',
+          'add_attachment', '添加补正附件：工程结算对账单原件.pdf', 'success', NULL, NULL, '2026-06-17T10:25:00+08:00'),
+
+         ('au8', 'm4', NULL, 'u1', '张登记', 'registrar',
+          'resubmit', '补正后重新提交CASE-2026-0004，被驳回原件保留，有效替代件满足必填项', 'success', NULL, NULL, '2026-06-17T10:30:00+08:00'),
+
+         ('au9', 'm3', NULL, 'u5', '陈复核', 'verifier',
+          'resubmit', '越权操作：复核负责人尝试补正提交', 'fail',
+          '角色权限不符，只有诉讼材料登记员才能补正提交', NULL, '2026-06-17T11:00:00+08:00'),
+
+         ('au10', NULL, NULL, 'u5', '陈复核', 'verifier',
+          'batch_pass_review', '越权操作：复核负责人尝试批量审核', 'fail',
+          '角色权限不符，只有审核主管才能批量审核', 'b2', '2026-06-17T14:00:00+08:00'),
+
+         ('au11', 'm4', NULL, 'u4', '赵主管', 'reviewer',
+          'batch_pass_review', '批量审核CASE-2026-0004，被驳回原件已由有效替代件满足', 'success', NULL, 'b2', '2026-06-17T14:05:00+08:00')",
         [],
     )?;
 

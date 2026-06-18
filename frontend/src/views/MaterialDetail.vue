@@ -101,10 +101,13 @@
               <b>二、诉讼材料附件管理</b>
               <div>
                 <el-tag type="success" size="small" style="margin-right:8px;">
-                  有效必填：{{ requiredValid }}/{{ requiredTotal }}
+                  必填满足：{{ requiredSatisfied }}/{{ requiredTotal }}
                 </el-tag>
-                <el-tag type="danger" size="small" style="margin-right:16px;" v-if="rejectedCount > 0">
-                  被驳回：{{ rejectedCount }}
+                <el-tag type="danger" size="small" style="margin-right:8px;" v-if="rejectedWithoutReplacement.length > 0">
+                  缺替代件：{{ rejectedWithoutReplacement.length }}
+                </el-tag>
+                <el-tag type="warning" size="small" style="margin-right:16px;" v-if="rejectedWithReplacement.length > 0">
+                  已补正（驳回原件保留）：{{ rejectedWithReplacement.length }}
                 </el-tag>
                 <el-button size="small" type="primary"
                            :disabled="!canAddAttachment" @click="openAddAttachment">
@@ -115,71 +118,113 @@
           </template>
 
           <el-alert v-if="!attachmentReady && material?.status !== 'archived'"
-                    :title="'附件未齐备（必填 ' + requiredTotal + ' 项，有效 ' + requiredValid + ' 项），补齐后才能回到处理队列/通过审核/批量处理'"
-                    type="warning" show-icon :closable="false" style="margin-bottom:12px;" />
+                    type="warning" show-icon :closable="false" style="margin-bottom:12px;">
+            <template #title>
+              <div>
+                <b>附件未齐备</b>（必填 {{ requiredTotal }} 项，已满足 {{ requiredSatisfied }} 项）
+                <div v-if="rejectedWithoutReplacement.length > 0" style="margin-top:6px;">
+                  <span style="color:#c0392b;">仍缺替代件的被驳回附件：</span>
+                  <span v-for="(item, i) in rejectedWithoutReplacement" :key="item.id">
+                    <b>{{ item.file_name }}</b>
+                    <span style="color:#909399; font-size:12px;">（{{ item.reject_reason }}）</span>
+                    <span v-if="i < rejectedWithoutReplacement.length - 1">；</span>
+                  </span>
+                </div>
+                <div style="margin-top:4px; color:#606266; font-size:12px;">
+                  补齐方式：添加新的有效附件作为替代件，被驳回原件保留用于审计追溯。满足所有必填项后可重新提交。
+                </div>
+              </div>
+            </template>
+          </el-alert>
 
-          <el-table :data="material?.attachments || []" border stripe>
-            <el-table-column label="文件名" min-width="220">
-              <template #default="{ row }">
-                <el-icon style="color:#409eff; vertical-align:-2px;"><Paperclip /></el-icon>
-                <span style="margin-left:4px;">{{ row.file_name }}</span>
-                <el-tag v-if="row.is_required" type="danger" size="small" effect="plain" style="margin-left:6px;">必填</el-tag>
-                <el-tag v-else type="info" size="small" effect="plain" style="margin-left:6px;">可选</el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column label="类型">
-              <template #default="{ row }">{{ row.file_type || '-' }}</template>
-            </el-table-column>
-            <el-table-column label="大小" width="100">
-              <template #default="{ row }">{{ formatSize(row.file_size) }}</template>
-            </el-table-column>
-            <el-table-column label="状态" width="90">
-              <template #default="{ row }">
-                <el-tag :type="row.status === 'valid' ? 'success' : 'danger'" size="small">
-                  {{ row.status === 'valid' ? '有效' : '被驳回' }}
-                </el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column label="上传信息" width="180">
-              <template #default="{ row }">
-                <div style="font-size:12px;">
-                  <div>{{ row.uploaded_by_name || row.uploaded_by }}</div>
-                  <div style="color:#909399;">{{ formatTime(row.uploaded_at) }}</div>
+          <el-alert v-if="attachmentReady && rejectedWithReplacement.length > 0 && material?.status !== 'archived'"
+                    type="success" show-icon :closable="false" style="margin-bottom:12px;">
+            <template #title>
+              <div>
+                <b>附件已齐备</b>（必填 {{ requiredTotal }} 项均已满足）
+                <span style="color:#67c23a;"> — 可重新提交 / 通过审核 / 批量处理</span>
+                <div style="margin-top:4px; font-size:12px; color:#606266;">
+                  其中 {{ rejectedWithReplacement.length }} 项被驳回原件已由有效替代件满足，原件保留用于审计追溯。
                 </div>
-              </template>
-            </el-table-column>
-            <el-table-column label="驳回原因" min-width="240">
-              <template #default="{ row }">
-                <div v-if="row.status === 'rejected'" style="font-size:12px;">
-                  <el-tag type="danger" size="small" style="margin-right:6px;">
-                    {{ row.rejected_by_name || row.rejected_by }}
+              </div>
+            </template>
+          </el-alert>
+
+          <div v-for="group in attachmentGroups" :key="group.key" style="margin-bottom:12px;">
+            <div style="font-size:13px; font-weight:bold; margin-bottom:6px; padding:4px 8px; background:#f5f7fa; border-radius:4px;">
+              <el-icon style="vertical-align:-2px;"><Paperclip /></el-icon>
+              {{ group.label }}
+              <el-tag v-if="group.items.length > 0" size="small" style="margin-left:6px;">{{ group.items.length }}</el-tag>
+            </div>
+            <el-table :data="group.items" border stripe size="small">
+              <el-table-column label="文件名" min-width="220">
+                <template #default="{ row }">
+                  <span>{{ row.file_name }}</span>
+                  <el-tag v-if="row.is_required" type="danger" size="small" effect="plain" style="margin-left:6px;">必填</el-tag>
+                  <el-tag v-else type="info" size="small" effect="plain" style="margin-left:6px;">可选</el-tag>
+                  <el-tag v-if="row.replaces_attachment_id" type="warning" size="small" effect="plain" style="margin-left:6px;">
+                    替代「{{ row.replaces_file_name || row.replaces_attachment_id }}」
                   </el-tag>
-                  <span style="color:#c0392b;">{{ row.reject_reason }}</span>
-                  <div style="color:#909399; margin-top:2px;">{{ formatTime(row.rejected_at) }}</div>
-                </div>
-                <span v-else style="color:#c0c4cc;">-</span>
-              </template>
-            </el-table-column>
-            <el-table-column label="操作" width="200" fixed="right">
-              <template #default="{ row }">
-                <template v-if="row.status === 'rejected' && userStore.can('reject_attachment')">
-                  <el-button size="small" type="success" plain @click="validateAttachment(row.id)">
-                    恢复有效
-                  </el-button>
                 </template>
-                <template v-if="row.status === 'valid' && userStore.can('reject_attachment') && material?.status === 'reviewing'">
-                  <el-button size="small" type="danger" plain @click="openRejectAtt(row)">驳回</el-button>
+              </el-table-column>
+              <el-table-column label="大小" width="90">
+                <template #default="{ row }">{{ formatSize(row.file_size) }}</template>
+              </el-table-column>
+              <el-table-column label="状态" width="120">
+                <template #default="{ row }">
+                  <el-tag :type="row.status === 'valid' ? 'success' : 'danger'" size="small">
+                    {{ row.status === 'valid' ? '有效' : '被驳回' }}
+                  </el-tag>
+                  <el-tag v-if="row.status === 'rejected' && hasReplacement(row)" type="success" size="small" effect="plain" style="margin-left:4px;">
+                    已补正
+                  </el-tag>
                 </template>
-                <template v-if="(material?.status === 'registered' || material?.status === 'returned') && row.status !== 'rejected'">
-                  <el-popconfirm title="确认删除该附件？" @confirm="deleteAttachment(row.id)">
-                    <template #reference>
-                      <el-button size="small" type="danger" plain>删除</el-button>
-                    </template>
-                  </el-popconfirm>
+              </el-table-column>
+              <el-table-column label="上传/驳回信息" min-width="260">
+                <template #default="{ row }">
+                  <div style="font-size:12px;">
+                    <div>
+                      <span style="color:#909399;">上传：</span>
+                      {{ row.uploaded_by_name || row.uploaded_by }}
+                      {{ formatTime(row.uploaded_at) }}
+                    </div>
+                    <div v-if="row.status === 'rejected'" style="margin-top:4px; padding:4px 8px; background:#fef0f0; border:1px solid #fbc4c4; border-radius:3px;">
+                      <el-tag type="danger" size="small">{{ row.rejected_by_name || row.rejected_by }}</el-tag>
+                      <span style="color:#c0392b; margin-left:6px;">{{ row.reject_reason }}</span>
+                      <div style="color:#909399; margin-top:2px;">{{ formatTime(row.rejected_at) }}</div>
+                    </div>
+                    <div v-if="hasReplacement(row)" style="margin-top:4px; padding:4px 8px; background:#f0f9eb; border:1px solid #c2e7b0; border-radius:3px;">
+                      <el-icon style="color:#67c23a; vertical-align:-2px;"><CircleCheck /></el-icon>
+                      <span style="color:#67c23a;">已由有效替代件满足：</span>
+                      <span v-for="rp in getReplacements(row)" :key="rp.id" style="color:#606266;">
+                        {{ rp.file_name }}（{{ rp.uploaded_by_name }} {{ formatTime(rp.uploaded_at) }}）
+                      </span>
+                    </div>
+                  </div>
                 </template>
-              </template>
-            </el-table-column>
-          </el-table>
+              </el-table-column>
+              <el-table-column label="操作" width="200" fixed="right">
+                <template #default="{ row }">
+                  <template v-if="row.status === 'rejected' && userStore.can('reject_attachment')">
+                    <el-button size="small" type="success" plain @click="validateAttachment(row.id)">恢复有效</el-button>
+                  </template>
+                  <template v-if="row.status === 'rejected' && !hasReplacement(row) && canAddAttachment">
+                    <el-button size="small" type="warning" plain @click="openAddReplacement(row)">上传替代件</el-button>
+                  </template>
+                  <template v-if="row.status === 'valid' && userStore.can('reject_attachment') && material?.status === 'reviewing'">
+                    <el-button size="small" type="danger" plain @click="openRejectAtt(row)">驳回</el-button>
+                  </template>
+                  <template v-if="(material?.status === 'registered' || material?.status === 'returned') && row.status !== 'rejected' && !isReplacementOfRejected(row)">
+                    <el-popconfirm title="确认删除该附件？" @confirm="deleteAttachment(row.id)">
+                      <template #reference>
+                        <el-button size="small" type="danger" plain>删除</el-button>
+                      </template>
+                    </el-popconfirm>
+                  </template>
+                </template>
+              </el-table-column>
+            </el-table>
+          </div>
         </el-card>
 
         <el-card shadow="never" style="margin-bottom:16px;">
@@ -279,13 +324,21 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="addAttDialog" title="添加附件" width="520px">
-      <el-form :model="attForm" label-width="100px">
+    <el-dialog v-model="addAttDialog" :title="attForm.replaces_attachment_id ? '添加替代件附件' : '添加附件'" width="560px">
+      <el-form :model="attForm" label-width="120px">
         <el-form-item label="文件名"><el-input v-model="attForm.file_name" placeholder="例：起诉状.pdf" /></el-form-item>
         <el-form-item label="类型"><el-input v-model="attForm.file_type" placeholder="例：application/pdf" /></el-form-item>
         <el-form-item label="大小(KB)"><el-input-number v-model="attForm.file_size" :min="1" :max="999999" /></el-form-item>
         <el-form-item label="是否必填"><el-switch v-model="attForm.is_required" /></el-form-item>
-        <el-alert type="info" :closable="false" show-icon style="margin-top:8px;">
+        <el-form-item label="替代被驳回附件">
+          <el-select v-model="attForm.replaces_attachment_id" clearable placeholder="如为替代件请选择被驳回的原附件" style="width:100%;">
+            <el-option v-for="a in rejectedAttachments" :key="a.id" :label="a.file_name + '（' + (a.reject_reason || '无原因') + '）'" :value="a.id" />
+          </el-select>
+        </el-form-item>
+        <el-alert v-if="attForm.replaces_attachment_id" type="success" :closable="false" show-icon style="margin-top:8px;">
+          此附件将替代被驳回的「{{ getAttachmentName(attForm.replaces_attachment_id) }}」，提交后该必填项将被视为满足。被驳回原件保留用于审计追溯。
+        </el-alert>
+        <el-alert v-else type="info" :closable="false" show-icon style="margin-top:8px;">
           此处使用演示用的元数据登记（无真实文件上传），真实项目可替换为 OSS 上传。
         </el-alert>
       </el-form>
@@ -331,7 +384,7 @@ const verifyDialog = ref(false)
 const verifyForm = reactive({ pass: true, reject_reason: '', audit_remark: '', archive: false })
 
 const addAttDialog = ref(false)
-const attForm = reactive({ file_name: '', file_type: 'application/pdf', file_size: 1024, is_required: true })
+const attForm = reactive({ file_name: '', file_type: 'application/pdf', file_size: 1024, is_required: true, replaces_attachment_id: null })
 
 const rejectAttDialog = ref(false)
 const rejectAttId = ref('')
@@ -340,16 +393,52 @@ const rejectAttReason = ref('')
 
 const id = computed(() => route.params.id)
 
+const allAttachments = computed(() => material.value?.attachments || [])
+
 const requiredTotal = computed(() =>
-  (material.value?.attachments || []).filter((a) => a.is_required).length
+  allAttachments.value.filter((a) => a.is_required).length
 )
-const requiredValid = computed(() =>
-  (material.value?.attachments || []).filter((a) => a.is_required && a.status === 'valid').length
+const requiredSatisfied = computed(() =>
+  allAttachments.value.filter((a) => a.is_required && (a.status === 'valid' || hasReplacement(a))).length
 )
-const rejectedCount = computed(() =>
-  (material.value?.attachments || []).filter((a) => a.status === 'rejected').length
+const rejectedWithReplacement = computed(() =>
+  allAttachments.value.filter((a) => a.status === 'rejected' && a.is_required && hasReplacement(a))
 )
-const attachmentReady = computed(() => requiredTotal.value === 0 || requiredValid.value === requiredTotal.value)
+const rejectedWithoutReplacement = computed(() =>
+  allAttachments.value.filter((a) => a.status === 'rejected' && a.is_required && !hasReplacement(a))
+)
+const rejectedAttachments = computed(() =>
+  allAttachments.value.filter((a) => a.status === 'rejected')
+)
+const attachmentReady = computed(() => requiredTotal.value === 0 || requiredSatisfied.value >= requiredTotal.value)
+
+const attachmentGroups = computed(() => {
+  const originals = allAttachments.value.filter((a) => !a.replaces_attachment_id)
+  const replacements = allAttachments.value.filter((a) => a.replaces_attachment_id)
+  const rejectedOriginals = originals.filter((a) => a.status === 'rejected')
+  const validOriginals = originals.filter((a) => a.status === 'valid')
+  return [
+    { key: 'rejected', label: '被驳回原件（保留）', items: rejectedOriginals },
+    { key: 'replacement', label: '替代件', items: replacements },
+    { key: 'valid', label: '有效原件', items: validOriginals },
+  ].filter((g) => g.items.length > 0)
+})
+
+function hasReplacement(att) {
+  return allAttachments.value.some((a) => a.replaces_attachment_id === att.id && a.status === 'valid')
+}
+function getReplacements(att) {
+  return allAttachments.value.filter((a) => a.replaces_attachment_id === att.id && a.status === 'valid')
+}
+function isReplacementOfRejected(att) {
+  if (!att.replaces_attachment_id) return false
+  const original = allAttachments.value.find((a) => a.id === att.replaces_attachment_id)
+  return original && original.status === 'rejected'
+}
+function getAttachmentName(aid) {
+  const a = allAttachments.value.find((x) => x.id === aid)
+  return a ? a.file_name : aid
+}
 
 const canAddAttachment = computed(() =>
   userStore.can('manage_attachment') &&
@@ -452,7 +541,8 @@ async function archive() {
 }
 async function resubmit() {
   if (!attachmentReady.value) {
-    ElMessage.error(`附件未齐备（必填 ${requiredTotal.value} 项，有效 ${requiredValid.value} 项），请先补齐再提交`)
+    const missing = rejectedWithoutReplacement.value.map((a) => a.file_name).join('、')
+    ElMessage.error(`附件未齐备（必填 ${requiredTotal.value} 项，已满足 ${requiredSatisfied.value} 项），仍缺替代件：${missing}，请先补齐再提交`)
     return
   }
   const res = await api.post(`/materials/${id.value}/resubmit`, { operator_id: userStore.user.id })
@@ -512,24 +602,37 @@ function openAddAttachment() {
   attForm.file_type = 'application/pdf'
   attForm.file_size = 1024
   attForm.is_required = true
+  attForm.replaces_attachment_id = null
+  addAttDialog.value = true
+}
+function openAddReplacement(row) {
+  attForm.file_name = ''
+  attForm.file_type = 'application/pdf'
+  attForm.file_size = 1024
+  attForm.is_required = true
+  attForm.replaces_attachment_id = row.id
   addAttDialog.value = true
 }
 async function confirmAddAtt() {
-  const res = await api.post(`/materials/${id.value}/attachments`, {
+  const payload = {
     file_name: attForm.file_name,
     file_type: attForm.file_type,
     file_size: attForm.file_size * 1024,
     is_required: attForm.is_required,
     operator_id: userStore.user.id,
-  })
+  }
+  if (attForm.replaces_attachment_id) {
+    payload.replaces_attachment_id = attForm.replaces_attachment_id
+  }
+  const res = await api.post(`/materials/${id.value}/attachments`, payload)
   if (res.data.success) {
-    ElMessage.success('附件已添加')
+    ElMessage.success(attForm.replaces_attachment_id ? '替代件附件已添加' : '附件已添加')
     addAttDialog.value = false
     load()
   }
 }
 async function deleteAttachment(aid) {
-  const res = await api.delete(`/materials/${id.value}/attachments/${aid}`)
+  const res = await api.delete(`/materials/${id.value}/attachments/${aid}?operator_id=${userStore.user.id}`)
   if (res.data.success) { ElMessage.success('已删除'); load() }
 }
 function openRejectAtt(row) {

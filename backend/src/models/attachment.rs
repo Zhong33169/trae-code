@@ -16,6 +16,8 @@ pub struct Attachment {
     pub rejected_by: Option<String>,
     pub rejected_by_name: Option<String>,
     pub rejected_at: Option<String>,
+    pub replaces_attachment_id: Option<String>,
+    pub replaces_file_name: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -25,6 +27,7 @@ pub struct AddAttachmentRequest {
     pub file_size: Option<i64>,
     pub is_required: Option<bool>,
     pub operator_id: String,
+    pub replaces_attachment_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -52,12 +55,34 @@ pub fn has_required_attachments(attachments: &[Attachment]) -> bool {
     if required.is_empty() {
         return true;
     }
-    required.iter().all(|a| a.status == "valid")
+    required.iter().all(|a| {
+        if a.status == "valid" {
+            return true;
+        }
+        if a.status == "rejected" {
+            return attachments.iter().any(|r| r.replaces_attachment_id.as_deref() == Some(&a.id) && r.status == "valid");
+        }
+        false
+    })
 }
 
 pub fn missing_required_count(attachments: &[Attachment]) -> usize {
     attachments
         .iter()
-        .filter(|a| a.is_required && a.status != "valid")
+        .filter(|a| a.is_required && a.status != "valid" && !attachments.iter().any(|r| r.replaces_attachment_id.as_deref() == Some(&a.id) && r.status == "valid"))
         .count()
+}
+
+pub fn get_rejected_without_replacement(attachments: &[Attachment]) -> Vec<&Attachment> {
+    attachments
+        .iter()
+        .filter(|a| a.is_required && a.status == "rejected" && !attachments.iter().any(|r| r.replaces_attachment_id.as_deref() == Some(&a.id) && r.status == "valid"))
+        .collect()
+}
+
+pub fn get_replacements_for<'a>(attachments: &'a [Attachment], att_id: &str) -> Vec<&'a Attachment> {
+    attachments
+        .iter()
+        .filter(|a| a.replaces_attachment_id.as_deref() == Some(att_id))
+        .collect()
 }

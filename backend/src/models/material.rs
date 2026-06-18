@@ -67,6 +67,7 @@ pub struct UpdateMaterialRequest {
     pub case_type: Option<String>,
     pub priority: Option<String>,
     pub deadline: Option<String>,
+    pub operator_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
