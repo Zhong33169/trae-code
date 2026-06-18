@@ -77,6 +77,16 @@ export interface ImportRecord {
   diff_json?: string;
   error_msg?: string;
   topic_id?: string;
+  process_status: 'pending' | 'submitted' | 'resolved' | 'not_applicable';
+  process_remark?: string;
+  processed_by?: string;
+  processed_by_name?: string;
+  processed_at?: string;
+}
+
+export interface ProcessConflictRequest {
+  action: 'submit' | 'resolve' | 'ignore';
+  remark: string;
 }
 
 export interface ImportTopicItem {
@@ -158,6 +168,10 @@ export class TopicService {
 
   executeImport(data: any) {
     return this.http.post<any>('/api/import/execute', data, this.opts());
+  }
+
+  processConflict(recordId: string, data: ProcessConflictRequest) {
+    return this.http.post<any>(`/api/import/records/${recordId}/process`, data, this.opts());
   }
 
   listAudit(params?: { topic_id?: string; batch_id?: string }) {

@@ -29,6 +29,7 @@ fn hello() -> Json<serde_json::Value> {
                 "GET /api/import/batches",
                 "GET /api/import/batches/:id/records",
                 "POST /api/import/execute (registrar)",
+                "POST /api/import/records/:id/process (registrar submit / reviewer resolve/ignore)",
             ],
             "audit": ["GET /api/audit/logs?topic_id="],
             "users": ["GET /api/users"],
@@ -71,6 +72,7 @@ async fn main() -> anyhow::Result<()> {
             get(handlers::handle_batch_records),
         )
         .at("/import/execute", post(handlers::handle_execute_import))
+        .at("/import/records/:id/process", post(handlers::handle_process_conflict))
         .at("/audit/logs", get(handlers::handle_list_audit));
 
     let app = Route::new().nest("/api", api).with(

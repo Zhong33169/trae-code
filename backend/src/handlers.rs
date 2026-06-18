@@ -88,6 +88,11 @@ fn row_to_import_record(row: &rusqlite::Row) -> rusqlite::Result<ImportRecord> {
         diff_json: row.get(5)?,
         error_msg: row.get(6)?,
         topic_id: row.get(7)?,
+        process_status: row.get(8).unwrap_or_else(|_| "pending".to_string()),
+        process_remark: row.get(9).unwrap_or(None),
+        processed_by: row.get(10).unwrap_or(None),
+        processed_by_name: row.get(11).unwrap_or(None),
+        processed_at: row.get(12).unwrap_or(None),
     })
 }
 
@@ -654,7 +659,7 @@ pub async fn handle_batch_records(
     let conn = get_conn();
     let mut stmt = conn
         .prepare(
-            "SELECT id, batch_id, topic_no, title, status, diff_json, error_msg, topic_id FROM import_records WHERE batch_id = ?1 ORDER BY id",
+            "SELECT id, batch_id, topic_no, title, status, diff_json, error_msg, topic_id, process_status, process_remark, processed_by, processed_by_name, processed_at FROM import_records WHERE batch_id = ?1 ORDER BY id",
         )
         .unwrap();
     let rows: Vec<ImportRecord> = stmt
@@ -709,7 +714,7 @@ pub async fn handle_execute_import(
                 )
                 .ok();
             conn.execute(
-                "INSERT INTO import_records (id, batch_id, topic_no, title, status, diff_json, error_msg, topic_id) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+                "INSERT INTO import_records (id, batch_id, topic_no, title, status, diff_json, error_msg, topic_id, process_status, process_remark, processed_by, processed_by_name, processed_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,'pending',NULL,NULL,NULL,NULL)",
                 params![
                     record_id,
                     batch_id,
@@ -728,9 +733,14 @@ pub async fn handle_execute_import(
                 topic_no: item.topic_no.clone(),
                 title: Some(item.title.clone()),
                 status: "conflict".to_string(),
-                diff_json: diff,
+                diff_json: diff.clone(),
                 error_msg: Some("选题单编号已存在，存在线上线下状态冲突或重复回填，未覆盖".to_string()),
                 topic_id: existing_topic_id.clone(),
+                process_status: "pending".to_string(),
+                process_remark: None,
+                processed_by: None,
+                processed_by_name: None,
+                processed_at: None,
             });
             write_audit(
                 existing_topic_id.as_deref(),
@@ -762,7 +772,7 @@ pub async fn handle_execute_import(
         if !valid_statuses.contains(&status.as_str()) {
             error_count += 1;
             conn.execute(
-                "INSERT INTO import_records (id, batch_id, topic_no, title, status, diff_json, error_msg, topic_id) VALUES (?1,?2,?3,?4,?5,?6,?7,NULL)",
+                "INSERT INTO import_records (id, batch_id, topic_no, title, status, diff_json, error_msg, topic_id, process_status, process_remark, processed_by, processed_by_name, processed_at) VALUES (?1,?2,?3,?4,?5,?6,?7,NULL,'pending',NULL,NULL,NULL,NULL)",
                 params![
                     record_id,
                     batch_id,
@@ -783,6 +793,11 @@ pub async fn handle_execute_import(
                 diff_json: None,
                 error_msg: Some(format!("非法状态值：{}", status)),
                 topic_id: None,
+                process_status: "pending".to_string(),
+                process_remark: None,
+                processed_by: None,
+                processed_by_name: None,
+                processed_at: None,
             });
             write_audit(
                 None,
@@ -825,7 +840,7 @@ pub async fn handle_execute_import(
             Ok(_) => {
                 success_count += 1;
                 conn.execute(
-                    "INSERT INTO import_records (id, batch_id, topic_no, title, status, diff_json, error_msg, topic_id) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+                    "INSERT INTO import_records (id, batch_id, topic_no, title, status, diff_json, error_msg, topic_id, process_status, process_remark, processed_by, processed_by_name, processed_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,'not_applicable',NULL,NULL,NULL,NULL)",
                     params![
                         record_id,
                         batch_id,
@@ -847,6 +862,11 @@ pub async fn handle_execute_import(
                     diff_json: None,
                     error_msg: None,
                     topic_id: Some(topic_id.clone()),
+                    process_status: "not_applicable".to_string(),
+                    process_remark: None,
+                    processed_by: None,
+                    processed_by_name: None,
+                    processed_at: None,
                 });
                 write_audit(
                     Some(&topic_id),
@@ -866,7 +886,7 @@ pub async fn handle_execute_import(
             Err(e) => {
                 error_count += 1;
                 conn.execute(
-                    "INSERT INTO import_records (id, batch_id, topic_no, title, status, diff_json, error_msg, topic_id) VALUES (?1,?2,?3,?4,?5,?6,?7,NULL)",
+                    "INSERT INTO import_records (id, batch_id, topic_no, title, status, diff_json, error_msg, topic_id, process_status, process_remark, processed_by, processed_by_name, processed_at) VALUES (?1,?2,?3,?4,?5,?6,?7,NULL,'pending',NULL,NULL,NULL,NULL)",
                     params![
                         record_id,
                         batch_id,
@@ -887,6 +907,11 @@ pub async fn handle_execute_import(
                     diff_json: None,
                     error_msg: Some(e.to_string()),
                     topic_id: None,
+                    process_status: "pending".to_string(),
+                    process_remark: None,
+                    processed_by: None,
+                    processed_by_name: None,
+                    processed_at: None,
                 });
                 write_audit(
                     None,
@@ -1056,4 +1081,193 @@ pub async fn handle_list_audit(
             .collect()
     };
     json_ok(rows)
+}
+
+#[handler]
+pub async fn handle_process_conflict(
+    req: &Request,
+    Path(record_id): Path<String>,
+    Json(body): Json<ProcessConflictRequest>,
+) -> Json<ApiResponse<ImportRecord>> {
+    let user = match current_user(req) {
+        Ok(u) => u,
+        Err(e) => return json_err(&e.to_string()),
+    };
+
+    let conn = get_conn();
+    let now = chrono::Utc::now().to_rfc3339();
+
+    let record_result = conn.query_row(
+        "SELECT id, batch_id, topic_no, title, status, diff_json, error_msg, topic_id, process_status, process_remark, processed_by, processed_by_name, processed_at FROM import_records WHERE id = ?1",
+        params![record_id],
+        |row| row_to_import_record(row),
+    );
+    let record = match record_result {
+        Ok(r) => r,
+        Err(_) => return json_err("导入记录不存在"),
+    };
+
+    if record.status != "conflict" {
+        return json_err("仅冲突记录可办理");
+    }
+
+    let topic_id = match record.topic_id.as_ref() {
+        Some(tid) => tid.clone(),
+        None => return json_err("冲突记录缺少关联 topic_id"),
+    };
+    let batch_id = record.batch_id.clone();
+
+    match body.action.as_str() {
+        "submit" => {
+            if let Err(e) = require_role(&user, &["registrar"]) {
+                return json_err(&e.to_string());
+            }
+            if record.process_status != "pending" {
+                return json_err("仅待处理的冲突可提交");
+            }
+            conn.execute(
+                "UPDATE import_records SET process_status = 'submitted', process_remark = ?1, processed_by = ?2, processed_by_name = ?3, processed_at = ?4 WHERE id = ?5",
+                params![
+                    body.remark,
+                    user.id,
+                    user.display_name,
+                    now,
+                    record_id,
+                ],
+            ).ok();
+            let _ = write_audit(
+                Some(&topic_id),
+                Some(&batch_id),
+                &user.id,
+                &user.display_name,
+                "conflict_submit",
+                None,
+                None,
+                Some(&format!("登记员提交冲突处理申请：{}", body.remark)),
+            );
+        }
+        "resolve" | "ignore" => {
+            if let Err(e) = require_role(&user, &["reviewer"]) {
+                return json_err(&e.to_string());
+            }
+            if record.process_status != "submitted" && record.process_status != "pending" {
+                return json_err("仅待处理或已提交的冲突可办理");
+            }
+
+            let new_process_status = "resolved";
+
+            if body.action == "resolve" {
+                if let Some(diff_str) = record.diff_json.as_ref() {
+                    if let Ok(diff_obj) = serde_json::from_str::<HashMap<String, Value>>(diff_str) {
+                        let topic_result = conn.query_row(
+                            "SELECT id, topic_no, title, source, reporter, department, deadline, status, content FROM topics WHERE id = ?1",
+                            params![topic_id],
+                            |row| {
+                                Ok((
+                                    row.get::<_, String>(0)?,
+                                    row.get::<_, String>(1)?,
+                                    row.get::<_, String>(2)?,
+                                    row.get::<_, String>(3)?,
+                                    row.get::<_, String>(4)?,
+                                    row.get::<_, String>(5)?,
+                                    row.get::<_, Option<String>>(6)?,
+                                    row.get::<_, String>(7)?,
+                                    row.get::<_, Option<String>>(8)?,
+                                ))
+                            },
+                        );
+                        if let Ok((_id, _no, old_title, _old_source, old_reporter, old_department, old_deadline, old_status, old_content)) = topic_result {
+                            let mut new_title = old_title;
+                            let mut new_reporter = old_reporter;
+                            let mut new_department = old_department;
+                            let mut new_deadline = old_deadline;
+                            let mut new_status = old_status;
+                            let mut new_content = old_content;
+
+                            for (k, v) in &diff_obj {
+                                if let Some(new_val) = v.get("new") {
+                                    match k.as_str() {
+                                        "title" => if let Some(s) = new_val.as_str() { new_title = s.to_string(); }
+                                        "reporter" => if let Some(s) = new_val.as_str() { new_reporter = s.to_string(); }
+                                        "department" => if let Some(s) = new_val.as_str() { new_department = s.to_string(); }
+                                        "deadline" => if let Some(s) = new_val.as_str() { new_deadline = Some(s.to_string()); }
+                                        "status" => if let Some(s) = new_val.as_str() { new_status = s.to_string(); }
+                                        "content" => if let Some(s) = new_val.as_str() { new_content = Some(s.to_string()); }
+                                        _ => {}
+                                    }
+                                }
+                            }
+
+                            conn.execute(
+                                "UPDATE topics SET title = ?1, reporter = ?2, department = ?3, deadline = ?4, status = ?5, content = ?6 WHERE id = ?7",
+                                params![
+                                    new_title,
+                                    new_reporter,
+                                    new_department,
+                                    new_deadline,
+                                    new_status,
+                                    new_content,
+                                    topic_id,
+                                ],
+                            ).ok();
+
+                            let _ = write_audit(
+                                Some(&topic_id),
+                                Some(&batch_id),
+                                &user.id,
+                                &user.display_name,
+                                "conflict_resolve",
+                                None,
+                                None,
+                                Some(&format!("审核主管采纳线下数据覆盖线上：{}", body.remark)),
+                            );
+                        }
+                    }
+                }
+            } else {
+                let _ = write_audit(
+                    Some(&topic_id),
+                    Some(&batch_id),
+                    &user.id,
+                    &user.display_name,
+                    "conflict_ignore",
+                    None,
+                    None,
+                    Some(&format!("审核主管保留线上数据：{}", body.remark)),
+                );
+            }
+
+            conn.execute(
+                "UPDATE import_records SET process_status = ?1, process_remark = ?2, processed_by = ?3, processed_by_name = ?4, processed_at = ?5 WHERE id = ?6",
+                params![
+                    new_process_status,
+                    body.remark,
+                    user.id,
+                    user.display_name,
+                    now,
+                    record_id,
+                ],
+            ).ok();
+        }
+        _ => return json_err("无效的 action，仅支持 submit / resolve / ignore"),
+    }
+
+    let updated = conn.query_row(
+        "SELECT id, batch_id, topic_no, title, status, diff_json, error_msg, topic_id, process_status, process_remark, processed_by, processed_by_name, processed_at FROM import_records WHERE id = ?1",
+        params![record_id],
+        |row| row_to_import_record(row),
+    ).ok();
+
+    match updated {
+        Some(r) => json_ok(r),
+        None => json_err("更新后查询失败"),
+    }
+}
+
+fn now_str() -> String {
+    chrono::Utc::now().to_rfc3339()
+}
+
+fn new_uuid() -> String {
+    uuid::Uuid::new_v4().to_string()
 }

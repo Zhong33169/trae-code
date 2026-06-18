@@ -9,6 +9,7 @@ import {
   ImportRecord,
   ImportTopicItem,
   ImportResult,
+  ProcessConflictRequest,
 } from '../../services/topic.service';
 
 @Component({
@@ -158,17 +159,43 @@ import {
                 冲突未覆盖 ({{ conflictRecords().length }})
               </div>
               <table class="sub-table">
-                <thead><tr><th>选题编号</th><th>标题</th><th>冲突原因</th><th>字段差异</th></tr></thead>
+                <thead><tr><th>选题编号</th><th>标题</th><th>冲突原因</th><th>字段差异</th><th>处理状态</th><th>处理信息</th><th>操作</th></tr></thead>
                 <tbody>
                   <tr *ngFor="let r of conflictRecords()">
-                    <td>{{ r.topic_no }}</td>
+                    <td>
+                      <a *ngIf="r.topic_id" [routerLink]="['/topics', r.topic_id]" class="link">{{ r.topic_no }}</a>
+                      <span *ngIf="!r.topic_id">{{ r.topic_no }}</span>
+                    </td>
                     <td>{{ r.title || '-' }}</td>
                     <td class="warn-cell">{{ r.error_msg || '-' }}</td>
-                    <td style="font-family: monospace; font-size: 12px; max-width: 300px;">
+                    <td style="font-family: monospace; font-size: 12px; max-width: 260px;">
                       <div *ngIf="r.diff_json && r.diff_json !== '{}'" style="white-space: pre-wrap;">
                         {{ formatDiff(r.diff_json) }}
                       </div>
                       <span *ngIf="!r.diff_json || r.diff_json === '{}'" class="muted">-</span>
+                    </td>
+                    <td>
+                      <span class="pstatus pstatus-{{ r.process_status }}">
+                        {{ processStatusLabel(r.process_status) }}
+                      </span>
+                    </td>
+                    <td style="font-size: 12px; max-width: 200px;">
+                      <div *ngIf="r.processed_by_name">处理人：{{ r.processed_by_name }}</div>
+                      <div *ngIf="r.process_remark">备注：{{ r.process_remark }}</div>
+                      <div *ngIf="r.processed_at" class="muted">{{ r.processed_at | slice : 0 : 16 }}</div>
+                      <div *ngIf="!r.processed_by_name" class="muted">-</div>
+                    </td>
+                    <td>
+                      <div *ngIf="r.process_status === 'pending'">
+                        <button *ngIf="auth.hasRole(['registrar'])" class="btn-link" (click)="openProcessModal(r, 'submit')">提交处理</button>
+                        <button *ngIf="auth.hasRole(['reviewer'])" class="btn-link" (click)="openProcessModal(r, 'resolve')">采纳线下</button>
+                        <button *ngIf="auth.hasRole(['reviewer'])" class="btn-link" style="color:#a53225" (click)="openProcessModal(r, 'ignore')">保留线上</button>
+                      </div>
+                      <div *ngIf="r.process_status === 'submitted'">
+                        <button *ngIf="auth.hasRole(['reviewer'])" class="btn-link" (click)="openProcessModal(r, 'resolve')">采纳线下</button>
+                        <button *ngIf="auth.hasRole(['reviewer'])" class="btn-link" style="color:#a53225" (click)="openProcessModal(r, 'ignore')">保留线上</button>
+                      </div>
+                      <span *ngIf="r.process_status === 'resolved'" class="muted">已处理</span>
                     </td>
                   </tr>
                 </tbody>
@@ -192,6 +219,30 @@ import {
               </table>
             </div>
           </div>
+        </div>
+      </div>
+
+      <div *ngIf="processModalVisible()" class="modal-overlay" (click)="closeProcessModal()">
+        <div class="modal" (click)="$event.stopPropagation()">
+          <h3>{{ processModalTitle() }}</h3>
+          <div class="muted" style="margin-bottom: 12px;">
+            选题：{{ processModalRecord()?.title }}（{{ processModalRecord()?.topic_no }}）
+          </div>
+          <div *ngIf="processModalRecord()?.diff_json" class="diff-preview">
+            <div class="muted" style="margin-bottom: 6px;">字段差异：</div>
+            <pre style="margin: 0; white-space: pre-wrap; font-size: 12px; background: #f5f7fa; padding: 10px; border-radius: 4px;">{{ formatDiff(processModalRecord()!.diff_json!) }}</pre>
+          </div>
+          <div class="field" style="margin-top: 12px;">
+            <label>处理备注 *</label>
+            <textarea [(ngModel)]="processRemark" class="input" rows="3" placeholder="请填写处理说明"></textarea>
+          </div>
+          <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 16px;">
+            <button class="btn" (click)="closeProcessModal()">取消</button>
+            <button class="btn-primary" (click)="submitProcess()" [disabled]="!processRemark.trim() || processing">
+              {{ processing ? '处理中...' : '确认' }}
+            </button>
+          </div>
+          <div *ngIf="processError" class="error" style="margin-top: 8px;">{{ processError }}</div>
         </div>
       </div>
     </div>
@@ -248,6 +299,22 @@ import {
       .dot-conflict { background: #a76b12; }
       .dot-error { background: #a53225; }
       .warn-cell { color: #a76b12; }
+      .pstatus { padding: 2px 10px; border-radius: 10px; font-size: 12px; }
+      .pstatus-pending { background: #e3f0ff; color: #1f5fb0; }
+      .pstatus-submitted { background: #fff3d6; color: #a76b12; }
+      .pstatus-resolved { background: #d8f3df; color: #1d7a38; }
+      .pstatus-not_applicable { background: #eee; color: #888; }
+      .modal-overlay {
+        position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+        background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center;
+        z-index: 1000;
+      }
+      .modal {
+        background: #fff; padding: 24px; border-radius: 8px; width: 520px; max-width: 90vw;
+        box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+      }
+      .modal h3 { margin: 0 0 8px; color: #1f3a68; font-size: 16px; }
+      .diff-preview { margin-top: 12px; }
     `,
   ],
 })
@@ -258,6 +325,23 @@ export class ImportPageComponent implements OnInit {
   lastResult = signal<ImportResult | null>(null);
   loading = false;
   opError = '';
+
+  processModalVisible = signal(false);
+  processModalRecord = signal<ImportRecord | null>(null);
+  processModalAction = signal<'submit' | 'resolve' | 'ignore'>('submit');
+  processRemark = '';
+  processing = false;
+  processError = '';
+
+  processModalTitle = computed(() => {
+    const action = this.processModalAction();
+    const titles: Record<string, string> = {
+      submit: '提交冲突处理申请',
+      resolve: '采纳线下数据（覆盖线上）',
+      ignore: '保留线上数据（忽略冲突）',
+    };
+    return titles[action] || '处理冲突';
+  });
 
   successRecords = computed(() => this.currentRecords().filter(r => r.status === 'success'));
   conflictRecords = computed(() => this.currentRecords().filter(r => r.status === 'conflict'));
@@ -270,6 +354,60 @@ export class ImportPageComponent implements OnInit {
 
   ngOnInit() {
     this.loadBatches();
+  }
+
+  processStatusLabel(s: string) {
+    const map: Record<string, string> = {
+      pending: '待处理',
+      submitted: '已提交',
+      resolved: '已处理',
+      not_applicable: '无需处理',
+    };
+    return map[s] || s;
+  }
+
+  openProcessModal(record: ImportRecord, action: 'submit' | 'resolve' | 'ignore') {
+    this.processModalRecord.set(record);
+    this.processModalAction.set(action);
+    this.processRemark = '';
+    this.processError = '';
+    this.processModalVisible.set(true);
+  }
+
+  closeProcessModal() {
+    this.processModalVisible.set(false);
+    this.processModalRecord.set(null);
+  }
+
+  submitProcess() {
+    const record = this.processModalRecord();
+    if (!record || !this.processRemark.trim()) return;
+
+    this.processing = true;
+    this.processError = '';
+
+    const req: ProcessConflictRequest = {
+      action: this.processModalAction(),
+      remark: this.processRemark.trim(),
+    };
+
+    this.service.processConflict(record.id, req).subscribe({
+      next: (res) => {
+        this.processing = false;
+        if (res.code === 0) {
+          const updated = res.data as ImportRecord;
+          const newRecords = this.currentRecords().map(r => r.id === updated.id ? updated : r);
+          this.currentRecords.set(newRecords);
+          this.closeProcessModal();
+        } else {
+          this.processError = res.message || '处理失败';
+        }
+      },
+      error: (e) => {
+        this.processing = false;
+        this.processError = '请求失败：' + (e.message || JSON.stringify(e));
+      },
+    });
   }
 
   loadBatches() {

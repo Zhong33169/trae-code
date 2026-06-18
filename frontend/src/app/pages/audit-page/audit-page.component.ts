@@ -103,6 +103,9 @@ import { TopicService, AuditLog, ImportBatch } from '../../services/topic.servic
       .act-import_create { background: #d8f3df; color: #1d7a38; }
       .act-import_conflict { background: #fff3d6; color: #a76b12; }
       .act-import_error { background: #fde0dc; color: #a53225; }
+      .act-conflict_submit { background: #e3f0ff; color: #1f5fb0; }
+      .act-conflict_resolve { background: #d8f3df; color: #1d7a38; }
+      .act-conflict_ignore { background: #eee; color: #666; }
       .status-mini { padding: 1px 6px; border-radius: 8px; font-size: 12px; }
       .status-registered { background: #e3f0ff; color: #1f5fb0; }
       .status-reviewed { background: #fff3d6; color: #a76b12; }
@@ -155,6 +158,9 @@ export class AuditPageComponent implements OnInit {
         import_create: '离线回填·创建',
         import_conflict: '离线回填·冲突',
         import_error: '离线回填·失败',
+        conflict_submit: '冲突·登记员提交',
+        conflict_resolve: '冲突·采纳线下',
+        conflict_ignore: '冲突·保留线上',
       } as Record<string, string>
     )[a || ''] || a;
   }

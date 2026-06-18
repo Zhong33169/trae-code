@@ -141,6 +141,26 @@ pub struct ImportRecord {
     pub error_msg: Option<String>,
     #[serde(default)]
     pub topic_id: Option<String>,
+    #[serde(default = "default_process_status")]
+    pub process_status: String,
+    #[serde(default)]
+    pub process_remark: Option<String>,
+    #[serde(default)]
+    pub processed_by: Option<String>,
+    #[serde(default)]
+    pub processed_by_name: Option<String>,
+    #[serde(default)]
+    pub processed_at: Option<String>,
+}
+
+fn default_process_status() -> String {
+    "pending".to_string()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProcessConflictRequest {
+    pub action: String,
+    pub remark: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
