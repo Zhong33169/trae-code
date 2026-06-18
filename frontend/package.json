@@ -1,0 +1,20 @@
+{
+  "name": "meter-replacement-frontend",
+  "version": "1.0.0",
+  "description": "换表申请管理系统前端",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --port 3004",
+    "build": "vite build",
+    "preview": "vite preview --port 3004"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.26.2"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.2",
+    "vite": "^5.4.8"
+  }
+}

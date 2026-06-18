@@ -1,0 +1,19 @@
+{
+  "name": "meter-replacement-backend",
+  "version": "1.0.0",
+  "description": "换表申请管理系统后端",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "dev": "node --watch src/index.js",
+    "start": "node src/index.js",
+    "init-db": "node src/db/init.js"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.13.1",
+    "better-sqlite3": "^11.3.0",
+    "cors": "^2.8.5",
+    "hono": "^4.6.3",
+    "uuid": "^10.0.0"
+  }
+}
