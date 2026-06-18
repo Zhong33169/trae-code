@@ -347,6 +347,7 @@ def seed_data():
                 add_audit_log(db, app.id, user.id, AuditActionEnum.SUBMIT, "提交申请",
                               ApplicationStatusEnum.DRAFT, ApplicationStatusEnum.SUBMITTED,
                               "登记员提交申请")
+                app.version = 2
 
             if demo["status"] in [
                 ApplicationStatusEnum.UNDER_REVIEW,
@@ -361,17 +362,27 @@ def seed_data():
                 add_audit_log(db, app.id, auditor.id, AuditActionEnum.START_AUDIT, "开始审核",
                               ApplicationStatusEnum.SUBMITTED, ApplicationStatusEnum.UNDER_REVIEW,
                               "审核主管开始审核")
+                app.version = 3
 
             if demo["status"] == ApplicationStatusEnum.CORRECTION_REQUESTED:
                 auditor = created_users.get(demo.get("auditor", "auditor1"))
                 add_audit_log(db, app.id, auditor.id, AuditActionEnum.REQUEST_CORRECTION, "要求补正",
                               ApplicationStatusEnum.UNDER_REVIEW, ApplicationStatusEnum.CORRECTION_REQUESTED,
                               demo.get("correction", "需要补正材料"))
+                app.version = 4
 
             if demo["status"] == ApplicationStatusEnum.CORRECTED:
+                auditor = created_users.get(demo.get("auditor", "auditor1"))
+                add_audit_log(db, app.id, auditor.id, AuditActionEnum.REQUEST_CORRECTION, "要求补正",
+                              ApplicationStatusEnum.UNDER_REVIEW, ApplicationStatusEnum.CORRECTION_REQUESTED,
+                              "材料信息不完整，请补充后重新提交")
+                add_audit_log(db, app.id, user.id, AuditActionEnum.UPDATE, "更新申请",
+                              ApplicationStatusEnum.CORRECTION_REQUESTED, ApplicationStatusEnum.CORRECTION_REQUESTED,
+                              "登记员补正材料并更新申请")
                 add_audit_log(db, app.id, user.id, AuditActionEnum.CORRECT, "补正提交",
                               ApplicationStatusEnum.CORRECTION_REQUESTED, ApplicationStatusEnum.CORRECTED,
                               "登记员补正后重新提交")
+                app.version = 5
 
             if demo["status"] in [
                 ApplicationStatusEnum.AUDIT_PASSED,
@@ -384,10 +395,12 @@ def seed_data():
                     add_audit_log(db, app.id, auditor.id, AuditActionEnum.REJECT, "审核拒绝",
                                   ApplicationStatusEnum.UNDER_REVIEW, ApplicationStatusEnum.REJECTED,
                                   demo.get("audit_opinion", "审核未通过"))
+                    app.version = 4
                 else:
                     add_audit_log(db, app.id, auditor.id, AuditActionEnum.AUDIT_PASS, "审核通过",
                                   ApplicationStatusEnum.UNDER_REVIEW, ApplicationStatusEnum.AUDIT_PASSED,
                                   demo.get("audit_opinion", "审核通过"))
+                    app.version = 4
 
             if demo["status"] in [
                 ApplicationStatusEnum.REVIEW_PASSED,
@@ -397,12 +410,14 @@ def seed_data():
                 add_audit_log(db, app.id, reviewer.id, AuditActionEnum.REVIEW_PASS, "复核通过",
                               ApplicationStatusEnum.AUDIT_PASSED, ApplicationStatusEnum.REVIEW_PASSED,
                               demo.get("review_opinion", "复核通过"))
+                app.version = 5
 
             if demo["status"] == ApplicationStatusEnum.ARCHIVED:
                 reviewer = created_users.get(demo.get("reviewer", "reviewer1"))
                 add_audit_log(db, app.id, reviewer.id, AuditActionEnum.ARCHIVE, "归档",
                               ApplicationStatusEnum.REVIEW_PASSED, ApplicationStatusEnum.ARCHIVED,
                               "已归档")
+                app.version = 6
 
             app.check_overdue()
 

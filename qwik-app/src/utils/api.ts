@@ -110,6 +110,39 @@ export function getApplication(id: number): Promise<Application> {
   return request<Application>(`/applications/${id}`);
 }
 
+export interface MaterialInput {
+  material_type: string;
+  material_name: string;
+  file_path?: string;
+}
+
+export interface ApplicationInput {
+  company_name: string;
+  contact_person: string;
+  contact_phone: string;
+  contact_email?: string;
+  booth_type?: string;
+  booth_size?: string;
+  expected_area?: number;
+  industry?: string;
+  product_description?: string;
+  materials?: MaterialInput[];
+}
+
+export function createApplication(data: ApplicationInput): Promise<Application> {
+  return request<Application>('/applications', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export function updateApplication(id: number, version: number, data: ApplicationInput): Promise<Application> {
+  return request<Application>(`/applications/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify({ ...data, version }),
+  });
+}
+
 export function submitApplication(id: number, version: number): Promise<Application> {
   return request<Application>(`/applications/${id}/submit`, {
     method: 'POST',

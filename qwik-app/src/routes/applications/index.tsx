@@ -260,6 +260,14 @@ export default component$(() => {
           </div>
 
           <div class="toolbar-right">
+            {role === 'registrar' && (
+              <button
+                class="btn btn-success"
+                onClick$={() => nav('/applications/new')}
+              >
+                + 新建申请
+              </button>
+            )}
             {canBatch.value && (
               <button
                 class="btn btn-primary"
@@ -347,12 +355,22 @@ export default component$(() => {
                         {formatDate(app.status_changed_at)}
                       </td>
                       <td rowSpan={app.is_overdue ? 2 : 1}>
-                        <button
-                          class="btn btn-primary btn-sm"
-                          onClick$={() => nav(`/applications/${app.id}`)}
-                        >
-                          查看
-                        </button>
+                        <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                          <button
+                            class="btn btn-primary btn-sm"
+                            onClick$={() => nav(`/applications/${app.id}`)}
+                          >
+                            查看
+                          </button>
+                          {role === 'registrar' && (app.status === 'draft' || app.status === 'correction_requested') && (
+                            <button
+                              class="btn btn-default btn-sm"
+                              onClick$={() => nav(`/applications/${app.id}/edit`)}
+                            >
+                              {app.status === 'correction_requested' ? '补正' : '编辑'}
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                     {app.is_overdue && (

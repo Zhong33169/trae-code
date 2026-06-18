@@ -129,9 +129,11 @@ async def update_existing_application(request: Request):
     db = next(get_db())
     try:
         user_id = request.state.user_id
-        application = update_application(db, app_id, app_data, user_id)
-        if not application:
-            return error_response("申请不存在或当前状态不可编辑", error_code="INVALID_STATUS")
+        try:
+            application = update_application(db, app_id, app_data, user_id, app_data.version)
+        except ActionError as e:
+            db.rollback()
+            return _handle_action_error(e)
         result = ApplicationResponse.model_validate(application)
         return JSONResponse(result.model_dump(mode="json"))
     finally:

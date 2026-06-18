@@ -62,26 +62,53 @@ def create_application(db: Session, app_data: ApplicationCreate, user_id: int) -
     return application
 
 
-def update_application(db: Session, app_id: int, app_data: ApplicationUpdate, user_id: int) -> Optional[ExhibitorApplication]:
+def update_application(db: Session, app_id: int, app_data: ApplicationUpdate,
+                       user_id: int, expected_version: int) -> ExhibitorApplication:
     application = db.query(ExhibitorApplication).filter(ExhibitorApplication.id == app_id).first()
     if not application:
-        return None
-    if application.status != ApplicationStatusEnum.DRAFT:
-        return None
+        raise ActionError("申请不存在", error_code="NOT_FOUND")
 
-    application.company_name = app_data.company_name
-    application.contact_person = app_data.contact_person
-    application.contact_phone = app_data.contact_phone
-    application.contact_email = app_data.contact_email
-    application.booth_type = app_data.booth_type
-    application.booth_size = app_data.booth_size
-    application.expected_area = app_data.expected_area
-    application.industry = app_data.industry
-    application.product_description = app_data.product_description
-    application.version += 1
+    check_version(application, expected_version)
+    check_status_allowed(application, [ApplicationStatusEnum.DRAFT, ApplicationStatusEnum.CORRECTION_REQUESTED])
+
+    old_status = application.status
+    is_correction = old_status == ApplicationStatusEnum.CORRECTION_REQUESTED
+
+    old_version = application.version
+    now = datetime.utcnow()
+
+    update_data = {
+        "company_name": app_data.company_name,
+        "contact_person": app_data.contact_person,
+        "contact_phone": app_data.contact_phone,
+        "contact_email": app_data.contact_email,
+        "booth_type": app_data.booth_type,
+        "booth_size": app_data.booth_size,
+        "expected_area": app_data.expected_area,
+        "industry": app_data.industry,
+        "product_description": app_data.product_description,
+        "version": old_version + 1,
+    }
+
+    rows = db.query(ExhibitorApplication).filter(
+        ExhibitorApplication.id == application.id,
+        ExhibitorApplication.version == old_version,
+    ).update(update_data, synchronize_session=False)
+
+    if rows == 0:
+        db.rollback()
+        raise ActionError(
+            "申请已被其他操作修改，请刷新后重试",
+            error_code="VERSION_CONFLICT",
+            data={"current_status": application.status.value},
+        )
+
+    db.refresh(application)
 
     if app_data.materials is not None:
-        db.query(ApplicationMaterial).filter(ApplicationMaterial.application_id == app_id).delete()
+        db.query(ApplicationMaterial).filter(
+            ApplicationMaterial.application_id == app_id
+        ).delete()
         for mat in app_data.materials:
             material = ApplicationMaterial(
                 application_id=application.id,
@@ -91,8 +118,11 @@ def update_application(db: Session, app_id: int, app_data: ApplicationUpdate, us
             )
             db.add(material)
 
-    add_audit_log(db, application.id, user_id, AuditActionEnum.UPDATE, "更新申请",
-                  ApplicationStatusEnum.DRAFT, ApplicationStatusEnum.DRAFT, "登记员更新申请草稿")
+    remark = "登记员补正材料并更新申请" if is_correction else "登记员更新申请草稿"
+    add_audit_log(
+        db, application.id, user_id, AuditActionEnum.UPDATE, "更新申请",
+        old_status, old_status, remark,
+    )
 
     db.commit()
     db.refresh(application)
@@ -108,12 +138,14 @@ def submit_application(db: Session, app_id: int, user_id: int, expected_version:
     check_status_allowed(application, [ApplicationStatusEnum.DRAFT, ApplicationStatusEnum.CORRECTION_REQUESTED])
 
     if application.status == ApplicationStatusEnum.DRAFT:
+        _check_materials_for_submit(application)
         from_status = ApplicationStatusEnum.DRAFT
         to_status = ApplicationStatusEnum.SUBMITTED
         action = AuditActionEnum.SUBMIT
         action_name = "提交申请"
         remark = "登记员提交展商申请，进入审核队列"
     else:
+        _check_correction_complete(application)
         from_status = ApplicationStatusEnum.CORRECTION_REQUESTED
         to_status = ApplicationStatusEnum.CORRECTED
         action = AuditActionEnum.CORRECT
@@ -123,6 +155,43 @@ def submit_application(db: Session, app_id: int, user_id: int, expected_version:
     atomic_status_update(db, application, expected_version, to_status)
     safe_commit_with_audit(db, application, user_id, action, action_name, from_status, to_status, remark)
     return application
+
+
+def _check_materials_for_submit(application: ExhibitorApplication) -> None:
+    materials = application.materials
+    if not materials or len(materials) == 0:
+        raise ActionError(
+            "无法提交：申请尚未上传任何材料，请至少上传营业执照后再提交",
+            error_code="MATERIAL_INCOMPLETE",
+            data={"material_count": 0},
+        )
+
+    has_license = any(
+        m.material_type == MaterialTypeEnum.BUSINESS_LICENSE for m in materials
+    )
+    if not has_license:
+        raise ActionError(
+            "无法提交：缺少营业执照材料，请上传营业执照后再提交",
+            error_code="MATERIAL_INCOMPLETE",
+            data={"missing": ["business_license"]},
+        )
+
+
+def _check_correction_complete(application: ExhibitorApplication) -> None:
+    materials = application.materials
+    rejected = [m for m in materials if m.is_approved is False]
+    if rejected:
+        names = "、".join(m.material_name for m in rejected)
+        raise ActionError(
+            f"无法补正提交：以下材料仍被标记为不通过，请更新后重新提交：{names}",
+            error_code="CORRECTION_INCOMPLETE",
+            data={
+                "rejected_materials": [
+                    {"id": m.id, "name": m.material_name, "comment": m.review_comment}
+                    for m in rejected
+                ],
+            },
+        )
 
 
 def start_audit(db: Session, app_id: int, user_id: int, remark: str, expected_version: int) -> ExhibitorApplication:

@@ -3,6 +3,7 @@ import { useNavigate, routeLoader$ } from '@builder.io/qwik-city';
 import type { Application, Material } from '~/types';
 import {
   getApplication,
+  submitApplication,
   startAudit,
   auditPass,
   auditReject,
@@ -34,10 +35,12 @@ export default component$(() => {
   const showReviewPassModal = useSignal(false);
   const showReviewRejectModal = useSignal(false);
   const showArchiveModal = useSignal(false);
+  const showSubmitModal = useSignal(false);
 
   const opinion = useSignal('');
   const startAuditRemark = useSignal('');
   const correctionRequest = useSignal('');
+  const submitRemark = useSignal('');
   const materialReviews = useSignal<
     Record<number, { is_approved: boolean; review_comment: string }>
   >({});
@@ -81,6 +84,12 @@ export default component$(() => {
   const role = user?.role || 'registrar';
 
   // 角色权限 - 严格按角色+状态显示按钮
+  const canEdit = useComputed$(
+    () => role === 'registrar' && (app?.status === 'draft' || app?.status === 'correction_requested')
+  );
+  const canSubmit = useComputed$(
+    () => role === 'registrar' && (app?.status === 'draft' || app?.status === 'correction_requested')
+  );
   const canStartAudit = useComputed$(
     () =>
       role === 'audit_supervisor' &&
@@ -111,6 +120,24 @@ export default component$(() => {
       loadDetail();
     } else {
       showMessage('error', e.message || '操作失败');
+    }
+  });
+
+  // 登记员提交/补正提交
+  const handleSubmit = $(async () => {
+    if (!app) return;
+    if (app.is_overdue && !submitRemark.value.trim()) {
+      showMessage('error', '该申请已逾期，请填写逾期处理说明后再提交');
+      return;
+    }
+    try {
+      await submitApplication(params.value.id, app.version);
+      showSubmitModal.value = false;
+      submitRemark.value = '';
+      showMessage('success', app.status === 'draft' ? '已提交，等待审核' : '已补正提交，等待审核');
+      loadDetail();
+    } catch (e: any) {
+      handleError(e);
     }
   });
 
@@ -316,6 +343,26 @@ export default component$(() => {
             </div>
           </div>
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            {canEdit.value && (
+              <button
+                class="btn btn-default"
+                onClick$={() => nav(`/applications/${params.value.id}/edit`)}
+              >
+                {app.status === 'correction_requested' ? '补正材料' : '编辑'}
+              </button>
+            )}
+            {canSubmit.value && (
+              <button
+                class="btn btn-primary"
+                onClick$={() => {
+                  showSubmitModal.value = true;
+                  submitRemark.value = '';
+                }}
+              >
+                {app.status === 'correction_requested' ? '补正提交' : '提交申请'}
+                {isOverdue ? '（逾期）' : ''}
+              </button>
+            )}
             {canStartAudit.value && (
               <button
                 class="btn btn-primary"
@@ -1085,6 +1132,94 @@ export default component$(() => {
               </button>
               <button class="btn btn-primary" onClick$={handleArchive}>
                 确认归档
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 提交/补正提交弹窗 */}
+      {showSubmitModal.value && (
+        <div
+          class="modal-overlay"
+          onClick$={() => (showSubmitModal.value = false)}
+        >
+          <div
+            class="modal"
+            style={{ width: '480px' }}
+            onClick$={(e) => e.stopPropagation()}
+          >
+            <div class="modal-header">
+              <span class="modal-title">
+                {app.status === 'correction_requested' ? '补正提交' : '提交申请'}
+                {isOverdue && (
+                  <span style={{ color: '#cf1322', marginLeft: '8px' }}>
+                    （逾期，需填处理说明）
+                  </span>
+                )}
+              </span>
+              <span
+                class="modal-close"
+                onClick$={() => (showSubmitModal.value = false)}
+              >
+                ×
+              </span>
+            </div>
+            <div class="modal-body">
+              {isOverdue && (
+                <div
+                  class="alert alert-warning"
+                  style={{ marginBottom: '16px', fontSize: '13px' }}
+                >
+                  <strong>⚠ 注意：</strong>该申请已逾期，
+                  <span style={{ color: '#cf1322' }}>必须填写逾期处理说明</span>
+                  后才能提交。
+                  <div style={{ marginTop: '6px', color: '#873800' }}>
+                    逾期原因：{app.overdue_reason || '原因未知'}
+                  </div>
+                </div>
+              )}
+              <p style={{ marginBottom: '16px' }}>
+                {app.status === 'correction_requested'
+                  ? '确认补正完成并重新提交？提交后将进入审核队列。'
+                  : '确认提交该展商申请？提交后将进入审核队列，无法再编辑。'}
+              </p>
+              {app.correction_request && (
+                <div
+                  class="alert alert-info"
+                  style={{ marginBottom: '16px', fontSize: '13px' }}
+                >
+                  <strong>补正要求：</strong>
+                  <div style={{ marginTop: '4px' }}>{app.correction_request}</div>
+                </div>
+              )}
+              <div class="form-item">
+                <label class="form-label">
+                  处理说明
+                  {isOverdue && <span style={{ color: '#ff4d4f' }}> *</span>}
+                </label>
+                <textarea
+                  class="form-input form-textarea"
+                  value={submitRemark.value}
+                  onInput$={(e) =>
+                    (submitRemark.value = (e.target as HTMLTextAreaElement).value)
+                  }
+                  placeholder={
+                    isOverdue ? '请填写逾期处理说明（必填）...' : '可选，填写提交备注'
+                  }
+                  rows={isOverdue ? 4 : 3}
+                />
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button
+                class="btn btn-default"
+                onClick$={() => (showSubmitModal.value = false)}
+              >
+                取消
+              </button>
+              <button class="btn btn-primary" onClick$={handleSubmit}>
+                确认提交
               </button>
             </div>
           </div>

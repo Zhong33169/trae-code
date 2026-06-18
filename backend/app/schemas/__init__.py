@@ -76,6 +76,7 @@ class ApplicationCreate(ApplicationBase):
 
 
 class ApplicationUpdate(ApplicationBase):
+    version: int
     materials: Optional[List[MaterialCreate]] = None
 
 
