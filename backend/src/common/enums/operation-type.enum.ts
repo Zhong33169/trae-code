@@ -1,0 +1,33 @@
+export enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  SUBMIT = 'submit',
+  REVIEW = 'review',
+  REVIEW_APPROVE = 'review_approve',
+  REVIEW_REJECT = 'review_reject',
+  VERIFY = 'verify',
+  VERIFY_APPROVE = 'verify_approve',
+  VERIFY_REJECT = 'verify_reject',
+  ARCHIVE = 'archive',
+  CORRECT = 'correct',
+  TIMEOUT_HANDLE = 'timeout_handle',
+  UPDATE_STATUS = 'update_status',
+  DELETE = 'delete',
+}
+
+export const OperationTypeLabel: Record<OperationType, string> = {
+  [OperationType.CREATE]: '创建',
+  [OperationType.UPDATE]: '更新',
+  [OperationType.SUBMIT]: '提交',
+  [OperationType.REVIEW]: '审核',
+  [OperationType.REVIEW_APPROVE]: '审核通过',
+  [OperationType.REVIEW_REJECT]: '审核驳回',
+  [OperationType.VERIFY]: '复核',
+  [OperationType.VERIFY_APPROVE]: '复核通过',
+  [OperationType.VERIFY_REJECT]: '复核驳回',
+  [OperationType.ARCHIVE]: '归档',
+  [OperationType.CORRECT]: '补正',
+  [OperationType.TIMEOUT_HANDLE]: '超时处理',
+  [OperationType.UPDATE_STATUS]: '状态更新',
+  [OperationType.DELETE]: '删除',
+};
