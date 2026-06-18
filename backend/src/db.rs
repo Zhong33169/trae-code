@@ -83,7 +83,11 @@ pub fn init_db() -> Result<()> {
             process_remark TEXT,
             processed_by TEXT,
             processed_by_name TEXT,
-            processed_at TEXT
+            processed_at TEXT,
+            decision_summary TEXT,
+            field_snapshot_old TEXT,
+            field_snapshot_new TEXT,
+            process_stage TEXT
         );
 
         CREATE TABLE IF NOT EXISTS audit_logs (
@@ -123,6 +127,18 @@ pub fn init_db() -> Result<()> {
     );
     let _ = conn.execute_batch(
         "ALTER TABLE import_records ADD COLUMN processed_at TEXT;",
+    );
+    let _ = conn.execute_batch(
+        "ALTER TABLE import_records ADD COLUMN decision_summary TEXT;",
+    );
+    let _ = conn.execute_batch(
+        "ALTER TABLE import_records ADD COLUMN field_snapshot_old TEXT;",
+    );
+    let _ = conn.execute_batch(
+        "ALTER TABLE import_records ADD COLUMN field_snapshot_new TEXT;",
+    );
+    let _ = conn.execute_batch(
+        "ALTER TABLE import_records ADD COLUMN process_stage TEXT;",
     );
 
     Ok(())
@@ -235,7 +251,7 @@ pub fn seed_demo_data() -> Result<()> {
         ],
     )?;
     conn.execute(
-        "INSERT INTO import_records (id, batch_id, topic_no, title, status, diff_json, error_msg, topic_id, process_status, process_remark, processed_by, processed_by_name, processed_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,'not_applicable',NULL,NULL,NULL,NULL)",
+        "INSERT INTO import_records (id, batch_id, topic_no, title, status, diff_json, error_msg, topic_id, process_status, process_remark, processed_by, processed_by_name, processed_at, decision_summary, field_snapshot_old, field_snapshot_new, process_stage) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,'not_applicable',NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL)",
         rusqlite::params![
             Uuid::new_v4().to_string(), demo_batch_id, "XT202505101", "五一劳动节劳模系列报道",
             "success", None as Option<String>, None as Option<String>, demo_offline_topic_id
@@ -258,14 +274,26 @@ pub fn seed_demo_data() -> Result<()> {
         "reporter": { "old": "刘记者", "new": "演示记者B" },
         "department": { "old": "时政部", "new": "宣传部" }
     }).to_string();
+    let conflict_snapshot_old = serde_json::json!({
+        "title": "关于加强基层宣传工作的专题报道",
+        "reporter": "刘记者",
+        "department": "时政部"
+    }).to_string();
+    let conflict_snapshot_new = serde_json::json!({
+        "title": "基层宣传工作专题报道（线下版）",
+        "reporter": "演示记者B",
+        "department": "宣传部"
+    }).to_string();
     conn.execute(
-        "INSERT INTO import_records (id, batch_id, topic_no, title, status, diff_json, error_msg, topic_id, process_status, process_remark, processed_by, processed_by_name, processed_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,'pending',NULL,NULL,NULL,NULL)",
+        "INSERT INTO import_records (id, batch_id, topic_no, title, status, diff_json, error_msg, topic_id, process_status, process_remark, processed_by, processed_by_name, processed_at, decision_summary, field_snapshot_old, field_snapshot_new, process_stage) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,'pending',NULL,NULL,NULL,NULL,NULL,?9,?10,NULL)",
         rusqlite::params![
             Uuid::new_v4().to_string(), demo_batch_id, "XT202506001",
             "基层宣传工作专题报道（线下版）", "conflict",
             conflict_diff,
             "选题单编号已存在，存在线上线下状态冲突或重复回填，未覆盖",
-            normal_id
+            normal_id,
+            conflict_snapshot_old,
+            conflict_snapshot_new
         ],
     )?;
     conn.execute(
@@ -285,8 +313,11 @@ pub fn seed_demo_data() -> Result<()> {
         "deadline": { "old": "2025-06-15T23:59:59+08:00", "new": "2025-06-10T23:59:59+08:00" }
     }).to_string();
     let submitted_time = (Utc::now() - chrono::Duration::hours(2)).to_rfc3339();
+    let submitted_snapshot_old = serde_json::json!({"reporter":"陈记者","deadline":"2025-06-15T23:59:59+08:00"}).to_string();
+    let submitted_snapshot_new = serde_json::json!({"reporter":"线下登记记者","deadline":"2025-06-10T23:59:59+08:00"}).to_string();
+    let submitted_summary = "登记员张登记提交冲突处理申请，选题XT202506002，备注：线下台账核对确认，记者和截止日期信息以下发的纸质台账为准，请主管审核";
     conn.execute(
-        "INSERT INTO import_records (id, batch_id, topic_no, title, status, diff_json, error_msg, topic_id, process_status, process_remark, processed_by, processed_by_name, processed_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,'submitted',?9,?10,?11,?12)",
+        "INSERT INTO import_records (id, batch_id, topic_no, title, status, diff_json, error_msg, topic_id, process_status, process_remark, processed_by, processed_by_name, processed_at, decision_summary, field_snapshot_old, field_snapshot_new, process_stage) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,'submitted',?9,?10,?11,?12,?13,?14,?15,'submit')",
         rusqlite::params![
             Uuid::new_v4().to_string(), demo_batch_id, "XT202506002",
             "2025年文化产业发展论坛报道", "conflict",
@@ -294,7 +325,10 @@ pub fn seed_demo_data() -> Result<()> {
             "选题单编号已存在，存在线上线下状态冲突或重复回填，未覆盖",
             missing_id,
             "线下台账核对确认，记者和截止日期信息以下发的纸质台账为准，请主管审核",
-            register_id, "张登记", submitted_time
+            register_id, "张登记", submitted_time,
+            submitted_summary,
+            submitted_snapshot_old,
+            submitted_snapshot_new
         ],
     )?;
     conn.execute(
@@ -314,8 +348,11 @@ pub fn seed_demo_data() -> Result<()> {
         "department": { "old": "经济部", "new": "经济部（线下确认）" }
     }).to_string();
     let resolved_time = (Utc::now() - chrono::Duration::days(1)).to_rfc3339();
+    let resolved_snapshot_old = serde_json::json!({"title":"上半年经济形势分析报道","department":"经济部"}).to_string();
+    let resolved_snapshot_new = serde_json::json!({"title":"线下最终定稿标题","department":"经济部（线下确认）"}).to_string();
+    let resolved_summary = "审核主管王主管采纳线下数据覆盖线上，选题XT202506003，影响字段[title,department]，备注：经与纸质台账核对，线下信息准确，采纳线下数据覆盖线上";
     conn.execute(
-        "INSERT INTO import_records (id, batch_id, topic_no, title, status, diff_json, error_msg, topic_id, process_status, process_remark, processed_by, processed_by_name, processed_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,'resolved',?9,?10,?11,?12)",
+        "INSERT INTO import_records (id, batch_id, topic_no, title, status, diff_json, error_msg, topic_id, process_status, process_remark, processed_by, processed_by_name, processed_at, decision_summary, field_snapshot_old, field_snapshot_new, process_stage) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,'resolved',?9,?10,?11,?12,?13,?14,?15,'resolve')",
         rusqlite::params![
             Uuid::new_v4().to_string(), demo_batch_id, "XT202506003",
             "线下最终定稿标题", "conflict",
@@ -323,7 +360,10 @@ pub fn seed_demo_data() -> Result<()> {
             "选题单编号已存在，存在线上线下状态冲突或重复回填，未覆盖",
             overdue_id,
             "经与纸质台账核对，线下信息准确，采纳线下数据覆盖线上",
-            reviewer_id, "王主管", resolved_time
+            reviewer_id, "王主管", resolved_time,
+            resolved_summary,
+            resolved_snapshot_old,
+            resolved_snapshot_new
         ],
     )?;
     conn.execute(
@@ -339,7 +379,7 @@ pub fn seed_demo_data() -> Result<()> {
 
     // 失败：非法状态值
     conn.execute(
-        "INSERT INTO import_records (id, batch_id, topic_no, title, status, diff_json, error_msg, topic_id, process_status, process_remark, processed_by, processed_by_name, processed_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,'pending',NULL,NULL,NULL,NULL)",
+        "INSERT INTO import_records (id, batch_id, topic_no, title, status, diff_json, error_msg, topic_id, process_status, process_remark, processed_by, processed_by_name, processed_at, decision_summary, field_snapshot_old, field_snapshot_new, process_stage) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,'pending',NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL)",
         rusqlite::params![
             Uuid::new_v4().to_string(), demo_batch_id, "XT202505202",
             "文明城市创建复查报道", "error",

@@ -122,13 +122,21 @@ npm run build      # 产物在 frontend/dist/browser
 - **冲突人工处理闭环**（后端 `handlers::handle_process_conflict`）：
   - **状态机**：`pending`（待处理）→ `registrar` 提交 → `submitted`（已提交）→ `reviewer` 办理 → `resolved`（已处理）。
   - **操作入口**：
-    - `registrar`：对 `pending` 状态的冲突可「提交处理」，填写核对说明。
+    - `registrar`：对 `pending` 状态的冲突可「提交处理」，填写核对说明（备注必填）。
     - `reviewer`：对 `pending` 或 `submitted` 状态的冲突可选择：
       - **采纳线下**：解析 `diff_json`，将线下字段值覆盖到线上 `topics` 表。
       - **保留线上**：不改动线上数据，记录处理意见。
-  - **数据库字段**：`import_records` 表新增 `process_status`、`process_remark`、`processed_by`、`processed_by_name`、`processed_at` 5 个字段，完整记录处理过程。
-  - **审计留痕**：所有冲突处理操作均写入 `audit_logs`，对应 action：`conflict_submit`（登记员提交）、`conflict_resolve`（采纳线下）、`conflict_ignore`（保留线上）。
+  - **数据库字段**：`import_records` 表新增 `process_status`、`process_remark`、`processed_by`、`processed_by_name`、`processed_at`、`decision_summary`（决策摘要）、`field_snapshot_old`（原值快照）、`field_snapshot_new`（新值快照）、`process_stage`（处理阶段）9 个字段，完整记录处理过程。
+  - **决策摘要**：每次处理自动生成摘要，包含操作人、选题编号、影响字段和处理备注：
+    - 提交：`登记员{姓名}提交冲突处理申请，选题{编号}，备注：{备注}`
+    - 采纳线下：`审核主管{姓名}采纳线下数据覆盖线上，选题{编号}，影响字段[{字段列表}]，备注：{备注}`
+    - 保留线上：`审核主管{姓名}保留线上数据不覆盖，选题{编号}，冲突字段[{字段列表}]，备注：{备注}`
+  - **字段快照**：采纳线下时记录变更前后的完整字段值（从 `topics` 表读取），保留线上时记录 diff 中的 old/new 值。前端可展开查看原值/新值对比。
+  - **处理阶段**：`process_stage` 标记最终处理方式（`submit`/`resolve`/`ignore`），便于统计分类。
+  - **空备注校验**：所有冲突处理操作备注不能为空，后端返回 4xx 错误。
+  - **审计留痕**：所有冲突处理操作均写入 `audit_logs`，对应 action：`conflict_submit`（登记员提交）、`conflict_resolve`（采纳线下）、`conflict_ignore`（保留线上），审计记录包含 `old_status`/`new_status` 状态变更和影响字段。
   - **权限与状态校验**：后端严格校验角色权限和当前处理状态，非法操作返回 4xx 错误。
+  - **详情联动**：处理完成后，前端同步更新处理状态、处理人信息、决策摘要，已处理记录显示「查看选题详情」入口。
 
 ### 4. 审计日志 `/audit`
 

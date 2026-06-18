@@ -151,6 +151,14 @@ pub struct ImportRecord {
     pub processed_by_name: Option<String>,
     #[serde(default)]
     pub processed_at: Option<String>,
+    #[serde(default)]
+    pub decision_summary: Option<String>,
+    #[serde(default)]
+    pub field_snapshot_old: Option<String>,
+    #[serde(default)]
+    pub field_snapshot_new: Option<String>,
+    #[serde(default)]
+    pub process_stage: Option<String>,
 }
 
 fn default_process_status() -> String {

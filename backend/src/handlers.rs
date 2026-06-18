@@ -93,6 +93,10 @@ fn row_to_import_record(row: &rusqlite::Row) -> rusqlite::Result<ImportRecord> {
         processed_by: row.get(10).unwrap_or(None),
         processed_by_name: row.get(11).unwrap_or(None),
         processed_at: row.get(12).unwrap_or(None),
+        decision_summary: row.get(13).unwrap_or(None),
+        field_snapshot_old: row.get(14).unwrap_or(None),
+        field_snapshot_new: row.get(15).unwrap_or(None),
+        process_stage: row.get(16).unwrap_or(None),
     })
 }
 
@@ -659,7 +663,7 @@ pub async fn handle_batch_records(
     let conn = get_conn();
     let mut stmt = conn
         .prepare(
-            "SELECT id, batch_id, topic_no, title, status, diff_json, error_msg, topic_id, process_status, process_remark, processed_by, processed_by_name, processed_at FROM import_records WHERE batch_id = ?1 ORDER BY id",
+            "SELECT id, batch_id, topic_no, title, status, diff_json, error_msg, topic_id, process_status, process_remark, processed_by, processed_by_name, processed_at, decision_summary, field_snapshot_old, field_snapshot_new, process_stage FROM import_records WHERE batch_id = ?1 ORDER BY id",
         )
         .unwrap();
     let rows: Vec<ImportRecord> = stmt
@@ -714,7 +718,7 @@ pub async fn handle_execute_import(
                 )
                 .ok();
             conn.execute(
-                "INSERT INTO import_records (id, batch_id, topic_no, title, status, diff_json, error_msg, topic_id, process_status, process_remark, processed_by, processed_by_name, processed_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,'pending',NULL,NULL,NULL,NULL)",
+                "INSERT INTO import_records (id, batch_id, topic_no, title, status, diff_json, error_msg, topic_id, process_status, process_remark, processed_by, processed_by_name, processed_at, decision_summary, field_snapshot_old, field_snapshot_new, process_stage) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,'pending',NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL)",
                 params![
                     record_id,
                     batch_id,
@@ -741,6 +745,10 @@ pub async fn handle_execute_import(
                 processed_by: None,
                 processed_by_name: None,
                 processed_at: None,
+                decision_summary: None,
+                field_snapshot_old: None,
+                field_snapshot_new: None,
+                process_stage: None,
             });
             write_audit(
                 existing_topic_id.as_deref(),
@@ -772,7 +780,7 @@ pub async fn handle_execute_import(
         if !valid_statuses.contains(&status.as_str()) {
             error_count += 1;
             conn.execute(
-                "INSERT INTO import_records (id, batch_id, topic_no, title, status, diff_json, error_msg, topic_id, process_status, process_remark, processed_by, processed_by_name, processed_at) VALUES (?1,?2,?3,?4,?5,?6,?7,NULL,'pending',NULL,NULL,NULL,NULL)",
+                "INSERT INTO import_records (id, batch_id, topic_no, title, status, diff_json, error_msg, topic_id, process_status, process_remark, processed_by, processed_by_name, processed_at, decision_summary, field_snapshot_old, field_snapshot_new, process_stage) VALUES (?1,?2,?3,?4,?5,?6,?7,NULL,'pending',NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL)",
                 params![
                     record_id,
                     batch_id,
@@ -798,6 +806,10 @@ pub async fn handle_execute_import(
                 processed_by: None,
                 processed_by_name: None,
                 processed_at: None,
+                decision_summary: None,
+                field_snapshot_old: None,
+                field_snapshot_new: None,
+                process_stage: None,
             });
             write_audit(
                 None,
@@ -840,7 +852,7 @@ pub async fn handle_execute_import(
             Ok(_) => {
                 success_count += 1;
                 conn.execute(
-                    "INSERT INTO import_records (id, batch_id, topic_no, title, status, diff_json, error_msg, topic_id, process_status, process_remark, processed_by, processed_by_name, processed_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,'not_applicable',NULL,NULL,NULL,NULL)",
+                    "INSERT INTO import_records (id, batch_id, topic_no, title, status, diff_json, error_msg, topic_id, process_status, process_remark, processed_by, processed_by_name, processed_at, decision_summary, field_snapshot_old, field_snapshot_new, process_stage) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,'not_applicable',NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL)",
                     params![
                         record_id,
                         batch_id,
@@ -867,6 +879,10 @@ pub async fn handle_execute_import(
                     processed_by: None,
                     processed_by_name: None,
                     processed_at: None,
+                decision_summary: None,
+                field_snapshot_old: None,
+                field_snapshot_new: None,
+                process_stage: None,
                 });
                 write_audit(
                     Some(&topic_id),
@@ -886,7 +902,7 @@ pub async fn handle_execute_import(
             Err(e) => {
                 error_count += 1;
                 conn.execute(
-                    "INSERT INTO import_records (id, batch_id, topic_no, title, status, diff_json, error_msg, topic_id, process_status, process_remark, processed_by, processed_by_name, processed_at) VALUES (?1,?2,?3,?4,?5,?6,?7,NULL,'pending',NULL,NULL,NULL,NULL)",
+                    "INSERT INTO import_records (id, batch_id, topic_no, title, status, diff_json, error_msg, topic_id, process_status, process_remark, processed_by, processed_by_name, processed_at, decision_summary, field_snapshot_old, field_snapshot_new, process_stage) VALUES (?1,?2,?3,?4,?5,?6,?7,NULL,'pending',NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL)",
                     params![
                         record_id,
                         batch_id,
@@ -912,6 +928,10 @@ pub async fn handle_execute_import(
                     processed_by: None,
                     processed_by_name: None,
                     processed_at: None,
+                decision_summary: None,
+                field_snapshot_old: None,
+                field_snapshot_new: None,
+                process_stage: None,
                 });
                 write_audit(
                     None,
@@ -1098,7 +1118,7 @@ pub async fn handle_process_conflict(
     let now = chrono::Utc::now().to_rfc3339();
 
     let record_result = conn.query_row(
-        "SELECT id, batch_id, topic_no, title, status, diff_json, error_msg, topic_id, process_status, process_remark, processed_by, processed_by_name, processed_at FROM import_records WHERE id = ?1",
+        "SELECT id, batch_id, topic_no, title, status, diff_json, error_msg, topic_id, process_status, process_remark, processed_by, processed_by_name, processed_at, decision_summary, field_snapshot_old, field_snapshot_new, process_stage FROM import_records WHERE id = ?1",
         params![record_id],
         |row| row_to_import_record(row),
     );
@@ -1109,6 +1129,10 @@ pub async fn handle_process_conflict(
 
     if record.status != "conflict" {
         return json_err("仅冲突记录可办理");
+    }
+
+    if body.remark.trim().is_empty() {
+        return json_err("处理备注不能为空");
     }
 
     let topic_id = match record.topic_id.as_ref() {
@@ -1125,13 +1149,21 @@ pub async fn handle_process_conflict(
             if record.process_status != "pending" {
                 return json_err("仅待处理的冲突可提交");
             }
+
+            let decision_summary = format!("登记员{}提交冲突处理申请，选题{}，备注：{}", user.display_name, record.topic_no, body.remark);
+            let snapshot_old = build_field_snapshot_from_diff(&record.diff_json, "old");
+            let snapshot_new = build_field_snapshot_from_diff(&record.diff_json, "new");
+
             conn.execute(
-                "UPDATE import_records SET process_status = 'submitted', process_remark = ?1, processed_by = ?2, processed_by_name = ?3, processed_at = ?4 WHERE id = ?5",
+                "UPDATE import_records SET process_status = 'submitted', process_remark = ?1, processed_by = ?2, processed_by_name = ?3, processed_at = ?4, decision_summary = ?5, field_snapshot_old = ?6, field_snapshot_new = ?7, process_stage = 'submit' WHERE id = ?8",
                 params![
                     body.remark,
                     user.id,
                     user.display_name,
                     now,
+                    decision_summary,
+                    snapshot_old,
+                    snapshot_new,
                     record_id,
                 ],
             ).ok();
@@ -1141,8 +1173,8 @@ pub async fn handle_process_conflict(
                 &user.id,
                 &user.display_name,
                 "conflict_submit",
-                None,
-                None,
+                Some("pending"),
+                Some("submitted"),
                 Some(&format!("登记员提交冲突处理申请：{}", body.remark)),
             );
         }
@@ -1155,6 +1187,7 @@ pub async fn handle_process_conflict(
             }
 
             let new_process_status = "resolved";
+            let stage_label = if body.action == "resolve" { "resolve" } else { "ignore" };
 
             if body.action == "resolve" {
                 if let Some(diff_str) = record.diff_json.as_ref() {
@@ -1177,12 +1210,12 @@ pub async fn handle_process_conflict(
                             },
                         );
                         if let Ok((_id, _no, old_title, _old_source, old_reporter, old_department, old_deadline, old_status, old_content)) = topic_result {
-                            let mut new_title = old_title;
-                            let mut new_reporter = old_reporter;
-                            let mut new_department = old_department;
-                            let mut new_deadline = old_deadline;
-                            let mut new_status = old_status;
-                            let mut new_content = old_content;
+                            let mut new_title = old_title.clone();
+                            let mut new_reporter = old_reporter.clone();
+                            let mut new_department = old_department.clone();
+                            let mut new_deadline = old_deadline.clone();
+                            let mut new_status = old_status.clone();
+                            let mut new_content = old_content.clone();
 
                             for (k, v) in &diff_obj {
                                 if let Some(new_val) = v.get("new") {
@@ -1211,49 +1244,93 @@ pub async fn handle_process_conflict(
                                 ],
                             ).ok();
 
+                            let snapshot_old = serde_json::json!({
+                                "title": old_title,
+                                "reporter": old_reporter,
+                                "department": old_department,
+                                "deadline": old_deadline,
+                                "status": old_status,
+                                "content": old_content,
+                            }).to_string();
+                            let snapshot_new = serde_json::json!({
+                                "title": new_title,
+                                "reporter": new_reporter,
+                                "department": new_department,
+                                "deadline": new_deadline,
+                                "status": new_status,
+                                "content": new_content,
+                            }).to_string();
+                            let changed_fields: Vec<String> = diff_obj.keys().cloned().collect();
+                            let decision_summary = format!("审核主管{}采纳线下数据覆盖线上，选题{}，影响字段[{}]，备注：{}", user.display_name, record.topic_no, changed_fields.join(","), body.remark);
+
+                            conn.execute(
+                                "UPDATE import_records SET process_status = ?1, process_remark = ?2, processed_by = ?3, processed_by_name = ?4, processed_at = ?5, decision_summary = ?6, field_snapshot_old = ?7, field_snapshot_new = ?8, process_stage = ?9 WHERE id = ?10",
+                                params![
+                                    new_process_status,
+                                    body.remark,
+                                    user.id,
+                                    user.display_name,
+                                    now,
+                                    decision_summary,
+                                    snapshot_old,
+                                    snapshot_new,
+                                    stage_label,
+                                    record_id,
+                                ],
+                            ).ok();
+
                             let _ = write_audit(
                                 Some(&topic_id),
                                 Some(&batch_id),
                                 &user.id,
                                 &user.display_name,
                                 "conflict_resolve",
-                                None,
-                                None,
-                                Some(&format!("审核主管采纳线下数据覆盖线上：{}", body.remark)),
+                                Some("submitted"),
+                                Some("resolved"),
+                                Some(&format!("审核主管采纳线下数据覆盖线上，影响字段[{}]：{}", changed_fields.join(","), body.remark)),
                             );
                         }
                     }
                 }
             } else {
+                let snapshot_old = build_field_snapshot_from_diff(&record.diff_json, "old");
+                let snapshot_new = build_field_snapshot_from_diff(&record.diff_json, "new");
+                let diff_keys = extract_diff_keys(&record.diff_json);
+                let decision_summary = format!("审核主管{}保留线上数据不覆盖，选题{}，冲突字段[{}]，备注：{}", user.display_name, record.topic_no, diff_keys, body.remark);
+
+                conn.execute(
+                    "UPDATE import_records SET process_status = ?1, process_remark = ?2, processed_by = ?3, processed_by_name = ?4, processed_at = ?5, decision_summary = ?6, field_snapshot_old = ?7, field_snapshot_new = ?8, process_stage = ?9 WHERE id = ?10",
+                    params![
+                        new_process_status,
+                        body.remark,
+                        user.id,
+                        user.display_name,
+                        now,
+                        decision_summary,
+                        snapshot_old,
+                        snapshot_new,
+                        stage_label,
+                        record_id,
+                    ],
+                ).ok();
+
                 let _ = write_audit(
                     Some(&topic_id),
                     Some(&batch_id),
                     &user.id,
                     &user.display_name,
                     "conflict_ignore",
-                    None,
-                    None,
-                    Some(&format!("审核主管保留线上数据：{}", body.remark)),
+                    Some("submitted"),
+                    Some("resolved"),
+                    Some(&format!("审核主管保留线上数据，冲突字段[{}]不覆盖：{}", diff_keys, body.remark)),
                 );
             }
-
-            conn.execute(
-                "UPDATE import_records SET process_status = ?1, process_remark = ?2, processed_by = ?3, processed_by_name = ?4, processed_at = ?5 WHERE id = ?6",
-                params![
-                    new_process_status,
-                    body.remark,
-                    user.id,
-                    user.display_name,
-                    now,
-                    record_id,
-                ],
-            ).ok();
         }
         _ => return json_err("无效的 action，仅支持 submit / resolve / ignore"),
     }
 
     let updated = conn.query_row(
-        "SELECT id, batch_id, topic_no, title, status, diff_json, error_msg, topic_id, process_status, process_remark, processed_by, processed_by_name, processed_at FROM import_records WHERE id = ?1",
+        "SELECT id, batch_id, topic_no, title, status, diff_json, error_msg, topic_id, process_status, process_remark, processed_by, processed_by_name, processed_at, decision_summary, field_snapshot_old, field_snapshot_new, process_stage FROM import_records WHERE id = ?1",
         params![record_id],
         |row| row_to_import_record(row),
     ).ok();
@@ -1270,4 +1347,26 @@ fn now_str() -> String {
 
 fn new_uuid() -> String {
     uuid::Uuid::new_v4().to_string()
+}
+
+fn build_field_snapshot_from_diff(diff_json: &Option<String>, side: &str) -> Option<String> {
+    diff_json.as_ref().and_then(|s| {
+        serde_json::from_str::<HashMap<String, Value>>(s).ok().map(|diff_obj| {
+            let snapshot: HashMap<&str, &Value> = diff_obj
+                .iter()
+                .filter_map(|(k, v)| v.get(side).map(|val| (k.as_str(), val)))
+                .collect();
+            serde_json::Value::Object(
+                snapshot.into_iter().map(|(k, v)| (k.to_string(), v.clone())).collect()
+            ).to_string()
+        })
+    })
+}
+
+fn extract_diff_keys(diff_json: &Option<String>) -> String {
+    diff_json.as_ref().map(|s| {
+        serde_json::from_str::<HashMap<String, Value>>(s)
+            .map(|obj| obj.keys().cloned().collect::<Vec<_>>().join(","))
+            .unwrap_or_default()
+    }).unwrap_or_default()
 }

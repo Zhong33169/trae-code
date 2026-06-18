@@ -82,6 +82,10 @@ export interface ImportRecord {
   processed_by?: string;
   processed_by_name?: string;
   processed_at?: string;
+  decision_summary?: string;
+  field_snapshot_old?: string;
+  field_snapshot_new?: string;
+  process_stage?: string;
 }
 
 export interface ProcessConflictRequest {

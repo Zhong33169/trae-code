@@ -179,11 +179,27 @@ import {
                         {{ processStatusLabel(r.process_status) }}
                       </span>
                     </td>
-                    <td style="font-size: 12px; max-width: 200px;">
-                      <div *ngIf="r.processed_by_name">处理人：{{ r.processed_by_name }}</div>
+                    <td style="font-size: 12px; max-width: 260px;">
+                      <div *ngIf="r.decision_summary" class="decision-summary">{{ r.decision_summary }}</div>
+                      <div *ngIf="r.processed_by_name">处理人：{{ r.processed_by_name }}<span *ngIf="r.process_stage">（{{ processStageLabel(r.process_stage) }}）</span></div>
                       <div *ngIf="r.process_remark">备注：{{ r.process_remark }}</div>
                       <div *ngIf="r.processed_at" class="muted">{{ r.processed_at | slice : 0 : 16 }}</div>
-                      <div *ngIf="!r.processed_by_name" class="muted">-</div>
+                      <div *ngIf="r.process_status === 'resolved' && r.field_snapshot_old && r.field_snapshot_new" class="snapshot-toggle">
+                        <button class="btn-link snapshot-btn" (click)="toggleSnapshot(r.id)">
+                          {{ snapshotExpanded()[r.id] ? '收起快照' : '展开字段快照' }}
+                        </button>
+                        <div *ngIf="snapshotExpanded()[r.id]" class="snapshot-compare">
+                          <div class="snapshot-col">
+                            <div class="muted">原值：</div>
+                            <pre class="snapshot-pre">{{ formatSnapshot(r.field_snapshot_old) }}</pre>
+                          </div>
+                          <div class="snapshot-col">
+                            <div class="muted">新值：</div>
+                            <pre class="snapshot-pre">{{ formatSnapshot(r.field_snapshot_new) }}</pre>
+                          </div>
+                        </div>
+                      </div>
+                      <div *ngIf="!r.processed_by_name && !r.decision_summary" class="muted">-</div>
                     </td>
                     <td>
                       <div *ngIf="r.process_status === 'pending'">
@@ -195,7 +211,10 @@ import {
                         <button *ngIf="auth.hasRole(['reviewer'])" class="btn-link" (click)="openProcessModal(r, 'resolve')">采纳线下</button>
                         <button *ngIf="auth.hasRole(['reviewer'])" class="btn-link" style="color:#a53225" (click)="openProcessModal(r, 'ignore')">保留线上</button>
                       </div>
-                      <span *ngIf="r.process_status === 'resolved'" class="muted">已处理</span>
+                      <div *ngIf="r.process_status === 'resolved'" class="resolved-actions">
+                        <span class="muted">{{ processStageLabel(r.process_stage) || '已处理' }}</span>
+                        <a *ngIf="r.topic_id" [routerLink]="['/topics', r.topic_id]" class="btn-link" style="margin-left:6px;">查看选题详情</a>
+                      </div>
                     </td>
                   </tr>
                 </tbody>
@@ -315,6 +334,13 @@ import {
       }
       .modal h3 { margin: 0 0 8px; color: #1f3a68; font-size: 16px; }
       .diff-preview { margin-top: 12px; }
+      .decision-summary { background: #f0f5ff; padding: 4px 8px; border-radius: 4px; margin-bottom: 4px; border-left: 3px solid #1f5fb0; }
+      .snapshot-toggle { margin-top: 4px; }
+      .snapshot-btn { font-size: 12px; }
+      .snapshot-compare { display: flex; gap: 12px; margin-top: 6px; }
+      .snapshot-col { flex: 1; }
+      .snapshot-pre { margin: 0; font-size: 11px; background: #f7f9fc; padding: 6px; border-radius: 4px; white-space: pre-wrap; }
+      .resolved-actions { display: flex; align-items: center; }
     `,
   ],
 })
@@ -332,6 +358,7 @@ export class ImportPageComponent implements OnInit {
   processRemark = '';
   processing = false;
   processError = '';
+  snapshotExpanded = signal<Record<string, boolean>>({});
 
   processModalTitle = computed(() => {
     const action = this.processModalAction();
@@ -364,6 +391,28 @@ export class ImportPageComponent implements OnInit {
       not_applicable: '无需处理',
     };
     return map[s] || s;
+  }
+
+  processStageLabel(s?: string) {
+    const map: Record<string, string> = {
+      submit: '登记员提交',
+      resolve: '采纳线下',
+      ignore: '保留线上',
+    };
+    return map[s || ''] || '已处理';
+  }
+
+  toggleSnapshot(id: string) {
+    this.snapshotExpanded.update(m => ({ ...m, [id]: !m[id] }));
+  }
+
+  formatSnapshot(json?: string) {
+    if (!json) return '-';
+    try {
+      return JSON.stringify(JSON.parse(json), null, 2);
+    } catch {
+      return json;
+    }
   }
 
   openProcessModal(record: ImportRecord, action: 'submit' | 'resolve' | 'ignore') {
