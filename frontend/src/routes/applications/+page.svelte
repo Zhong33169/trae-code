@@ -41,7 +41,7 @@
         apiGet<any>(`/api/applications${qs ? `?${qs}` : ''}`),
         apiGet<any>('/api/statistics'),
       ]);
-      all = apps.applications;
+      all = apps;
       stats = st;
     } catch (e: any) {
       showToast(e.message || '加载失败', 'error');

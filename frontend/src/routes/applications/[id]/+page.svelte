@@ -2,7 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { page, goto } from '$app/navigation';
   import { currentUser } from '$lib/stores';
-  import { apiGet, apiPost } from '$lib/api';
+  import { apiGet, apiPost, apiPostFull } from '$lib/api';
   import {
     STATUS_LABEL, STATUS_COLOR, RISK_LABEL, RISK_COLOR,
     ROLE_LABEL, EVIDENCE_LABEL, ACTION_LABEL, RESULT_LABEL
@@ -100,7 +100,7 @@
     if (!app || !$currentUser) return;
     if (!processOpinion.trim()) { showToast('请填写处理意见', 'warning'); return; }
     try {
-      const r = await apiPost<any>('/api/applications/process', {
+      const r = await apiPostFull<any>('/api/applications/process', {
         application_id: app.id,
         operator_id: $currentUser.id,
         action: processAction,
@@ -108,7 +108,9 @@
         expected_version: app.version,
         new_risk_level: processNewRisk || undefined
       });
-      showToast(`处理成功：${r.result}，当前状态 ${STATUS_LABEL[r.status]}`, 'success');
+      const st = r.status || app.status;
+      const rs = r.last_result || '已处理';
+      showToast(`处理成功：${RESULT_LABEL[rs] || rs}，当前状态 ${STATUS_LABEL[st] || st}（v${r.version}）`, 'success');
       showProcessModal = false;
       await loadData();
     } catch (e: any) {
@@ -132,14 +134,15 @@
   async function doSubmit() {
     if (!app || !$currentUser) return;
     try {
-      const r = await apiPost<any>('/api/applications/submit', {
+      const r = await apiPostFull<any>('/api/applications/submit', {
         application_id: app.id,
         operator_id: $currentUser.id,
         submitted_evidence: submitEvidence,
         opinion: submitOpinion || undefined,
         expected_version: app.version
       });
-      showToast(`提交成功，状态：${STATUS_LABEL[r.status]}`, 'success');
+      const st = r.status || app.status;
+      showToast(`提交成功，状态：${STATUS_LABEL[st] || st}（v${r.version}）`, 'success');
       showSubmitModal = false;
       await loadData();
     } catch (e: any) { showToast(e.message || '提交失败', 'error'); }
@@ -156,7 +159,7 @@
     if (!app || !$currentUser) return;
     if (!auditRemark.trim()) { showToast('请填写复核意见', 'warning'); return; }
     try {
-      const r = await apiPost<any>('/api/applications/audit', {
+      const r = await apiPostFull<any>('/api/applications/audit', {
         application_id: app.id,
         operator_id: $currentUser.id,
         pass: auditPass,
@@ -164,7 +167,8 @@
         expected_version: app.version,
         new_risk_level: auditRisk || undefined
       });
-      showToast(`复核完成：${r.result}`, 'success');
+      const rs = r.last_result || (auditPass ? 'ARCHIVED' : 'REJECTED');
+      showToast(`复核完成：${RESULT_LABEL[rs] || rs}（v${r.version}）`, 'success');
       showAuditModal = false;
       await loadData();
     } catch (e: any) { showToast(e.message || '复核失败', 'error'); }

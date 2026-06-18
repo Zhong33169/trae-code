@@ -85,7 +85,7 @@
           : '/api/applications'),
         apiGet<any>('/api/statistics'),
       ]);
-      all = apps.applications;
+      all = apps;
       stats = st;
     } catch (e: any) {
       showToast(e.message || '数据加载失败', 'error');

@@ -12,8 +12,7 @@
 
   onMount(async () => {
     try {
-      const data = await apiGet<any>('/api/users');
-      users = data.users;
+      users = await apiGet<User[]>('/api/users');
       if (!$currentUser && users.length > 0) {
         $currentUser = users[0];
       }
