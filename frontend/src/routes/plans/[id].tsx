@@ -144,7 +144,13 @@ function HandoverModal(props: {
   const ok = async () => {
     if (!to()) return;
     setLoading(true);
-    await props.onConfirm({ toUserId: to(), fromShift, toShift, remark: remark() || undefined });
+    const payload = {
+      toUserId: to()!,
+      fromShift: fromShift() as 'MORNING' | 'AFTERNOON' | 'NIGHT',
+      toShift: toShift() as 'MORNING' | 'AFTERNOON' | 'NIGHT',
+      remark: remark() || undefined,
+    };
+    await props.onConfirm(payload);
     setLoading(false);
   };
   return (
@@ -197,7 +203,7 @@ export default function PlanDetail() {
   const [plan, setPlan] = createSignal<PlanDetail | null>(null);
   const [loading, setLoading] = createSignal(true);
   const nav = useNavigate();
-  const { notify, user } = useUser();
+  const { notify, user, bus } = useUser();
 
   const [showEdit, setShowEdit] = createSignal(false);
   const [showAudit, setShowAudit] = createSignal(false);
@@ -211,7 +217,7 @@ export default function PlanDetail() {
     setLoading(true);
     const r = await getPlan(id());
     setLoading(false);
-    if (r.code === 0) setPlan(r.data);
+    if (r.code === 0) { setPlan(r.data); bus.emit('plan:changed', id()); }
     else { notify(r.message || '加载失败', 'error'); nav('/plans'); }
   };
   onMount(load);

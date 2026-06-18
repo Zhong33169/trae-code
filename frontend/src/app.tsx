@@ -5,11 +5,25 @@ import { getCurrentUser, logout } from './api/auth';
 import type { UserInfo } from './api/client';
 import './style.css';
 
+type EventBusListener = (...args: any[]) => void;
+class EventBus {
+  private map = new Map<string, Set<EventBusListener>>();
+  on(name: string, fn: EventBusListener) {
+    if (!this.map.has(name)) this.map.set(name, new Set());
+    this.map.get(name)!.add(fn);
+    return () => this.off(name, fn);
+  }
+  off(name: string, fn: EventBusListener) { this.map.get(name)?.delete(fn); }
+  emit(name: string, ...args: any[]) { this.map.get(name)?.forEach((fn) => fn(...args)); }
+}
+const bus = new EventBus();
+
 const UserCtx = createContext<{
   user: () => UserInfo | null;
   setUser: (u: UserInfo | null) => void;
   notify: (msg: string, type?: 'success' | 'error' | 'info') => void;
   toast: () => { msg: string; type: string } | null;
+  bus: EventBus;
 }>(null as any);
 
 export function useUser() { return useContext(UserCtx); }
@@ -86,7 +100,7 @@ export default function App() {
     timer = setTimeout(() => setToast(null), 2800);
   };
   return (
-    <UserCtx.Provider value={{ user, setUser, notify, toast }}>
+    <UserCtx.Provider value={{ user, setUser, notify, toast, bus }}>
       <Router root={(props) => <Suspense><Layout>{props.children}</Layout></Suspense>}>
         <FileRoutes />
       </Router>

@@ -247,7 +247,12 @@ export class PlanService {
     const plan = await this.planRepo.findOne({ where: { id } });
     if (!plan) throw new NotFoundException('传播计划单不存在');
     const perms = this.getPermissions(plan, user);
-    if (!perms.canEdit) throw new ForbiddenException('当前状态不允许编辑，或无编辑权限');
+    if (!perms.canEdit) {
+      const why = user.role !== UserRole.REGISTER
+        ? `当前岗位【${ROLE_NAME[user.role]}】无编辑权限（仅登记员可编辑草稿/补正单）`
+        : `当前状态【${STATUS_NAME[plan.status]}】不允许编辑；仅草稿、需补正、素材不通过状态允许编辑`;
+      throw new ForbiddenException('无法编辑：' + why);
+    }
     const before = { ...plan };
     if (data.title !== undefined) plan.title = data.title;
     if (data.content !== undefined) plan.content = data.content;
@@ -264,11 +269,11 @@ export class PlanService {
     return this.dataSource.transaction(async (mgr) => {
       const plan = await mgr.findOne(PropagandaPlan, { where: { id } });
       if (!plan) throw new NotFoundException('传播计划单不存在');
-      if (plan.status !== PlanStatus.DRAFT && plan.status !== PlanStatus.NEED_CORRECT) {
-        throw new BadRequestException(`当前状态 [${STATUS_NAME[plan.status]}] 不允许提交审核`);
-      }
       if (user.role !== UserRole.REGISTER) {
-        throw new ForbiddenException('仅登记员可提交审核');
+        throw new ForbiddenException(`当前岗位【${ROLE_NAME[user.role]}】无提交审核权限；提交审核仅支持【传播计划登记员】`);
+      }
+      if (plan.status !== PlanStatus.DRAFT && plan.status !== PlanStatus.NEED_CORRECT) {
+        throw new BadRequestException(`当前状态【${STATUS_NAME[plan.status]}】不允许提交审核；仅草稿或需补正状态可提交审核`);
       }
       const before = { status: plan.status };
       plan.status = PlanStatus.PENDING_AUDIT;
@@ -286,16 +291,16 @@ export class PlanService {
 
   async audit(id: number, user: User, pass: boolean, remark?: string) {
     return this.dataSource.transaction(async (mgr) => {
-      const plan = await mgr.findOne(PropagandaPlan, { where: { id } });
+      const plan = await mgr.findOne(PropagandaPlan, { where: { id }, relations: ['currentHandler'] });
       if (!plan) throw new NotFoundException('传播计划单不存在');
+      if (user.role !== UserRole.AUDIT) {
+        throw new ForbiddenException(`当前岗位【${ROLE_NAME[user.role]}】无审核权限；审核仅支持【传播计划审核主管】`);
+      }
       if (plan.status !== PlanStatus.PENDING_AUDIT) {
-        throw new BadRequestException(`当前状态 [${STATUS_NAME[plan.status]}] 不允许审核`);
+        throw new BadRequestException(`当前状态【${STATUS_NAME[plan.status]}】不允许审核；仅待审核状态可执行审核`);
       }
       if (plan.currentHandlerId && plan.currentHandlerId !== user.id) {
-        throw new ForbiddenException('该单据已被其他审核员处理');
-      }
-      if (user.role !== UserRole.AUDIT) {
-        throw new ForbiddenException('仅审核主管可执行审核');
+        throw new ForbiddenException(`该单据当前处理人为【${plan.currentHandler?.realName || plan.currentHandlerId}】，已被其他审核员接单，您无法重复处理`);
       }
       const before = { status: plan.status };
       if (pass) {
@@ -322,16 +327,19 @@ export class PlanService {
 
   async submitMaterial(id: number, user: User, data: { materialInfo?: string }) {
     return this.dataSource.transaction(async (mgr) => {
-      const plan = await mgr.findOne(PropagandaPlan, { where: { id } });
+      const plan = await mgr.findOne(PropagandaPlan, { where: { id }, relations: ['currentHandler'] });
       if (!plan) throw new NotFoundException('传播计划单不存在');
       if (plan.status !== PlanStatus.AUDIT_PASSED && plan.status !== PlanStatus.MATERIAL_REJECTED) {
-        throw new BadRequestException(`当前状态 [${STATUS_NAME[plan.status]}] 不允许提交素材审核`);
+        throw new BadRequestException(`当前状态【${STATUS_NAME[plan.status]}】不允许提交素材审核；仅审核通过 / 素材不通过状态可提交`);
       }
       if (user.role === UserRole.REGISTER && plan.createdById !== user.id) {
-        throw new ForbiddenException('仅登记员可提交素材');
+        throw new ForbiddenException(`登记员仅可提交自己创建单据的素材；该单据创建人ID为 ${plan.createdById}`);
       }
       if (user.role === UserRole.AUDIT && plan.currentHandlerId !== user.id) {
-        throw new ForbiddenException('不是您的待办单据，无法提交素材');
+        throw new ForbiddenException(`审核主管仅可提交自己持有的待办单据；当前处理人为【${plan.currentHandler?.realName || plan.currentHandlerId}】`);
+      }
+      if (user.role !== UserRole.REGISTER && user.role !== UserRole.AUDIT) {
+        throw new ForbiddenException(`当前岗位【${ROLE_NAME[user.role]}】无提交素材权限`);
       }
       if (data.materialInfo) plan.materialInfo = data.materialInfo;
       if (!plan.materialInfo?.trim()) throw new BadRequestException('素材信息不能为空');
@@ -351,16 +359,16 @@ export class PlanService {
 
   async auditMaterial(id: number, user: User, pass: boolean, remark?: string) {
     return this.dataSource.transaction(async (mgr) => {
-      const plan = await mgr.findOne(PropagandaPlan, { where: { id } });
+      const plan = await mgr.findOne(PropagandaPlan, { where: { id }, relations: ['currentHandler'] });
       if (!plan) throw new NotFoundException('传播计划单不存在');
+      if (user.role !== UserRole.AUDIT) {
+        throw new ForbiddenException(`当前岗位【${ROLE_NAME[user.role]}】无素材审核权限；仅【传播计划审核主管】可执行素材审核`);
+      }
       if (plan.status !== PlanStatus.MATERIAL_PENDING) {
-        throw new BadRequestException(`当前状态 [${STATUS_NAME[plan.status]}] 不允许素材审核`);
+        throw new BadRequestException(`当前状态【${STATUS_NAME[plan.status]}】不允许素材审核；仅待素材审核状态可执行`);
       }
       if (plan.currentHandlerId && plan.currentHandlerId !== user.id) {
-        throw new ForbiddenException('该单据素材已被其他审核员处理');
-      }
-      if (user.role !== UserRole.AUDIT) {
-        throw new ForbiddenException('仅审核主管可执行素材审核');
+        throw new ForbiddenException(`该单据当前处理人为【${plan.currentHandler?.realName || plan.currentHandlerId}】，已被其他审核员处理`);
       }
       const before = { status: plan.status };
       if (pass) {
@@ -387,16 +395,16 @@ export class PlanService {
 
   async confirmDelivery(id: number, user: User, remark?: string) {
     return this.dataSource.transaction(async (mgr) => {
-      const plan = await mgr.findOne(PropagandaPlan, { where: { id } });
+      const plan = await mgr.findOne(PropagandaPlan, { where: { id }, relations: ['currentHandler'] });
       if (!plan) throw new NotFoundException('传播计划单不存在');
+      if (user.role !== UserRole.AUDIT) {
+        throw new ForbiddenException(`当前岗位【${ROLE_NAME[user.role]}】无投放确认权限；仅【传播计划审核主管】可确认投放`);
+      }
       if (plan.status !== PlanStatus.MATERIAL_APPROVED && plan.status !== PlanStatus.DELIVERY_PENDING) {
-        throw new BadRequestException(`当前状态 [${STATUS_NAME[plan.status]}] 不允许确认投放`);
+        throw new BadRequestException(`当前状态【${STATUS_NAME[plan.status]}】不允许确认投放；仅素材通过/待投放确认状态可执行`);
       }
       if (plan.currentHandlerId !== user.id) {
-        throw new ForbiddenException('不是您的待办单据，无法确认投放');
-      }
-      if (user.role !== UserRole.AUDIT) {
-        throw new ForbiddenException('仅审核主管可确认投放');
+        throw new ForbiddenException(`投放确认必须由当前处理人【${plan.currentHandler?.realName || plan.currentHandlerId}】执行`);
       }
       const before = { status: plan.status };
       plan.status = PlanStatus.DELIVERY_CONFIRMED;
@@ -418,11 +426,11 @@ export class PlanService {
     return this.dataSource.transaction(async (mgr) => {
       const plan = await mgr.findOne(PropagandaPlan, { where: { id } });
       if (!plan) throw new NotFoundException('传播计划单不存在');
-      if (plan.status !== PlanStatus.DELIVERY_CONFIRMED) {
-        throw new BadRequestException(`当前状态 [${STATUS_NAME[plan.status]}] 不允许归档`);
-      }
       if (user.role !== UserRole.REVIEW) {
-        throw new ForbiddenException('仅复核负责人可归档');
+        throw new ForbiddenException(`当前岗位【${ROLE_NAME[user.role]}】无归档权限；复核归档仅支持【公关传播团队复核负责人】`);
+      }
+      if (plan.status !== PlanStatus.DELIVERY_CONFIRMED) {
+        throw new BadRequestException(`当前状态【${STATUS_NAME[plan.status]}】不允许归档；只有投放已确认的单据才能复核归档（闭环终点）`);
       }
       const before = { status: plan.status };
       plan.status = PlanStatus.ARCHIVED;
@@ -445,20 +453,32 @@ export class PlanService {
     data: { toUserId: number; fromShift: Shift; toShift: Shift; remark?: string },
   ) {
     return this.dataSource.transaction(async (mgr) => {
-      const plan = await mgr.findOne(PropagandaPlan, { where: { id: planId } });
+      const plan = await mgr.findOne(PropagandaPlan, { where: { id: planId }, relations: ['currentHandler'] });
       if (!plan) throw new NotFoundException('传播计划单不存在');
+      const VALID_SHIFTS = [Shift.MORNING, Shift.AFTERNOON, Shift.NIGHT];
+      if (!VALID_SHIFTS.includes(data.fromShift)) {
+        throw new BadRequestException(`fromShift 必须是 MORNING/AFTERNOON/NIGHT，收到：${data.fromShift}`);
+      }
+      if (!VALID_SHIFTS.includes(data.toShift)) {
+        throw new BadRequestException(`toShift 必须是 MORNING/AFTERNOON/NIGHT，收到：${data.toShift}`);
+      }
       if (this.isClosed(plan.status)) {
-        throw new BadRequestException('该单据已归档，不允许交接');
+        throw new BadRequestException(`当前状态【${STATUS_NAME[plan.status]}】已归档，流程闭环，不允许交接`);
       }
       if (plan.currentHandlerId !== user.id) {
-        throw new ForbiddenException('仅当前处理人可发起交接');
+        throw new ForbiddenException(
+          `仅当前处理人可发起交接；当前处理人为【${plan.currentHandler?.realName || plan.currentHandlerId}】`,
+        );
       }
       const toUser = await mgr.findOne(User, { where: { id: data.toUserId, active: true } });
-      if (!toUser) throw new BadRequestException('接收人不存在或已禁用');
+      if (!toUser) throw new BadRequestException(`接收人 ID=${data.toUserId} 不存在或已禁用`);
       if (toUser.role !== plan.currentHandlerRole) {
-        throw new BadRequestException(`接收人岗位应为 ${ROLE_NAME[plan.currentHandlerRole]}`);
+        throw new BadRequestException(
+          `接收人岗位必须为【${ROLE_NAME[plan.currentHandlerRole]}】；` +
+          `当前接收人【${toUser.realName}】岗位为【${ROLE_NAME[toUser.role as UserRole]}】，不匹配`,
+        );
       }
-      if (toUser.id === user.id) throw new BadRequestException('交接双方不能为同一人');
+      if (toUser.id === user.id) throw new BadRequestException('交接双方不能为同一人，请选择其他同事');
 
       const confirmTime = new Date();
       await mgr.save(HandoverRecord, {

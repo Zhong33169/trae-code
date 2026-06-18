@@ -12,7 +12,7 @@ const STATUS_ORDER = [
 export default function Stat() {
   const [data, setData] = createSignal<any>(null);
   const [loading, setLoading] = createSignal(true);
-  const { notify } = useUser();
+  const { notify, bus } = useUser();
 
   const load = async () => {
     setLoading(true);
@@ -21,7 +21,11 @@ export default function Stat() {
     if (r.code === 0) setData(r.data);
     else notify(r.message || '加载失败', 'error');
   };
-  onMount(load);
+  onMount(() => {
+    load();
+    bus.on('plan:changed', load);
+    bus.on('plan:created', load);
+  });
   createEffect(() => {});
 
   const maxByStatus = () => Math.max(1, ...STATUS_ORDER.map(k => (data()?.byStatus || {})[k] || 0));

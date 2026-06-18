@@ -27,14 +27,17 @@ function CreateModal(props: { show: boolean; close: () => void; done: () => void
   const [aud, setAud] = createSignal('');
   const [time, setTime] = createSignal('');
   const [loading, setLoading] = createSignal(false);
-  const { notify } = useUser();
+  const { notify, bus } = useUser();
   const ok = async () => {
     if (!title().trim()) return notify('请填写标题', 'error');
     setLoading(true);
     const r = await createPlan({ title: title(), content: content(), channel: channel(), targetAudience: aud(), planPublishTime: time() });
     setLoading(false);
-    if (r.code === 0) { notify('创建成功', 'success'); props.done(); props.close(); }
-    else notify(r.message || '创建失败', 'error');
+    if (r.code === 0) {
+      notify('创建成功', 'success');
+      bus.emit('plan:created', r.data.id);
+      props.done(); props.close();
+    } else notify(r.message || '创建失败', 'error');
   };
   const reset = () => { setTitle(''); setContent(''); setChannel(''); setAud(''); setTime(''); };
   createEffect(() => { if (props.show) reset(); });
@@ -62,13 +65,14 @@ function BatchModal(props: { show: boolean; ids: number[]; close: () => void; do
   const [pass, setPass] = createSignal(true);
   const [remark, setRemark] = createSignal('');
   const [loading, setLoading] = createSignal(false);
-  const { notify } = useUser();
+  const { notify, bus } = useUser();
   const go = async () => {
     setLoading(true);
     const r = await batchAudit(props.ids, pass(), remark() || undefined);
     setLoading(false);
     if (r.code === 0) {
       notify(`批量处理成功：${r.data.successCount}条通过，${r.data.failCount}条失败`, r.data.failCount ? 'info' : 'success');
+      bus.emit('plan:changed');
       props.done(); props.close();
     } else notify(r.message || '批量失败', 'error');
   };
@@ -108,7 +112,7 @@ export default function PlansIndex() {
   const [showCreate, setShowCreate] = createSignal(false);
   const [showBatch, setShowBatch] = createSignal(false);
   const [loading, setLoading] = createSignal(false);
-  const { user, notify } = useUser();
+  const { user, notify, bus } = useUser();
   const nav = useNavigate();
 
   const load = async () => {
@@ -119,7 +123,11 @@ export default function PlansIndex() {
     else notify(r.message || '加载失败', 'error');
   };
 
-  onMount(load);
+  onMount(() => {
+    load();
+    bus.on('plan:changed', () => { load(); });
+    bus.on('plan:created', () => { setPage(1); load(); });
+  });
   createEffect(() => { page(); st(); only(); kw(); });
 
   const toggleSel = (id: number, e: Event) => {
