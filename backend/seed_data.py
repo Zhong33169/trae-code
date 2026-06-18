@@ -394,11 +394,52 @@ def init_db():
             description="补充了讲师与场地费用的详细报价",
             uploaded_by_id=registrar2.id,
         ), project9.id)
-        # 步骤3：冲突恢复提交（audit_note 记录审计备注）
+        # 步骤3：冲突恢复提交（audit_note 记录审计备注，持久化恢复来源与下一处理人）
         services.recover_from_conflict(db, project9.id, schemas.ConflictRecoveryData(
             current_user_id=registrar2.id,
             comment="已补齐报价单，执行冲突恢复提交",
             audit_note="审计：缺证据冲突恢复，补全报价单后重新提交，版本v2",
+        ))
+        # 步骤4：主管接收（冲突恢复后的主管接收闭环，submitted → under_review）
+        services.process_incoming_project(db, project9.id, current_user_id=supervisor.id)
+        print(f"  [已恢复·主管已接收] {project9.project_no} - {project9.project_name} (恢复后被主管接收进入审核)")
+
+        # 恢复后待主管接收示例：缺证据冲突 → 补齐 → 冲突恢复 → submitted（待主管接收）
+        project10 = crud.create_project(db, schemas.TrainingProjectCreate(
+            project_name="数字化转型领导力培训",
+            client_company="宝鸡智造集团",
+            stage=Stage.QUOTATION,
+            description="面向中高层管理者的数字化转型领导力提升项目。",
+            budget=180000.0,
+            deadline=datetime.utcnow() + timedelta(days=35),
+            created_by_id=registrar.id,
+        ))
+        crud.add_evidence(db, schemas.EvidenceCreate(
+            name="数字化转型培训需求确认书.pdf",
+            evidence_type=EvidenceType.NEED_DOCUMENT,
+            description="客户确认的数字化转型领导力培训需求",
+            uploaded_by_id=registrar.id,
+        ), project10.id)
+        print(f"  [恢复后待接收] {project10.project_no} - {project10.project_name} (缺证据冲突→补齐→恢复提交待主管接收)")
+        # 步骤1：缺证据提交 → state_conflict（缺报价单）
+        _expect_conflict(
+            "缺证据-待接收前",
+            services.submit_project,
+            db, project10.id,
+            schemas.SubmitData(current_user_id=registrar.id, comment="先提交试试"),
+        )
+        # 步骤2：登记员补齐证据
+        crud.add_evidence(db, schemas.EvidenceCreate(
+            name="数字化转型报价单.xlsx",
+            evidence_type=EvidenceType.QUOTATION_SHEET,
+            description="含讲师费、场地费、教材费的完整报价",
+            uploaded_by_id=registrar.id,
+        ), project10.id)
+        # 步骤3：冲突恢复提交（状态停在 submitted，待主管接收）
+        services.recover_from_conflict(db, project10.id, schemas.ConflictRecoveryData(
+            current_user_id=registrar.id,
+            comment="已补齐报价单，冲突恢复提交，等待主管接收",
+            audit_note="审计：缺证据冲突恢复，待主管接收办理",
         ))
 
         print("\n初始化完成！")
@@ -418,6 +459,7 @@ def init_db():
         print(f"  已归档: {stats['archived']}")
         print(f"  待补救（冲突）: {stats['pending_conflict']}")
         print(f"  已恢复（冲突）: {stats['conflict_recovered']}")
+        print(f"  恢复后待主管接收: {stats['recovered_pending_receive']}")
 
     finally:
         db.close()

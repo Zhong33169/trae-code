@@ -6,11 +6,11 @@ from sqlalchemy import func
 from .models import (
     User, TrainingProject, Evidence, OperationLog, AppealRecord,
     Role, Stage, Status, AppealResult, EvidenceType, ActionType,
-    STAGE_REQUIRED_EVIDENCES
+    STAGE_REQUIRED_EVIDENCES, STATUS_LABELS, ROLE_LABELS
 )
 from .schemas import (
     UserCreate, TrainingProjectCreate, TrainingProjectUpdate,
-    EvidenceCreate, AppealRecordCreate, AppealRecordReview
+    EvidenceCreate, AppealRecordCreate, AppealRecordReview, ConflictFilter
 )
 
 
@@ -50,6 +50,15 @@ def get_project_by_no(db: Session, project_no: str) -> Optional[TrainingProject]
     return db.query(TrainingProject).filter(TrainingProject.project_no == project_no).first()
 
 
+def _project_ids_with_action(db: Session, action: ActionType) -> set:
+    rows = (
+        db.query(func.distinct(OperationLog.project_id))
+        .filter(OperationLog.action == action)
+        .all()
+    )
+    return {r[0] for r in rows}
+
+
 def get_projects(
     db: Session,
     skip: int = 0,
@@ -58,6 +67,7 @@ def get_projects(
     stage: Optional[Stage] = None,
     handler_id: Optional[int] = None,
     creator_id: Optional[int] = None,
+    conflict_filter: Optional[ConflictFilter] = None,
 ) -> List[TrainingProject]:
     query = db.query(TrainingProject)
     if status:
@@ -68,6 +78,26 @@ def get_projects(
         query = query.filter(TrainingProject.current_handler_id == handler_id)
     if creator_id:
         query = query.filter(TrainingProject.created_by_id == creator_id)
+
+    if conflict_filter:
+        conflict_ids = _project_ids_with_action(db, ActionType.STATE_CONFLICT)
+        recovered_ids = _project_ids_with_action(db, ActionType.CONFLICT_RECOVERED)
+        if conflict_filter == ConflictFilter.PENDING_CONFLICT:
+            target_ids = {
+                pid for pid in conflict_ids
+                if pid not in recovered_ids
+            }
+            query = query.filter(TrainingProject.id.in_(target_ids)) if target_ids \
+                else query.filter(TrainingProject.id == -1)
+        elif conflict_filter == ConflictFilter.CONFLICT_RECOVERED:
+            query = query.filter(TrainingProject.id.in_(recovered_ids)) if recovered_ids \
+                else query.filter(TrainingProject.id == -1)
+        elif conflict_filter == ConflictFilter.RECOVERED_PENDING_RECEIVE:
+            query = query.filter(
+                TrainingProject.id.in_(recovered_ids),
+                TrainingProject.status == Status.SUBMITTED,
+            ) if recovered_ids else query.filter(TrainingProject.id == -1)
+
     return query.order_by(TrainingProject.updated_at.desc()).offset(skip).limit(limit).all()
 
 
@@ -155,6 +185,9 @@ def add_operation_log(
     opinion: Optional[str] = None,
     reject_reason: Optional[str] = None,
     audit_note: Optional[str] = None,
+    recovery_source: Optional[Status] = None,
+    next_handler_id: Optional[int] = None,
+    next_handler_name: Optional[str] = None,
 ) -> OperationLog:
     user = get_user(db, user_id)
     log = OperationLog(
@@ -171,6 +204,9 @@ def add_operation_log(
         opinion=opinion,
         reject_reason=reject_reason,
         audit_note=audit_note,
+        recovery_source=recovery_source,
+        next_handler_id=next_handler_id,
+        next_handler_name=next_handler_name,
     )
     db.add(log)
     db.flush()
@@ -184,6 +220,24 @@ def get_project_logs(db: Session, project_id: int) -> List[OperationLog]:
         .order_by(OperationLog.created_at.desc())
         .all()
     )
+
+
+def get_recovery_summary(db: Session, project_id: int) -> Optional[str]:
+    log = (
+        db.query(OperationLog)
+        .filter(
+            OperationLog.project_id == project_id,
+            OperationLog.action == ActionType.CONFLICT_RECOVERED,
+        )
+        .order_by(OperationLog.created_at.desc())
+        .first()
+    )
+    if not log:
+        return None
+    source_label = STATUS_LABELS.get(log.recovery_source, log.recovery_source.value) \
+        if log.recovery_source else "未知状态"
+    handler = log.next_handler_name or "待分配"
+    return f"从「{source_label}」恢复提交，下一处理人：{handler}"
 
 
 def create_appeal(db: Session, appeal: AppealRecordCreate, project_id: int, version: int) -> AppealRecord:
@@ -254,6 +308,23 @@ def get_statistics(db: Session) -> dict:
         .scalar() or 0
     )
 
+    recovered_project_ids = {
+        r[0] for r in
+        db.query(func.distinct(OperationLog.project_id))
+        .filter(OperationLog.action == ActionType.CONFLICT_RECOVERED)
+        .all()
+    }
+    recovered_pending_receive = 0
+    if recovered_project_ids:
+        recovered_pending_receive = (
+            db.query(func.count(TrainingProject.id))
+            .filter(
+                TrainingProject.id.in_(recovered_project_ids),
+                TrainingProject.status == Status.SUBMITTED,
+            )
+            .scalar() or 0
+        )
+
     return {
         "total": total,
         "draft": count_status(Status.DRAFT),
@@ -270,6 +341,7 @@ def get_statistics(db: Session) -> dict:
         "archived": count_status(Status.ARCHIVED),
         "pending_conflict": pending_conflict,
         "conflict_recovered": conflict_recovered,
+        "recovered_pending_receive": recovered_pending_receive,
         "by_stage_need": count_stage(Stage.NEED),
         "by_stage_quotation": count_stage(Stage.QUOTATION),
         "by_stage_contract": count_stage(Stage.CONTRACT),

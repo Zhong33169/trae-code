@@ -1,3 +1,4 @@
+import enum
 from datetime import datetime
 from typing import List, Optional
 from pydantic import BaseModel, Field, ConfigDict
@@ -99,8 +100,15 @@ class OperationLog(OperationLogBase):
     opinion: Optional[str] = None
     reject_reason: Optional[str] = None
     audit_note: Optional[str] = None
+    recovery_source: Optional[Status] = None
+    next_handler_id: Optional[int] = None
+    next_handler_name: Optional[str] = None
     created_at: datetime
     model_config = ConfigDict(from_attributes=True)
+
+    @property
+    def recovery_source_label(self) -> Optional[str]:
+        return STATUS_LABELS.get(self.recovery_source) if self.recovery_source else None
 
     @property
     def user_role_label(self) -> str:
@@ -239,6 +247,12 @@ class TrainingProject(TrainingProjectBase):
         return None
 
 
+class ConflictFilter(str, enum.Enum):
+    PENDING_CONFLICT = "pending_conflict"
+    CONFLICT_RECOVERED = "conflict_recovered"
+    RECOVERED_PENDING_RECEIVE = "recovered_pending_receive"
+
+
 class TrainingProjectListItem(BaseModel):
     id: int
     project_no: str
@@ -252,6 +266,7 @@ class TrainingProjectListItem(BaseModel):
     created_at: datetime
     updated_at: datetime
     is_overdue: bool = False
+    recovery_summary: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -284,6 +299,7 @@ class Statistics(BaseModel):
     archived: int = 0
     pending_conflict: int = 0
     conflict_recovered: int = 0
+    recovered_pending_receive: int = 0
     by_stage_need: int = 0
     by_stage_quotation: int = 0
     by_stage_contract: int = 0

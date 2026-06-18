@@ -18,6 +18,7 @@ import type {
   EvidenceCreate,
   Stage,
   Status,
+  ConflictFilter,
 } from "./types";
 
 const API_URL = (import.meta as any).env?.VITE_API_URL || "http://localhost:8001/api";
@@ -56,12 +57,13 @@ export const api = {
     stage?: Stage;
     handler_id?: number;
     creator_id?: number;
+    conflict_filter?: ConflictFilter;
   }) => {
     const qs = params
       ? "?" +
         new URLSearchParams(
           Object.entries(params)
-            .filter(([, v]) => v !== undefined)
+            .filter(([, v]) => v !== undefined && v !== "")
             .map(([k, v]) => [k, String(v)])
         ).toString()
       : "";

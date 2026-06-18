@@ -80,6 +80,9 @@ export interface OperationLog {
   opinion?: string;
   reject_reason?: string;
   audit_note?: string;
+  recovery_source?: Status;
+  next_handler_id?: number;
+  next_handler_name?: string;
   created_at: string;
 }
 
@@ -119,7 +122,10 @@ export interface TrainingProjectListItem {
   created_at: string;
   updated_at: string;
   is_overdue: boolean;
+  recovery_summary?: string;
 }
+
+export type ConflictFilter = "pending_conflict" | "conflict_recovered" | "recovered_pending_receive";
 
 export interface Statistics {
   total: number;
@@ -137,6 +143,7 @@ export interface Statistics {
   archived: number;
   pending_conflict: number;
   conflict_recovered: number;
+  recovered_pending_receive: number;
   by_stage_need: number;
   by_stage_quotation: number;
   by_stage_contract: number;

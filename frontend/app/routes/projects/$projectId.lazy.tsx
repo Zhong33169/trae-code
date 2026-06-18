@@ -320,6 +320,11 @@ function ProjectDetail() {
     (log) => log.action === "state_conflict"
   );
 
+  const lastConflictRecovery = project.operation_logs
+    .slice()
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+    .find((log) => log.action === "conflict_recovered");
+
   const missingEvidences = getMissingEvidences(project.stage, project.evidences);
 
   const lastOpinion = (() => {
@@ -447,6 +452,33 @@ function ProjectDetail() {
               {lastOpinion.reject_reason}
             </div>
           )}
+        </div>
+      )}
+
+      {lastConflictRecovery && project.status === "submitted" && (
+        <div
+          className="card"
+          style={{
+            background: "#eff6ff",
+            border: "1px solid #bfdbfe",
+            marginBottom: "1rem",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+            <span style={{ fontSize: "1.5rem" }}>🔄</span>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 600, color: "#1e40af" }}>
+                冲突恢复成功，已重新提交等待主管接收
+              </div>
+              <div style={{ fontSize: "0.875rem", color: "#1d4ed8", marginTop: "0.25rem" }}>
+                {lastConflictRecovery.recovery_source &&
+                  `恢复来源：${labels.statuses[lastConflictRecovery.recovery_source]}`}
+                {lastConflictRecovery.next_handler_name &&
+                  ` · 下一处理人：${lastConflictRecovery.next_handler_name}（审核主管）`}
+                {canReceive ? " · 请点击下方「接收办理」继续审核" : " · 等待审核主管接收办理"}
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
@@ -890,6 +922,23 @@ function ProjectDetail() {
                           }}
                         >
                           📋 审计备注：{log.audit_note}
+                        </div>
+                      )}
+                      {log.action === "conflict_recovered" &&
+                        (log.recovery_source || log.next_handler_name) && (
+                        <div
+                          className="log-comment"
+                          style={{
+                            color: "#1d4ed8",
+                            marginTop: "0.5rem",
+                          }}
+                        >
+                          🔗 恢复来源：
+                          {log.recovery_source &&
+                            labels.statuses[log.recovery_source]}
+                          {log.recovery_source && log.next_handler_name && " · "}
+                          {log.next_handler_name &&
+                            `下一处理人：${log.next_handler_name}`}
                         </div>
                       )}
                       {log.action === "state_conflict" && canRecover && (

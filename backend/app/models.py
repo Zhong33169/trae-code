@@ -200,6 +200,10 @@ class OperationLog(Base):
     reject_reason = Column(Text)
     audit_note = Column(Text)
 
+    recovery_source = Column(Enum(Status))
+    next_handler_id = Column(Integer)
+    next_handler_name = Column(String(100))
+
     created_at = Column(DateTime, default=datetime.utcnow)
 
     project = relationship("TrainingProject", back_populates="operation_logs")

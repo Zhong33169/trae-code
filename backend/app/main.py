@@ -70,6 +70,9 @@ def list_projects(
     stage: Optional[Stage] = None,
     handler_id: Optional[int] = None,
     creator_id: Optional[int] = None,
+    conflict_filter: Optional[schemas.ConflictFilter] = Query(
+        None, description="冲突筛选: pending_conflict/conflict_recovered/recovered_pending_receive"
+    ),
     db: Session = Depends(get_db),
 ):
     projects = crud.get_projects(
@@ -80,6 +83,7 @@ def list_projects(
         stage=stage,
         handler_id=handler_id,
         creator_id=creator_id,
+        conflict_filter=conflict_filter,
     )
     result = []
     for p in projects:
@@ -98,6 +102,7 @@ def list_projects(
             created_at=p.created_at,
             updated_at=p.updated_at,
             is_overdue=p.is_overdue,
+            recovery_summary=crud.get_recovery_summary(db, p.id),
         ))
     return result
 

@@ -2,7 +2,7 @@ import { createLazyFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, useEffect } from "react";
 import { api } from "../lib/api";
-import type { Status, Stage, User } from "../lib/types";
+import type { Status, Stage, User, ConflictFilter } from "../lib/types";
 import {
   getStatusBadgeClass,
   getRoleBadgeClass,
@@ -22,6 +22,7 @@ function Index() {
   const [filterStatus, setFilterStatus] = useState<Status | "">("");
   const [filterStage, setFilterStage] = useState<Stage | "">("");
   const [filterHandlerId, setFilterHandlerId] = useState<number | "">("");
+  const [filterConflict, setFilterConflict] = useState<ConflictFilter | "">("");
   const [currentUserId, setCurrentUserId] = useState<number | null>(null);
 
   const { data: labels } = useQuery({
@@ -41,12 +42,13 @@ function Index() {
   });
 
   const { data: projects = [], refetch } = useQuery({
-    queryKey: ["projects", filterStatus, filterStage, filterHandlerId],
+    queryKey: ["projects", filterStatus, filterStage, filterHandlerId, filterConflict],
     queryFn: () =>
       api.getProjects({
         status: filterStatus || undefined,
         stage: filterStage || undefined,
         handler_id: filterHandlerId || undefined,
+        conflict_filter: filterConflict || undefined,
       }),
     refetchInterval: 5000,
   });
@@ -160,6 +162,14 @@ function Index() {
             </div>
             <div className="stat-label" style={{ color: "#166534" }}>
               已恢复（冲突）
+            </div>
+          </div>
+          <div className="stat-card" style={{ background: "#eff6ff", borderTop: "3px solid #3b82f6" }}>
+            <div className="stat-value" style={{ color: "#1d4ed8" }}>
+              {statistics.recovered_pending_receive}
+            </div>
+            <div className="stat-label" style={{ color: "#1e40af" }}>
+              恢复后待接收
             </div>
           </div>
         </div>
@@ -290,13 +300,24 @@ function Index() {
               </option>
             ))}
           </select>
-          {(filterStatus || filterStage || filterHandlerId) && (
+          <select
+            className="form-select"
+            value={filterConflict}
+            onChange={(e) => setFilterConflict(e.target.value as ConflictFilter | "")}
+          >
+            <option value="">全部项目</option>
+            <option value="pending_conflict">待补救（冲突）</option>
+            <option value="conflict_recovered">已恢复（冲突）</option>
+            <option value="recovered_pending_receive">恢复后待接收</option>
+          </select>
+          {(filterStatus || filterStage || filterHandlerId || filterConflict) && (
             <button
               className="btn btn-secondary"
               onClick={() => {
                 setFilterStatus("");
                 setFilterStage("");
                 setFilterHandlerId("");
+                setFilterConflict("");
               }}
             >
               清除筛选
@@ -339,6 +360,11 @@ function Index() {
                         >
                           已逾期
                         </span>
+                      )}
+                      {p.recovery_summary && (
+                        <div style={{ fontSize: "0.75rem", color: "#16a34a", marginTop: "0.25rem" }}>
+                          🔄 {p.recovery_summary}
+                        </div>
                       )}
                     </td>
                     <td>{p.client_company}</td>

@@ -398,8 +398,12 @@ def recover_from_conflict(
     project.version += 1
 
     supervisors = crud.get_users_by_role(db, Role.SUPERVISOR)
+    next_handler_id = None
+    next_handler_name = None
     if supervisors:
         project.current_handler_id = supervisors[0].id
+        next_handler_id = supervisors[0].id
+        next_handler_name = supervisors[0].name
 
     crud.add_operation_log(
         db,
@@ -412,6 +416,9 @@ def recover_from_conflict(
         version=project.version,
         comment=data.comment,
         audit_note=data.audit_note,
+        recovery_source=from_status,
+        next_handler_id=next_handler_id,
+        next_handler_name=next_handler_name,
     )
 
     db.commit()
