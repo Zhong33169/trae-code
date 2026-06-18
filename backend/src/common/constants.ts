@@ -60,3 +60,25 @@ export const SHIFT_NAME: Record<Shift, string> = {
   [Shift.AFTERNOON]: '中班',
   [Shift.NIGHT]: '夜班',
 };
+
+export enum HandoverState {
+  PENDING_ACCEPT = 'PENDING_ACCEPT',
+  ACCEPTED = 'ACCEPTED',
+}
+
+export const HANDOVER_STATE_NAME: Record<HandoverState, string> = {
+  [HandoverState.PENDING_ACCEPT]: '待接收',
+  [HandoverState.ACCEPTED]: '已接收',
+};
+
+export enum PlanBucket {
+  PENDING_ACCEPT = 'PENDING_ACCEPT',
+  PROCESSING = 'PROCESSING',
+  ARCHIVED = 'ARCHIVED',
+}
+
+export const PLAN_BUCKET_NAME: Record<PlanBucket, string> = {
+  [PlanBucket.PENDING_ACCEPT]: '待接收',
+  [PlanBucket.PROCESSING]: '处理中',
+  [PlanBucket.ARCHIVED]: '已归档',
+};

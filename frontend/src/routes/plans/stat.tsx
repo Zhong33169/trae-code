@@ -35,6 +35,36 @@ export default function Stat() {
       <div class="page-title">📊 统计看板</div>
       <div class="page-desc">统计数据与列表、详情使用同一数据源，后端聚合计算，刷新后保证一致。</div>
 
+      <div class="card" style={{ marginBottom: 16 }}>
+        <div class="card-title">🔁 全链路汇总（待接收 / 处理中 / 已归档）</div>
+        <div class="grid-3">
+          {([
+            { k: 'PENDING_ACCEPT', color: '#f59e0b', bg: '#fffbeb', title: '待接收', sub: '已交接，等待接收人确认接单' },
+            { k: 'PROCESSING', color: '#2563eb', bg: '#eff6ff', title: '处理中', sub: '已确认接收，正在办理流转中' },
+            { k: 'ARCHIVED', color: '#059669', bg: '#ecfdf5', title: '已归档', sub: '全流程闭环完成' },
+          ] as const).map((b) => {
+            const count = (data()?.byBucket || {})[b.k] || 0;
+            const total = data()?.total || 1;
+            const pct = (count / total * 100).toFixed(1);
+            return (
+              <div style={{
+                background: b.bg, border: `1px solid ${b.color}33`, borderRadius: 12, padding: '16px 18px',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                  <div style={{ fontSize: 14, color: '#111827', fontWeight: 600 }}>{b.title}</div>
+                  <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 999, background: b.color, color: '#fff' }}>{pct}%</span>
+                </div>
+                <div style={{ fontSize: 30, fontWeight: 700, color: b.color, lineHeight: 1.1 }}>{count}</div>
+                <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>{b.sub}</div>
+                <div style={{ height: 6, background: '#fff', borderRadius: 999, marginTop: 10, overflow: 'hidden' }}>
+                  <div style={{ height: '100%', width: `${pct}%`, background: b.color, borderRadius: 999 }} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
       <div class="grid-4">
         <div class="stat-card">
           <div class="stat-num">{data()?.total ?? 0}</div>

@@ -196,9 +196,22 @@ export default function PlansIndex() {
                     />
                   </td>
                   <td style={{ fontFamily: 'monospace', fontSize: 12 }}>{p.planNo}</td>
-                  <td>{p.title}</td>
+                  <td>
+                    {p.title}
+                    <Show when={p.awaitingAccept}>
+                      <span class="badge badge-pending" style={{ marginLeft: 8, background: '#fef3c7', color: '#92400e' }}>
+                        ⏳ {p.awaitingAccept.stateName}
+                      </span>
+                    </Show>
+                  </td>
                   <td><Badge status={p.status} label={p.statusName} /></td>
                   <td>
+                    <Show when={p.awaitingAccept}>
+                      <div style={{ fontSize: 12, color: '#92400e', marginBottom: 2 }}>
+                        {p.awaitingAccept.fromShiftName}{p.awaitingAccept.handFrom?.realName}
+                        → {p.awaitingAccept.toShiftName}{p.awaitingAccept.handTo?.realName}
+                      </div>
+                    </Show>
                     {p.currentHandler
                       ? <span class="user-chip">{p.currentHandler.realName} · {p.currentHandlerRoleName}</span>
                       : <span style={{ color: '#9ca3af' }}>（待接单）</span>}

@@ -50,6 +50,9 @@ export class HandoverDto {
   toShift: Shift;
   @IsOptional() @IsString() remark?: string;
 }
+export class AcceptHandoverDto {
+  @IsOptional() @IsString() acceptRemark?: string;
+}
 export class BatchAuditDto {
   @IsArray({ message: 'ids 必须为数组' })
   @Type(() => Number)
@@ -160,7 +163,12 @@ export class PlanController {
   @Post(':id/handover')
   async handover(@Param('id', ParseIntPipe) id: number, @Body() dto: HandoverDto, @Request() req) {
     const r = await this.planService.handover(id, req.user, dto);
-    return ok(r, '交接确认成功，详情已同步更新接收人和确认时间');
+    return ok(r, '已提交交接，待接收人确认后继续办理');
+  }
+
+  @Post(':id/accept-handover')
+  async acceptHandover(@Param('id', ParseIntPipe) id: number, @Body() dto: AcceptHandoverDto, @Request() req) {
+    return ok(await this.planService.acceptHandover(id, req.user, dto), '已确认接收，可继续办理');
   }
 
   @Post('batch/audit')

@@ -76,6 +76,7 @@ export interface PlanItem {
   currentHandler: { id: number; realName: string; role: string; roleName: string } | null;
   currentHandlerRole?: string;
   currentHandlerRoleName?: string;
+  awaitingAccept: HandoverItem | null;
 }
 
 export interface PlanDetail extends PlanItem {
@@ -98,6 +99,8 @@ export interface PlanDetail extends PlanItem {
 
 export interface HandoverItem {
   id?: number;
+  state?: 'PENDING_ACCEPT' | 'ACCEPTED';
+  stateName?: string;
   handFrom: { id: number; realName: string };
   handTo: { id: number; realName: string };
   fromShift: string;
@@ -105,7 +108,9 @@ export interface HandoverItem {
   toShift: string;
   toShiftName: string;
   confirmTime: string;
+  acceptedAt?: string;
   remark?: string;
+  acceptRemark?: string;
   createdAt?: string;
 }
 
@@ -115,4 +120,18 @@ export interface LogItem {
   description: string;
   operator: { id: number; realName: string; roleName: string } | null;
   createdAt: string;
+}
+
+export interface StatResult {
+  total: number;
+  todayCount: number;
+  closedCount: number;
+  pendingCount: number;
+  closedRate: number;
+  byStatus: Record<string, number>;
+  statusLabels: Record<string, string>;
+  byRole: Record<string, number>;
+  roleLabels: Record<string, string>;
+  byBucket: Record<string, number>;
+  bucketLabels: Record<string, string>;
 }

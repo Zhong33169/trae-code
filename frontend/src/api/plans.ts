@@ -44,6 +44,10 @@ export async function handover(id: number, data: any) {
   return api<any>(`/plans/${id}/handover`, { method: 'POST', body: JSON.stringify(data) });
 }
 
+export async function acceptHandover(id: number, acceptRemark?: string) {
+  return api<any>(`/plans/${id}/accept-handover`, { method: 'POST', body: JSON.stringify({ acceptRemark }) });
+}
+
 export async function listReceivers(role: string) {
   return api<any>(`/plans/receivers`, { params: { role } });
 }

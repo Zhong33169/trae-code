@@ -48,6 +48,14 @@ export class PropagandaPlan {
   @JoinColumn({ name: 'currentHandlerId' })
   currentHandler: User;
 
+  @Column({ type: 'integer', nullable: true })
+  @Index()
+  awaitingAcceptId: number;
+
+  @ManyToOne(() => HandoverRecord, { nullable: true })
+  @JoinColumn({ name: 'awaitingAcceptId' })
+  awaitingAccept: HandoverRecord;
+
   @Column({ type: 'integer' })
   createdById: number;
 

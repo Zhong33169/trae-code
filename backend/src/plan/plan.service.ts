@@ -7,6 +7,7 @@ import { OperationLog } from '../entities/operation-log.entity';
 import { User } from '../entities/user.entity';
 import {
   PlanStatus, UserRole, STATUS_NAME, SHIFT_NAME, ROLE_NAME, Shift,
+  HandoverState, HANDOVER_STATE_NAME, PlanBucket, PLAN_BUCKET_NAME,
 } from '../common/constants';
 import { PaginatedResult } from '../common/dto';
 
@@ -71,6 +72,9 @@ export class PlanService {
     const qb = this.planRepo.createQueryBuilder('p')
       .leftJoinAndSelect('p.createdBy', 'creator')
       .leftJoinAndSelect('p.currentHandler', 'handler')
+      .leftJoinAndSelect('p.awaitingAccept', 'awa')
+      .leftJoinAndSelect('awa.handFrom', 'awaF')
+      .leftJoinAndSelect('awa.handTo', 'awaT')
       .skip((page - 1) * pageSize)
       .take(pageSize)
       .orderBy('p.id', 'DESC');
@@ -85,7 +89,8 @@ export class PlanService {
     if (params.onlyMine) {
       qb.andWhere(new Brackets(q => {
         q.where('p.createdById = :uid', { uid: user.id })
-          .orWhere('p.currentHandlerId = :uid', { uid: user.id });
+          .orWhere('p.currentHandlerId = :uid', { uid: user.id })
+          .orWhere('awaT.id = :uid', { uid: user.id });
       }));
     }
 
@@ -98,6 +103,9 @@ export class PlanService {
     const plan = await this.planRepo.createQueryBuilder('p')
       .leftJoinAndSelect('p.createdBy', 'creator')
       .leftJoinAndSelect('p.currentHandler', 'handler')
+      .leftJoinAndSelect('p.awaitingAccept', 'awa')
+      .leftJoinAndSelect('awa.handFrom', 'awaF')
+      .leftJoinAndSelect('awa.handTo', 'awaT')
       .leftJoinAndMapMany('p.handovers', HandoverRecord, 'h', 'h.planId = p.id')
       .leftJoinAndSelect('h.handFrom', 'hf')
       .leftJoinAndSelect('h.handTo', 'ht')
@@ -109,6 +117,25 @@ export class PlanService {
       .getOne();
     if (!plan) throw new NotFoundException('传播计划单不存在');
     return this.serializePlanDetail(plan, user);
+  }
+
+  private serializeHandover(h: HandoverRecord) {
+    return {
+      id: h.id,
+      state: h.state,
+      stateName: HANDOVER_STATE_NAME[h.state],
+      handFrom: h.handFrom ? { id: h.handFrom.id, realName: h.handFrom.realName } : null,
+      handTo: h.handTo ? { id: h.handTo.id, realName: h.handTo.realName } : null,
+      fromShift: h.fromShift,
+      fromShiftName: SHIFT_NAME[h.fromShift],
+      toShift: h.toShift,
+      toShiftName: SHIFT_NAME[h.toShift],
+      confirmTime: h.confirmTime,
+      acceptedAt: h.acceptedAt,
+      remark: h.remark,
+      acceptRemark: h.acceptRemark,
+      createdAt: h.createdAt,
+    };
   }
 
   private serializePlan(p: PropagandaPlan, _user: User) {
@@ -132,24 +159,14 @@ export class PlanService {
       } : null,
       currentHandlerRole: p.currentHandlerRole,
       currentHandlerRoleName: p.currentHandlerRole ? ROLE_NAME[p.currentHandlerRole] : null,
+      awaitingAccept: p.awaitingAccept ? this.serializeHandover(p.awaitingAccept) : null,
     };
   }
 
   private serializePlanDetail(p: PropagandaPlan, user: User) {
     const base = this.serializePlan(p, user);
     const permissions = this.getPermissions(p, user);
-    const handovers = (p.handovers || []).map(h => ({
-      id: h.id,
-      handFrom: { id: h.handFrom?.id, realName: h.handFrom?.realName },
-      handTo: { id: h.handTo?.id, realName: h.handTo?.realName },
-      fromShift: h.fromShift,
-      fromShiftName: SHIFT_NAME[h.fromShift],
-      toShift: h.toShift,
-      toShiftName: SHIFT_NAME[h.toShift],
-      confirmTime: h.confirmTime,
-      remark: h.remark,
-      createdAt: h.createdAt,
-    }));
+    const handovers = (p.handovers || []).map(h => this.serializeHandover(h));
     const logs = (p.logs || []).map(l => ({
       id: l.id,
       action: l.action,
@@ -183,8 +200,14 @@ export class PlanService {
     const result: Record<string, boolean> = {
       canEdit: false, canSubmitAudit: false, canAuditPass: false, canAuditReject: false,
       canMaterialSubmit: false, canMaterialApprove: false, canMaterialReject: false,
-      canDeliveryConfirm: false, canArchive: false, canHandover: false,
+      canDeliveryConfirm: false, canArchive: false, canHandover: false, canAcceptHandover: false,
     };
+    if (p.awaitingAccept) {
+      if (p.awaitingAccept.state === HandoverState.PENDING_ACCEPT && p.awaitingAccept.handToId === user.id) {
+        result.canAcceptHandover = true;
+      }
+      return result;
+    }
     if (role === UserRole.REGISTER) {
       if (s === PlanStatus.DRAFT || s === PlanStatus.NEED_CORRECT) {
         result.canEdit = true; result.canSubmitAudit = true;
@@ -219,6 +242,19 @@ export class PlanService {
     return result;
   }
 
+  private ensureNotAwaitingAccept(plan: PropagandaPlan, userId: number, action: string) {
+    if (!plan.awaitingAccept) return;
+    if (plan.awaitingAccept.state === HandoverState.PENDING_ACCEPT) {
+      if (plan.awaitingAccept.handToId === userId) {
+        throw new ForbiddenException(`该单据交接待接收；请先点击【确认接收】后再执行${action}`);
+      }
+      throw new ForbiddenException(
+        `该单据当前交接给【${plan.awaitingAccept.handTo?.realName}】，处于【待接收】状态；` +
+        `您不是接收人，无法执行${action}`,
+      );
+    }
+  }
+
   private isClosed(s: PlanStatus) {
     return s === PlanStatus.ARCHIVED;
   }
@@ -244,8 +280,9 @@ export class PlanService {
   }
 
   async update(id: number, user: User, data: any) {
-    const plan = await this.planRepo.findOne({ where: { id } });
+    const plan = await this.planRepo.findOne({ where: { id }, relations: ['awaitingAccept', 'awaitingAccept.handTo'] });
     if (!plan) throw new NotFoundException('传播计划单不存在');
+    this.ensureNotAwaitingAccept(plan, user.id, '编辑');
     const perms = this.getPermissions(plan, user);
     if (!perms.canEdit) {
       const why = user.role !== UserRole.REGISTER
@@ -267,8 +304,9 @@ export class PlanService {
 
   async submitAudit(id: number, user: User) {
     return this.dataSource.transaction(async (mgr) => {
-      const plan = await mgr.findOne(PropagandaPlan, { where: { id } });
+      const plan = await mgr.findOne(PropagandaPlan, { where: { id }, relations: ['awaitingAccept', 'awaitingAccept.handTo'] });
       if (!plan) throw new NotFoundException('传播计划单不存在');
+      this.ensureNotAwaitingAccept(plan, user.id, '提交审核');
       if (user.role !== UserRole.REGISTER) {
         throw new ForbiddenException(`当前岗位【${ROLE_NAME[user.role]}】无提交审核权限；提交审核仅支持【传播计划登记员】`);
       }
@@ -291,8 +329,9 @@ export class PlanService {
 
   async audit(id: number, user: User, pass: boolean, remark?: string) {
     return this.dataSource.transaction(async (mgr) => {
-      const plan = await mgr.findOne(PropagandaPlan, { where: { id }, relations: ['currentHandler'] });
+      const plan = await mgr.findOne(PropagandaPlan, { where: { id }, relations: ['currentHandler', 'awaitingAccept', 'awaitingAccept.handTo'] });
       if (!plan) throw new NotFoundException('传播计划单不存在');
+      this.ensureNotAwaitingAccept(plan, user.id, '审核');
       if (user.role !== UserRole.AUDIT) {
         throw new ForbiddenException(`当前岗位【${ROLE_NAME[user.role]}】无审核权限；审核仅支持【传播计划审核主管】`);
       }
@@ -327,8 +366,9 @@ export class PlanService {
 
   async submitMaterial(id: number, user: User, data: { materialInfo?: string }) {
     return this.dataSource.transaction(async (mgr) => {
-      const plan = await mgr.findOne(PropagandaPlan, { where: { id }, relations: ['currentHandler'] });
+      const plan = await mgr.findOne(PropagandaPlan, { where: { id }, relations: ['currentHandler', 'awaitingAccept', 'awaitingAccept.handTo'] });
       if (!plan) throw new NotFoundException('传播计划单不存在');
+      this.ensureNotAwaitingAccept(plan, user.id, '提交素材审核');
       if (plan.status !== PlanStatus.AUDIT_PASSED && plan.status !== PlanStatus.MATERIAL_REJECTED) {
         throw new BadRequestException(`当前状态【${STATUS_NAME[plan.status]}】不允许提交素材审核；仅审核通过 / 素材不通过状态可提交`);
       }
@@ -359,8 +399,9 @@ export class PlanService {
 
   async auditMaterial(id: number, user: User, pass: boolean, remark?: string) {
     return this.dataSource.transaction(async (mgr) => {
-      const plan = await mgr.findOne(PropagandaPlan, { where: { id }, relations: ['currentHandler'] });
+      const plan = await mgr.findOne(PropagandaPlan, { where: { id }, relations: ['currentHandler', 'awaitingAccept', 'awaitingAccept.handTo'] });
       if (!plan) throw new NotFoundException('传播计划单不存在');
+      this.ensureNotAwaitingAccept(plan, user.id, '素材审核');
       if (user.role !== UserRole.AUDIT) {
         throw new ForbiddenException(`当前岗位【${ROLE_NAME[user.role]}】无素材审核权限；仅【传播计划审核主管】可执行素材审核`);
       }
@@ -395,8 +436,9 @@ export class PlanService {
 
   async confirmDelivery(id: number, user: User, remark?: string) {
     return this.dataSource.transaction(async (mgr) => {
-      const plan = await mgr.findOne(PropagandaPlan, { where: { id }, relations: ['currentHandler'] });
+      const plan = await mgr.findOne(PropagandaPlan, { where: { id }, relations: ['currentHandler', 'awaitingAccept', 'awaitingAccept.handTo'] });
       if (!plan) throw new NotFoundException('传播计划单不存在');
+      this.ensureNotAwaitingAccept(plan, user.id, '投放确认');
       if (user.role !== UserRole.AUDIT) {
         throw new ForbiddenException(`当前岗位【${ROLE_NAME[user.role]}】无投放确认权限；仅【传播计划审核主管】可确认投放`);
       }
@@ -424,8 +466,9 @@ export class PlanService {
 
   async archive(id: number, user: User, remark?: string) {
     return this.dataSource.transaction(async (mgr) => {
-      const plan = await mgr.findOne(PropagandaPlan, { where: { id } });
+      const plan = await mgr.findOne(PropagandaPlan, { where: { id }, relations: ['awaitingAccept', 'awaitingAccept.handTo'] });
       if (!plan) throw new NotFoundException('传播计划单不存在');
+      this.ensureNotAwaitingAccept(plan, user.id, '归档');
       if (user.role !== UserRole.REVIEW) {
         throw new ForbiddenException(`当前岗位【${ROLE_NAME[user.role]}】无归档权限；复核归档仅支持【公关传播团队复核负责人】`);
       }
@@ -453,8 +496,9 @@ export class PlanService {
     data: { toUserId: number; fromShift: Shift; toShift: Shift; remark?: string },
   ) {
     return this.dataSource.transaction(async (mgr) => {
-      const plan = await mgr.findOne(PropagandaPlan, { where: { id: planId }, relations: ['currentHandler'] });
+      const plan = await mgr.findOne(PropagandaPlan, { where: { id: planId }, relations: ['currentHandler', 'awaitingAccept', 'awaitingAccept.handTo'] });
       if (!plan) throw new NotFoundException('传播计划单不存在');
+      this.ensureNotAwaitingAccept(plan, user.id, '交接');
       const VALID_SHIFTS = [Shift.MORNING, Shift.AFTERNOON, Shift.NIGHT];
       if (!VALID_SHIFTS.includes(data.fromShift)) {
         throw new BadRequestException(`fromShift 必须是 MORNING/AFTERNOON/NIGHT，收到：${data.fromShift}`);
@@ -481,30 +525,38 @@ export class PlanService {
       if (toUser.id === user.id) throw new BadRequestException('交接双方不能为同一人，请选择其他同事');
 
       const confirmTime = new Date();
-      await mgr.save(HandoverRecord, {
+      const savedHandover = await mgr.save(HandoverRecord, {
         planId,
         handFromId: user.id,
         handToId: toUser.id,
         fromShift: data.fromShift,
         toShift: data.toShift,
+        state: HandoverState.PENDING_ACCEPT,
         confirmTime,
         remark: data.remark || null,
       });
-      const before = { currentHandlerId: plan.currentHandlerId };
+      const before = { currentHandlerId: plan.currentHandlerId, awaitingAcceptId: plan.awaitingAcceptId };
       plan.currentHandlerId = toUser.id;
+      plan.awaitingAcceptId = savedHandover.id;
       plan.updatedAt = new Date();
       const saved = await mgr.save(plan);
       await mgr.save(OperationLog, {
         planId: plan.id, operatorId: user.id, action: 'HANDOVER',
-        description: `${SHIFT_NAME[data.fromShift]}${user.realName} → ${SHIFT_NAME[data.toShift]}${toUser.realName}，交接确认完成${data.remark ? '，备注：' + data.remark : ''}`,
+        description: `${SHIFT_NAME[data.fromShift]}${user.realName} → ${SHIFT_NAME[data.toShift]}${toUser.realName}，已提交交接，待${toUser.realName}确认接收${data.remark ? '，备注：' + data.remark : ''}`,
         beforeState: JSON.stringify(before),
         afterState: JSON.stringify({
-          currentHandlerId: toUser.id, handTo: toUser.realName, confirmTime,
+          currentHandlerId: toUser.id,
+          awaitingAcceptId: savedHandover.id,
+          handTo: toUser.realName,
+          confirmTime,
         }),
       });
       return {
         id: saved.id,
-        latestHandover: {
+        awaitingAccept: {
+          id: savedHandover.id,
+          state: HandoverState.PENDING_ACCEPT,
+          stateName: HANDOVER_STATE_NAME[HandoverState.PENDING_ACCEPT],
           handFrom: { id: user.id, realName: user.realName },
           handTo: { id: toUser.id, realName: toUser.realName },
           fromShift: data.fromShift,
@@ -516,6 +568,48 @@ export class PlanService {
         },
       };
     });
+  }
+
+  async acceptHandover(planId: number, user: User, data: { acceptRemark?: string }) {
+    await this.dataSource.transaction(async (mgr) => {
+      const plan = await mgr.findOne(PropagandaPlan, {
+        where: { id: planId },
+        relations: ['awaitingAccept', 'awaitingAccept.handFrom', 'awaitingAccept.handTo'],
+      });
+      if (!plan) throw new NotFoundException('传播计划单不存在');
+      if (!plan.awaitingAccept) {
+        throw new BadRequestException('该单据当前没有待接收的交接');
+      }
+      if (plan.awaitingAccept.state !== HandoverState.PENDING_ACCEPT) {
+        throw new BadRequestException(
+          `交接状态为【${HANDOVER_STATE_NAME[plan.awaitingAccept.state]}】，无需再次确认`,
+        );
+      }
+      if (plan.awaitingAccept.handToId !== user.id) {
+        throw new ForbiddenException(
+          `该交接指定接收人为【${plan.awaitingAccept.handTo?.realName}】，` +
+          `您不是指定接收人，无法确认接收`,
+        );
+      }
+      const acceptedAt = new Date();
+      plan.awaitingAccept.state = HandoverState.ACCEPTED;
+      plan.awaitingAccept.acceptedAt = acceptedAt;
+      plan.awaitingAccept.acceptRemark = data.acceptRemark || null;
+      await mgr.save(HandoverRecord, plan.awaitingAccept);
+      const before = { awaitingAcceptId: plan.awaitingAcceptId };
+      const toShift = plan.awaitingAccept.toShift;
+      plan.awaitingAcceptId = null;
+      plan.awaitingAccept = null as any;
+      plan.updatedAt = new Date();
+      await mgr.save(plan);
+      await mgr.save(OperationLog, {
+        planId: plan.id, operatorId: user.id, action: 'ACCEPT_HANDOVER',
+        description: `${SHIFT_NAME[toShift]}${user.realName}已确认接收，可继续办理${data.acceptRemark ? '，备注：' + data.acceptRemark : ''}`,
+        beforeState: JSON.stringify(before),
+        afterState: JSON.stringify({ awaitingAcceptId: null, acceptedAt }),
+      });
+    });
+    return this.detail(planId, user);
   }
 
   async listReceivers(role: UserRole, excludeUserId?: number) {
@@ -543,21 +637,31 @@ export class PlanService {
   }
 
   async statistics(_user: User) {
-    const all = await this.planRepo.find({ select: ['status', 'currentHandlerRole', 'createdAt'] });
+    const all = await this.planRepo.find({ select: ['status', 'currentHandlerRole', 'createdAt', 'awaitingAcceptId'] });
     const byStatus: Record<string, number> = {};
     const byRole: Record<string, number> = {};
+    const byBucket: Record<string, number> = { [PlanBucket.PENDING_ACCEPT]: 0, [PlanBucket.PROCESSING]: 0, [PlanBucket.ARCHIVED]: 0 };
     const today = new Date(); today.setHours(0, 0, 0, 0);
     let todayCount = 0; let closedCount = 0;
     for (const r of all) {
       byStatus[r.status] = (byStatus[r.status] || 0) + 1;
       if (r.currentHandlerRole) byRole[r.currentHandlerRole] = (byRole[r.currentHandlerRole] || 0) + 1;
       if (r.createdAt >= today) todayCount++;
-      if (r.status === PlanStatus.ARCHIVED) closedCount++;
+      if (r.status === PlanStatus.ARCHIVED) {
+        closedCount++;
+        byBucket[PlanBucket.ARCHIVED]++;
+      } else if (r.awaitingAcceptId) {
+        byBucket[PlanBucket.PENDING_ACCEPT]++;
+      } else {
+        byBucket[PlanBucket.PROCESSING]++;
+      }
     }
     const statusLabels: Record<string, string> = {};
     Object.keys(STATUS_NAME).forEach(k => { statusLabels[k] = STATUS_NAME[k as PlanStatus]; });
     const roleLabels: Record<string, string> = {};
     Object.keys(ROLE_NAME).forEach(k => { roleLabels[k] = ROLE_NAME[k as UserRole]; });
+    const bucketLabels: Record<string, string> = {};
+    Object.keys(PLAN_BUCKET_NAME).forEach(k => { bucketLabels[k] = PLAN_BUCKET_NAME[k as PlanBucket]; });
     return {
       total: all.length,
       todayCount,
@@ -568,6 +672,8 @@ export class PlanService {
       statusLabels,
       byRole,
       roleLabels,
+      byBucket,
+      bucketLabels,
     };
   }
 }

@@ -20,6 +20,7 @@ import { SeedService } from './seed';
       synchronize: true,
       logging: false,
     }),
+    TypeOrmModule.forFeature([User, PropagandaPlan, HandoverRecord, OperationLog]),
     AuthModule,
     PlanModule,
   ],
