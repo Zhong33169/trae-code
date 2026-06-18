@@ -50,6 +50,22 @@ export class ProgressReportsService {
     report.timeoutDays = Math.max(0, now.diff(deadline, 'day'));
   }
 
+  private async refreshAllTimeoutStatuses(): Promise<void> {
+    const reports = await this.progressReportsRepository.find();
+    const toUpdate: ProgressReport[] = [];
+    for (const report of reports) {
+      const oldStatus = report.timeoutStatus;
+      const oldDays = report.timeoutDays;
+      this.updateTimeoutInfo(report);
+      if (report.timeoutStatus !== oldStatus || report.timeoutDays !== oldDays) {
+        toUpdate.push(report);
+      }
+    }
+    if (toUpdate.length > 0) {
+      await this.progressReportsRepository.save(toUpdate);
+    }
+  }
+
   async create(
     createProgressReportDto: CreateProgressReportDto,
     user: User,
@@ -101,6 +117,8 @@ export class ProgressReportsService {
       user,
     } = params || {};
 
+    await this.refreshAllTimeoutStatuses();
+
     const query = this.progressReportsRepository
       .createQueryBuilder('report')
       .leftJoinAndSelect('report.responsiblePerson', 'responsiblePerson')
@@ -139,9 +157,6 @@ export class ProgressReportsService {
       .skip((page - 1) * pageSize)
       .take(pageSize)
       .getMany();
-
-    list.forEach((report) => this.updateTimeoutInfo(report));
-    await this.progressReportsRepository.save(list);
 
     return { list, total };
   }
@@ -523,37 +538,33 @@ export class ProgressReportsService {
   }
 
   async getStatistics(user?: User): Promise<any> {
+    await this.refreshAllTimeoutStatuses();
+
+    const filterByUser = (qb: any) => {
+      if (user && user.role === Role.REGISTRAR) {
+        qb.andWhere('report.responsiblePersonId = :userId', { userId: user.id });
+      }
+    };
+
     const baseQuery = this.progressReportsRepository.createQueryBuilder('report');
-
-    if (user && user.role === Role.REGISTRAR) {
-      baseQuery.andWhere('report.responsiblePersonId = :userId', { userId: user.id });
-    }
-
+    filterByUser(baseQuery);
     const totalCount = await baseQuery.getCount();
 
-    const statusCounts = await this.progressReportsRepository
+    const statusQuery = this.progressReportsRepository
       .createQueryBuilder('report')
       .select('report.status', 'status')
-      .addSelect('COUNT(*)', 'count')
-      .where((qb) => {
-        if (user && user.role === Role.REGISTRAR) {
-          qb.where('report.responsiblePersonId = :userId', { userId: user.id });
-        }
-        return '1=1';
-      })
+      .addSelect('COUNT(*)', 'count');
+    filterByUser(statusQuery);
+    const statusCounts = await statusQuery
       .groupBy('report.status')
       .getRawMany();
 
-    const timeoutCounts = await this.progressReportsRepository
+    const timeoutQuery = this.progressReportsRepository
       .createQueryBuilder('report')
       .select('report.timeoutStatus', 'timeoutStatus')
-      .addSelect('COUNT(*)', 'count')
-      .where((qb) => {
-        if (user && user.role === Role.REGISTRAR) {
-          qb.where('report.responsiblePersonId = :userId', { userId: user.id });
-        }
-        return '1=1';
-      })
+      .addSelect('COUNT(*)', 'count');
+    filterByUser(timeoutQuery);
+    const timeoutCounts = await timeoutQuery
       .groupBy('report.timeoutStatus')
       .getRawMany();
 
@@ -565,9 +576,7 @@ export class ProgressReportsService {
     const thisMonthEnd = dayjs().endOf('month').toDate();
 
     const monthQuery = this.progressReportsRepository.createQueryBuilder('report');
-    if (user && user.role === Role.REGISTRAR) {
-      monthQuery.andWhere('report.responsiblePersonId = :userId', { userId: user.id });
-    }
+    filterByUser(monthQuery);
     const thisMonthCount = await monthQuery
       .andWhere({ createdAt: Between(thisMonthStart, thisMonthEnd) })
       .getCount();

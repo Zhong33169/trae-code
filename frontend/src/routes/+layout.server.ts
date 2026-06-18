@@ -17,7 +17,7 @@ export const load: LayoutServerLoad = async ({ url, cookies }) => {
   let user = null;
   if (accessToken) {
     try {
-      const response = await authApi.getCurrentUser();
+      const response = await authApi.getCurrentUser(accessToken);
       user = response.data;
     } catch (e) {
       cookies.delete('access_token', { path: '/' });

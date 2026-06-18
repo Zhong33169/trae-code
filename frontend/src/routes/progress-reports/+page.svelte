@@ -20,18 +20,18 @@
   $: user = $currentUser;
 
   let filters = {
-    status: queryParams.status || '',
-    timeoutStatus: queryParams.timeoutStatus || '',
-    keyword: queryParams.keyword || '',
-    responsiblePersonId: queryParams.responsiblePersonId || '',
-    startDate: queryParams.startDate || '',
-    endDate: queryParams.endDate || '',
+    status: queryParams?.status || '',
+    timeoutStatus: queryParams?.timeoutStatus || '',
+    keyword: queryParams?.keyword || '',
+    responsiblePersonId: queryParams?.responsiblePersonId || '',
+    startDate: queryParams?.startDate || '',
+    endDate: queryParams?.endDate || '',
   };
 
   let showDeleteModal = false;
   let deletingReportId: string | null = null;
-  let currentPage = queryParams.page || 1;
-  let pageSize = queryParams.pageSize || 10;
+  let currentPage = queryParams?.page || 1;
+  let pageSize = queryParams?.pageSize || 10;
 
   function handleFilterChange() {
     const params = new URLSearchParams();

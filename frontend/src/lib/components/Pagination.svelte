@@ -73,7 +73,7 @@
       {:else}
         <button
           class="pagination-btn {page === current ? 'active' : ''}"
-          on:click={() => changePage(page as number)}
+          on:click={() => changePage(Number(page))}
         >
           {page}
         </button>

@@ -12,7 +12,8 @@ export interface LoginResult {
 }
 
 export const authApi = {
-  login: (data: LoginData) => api.post<LoginResult>('/auth/login', data),
-  logout: () => api.post<void>('/auth/logout'),
-  getCurrentUser: () => api.get<User>('/auth/me'),
+  login: (data: LoginData, authToken?: string | null) =>
+    api.post<LoginResult>('/auth/login', data, authToken),
+  logout: (authToken?: string | null) => api.post<void>('/auth/logout', undefined, authToken),
+  getCurrentUser: (authToken?: string | null) => api.get<User>('/auth/me', undefined, authToken),
 };

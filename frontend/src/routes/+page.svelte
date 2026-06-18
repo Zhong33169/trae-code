@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { PageData } from './$types';
   import { goto } from '$app/navigation';
-  import { ProgressStatus, TimeoutStatus, ProgressStatusLabel, TimeoutStatusLabel, TimeoutStatusColor } from '$types';
+  import { ProgressStatus, TimeoutStatus, ProgressStatusLabel, ProgressStatusColor, TimeoutStatusLabel, TimeoutStatusColor } from '$types';
   import { canCreateReport } from '$utils/permissions';
   import { currentUser } from '$stores';
 
@@ -86,7 +86,7 @@
               <span class="timeout-bar">
                 <span
                   class="timeout-bar-fill"
-                  style="width: {statistics.timeoutCounts[status]! / (statistics.totalCount || 1) * 100}%; background: {TimeoutStatusColor[status]};"
+                  style="width: {(statistics.timeoutCounts[status] || 0) / (statistics.totalCount || 1) * 100}%; background: {TimeoutStatusColor[status]};"
                 ></span>
               </span>
               <div class="timeout-info">

@@ -43,9 +43,9 @@
   let verifyApproved = true;
   let verifyOpinion = '';
   let correctData = {
-    title: report.title,
-    content: report.content || '',
-    abnormalReason: report.abnormalReason || '',
+    title: report?.title || '',
+    content: report?.content || '',
+    abnormalReason: report?.abnormalReason || '',
     correctionRemark: '',
   };
   let timeoutData = {

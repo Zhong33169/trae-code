@@ -1,5 +1,5 @@
 import { api } from './client';
-import type { ProgressReport, PageResult, Statistics, ApiResponse } from '$types';
+import type { ProgressReport, PageResult, Statistics } from '$types';
 import type { ProgressStatus, TimeoutStatus } from '$types';
 
 export interface CreateProgressReportData {
@@ -61,39 +61,40 @@ export interface QueryParams {
 }
 
 export const progressReportsApi = {
-  getList: (params?: QueryParams) =>
-    api.get<PageResult<ProgressReport>>('/progress-reports', params),
+  getList: (params?: QueryParams, authToken?: string | null) =>
+    api.get<PageResult<ProgressReport>>('/progress-reports', params, authToken),
 
-  getDetail: (id: string) => api.get<ProgressReport>(`/progress-reports/${id}`),
+  getDetail: (id: string, authToken?: string | null) =>
+    api.get<ProgressReport>(`/progress-reports/${id}`, undefined, authToken),
 
-  create: (data: CreateProgressReportData) =>
-    api.post<ProgressReport>('/progress-reports', data),
+  create: (data: CreateProgressReportData, authToken?: string | null) =>
+    api.post<ProgressReport>('/progress-reports', data, authToken),
 
-  update: (id: string, data: UpdateProgressReportData) =>
-    api.patch<ProgressReport>(`/progress-reports/${id}`, data),
+  update: (id: string, data: UpdateProgressReportData, authToken?: string | null) =>
+    api.patch<ProgressReport>(`/progress-reports/${id}`, data, authToken),
 
-  submitForReview: (id: string, data?: SubmitReviewData) =>
-    api.post<ProgressReport>(`/progress-reports/${id}/submit-review`, data || {}),
+  submitForReview: (id: string, data?: SubmitReviewData, authToken?: string | null) =>
+    api.post<ProgressReport>(`/progress-reports/${id}/submit-review`, data || {}, authToken),
 
-  startReview: (id: string) =>
-    api.post<ProgressReport>(`/progress-reports/${id}/start-review`),
+  startReview: (id: string, authToken?: string | null) =>
+    api.post<ProgressReport>(`/progress-reports/${id}/start-review`, undefined, authToken),
 
-  review: (id: string, data: ReviewData) =>
-    api.post<ProgressReport>(`/progress-reports/${id}/review`, data),
+  review: (id: string, data: ReviewData, authToken?: string | null) =>
+    api.post<ProgressReport>(`/progress-reports/${id}/review`, data, authToken),
 
-  startVerification: (id: string) =>
-    api.post<ProgressReport>(`/progress-reports/${id}/start-verification`),
+  startVerification: (id: string, authToken?: string | null) =>
+    api.post<ProgressReport>(`/progress-reports/${id}/start-verification`, undefined, authToken),
 
-  verify: (id: string, data: VerifyData) =>
-    api.post<ProgressReport>(`/progress-reports/${id}/verify`, data),
+  verify: (id: string, data: VerifyData, authToken?: string | null) =>
+    api.post<ProgressReport>(`/progress-reports/${id}/verify`, data, authToken),
 
-  correct: (id: string, data: CorrectData) =>
-    api.post<ProgressReport>(`/progress-reports/${id}/correct`, data),
+  correct: (id: string, data: CorrectData, authToken?: string | null) =>
+    api.post<ProgressReport>(`/progress-reports/${id}/correct`, data, authToken),
 
-  handleTimeout: (id: string, data: HandleTimeoutData) =>
-    api.post<ProgressReport>(`/progress-reports/${id}/handle-timeout`, data),
+  handleTimeout: (id: string, data: HandleTimeoutData, authToken?: string | null) =>
+    api.post<ProgressReport>(`/progress-reports/${id}/handle-timeout`, data, authToken),
 
-  delete: (id: string) => api.delete<void>(`/progress-reports/${id}`),
+  delete: (id: string, authToken?: string | null) => api.delete<void>(`/progress-reports/${id}`, authToken),
 
-  getStatistics: () => api.get<Statistics>('/progress-reports/statistics'),
+  getStatistics: (authToken?: string | null) => api.get<Statistics>('/progress-reports/statistics', undefined, authToken),
 };

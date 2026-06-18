@@ -3,7 +3,8 @@ import type { PageServerLoad } from './$types';
 import { progressReportsApi, usersApi } from '$api';
 import type { QueryParams } from '$api/progress-reports';
 
-export const load = async ({ url }: Parameters<PageServerLoad>[0]) => {
+export const load = async ({ url, cookies }: Parameters<PageServerLoad>[0]) => {
+  const token = cookies.get('access_token');
   const params: QueryParams = {
     page: parseInt(url.searchParams.get('page') || '1'),
     pageSize: parseInt(url.searchParams.get('pageSize') || '10'),
@@ -29,9 +30,9 @@ export const load = async ({ url }: Parameters<PageServerLoad>[0]) => {
 
   try {
     const [reportsResponse, usersResponse, statsResponse] = await Promise.all([
-      progressReportsApi.getList(params),
-      usersApi.getList(),
-      progressReportsApi.getStatistics(),
+      progressReportsApi.getList(params, token),
+      usersApi.getList(token),
+      progressReportsApi.getStatistics(token),
     ]);
 
     return {

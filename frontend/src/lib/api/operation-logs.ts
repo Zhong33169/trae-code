@@ -11,9 +11,9 @@ export interface QueryParams {
 }
 
 export const operationLogsApi = {
-  getList: (params?: QueryParams) =>
-    api.get<PageResult<OperationLog>>('/operation-logs', params),
+  getList: (params?: QueryParams, authToken?: string | null) =>
+    api.get<PageResult<OperationLog>>('/operation-logs', params, authToken),
 
-  getByProgressReportId: (progressReportId: string) =>
-    api.get<OperationLog[]>(`/operation-logs/progress-report/${progressReportId}`),
+  getByProgressReportId: (progressReportId: string, authToken?: string | null) =>
+    api.get<OperationLog[]>(`/operation-logs/progress-report/${progressReportId}`, undefined, authToken),
 };

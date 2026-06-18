@@ -1,13 +1,14 @@
 // @ts-nocheck
 import type { PageServerLoad } from './$types';
 import { progressReportsApi, usersApi } from '$api';
-import { error, redirect } from '@sveltejs/kit';
+import { error } from '@sveltejs/kit';
 
-export const load = async ({ params }: Parameters<PageServerLoad>[0]) => {
+export const load = async ({ params, cookies }: Parameters<PageServerLoad>[0]) => {
+  const token = cookies.get('access_token');
   try {
     const [reportResponse, usersResponse] = await Promise.all([
-      progressReportsApi.getDetail(params.id),
-      usersApi.getList(),
+      progressReportsApi.getDetail(params.id, token),
+      usersApi.getList(token),
     ]);
 
     return {

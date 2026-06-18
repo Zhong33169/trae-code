@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
   import { page } from '$app/stores';
   import { currentUser, toasts, logout as userStoreLogout } from '$stores';
   import { goto } from '$app/navigation';
@@ -11,12 +10,7 @@
   export let data: PageData;
 
   $: isLoginPage = $page.url.pathname === '/login';
-
-  onMount(() => {
-    if (data.user) {
-      currentUser.set(data.user);
-    }
-  });
+  $: currentUser.set(data.user);
 
   async function handleLogout() {
     await userStoreLogout();

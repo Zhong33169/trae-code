@@ -15,13 +15,13 @@
   $: reportId = $page.params.id;
 
   let formData = {
-    title: report.title,
-    content: report.content || '',
-    deadline: formatDate(report.deadline),
-    reportDate: report.reportDate ? formatDate(report.reportDate) : '',
-    projectName: report.projectName || '',
-    abnormalReason: report.abnormalReason || '',
-    responsiblePersonId: report.responsiblePersonId || '',
+    title: report?.title || '',
+    content: report?.content || '',
+    deadline: report?.deadline ? formatDate(report.deadline) : '',
+    reportDate: report?.reportDate ? formatDate(report.reportDate) : '',
+    projectName: report?.projectName || '',
+    abnormalReason: report?.abnormalReason || '',
+    responsiblePersonId: report?.responsiblePersonId || '',
   };
 
   let submitting = false;
@@ -226,7 +226,7 @@
 
   .form-row {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr);
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
     gap: 20px;
   }
 

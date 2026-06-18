@@ -13,14 +13,14 @@
   $: queryParams = data.queryParams;
 
   let filters = {
-    operationType: queryParams.operationType || '',
-    operatorId: queryParams.operatorId || '',
-    startDate: queryParams.startDate || '',
-    endDate: queryParams.endDate || '',
+    operationType: queryParams?.operationType || '',
+    operatorId: queryParams?.operatorId || '',
+    startDate: queryParams?.startDate || '',
+    endDate: queryParams?.endDate || '',
   };
 
-  let currentPage = queryParams.page || 1;
-  let pageSize = queryParams.pageSize || 20;
+  let currentPage = queryParams?.page || 1;
+  let pageSize = queryParams?.pageSize || 20;
 
   function handleFilterChange() {
     const params = new URLSearchParams();
