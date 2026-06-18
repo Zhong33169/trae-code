@@ -590,13 +590,34 @@ export class ProgressReportsService {
     action: string,
     data: any,
     user: User,
-  ): Promise<{ results: Array<{ id: string; success: boolean; message: string }> }> {
+  ): Promise<{
+    results: Array<{ id: string; success: boolean; message: string }>;
+    successCount: number;
+    failCount: number;
+  }> {
+    if (action === 'submit') {
+      if (user.role !== Role.REGISTRAR) {
+        throw new ForbiddenException('只有登记员可以执行批量提交审核操作');
+      }
+    } else if (action === 'handle-timeout') {
+      if (user.role !== Role.SUPERVISOR && user.role !== Role.SUPERVISOR_ENGINEER) {
+        throw new ForbiddenException('只有审核主管或复核负责人可以执行批量处理超时操作');
+      }
+    } else {
+      throw new BadRequestException(`不支持的批量操作类型: ${action}`);
+    }
+
     const results: Array<{ id: string; success: boolean; message: string }> = [];
+    const successCount = { value: 0 };
+    const failCount = { value: 0 };
 
     for (const id of ids) {
+      let fromStatus: ProgressStatus | null = null;
+      let report: ProgressReport | null = null;
+
       try {
-        let report: ProgressReport;
-        const fromStatus: ProgressStatus = (await this.findOne(id)).status;
+        report = await this.findOne(id);
+        fromStatus = report.status;
 
         if (action === 'submit') {
           report = await this.submitForReview(id, { remarks: data.remarks || '' }, user);
@@ -606,32 +627,50 @@ export class ProgressReportsService {
             { timeoutReason: data.timeoutReason, timeoutFollowUp: data.timeoutFollowUp, remarks: data.remarks },
             user,
           );
-        } else {
-          throw new BadRequestException(`不支持的批量操作类型: ${action}`);
         }
 
         const toStatus = report.status;
-        report.batchResult = `批量${action === 'submit' ? '提交审核' : '处理超时'}成功，操作人：${user.name}，时间：${new Date().toISOString()}`;
+        const actionLabel = action === 'submit' ? '提交审核' : '处理超时';
+        report.batchResult = `[成功] 批量${actionLabel}，操作人：${user.name}，时间：${new Date().toISOString()}`;
         await this.progressReportsRepository.save(report);
 
         await this.operationLogsService.create(
           id,
           user,
           OperationType.BATCH_PROCESS,
-          `批量${action === 'submit' ? '提交审核' : '处理超时'}：${report.batchResult}`,
+          `批量${actionLabel}成功`,
           data.remarks,
           fromStatus,
           toStatus,
         );
 
+        successCount.value += 1;
         results.push({ id, success: true, message: '操作成功' });
       } catch (e) {
         const error = e as Error;
+        failCount.value += 1;
+
+        if (report && fromStatus !== null) {
+          const actionLabel = action === 'submit' ? '提交审核' : '处理超时';
+          report.batchResult = `[失败] 批量${actionLabel}，原因：${error.message}，时间：${new Date().toISOString()}`;
+          await this.progressReportsRepository.save(report);
+
+          await this.operationLogsService.create(
+            id,
+            user,
+            OperationType.BATCH_PROCESS,
+            `批量${actionLabel}失败：${error.message}`,
+            data.remarks,
+            fromStatus,
+            fromStatus,
+          );
+        }
+
         results.push({ id, success: false, message: error.message });
       }
     }
 
-    return { results };
+    return { results, successCount: successCount.value, failCount: failCount.value };
   }
 
   async getStatistics(user?: User): Promise<any> {
@@ -669,6 +708,22 @@ export class ProgressReportsService {
       (item) => item.timeoutStatus === TimeoutStatus.OVERDUE,
     )?.count || 0;
 
+    const batchQuery = this.progressReportsRepository
+      .createQueryBuilder('report')
+      .select('report.batchResult', 'batchResult');
+    filterByUser(batchQuery);
+    const batchResults = await batchQuery
+      .andWhere('report.batchResult IS NOT NULL')
+      .getRawMany();
+
+    let batchSuccessCount = 0;
+    let batchFailCount = 0;
+    for (const item of batchResults) {
+      const br = item.batchResult;
+      if (br?.startsWith('[成功]')) batchSuccessCount++;
+      else if (br?.startsWith('[失败]')) batchFailCount++;
+    }
+
     const thisMonthStart = dayjs().startOf('month').toDate();
     const thisMonthEnd = dayjs().endOf('month').toDate();
 
@@ -682,6 +737,8 @@ export class ProgressReportsService {
       totalCount,
       thisMonthCount,
       overdueCount: Number(overdueCount),
+      batchSuccessCount,
+      batchFailCount,
       statusCounts: statusCounts.reduce((acc, item) => {
         acc[item.status] = Number(item.count);
         return acc;

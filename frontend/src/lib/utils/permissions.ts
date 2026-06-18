@@ -148,17 +148,23 @@ export function canAcknowledgeOwnerReport(
   return report.status === ProgressStatus.UNDER_VERIFICATION;
 }
 
-export function canBatchProcess(user: User | null | undefined, report: ProgressReport): boolean {
+export function canBatchSubmit(user: User | null | undefined, report: ProgressReport): boolean {
   if (!user) return false;
-  if (user.role === Role.REGISTRAR) {
-    return [ProgressStatus.DRAFT, ProgressStatus.REVIEW_REJECTED, ProgressStatus.VERIFICATION_REJECTED].includes(
-      report.status,
-    );
-  }
-  if (user.role === Role.SUPERVISOR || user.role === Role.SUPERVISOR_ENGINEER) {
-    return report.timeoutStatus === TimeoutStatus.OVERDUE;
-  }
-  return false;
+  if (user.role !== Role.REGISTRAR) return false;
+  if (report.responsiblePersonId !== user.id) return false;
+  return [ProgressStatus.DRAFT, ProgressStatus.REVIEW_REJECTED, ProgressStatus.VERIFICATION_REJECTED].includes(
+    report.status,
+  );
+}
+
+export function canBatchHandleTimeout(user: User | null | undefined, report: ProgressReport): boolean {
+  if (!user) return false;
+  if (user.role !== Role.SUPERVISOR && user.role !== Role.SUPERVISOR_ENGINEER) return false;
+  return report.timeoutStatus === TimeoutStatus.OVERDUE;
+}
+
+export function canBatchProcess(user: User | null | undefined, report: ProgressReport): boolean {
+  return canBatchSubmit(user, report) || canBatchHandleTimeout(user, report);
 }
 
 export function getAvailableActions(user: User | null | undefined, report: ProgressReport) {

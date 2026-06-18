@@ -5,7 +5,7 @@
   import { ProgressStatus, TimeoutStatus, ProgressStatusLabel, TimeoutStatusLabel, Role } from '$types';
   import type { BatchResult } from '$types';
   import { formatDate, formatDateTime } from '$utils/format';
-  import { canCreateReport, canEditReport, canSubmitReview, canReview, canVerify, canCorrect, canHandleTimeout, canDeleteReport, canBatchProcess } from '$utils/permissions';
+  import { canCreateReport, canEditReport, canSubmitReview, canReview, canVerify, canCorrect, canHandleTimeout, canDeleteReport, canBatchProcess, canBatchSubmit, canBatchHandleTimeout } from '$utils/permissions';
   import { currentUser, showToast } from '$stores';
   import { progressReportsApi } from '$api';
   import StatusTag from '$components/StatusTag.svelte';
@@ -20,7 +20,13 @@
   $: queryParams = data.queryParams;
   $: user = $currentUser;
   $: batchableReports = reports?.list?.filter((r) => canBatchProcess(user, r)) || [];
+  $: batchSubmitableReports = reports?.list?.filter((r) => canBatchSubmit(user, r)) || [];
+  $: batchTimeoutableReports = reports?.list?.filter((r) => canBatchHandleTimeout(user, r)) || [];
   $: hasBatchAccess = batchableReports.length > 0;
+  $: hasBatchSubmitAccess = batchSubmitableReports.length > 0;
+  $: hasBatchTimeoutAccess = batchTimeoutableReports.length > 0;
+  $: isRegistrar = user?.role === Role.REGISTRAR;
+  $: isSupervisor = user?.role === Role.SUPERVISOR || user?.role === Role.SUPERVISOR_ENGINEER;
 
   let filters = {
     status: queryParams?.status || '',
@@ -159,6 +165,36 @@
     batchableReports.length > 0 &&
     batchableReports.every((r) => selectedIds.has(r.id));
 
+  function openBatchSubmitModal() {
+    const submitableSelected = Array.from(selectedIds).filter(id =>
+      batchSubmitableReports.some(r => r.id === id)
+    );
+    if (submitableSelected.length === 0) {
+      showToast('请先选择可批量提交的报告（草稿或被驳回）', 'error');
+      return;
+    }
+    batchAction = 'submit';
+    batchRemarks = '';
+    batchTimeoutReason = '';
+    batchTimeoutFollowUp = '';
+    showBatchModal = true;
+  }
+
+  function openBatchTimeoutModal() {
+    const timeoutableSelected = Array.from(selectedIds).filter(id =>
+      batchTimeoutableReports.some(r => r.id === id)
+    );
+    if (timeoutableSelected.length === 0) {
+      showToast('请先选择可批量处理超时的报告（超时状态）', 'error');
+      return;
+    }
+    batchAction = 'handle-timeout';
+    batchRemarks = '';
+    batchTimeoutReason = '';
+    batchTimeoutFollowUp = '';
+    showBatchModal = true;
+  }
+
   function openBatchModal() {
     if (selectedIds.size === 0) {
       showToast('请先选择要批量办理的报告', 'error');
@@ -232,6 +268,16 @@
         <span class="stat-badge-label">已归档</span>
         <span class="stat-badge-value success">{statistics.statusCounts?.[ProgressStatus.ARCHIVED] || 0}</span>
       </div>
+      {#if statistics.batchSuccessCount > 0 || statistics.batchFailCount > 0}
+        <div class="stat-badge">
+          <span class="stat-badge-label">批量成功</span>
+          <span class="stat-badge-value success">{statistics.batchSuccessCount || 0}</span>
+        </div>
+        <div class="stat-badge">
+          <span class="stat-badge-label">批量失败</span>
+          <span class="stat-badge-value danger">{statistics.batchFailCount || 0}</span>
+        </div>
+      {/if}
     </div>
   {/if}
 
@@ -299,9 +345,16 @@
 
   {#if hasBatchAccess && selectedIds.size > 0}
     <div class="batch-bar">
-      <span class="batch-info">已选择 {selectedIds.size} 项 / 可批量办理 {batchableReports.length} 项</span>
-      <button class="btn btn-primary btn-sm" on:click={openBatchModal}>批量办理</button>
-      <button class="btn btn-outline btn-sm" on:click={() => { selectedIds = new Set(); }}>取消选择</button>
+      <span class="batch-info">已选择 {selectedIds.size} 项 / 可批量 {batchableReports.length} 项（提交 {batchSubmitableReports.length}，超时 {batchTimeoutableReports.length}）</span>
+      <div class="batch-buttons">
+        {#if hasBatchSubmitAccess}
+          <button class="btn btn-primary btn-sm" on:click={openBatchSubmitModal}>批量提交审核</button>
+        {/if}
+        {#if hasBatchTimeoutAccess}
+          <button class="btn btn-warning btn-sm" on:click={openBatchTimeoutModal}>批量处理超时</button>
+        {/if}
+        <button class="btn btn-outline btn-sm" on:click={() => { selectedIds = new Set(); }}>取消选择</button>
+      </div>
     </div>
   {/if}
 
@@ -390,8 +443,10 @@
                     </div>
                   {/if}
                   {#if report.batchResult}
-                    <div class="result-row result-batch" title={report.batchResult}>
-                      <span class="batch-tag">批量</span>{report.batchResult}
+                    {@const batchSuccess = report.batchResult.startsWith('[成功]')}
+                    {@const batchFailed = report.batchResult.startsWith('[失败]')}
+                    <div class="result-row result-batch" class:success={batchSuccess} class:failed={batchFailed} title={report.batchResult}>
+                      <span class="batch-tag" class:success={batchSuccess} class:failed={batchFailed}>批量</span>{report.batchResult}
                     </div>
                   {/if}
                   {#if !report.lastProcessResult && !report.batchResult}-{/if}
@@ -470,23 +525,27 @@
 <!-- 批量办理弹窗 -->
 <Modal
   show={showBatchModal}
-  title="批量办理进度报告"
+  title={batchAction === 'submit' ? '批量提交审核' : '批量处理超时'}
   onClose={() => { showBatchModal = false; }}
   footer={true}
   size="large"
 >
-  <p>将对 {selectedIds.size} 份进度报告执行批量操作</p>
-  <div class="form-group">
+  <p>将对 {selectedIds.size} 份进度报告执行{batchAction === 'submit' ? '批量提交审核' : '批量处理超时'}操作</p>
+  <div class="form-group" style="display: none;">
     <label>操作类型</label>
     <div class="radio-group">
-      <label class="radio-item">
-        <input type="radio" bind:group={batchAction} value="submit" />
-        <span>批量提交审核</span>
-      </label>
-      <label class="radio-item">
-        <input type="radio" bind:group={batchAction} value="handle-timeout" />
-        <span>批量处理超时</span>
-      </label>
+      {#if isRegistrar}
+        <label class="radio-item">
+          <input type="radio" bind:group={batchAction} value="submit" />
+          <span>批量提交审核</span>
+        </label>
+      {/if}
+      {#if isSupervisor}
+        <label class="radio-item">
+          <input type="radio" bind:group={batchAction} value="handle-timeout" />
+          <span>批量处理超时</span>
+        </label>
+      {/if}
     </div>
   </div>
   {#if batchAction === 'handle-timeout'}
@@ -505,7 +564,7 @@
   </div>
   <div slot="footer">
     <button class="btn btn-outline" on:click={() => { showBatchModal = false; }}>取消</button>
-    <button class="btn btn-primary" on:click={handleBatchProcess}>确认批量办理</button>
+    <button class="btn {batchAction === 'submit' ? 'btn-primary' : 'btn-warning'}" on:click={handleBatchProcess}>确认{batchAction === 'submit' ? '提交' : '处理超时'}</button>
   </div>
 </Modal>
 
@@ -519,10 +578,12 @@
   {#if batchResult}
     <div class="batch-result-summary">
       <div class="batch-result-stat success">
-        成功：{batchResult.results.filter(r => r.success).length} 项
+        <span class="stat-icon">✓</span>
+        <span>成功：{batchResult.successCount ?? batchResult.results.filter(r => r.success).length} 项</span>
       </div>
       <div class="batch-result-stat error">
-        失败：{batchResult.results.filter(r => !r.success).length} 项
+        <span class="stat-icon">✗</span>
+        <span>失败：{batchResult.failCount ?? batchResult.results.filter(r => !r.success).length} 项</span>
       </div>
     </div>
     <div class="batch-result-list">
@@ -760,6 +821,12 @@
     color: #8b5cf6;
     font-size: 12px;
   }
+  .result-batch.success {
+    color: #10b981;
+  }
+  .result-batch.failed {
+    color: #ef4444;
+  }
 
   .batch-tag {
     display: inline-block;
@@ -770,6 +837,12 @@
     border-radius: 4px;
     font-size: 11px;
     font-weight: 500;
+  }
+  .batch-tag.success {
+    background: #10b981;
+  }
+  .batch-tag.failed {
+    background: #ef4444;
   }
 
   .text-danger {
@@ -802,11 +875,18 @@
   .batch-bar {
     display: flex;
     align-items: center;
+    justify-content: space-between;
     gap: 12px;
     padding: 12px 20px;
     background: #eff6ff;
     border: 1px solid #bfdbfe;
     border-radius: 8px;
+  }
+
+  .batch-buttons {
+    display: flex;
+    gap: 8px;
+    align-items: center;
   }
 
   .batch-info {

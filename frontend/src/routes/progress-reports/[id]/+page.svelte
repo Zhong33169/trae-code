@@ -673,8 +673,15 @@
         </div>
 
         {#if report.batchResult}
-          <div class="batch-result-section">
-            <h3 class="section-title">批量办理结果</h3>
+          {@const batchSuccess = report.batchResult.startsWith('[成功]')}
+          {@const batchFailed = report.batchResult.startsWith('[失败]')}
+          <div class="batch-result-section" class:success={batchSuccess} class:failed={batchFailed}>
+            <h3 class="section-title">
+              {#if batchSuccess}<span class="batch-icon success">✓</span>成功{/if}
+              {#if batchFailed}<span class="batch-icon failed">✗</span>失败{/if}
+              {#if !batchSuccess && !batchFailed}<span class="batch-icon">●</span>{/if}
+              批量办理结果
+            </h3>
             <div class="batch-result-content">{report.batchResult}</div>
           </div>
         {/if}
@@ -1516,10 +1523,53 @@
     border: 1px solid #bae6fd;
     border-radius: 8px;
   }
+  .batch-result-section.success {
+    background: #ecfdf5;
+    border-color: #a7f3d0;
+  }
+  .batch-result-section.failed {
+    background: #fef2f2;
+    border-color: #fecaca;
+  }
+  .batch-result-section .section-title {
+    margin: 0 0 8px 0;
+    font-size: 16px;
+    color: #0c4a6e;
+  }
+  .batch-result-section.success .section-title {
+    color: #065f46;
+  }
+  .batch-result-section.failed .section-title {
+    color: #991b1b;
+  }
+  .batch-icon {
+    display: inline-block;
+    width: 20px;
+    height: 20px;
+    line-height: 20px;
+    text-align: center;
+    border-radius: 50%;
+    background: #0ea5e9;
+    color: white;
+    font-size: 12px;
+    margin-right: 8px;
+  }
+  .batch-icon.success {
+    background: #10b981;
+  }
+  .batch-icon.failed {
+    background: #ef4444;
+  }
 
   .batch-result-content {
     font-size: 14px;
     color: #0c4a6e;
     line-height: 1.6;
+  }
+  .batch-result-section.success .batch-result-content {
+    color: #065f46;
+  }
+  .batch-result-section.failed .batch-result-content {
+    color: #991b1b;
   }
 </style>
