@@ -39,6 +39,8 @@ export const ACTIONS = {
   REJECT: 'reject',
   CORRECT: 'correct',
   ARCHIVE: 'archive',
+  BATCH_ARCHIVE: 'batch_archive',
+  ARCHIVE_VALIDATION: 'archive_validation',
   UPDATE_ATTACHMENT: 'update_attachment',
   UPDATE_RESULT: 'update_result',
   UPDATE_AUDIT_REMARK: 'update_audit_remark'
@@ -51,7 +53,15 @@ export const ACTION_NAMES = {
   [ACTIONS.REJECT]: '退回',
   [ACTIONS.CORRECT]: '补正提交',
   [ACTIONS.ARCHIVE]: '复核归档',
+  [ACTIONS.BATCH_ARCHIVE]: '批量复核归档',
+  [ACTIONS.ARCHIVE_VALIDATION]: '归档校验',
   [ACTIONS.UPDATE_ATTACHMENT]: '上传/更新附件',
   [ACTIONS.UPDATE_RESULT]: '更新处理结果',
   [ACTIONS.UPDATE_AUDIT_REMARK]: '更新审计备注'
+};
+
+export const ISSUE_TYPE_NAMES = {
+  offline_missing: '离线台账缺失',
+  batch_conflict: '重复批次冲突',
+  status_inconsistency: '状态不一致'
 };

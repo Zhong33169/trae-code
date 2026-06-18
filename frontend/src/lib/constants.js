@@ -41,8 +41,15 @@ export const ACTION_NAMES = {
   reject: '退回',
   correct: '补正提交',
   archive: '复核归档',
-  update_attachment: '更新附件',
+  archive_validation: '归档校验',
+  update_attachment: '上传/更新附件',
   update_result: '更新结果',
   update_audit_remark: '更新审计备注',
-  batch_archive: '批量归档'
+  batch_archive: '批量复核归档'
+};
+
+export const ISSUE_TYPE_NAMES = {
+  offline_missing: '离线台账缺失',
+  batch_conflict: '重复批次冲突',
+  status_inconsistency: '状态不一致'
 };

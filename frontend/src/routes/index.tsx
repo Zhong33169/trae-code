@@ -1,21 +1,25 @@
-import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
-import { api } from '../lib/api.js';
-import { STATUS, STATUS_NAMES, STATUS_COLORS, ROLES } from '../lib/constants.js';
+import { useState, useEffect } from 'react'
+import { createFileRoute, Link } from '@tanstack/react-router'
+import { api } from '../lib/api.js'
+import { STATUS, STATUS_NAMES, STATUS_COLORS, ROLES, ISSUE_TYPE_NAMES } from '../lib/constants.js'
+
+export const Route = createFileRoute('/')({
+  component: ApplicationsList,
+})
 
 function ApplicationsList() {
-  const [data, setData] = useState({ list: [], current_user: null });
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [data, setData] = useState({ list: [], current_user: null })
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
   const [filters, setFilters] = useState({
     status: '',
     abnormal: '',
     batch_no: '',
     keyword: ''
-  });
-  const [selectedIds, setSelectedIds] = useState(new Set());
-  const [showCreateModal, setShowCreateModal] = useState(false);
-  const [showBatchResult, setShowBatchResult] = useState(null);
+  })
+  const [selectedIds, setSelectedIds] = useState(new Set())
+  const [showCreateModal, setShowCreateModal] = useState(false)
+  const [showBatchResult, setShowBatchResult] = useState(null)
   const [createForm, setCreateForm] = useState({
     batch_no: '',
     customer_name: '',
@@ -23,54 +27,54 @@ function ApplicationsList() {
     old_meter_no: '',
     new_meter_no: '',
     reason: ''
-  });
+  })
 
   const loadData = () => {
-    setLoading(true);
-    setError(null);
-    const params = {};
+    setLoading(true)
+    setError(null)
+    const params = {}
     Object.keys(filters).forEach(k => {
-      if (filters[k]) params[k] = filters[k];
-    });
+      if (filters[k]) params[k] = filters[k]
+    })
     api.getApplications(params)
       .then(d => setData(d))
       .catch(err => setError(err.message))
-      .finally(() => setLoading(false));
-  };
+      .finally(() => setLoading(false))
+  }
 
   useEffect(() => {
-    loadData();
-  }, [filters]);
+    loadData()
+  }, [filters])
 
   const handleFilterChange = (key, value) => {
-    setFilters(prev => ({ ...prev, [key]: value }));
-  };
+    setFilters(prev => ({ ...prev, [key]: value }))
+  }
 
   const toggleSelect = (id) => {
     setSelectedIds(prev => {
-      const next = new Set(prev);
+      const next = new Set(prev)
       if (next.has(id)) {
-        next.delete(id);
+        next.delete(id)
       } else {
-        next.add(id);
+        next.add(id)
       }
-      return next;
-    });
-  };
+      return next
+    })
+  }
 
   const toggleSelectAll = () => {
     if (selectedIds.size === data.list.length) {
-      setSelectedIds(new Set());
+      setSelectedIds(new Set())
     } else {
-      setSelectedIds(new Set(data.list.map(a => a.id)));
+      setSelectedIds(new Set(data.list.map(a => a.id)))
     }
-  };
+  }
 
   const handleCreate = async (e) => {
-    e.preventDefault();
+    e.preventDefault()
     try {
-      await api.createApplication(createForm);
-      setShowCreateModal(false);
+      await api.createApplication(createForm)
+      setShowCreateModal(false)
       setCreateForm({
         batch_no: '',
         customer_name: '',
@@ -78,36 +82,36 @@ function ApplicationsList() {
         old_meter_no: '',
         new_meter_no: '',
         reason: ''
-      });
-      loadData();
+      })
+      loadData()
     } catch (err) {
-      alert(err.message);
+      alert(err.message)
     }
-  };
+  }
 
   const handleBatchArchive = async () => {
     if (selectedIds.size === 0) {
-      alert('请选择要归档的申请');
-      return;
+      alert('请选择要归档的申请')
+      return
     }
     try {
-      const result = await api.batchArchive({ ids: Array.from(selectedIds) });
-      setShowBatchResult(result);
-      setSelectedIds(new Set());
-      loadData();
+      const result = await api.batchArchive({ ids: Array.from(selectedIds) })
+      setShowBatchResult(result)
+      setSelectedIds(new Set())
+      loadData()
     } catch (err) {
-      alert(err.message);
+      alert(err.message)
     }
-  };
+  }
 
-  const canCreate = data.current_user?.role === ROLES.METER_OPERATOR;
-  const canBatchArchive = data.current_user?.role === ROLES.GAS_ARCHIVIST;
-  const archivableCount = data.list.filter(a => 
+  const canCreate = data.current_user?.role === ROLES.METER_OPERATOR
+  const canBatchArchive = data.current_user?.role === ROLES.GAS_ARCHIVIST
+  const archivableCount = data.list.filter(a =>
     a.status === STATUS.PENDING_ARCHIVIST && selectedIds.has(a.id)
-  ).length;
+  ).length
 
-  if (loading) return <div>加载中...</div>;
-  if (error) return <div className="alert alert-error">错误: {error}</div>;
+  if (loading) return <div>加载中...</div>
+  if (error) return <div className="alert alert-error">错误: {error}</div>
 
   return (
     <div>
@@ -142,18 +146,18 @@ function ApplicationsList() {
           </div>
           <div className="filter-group">
             <label>批次号</label>
-            <input 
-              type="text" 
-              placeholder="输入批次号" 
+            <input
+              type="text"
+              placeholder="输入批次号"
               value={filters.batch_no}
               onChange={e => handleFilterChange('batch_no', e.target.value)}
             />
           </div>
           <div className="filter-group">
             <label>关键词</label>
-            <input 
-              type="text" 
-              placeholder="客户名称/表号" 
+            <input
+              type="text"
+              placeholder="客户名称/表号"
               value={filters.keyword}
               onChange={e => handleFilterChange('keyword', e.target.value)}
             />
@@ -167,8 +171,8 @@ function ApplicationsList() {
 
         {canBatchArchive && (
           <div className="batch-actions">
-            <button 
-              className="btn btn-success btn-sm" 
+            <button
+              className="btn btn-success btn-sm"
               onClick={handleBatchArchive}
               disabled={archivableCount === 0}
             >
@@ -185,8 +189,8 @@ function ApplicationsList() {
             <tr>
               {canBatchArchive && (
                 <th className="checkbox-cell">
-                  <input 
-                    type="checkbox" 
+                  <input
+                    type="checkbox"
                     checked={selectedIds.size === data.list.length && data.list.length > 0}
                     onChange={toggleSelectAll}
                   />
@@ -213,7 +217,7 @@ function ApplicationsList() {
               <tr key={app.id} className={app.is_abnormal ? 'row-abnormal' : ''}>
                 {canBatchArchive && (
                   <td className="checkbox-cell">
-                    <input 
+                    <input
                       type="checkbox"
                       checked={selectedIds.has(app.id)}
                       onChange={() => toggleSelect(app.id)}
@@ -221,7 +225,7 @@ function ApplicationsList() {
                   </td>
                 )}
                 <td>
-                  <Link to={`/applications/${app.id}`} className="link">
+                  <Link to="/applications/$id" params={{ id: app.id }} className="link">
                     {app.id}
                   </Link>
                 </td>
@@ -237,13 +241,13 @@ function ApplicationsList() {
                 </td>
                 <td>
                   {app.offline_ledger_backfilled ? (
-                    <span style={{ color: '#16a34a', fontSize: 13 }}>✓ 已回填</span>
+                    <span style={{ color: '#16a34a', fontSize: 13 }}>&#10003; 已回填</span>
                   ) : (
-                    <span style={{ color: '#dc2626', fontSize: 13 }}>✗ 未回填</span>
+                    <span style={{ color: '#dc2626', fontSize: 13 }}>&#10007; 未回填</span>
                   )}
                 </td>
                 <td>
-                  <Link to={`/applications/${app.id}`} className="link">
+                  <Link to="/applications/$id" params={{ id: app.id }} className="link">
                     查看详情
                   </Link>
                 </td>
@@ -260,8 +264,8 @@ function ApplicationsList() {
             <form onSubmit={handleCreate}>
               <div className="field">
                 <label>批次号 *</label>
-                <input 
-                  type="text" 
+                <input
+                  type="text"
                   required
                   value={createForm.batch_no}
                   onChange={e => setCreateForm({ ...createForm, batch_no: e.target.value })}
@@ -270,8 +274,8 @@ function ApplicationsList() {
               </div>
               <div className="field">
                 <label>客户名称 *</label>
-                <input 
-                  type="text" 
+                <input
+                  type="text"
                   required
                   value={createForm.customer_name}
                   onChange={e => setCreateForm({ ...createForm, customer_name: e.target.value })}
@@ -279,8 +283,8 @@ function ApplicationsList() {
               </div>
               <div className="field">
                 <label>客户地址 *</label>
-                <input 
-                  type="text" 
+                <input
+                  type="text"
                   required
                   value={createForm.customer_address}
                   onChange={e => setCreateForm({ ...createForm, customer_address: e.target.value })}
@@ -288,8 +292,8 @@ function ApplicationsList() {
               </div>
               <div className="field">
                 <label>旧表号 *</label>
-                <input 
-                  type="text" 
+                <input
+                  type="text"
                   required
                   value={createForm.old_meter_no}
                   onChange={e => setCreateForm({ ...createForm, old_meter_no: e.target.value })}
@@ -297,8 +301,8 @@ function ApplicationsList() {
               </div>
               <div className="field">
                 <label>新表号 *</label>
-                <input 
-                  type="text" 
+                <input
+                  type="text"
                   required
                   value={createForm.new_meter_no}
                   onChange={e => setCreateForm({ ...createForm, new_meter_no: e.target.value })}
@@ -306,7 +310,7 @@ function ApplicationsList() {
               </div>
               <div className="field">
                 <label>换表原因 *</label>
-                <select 
+                <select
                   required
                   value={createForm.reason}
                   onChange={e => setCreateForm({ ...createForm, reason: e.target.value })}
@@ -333,10 +337,12 @@ function ApplicationsList() {
 
       {showBatchResult && (
         <div className="modal-overlay" onClick={() => setShowBatchResult(null)}>
-          <div className="modal" onClick={e => e.stopPropagation()}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 700 }}>
             <h3>批量归档结果</h3>
             <div style={{ marginBottom: 12 }}>
               <span style={{ color: '#16a34a' }}>成功: {showBatchResult.success}</span>
+              <span style={{ margin: '0 12px', color: '#94a3b8' }}>|</span>
+              <span style={{ color: '#d97706' }}>拦截: {showBatchResult.blocked}</span>
               <span style={{ margin: '0 12px', color: '#94a3b8' }}>|</span>
               <span style={{ color: '#dc2626' }}>失败: {showBatchResult.failed}</span>
               <span style={{ margin: '0 12px', color: '#94a3b8' }}>|</span>
@@ -344,12 +350,34 @@ function ApplicationsList() {
             </div>
             <div className="result-list">
               {showBatchResult.results.map(r => (
-                <div key={r.id} className={`result-item ${r.success ? 'success' : 'failed'}`}>
+                <div key={r.id} className={`result-item ${r.archived ? 'success' : 'failed'}`}>
                   <strong>{r.id}</strong>
-                  {r.success ? (
+                  {r.archived ? (
                     <span> - {r.detail}</span>
                   ) : (
-                    <span> - 失败: {r.error}</span>
+                    <div>
+                      <div>- {r.error || r.detail}</div>
+                      {r.issues && r.issues.length > 0 && (
+                        <div className="issue-list">
+                          {r.issues.map((issue, idx) => (
+                            <div key={idx} className="issue-item" style={{ padding: 8 }}>
+                              <div className="issue-type">[{issue.type_name}]</div>
+                              <div className="issue-comparison">
+                                <div className="issue-side issue-side-online">
+                                  <div className="issue-side-label">{issue.online.label}</div>
+                                  <div>{issue.online.value}</div>
+                                </div>
+                                <div className="issue-side issue-side-offline">
+                                  <div className="issue-side-label">{issue.offline.label}</div>
+                                  <div>{issue.offline.value}</div>
+                                </div>
+                              </div>
+                              <div className="issue-message">{issue.message}</div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   )}
                 </div>
               ))}
@@ -363,7 +391,5 @@ function ApplicationsList() {
         </div>
       )}
     </div>
-  );
+  )
 }
-
-export default ApplicationsList;

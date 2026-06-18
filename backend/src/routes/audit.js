@@ -8,7 +8,7 @@ const app = new Hono();
 app.use('*', authMiddleware);
 
 app.get('/', (c) => {
-  const { application_id, user_role, action, keyword } = c.req.query();
+  const { application_id, user_role, action, keyword, has_failure } = c.req.query();
 
   let query = `
     SELECT al.*, u.name as user_name, a.customer_name, a.batch_no
@@ -31,9 +31,13 @@ app.get('/', (c) => {
     query += ' AND al.action = ?';
     params.push(action);
   }
+  if (has_failure === 'true') {
+    query += ' AND al.failure_reason IS NOT NULL AND al.failure_reason != ?';
+    params.push('');
+  }
   if (keyword) {
-    query += ' AND (al.details LIKE ? OR al.failure_reason LIKE ?';
-    params.push(`%${keyword}%`, `%${keyword}%`);
+    query += ' AND (al.details LIKE ? OR al.failure_reason LIKE ? OR al.remark LIKE ?)';
+    params.push(`%${keyword}%`, `%${keyword}%`, `%${keyword}%`);
   }
 
   query += ' ORDER BY al.created_at DESC LIMIT 200';
@@ -42,7 +46,7 @@ app.get('/', (c) => {
     ...l,
     user_role_name: ROLE_NAMES[l.user_role] || l.user_role,
     action_name: ACTION_NAMES[l.action] || l.action,
-    has_failure: !!l.failure_reason
+    has_failure: !!(l.failure_reason && l.failure_reason.trim() !== '')
   }));
 
   return c.json(logs);
@@ -59,7 +63,8 @@ app.get('/failures', (c) => {
   `).all().map(l => ({
     ...l,
     user_role_name: ROLE_NAMES[l.user_role] || l.user_role,
-    action_name: ACTION_NAMES[l.action] || l.action
+    action_name: ACTION_NAMES[l.action] || l.action,
+    has_failure: true
   }));
 
   return c.json(logs);

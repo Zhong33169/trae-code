@@ -1,26 +1,40 @@
-import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
-import { api } from '../lib/api.js';
+import { useState, useEffect } from 'react'
+import { createFileRoute, Link } from '@tanstack/react-router'
+import { api } from '../lib/api.js'
+
+export const Route = createFileRoute('/audit')({
+  component: AuditLogs,
+})
 
 function AuditLogs() {
-  const [logs, setLogs] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [showFailuresOnly, setShowFailuresOnly] = useState(false);
+  const [logs, setLogs] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [showFailuresOnly, setShowFailuresOnly] = useState(false)
+  const [keyword, setKeyword] = useState('')
 
   const loadData = () => {
-    setLoading(true);
-    const req = showFailuresOnly ? api.getAuditFailures() : api.getAuditLogs();
+    setLoading(true)
+    const params = {}
+    if (showFailuresOnly) params.has_failure = 'true'
+    if (keyword) params.keyword = keyword
+
+    const req = showFailuresOnly || keyword ? api.getAuditLogs(params) : api.getAuditLogs(params)
     req
       .then(data => setLogs(data))
       .catch(err => console.error(err))
-      .finally(() => setLoading(false));
-  };
+      .finally(() => setLoading(false))
+  }
 
   useEffect(() => {
-    loadData();
-  }, [showFailuresOnly]);
+    loadData()
+  }, [showFailuresOnly])
 
-  if (loading) return <div>加载中...</div>;
+  const handleSearch = (e) => {
+    e.preventDefault()
+    loadData()
+  }
+
+  if (loading) return <div>加载中...</div>
 
   return (
     <div>
@@ -28,7 +42,17 @@ function AuditLogs() {
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
           <h2 className="section-title">审计日志</h2>
           <div className="actions">
-            <button 
+            <form onSubmit={handleSearch} style={{ display: 'flex', gap: 8 }}>
+              <input
+                type="text"
+                placeholder="搜索详情/失败原因/备注"
+                value={keyword}
+                onChange={e => setKeyword(e.target.value)}
+                style={{ padding: '6px 12px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: 13, minWidth: 200 }}
+              />
+              <button type="submit" className="btn btn-outline btn-sm">搜索</button>
+            </form>
+            <button
               className={`btn ${showFailuresOnly ? 'btn-warning' : 'btn-outline'}`}
               onClick={() => setShowFailuresOnly(!showFailuresOnly)}
             >
@@ -52,6 +76,7 @@ function AuditLogs() {
                 <th>关联申请</th>
                 <th>详情</th>
                 <th>失败原因</th>
+                <th>备注</th>
               </tr>
             </thead>
             <tbody>
@@ -63,7 +88,7 @@ function AuditLogs() {
                   <td>{l.action_name}</td>
                   <td>
                     {l.application_id ? (
-                      <Link to={`/applications/${l.application_id}`} className="link">
+                      <Link to="/applications/$id" params={{ id: l.application_id }} className="link">
                         {l.application_id}
                       </Link>
                     ) : '-'}
@@ -74,8 +99,13 @@ function AuditLogs() {
                     {l.failure_reason ? (
                       <div className="failure-detail">{l.failure_reason}</div>
                     ) : (
-                      <span style={{ color: '#16a34a', fontSize: 13 }}>✓</span>
+                      <span style={{ color: '#16a34a', fontSize: 13 }}>&#10003;</span>
                     )}
+                  </td>
+                  <td>
+                    {l.remark ? (
+                      <span className="remark-text" title={l.remark}>{l.remark}</span>
+                    ) : '-'}
                   </td>
                 </tr>
               ))}
@@ -84,7 +114,5 @@ function AuditLogs() {
         )}
       </div>
     </div>
-  );
+  )
 }
-
-export default AuditLogs;
