@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import { page, goto } from '$app/navigation';
+  import { goto } from '$app/navigation';
+  import { page } from '$app/stores';
   import { currentUser } from '$lib/stores';
   import { apiGet, apiPost, apiPostFull } from '$lib/api';
   import {
@@ -51,14 +52,21 @@
     setTimeout(() => toast = null, 3500);
   }
 
-  $: isMine = $currentUser && app ? $currentUser.id === app.current_handler : false;
-  $: role = $currentUser?.role || '';
-  $: evidenceMissing: string[] = (app?.required_evidence || [])
-    .filter((r: string) => !(app?.submitted_evidence || []).includes(r));
-  $: canSubmit = role === 'REGISTRAR' && isMine
-    && (app?.status === 'DRAFT' || app?.status === 'RETURNED_FOR_CORRECTION' || app?.status === 'EVIDENCE_MISSING');
-  $: auditorActions = getAuditorActions();
-  $: canAudit = role === 'REVIEWER' && isMine && app?.status === 'REVIEW_PENDING';
+   let isMine = false;
+  let role = '';
+  let evidenceMissing: string[] = [];
+  let canSubmit = false;
+  let auditorActions: any[] = [];
+  let canAudit = false;
+  $: {
+	  isMine = !!($currentUser && app && $currentUser.id === app.current_handler);
+    role = $currentUser?.role || '';
+    evidenceMissing = (app?.required_evidence || []).filter(r => !(app?.submitted_evidence || []).includes(r));
+    canSubmit = role === 'REGISTRAR' && isMine && (app?.status === 'DRAFT' || app?.status === 'RETURNED_FOR_CORRECTION' || app?.status === 'EVIDENCE_MISSING');
+    auditorActions = getAuditorActions();
+    canAudit = role === 'REVIEWER' && isMine && app?.status === 'REVIEW_PENDING';
+  }
+
 
   function getAuditorActions() {
     if (!app || !isMine || role !== 'AUDITOR') return [];
@@ -194,7 +202,7 @@
   <!-- 风险提示 -->
   {#if isMine && (app.risk_level === 'CRITICAL' || app.risk_level === 'HIGH')}
     <div class="alert {app.risk_level === 'CRITICAL' ? 'alert-danger' : 'alert-warning'}">
-      <span>{app.risk_level === 'CRITICAL' ? '🚨' : '⚠️'}</span>
+      <span>{app.risk_level === 'CRITICAL' ? '' : ''}</span>
       <div>
         <b>风险提示：</b>该申请单当前评级为 <b>{RISK_LABEL[app.risk_level]}</b>，
         处理时请审慎。调整风险等级（升/降）会写入操作记录永久留痕。
@@ -208,9 +216,9 @@
         <h2>
           {app.applicant_name} 的融资申请
           {#if app.risk_level === 'CRITICAL'}
-            <span class="badge-highlight critical">🔴🔴 {RISK_LABEL[app.risk_level]}</span>
+            <span class="badge-highlight critical">{RISK_LABEL[app.risk_level]}</span>
           {:else if app.risk_level === 'HIGH'}
-            <span class="badge-highlight high">🔴 {RISK_LABEL[app.risk_level]}</span>
+            <span class="badge-highlight high">{RISK_LABEL[app.risk_level]}</span>
           {:else}
             <span class="tag tag-risk" style="background:{RISK_COLOR[app.risk_level]}">{RISK_LABEL[app.risk_level]}</span>
           {/if}
@@ -240,7 +248,7 @@
       {#if isMine}
         {#if canSubmit}
           <button class="primary" on:click={openSubmit}>
-            {app.status === 'DRAFT' ? '📤 提交审核' : '✏️ 补正后重新提交'}
+            {app.status === 'DRAFT' ? '提交审核' : '补正后重新提交'}
           </button>
         {/if}
         {#each auditorActions as a}
@@ -378,7 +386,7 @@
                 {/if}
                 {#if r.from_risk_level && r.to_risk_level && r.from_risk_level !== r.to_risk_level}
                   <span class="tag" style="background:#fee2e2;color:#991b1b;font-weight:600">
-                    ⚠️ 风险变更：{RISK_LABEL[r.from_risk_level]} → {RISK_LABEL[r.to_risk_level]}
+                     风险变更：{RISK_LABEL[r.from_risk_level]} → {RISK_LABEL[r.to_risk_level]}
                   </span>
                 {/if}
               </div>
@@ -402,24 +410,24 @@
       <div class="modal" style="max-width: 560px;">
         <div class="modal-header">
           <h3>
-            {app!.status === 'DRAFT' ? '📤 提交审核' : '✏️ 补正后重新提交'}
+            {app.status === 'DRAFT' ? '提交审核' : '补正后重新提交'}
           </h3>
           <button class="close-btn" on:click={() => showSubmitModal = false}>×</button>
         </div>
         <div class="modal-body">
-          {#if app!.status !== 'DRAFT' && app!.last_opinion}
+          {#if app.status !== 'DRAFT' && app.last_opinion}
             <div class="alert alert-info">
-              <span>💡</span>
+              <span></span>
               <div>
-                <b>上一处理人（{app!.last_handler_name}）的意见：</b><br>
-                {app!.last_opinion}
+                <b>上一处理人（{app.last_handler_name}）的意见：</b><br>
+                {app.last_opinion}
               </div>
             </div>
           {/if}
           <div class="form-item">
             <label>勾选已提交的证据（必填项需全部勾选）</label>
             <div class="evidence-list">
-              {#each app!.required_evidence as key}
+              {#each app.required_evidence as key}
                 <label class="evidence-item" style="cursor:pointer;user-select:none"
                   class:submitted={submitEvidence.includes(key)}
                   class:missing={!submitEvidence.includes(key)}>
@@ -433,18 +441,18 @@
           <div class="form-item">
             <label>处理说明（建议填写补充了哪些内容）</label>
             <textarea bind:value={submitOpinion}
-              placeholder={app!.status === 'DRAFT'
+              placeholder={app.status === 'DRAFT'
                 ? '如：信息已核对无误，申请主管审核'
                 : '例如：已补正财务报表数据，调整营收/金额比例，请复核'} rows={3}></textarea>
           </div>
           <div style="font-size:11px;color:var(--text-muted)">
-            后端校验项：当前处理人、角色{role}、状态{app!.status}、版本v{app!.version}、必填证据齐全
+            后端校验项：当前处理人、角色{role}、状态{app.status}、版本v{app.version}、必填证据齐全
           </div>
         </div>
         <div class="modal-footer">
           <button class="secondary" on:click={() => showSubmitModal = false}>取消</button>
           <button class="primary" on:click={doSubmit}>
-            {app!.status === 'DRAFT' ? '提交审核' : '补正并提交'}
+            {app.status === 'DRAFT' ? '提交审核' : '补正并提交'}
           </button>
         </div>
       </div>
@@ -477,7 +485,7 @@
               </span>
             </label>
             <select bind:value={processNewRisk}>
-              <option value={null as any}>保持不变（当前：{RISK_LABEL[app.risk_level]}）</option>
+              <option value="">保持不变（当前：{RISK_LABEL[app.risk_level]}）</option>
               <option value="LOW">低风险</option>
               <option value="MEDIUM">中风险</option>
               <option value="HIGH">高风险</option>
@@ -528,7 +536,7 @@
               </span>
             </label>
             <select bind:value={auditRisk}>
-              <option value={null as any}>保持不变（当前：{RISK_LABEL[app.risk_level]}）</option>
+              <option value="">保持不变（当前：{RISK_LABEL[app.risk_level]}）</option>
               <option value="LOW">低风险</option>
               <option value="MEDIUM">中风险</option>
               <option value="HIGH">高风险</option>

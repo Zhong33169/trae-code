@@ -1,11 +1,12 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import '$lib/app.css';
+  import '../app.css';
   import { currentUser } from '$lib/stores';
   import { ROLE_LABEL } from '$lib/types';
   import type { User } from '$lib/types';
   import { apiGet } from '$lib/api';
-  import { goto, page } from '$app/navigation';
+  import { goto } from '$app/navigation';
+  import { page } from '$app/stores';
 
   let users: User[] = [];
   let selectedUserId = '';

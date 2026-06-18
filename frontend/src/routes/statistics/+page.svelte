@@ -17,13 +17,13 @@
   });
 
   $: statusEntries = stats
-    ? Object.entries(stats.count_by_status || {}).sort((a,b) => (b[1] as number) - (a[1] as number))
+    ? Object.entries(stats.count_by_status || {}).sort((a,b) => Number(b[1]) - Number(a[1]))
     : [];
   $: riskEntries = stats
-    ? Object.entries(stats.count_by_risk || {}).sort((a,b) => (b[1] as number) - (a[1] as number))
+    ? Object.entries(stats.count_by_risk || {}).sort((a,b) => Number(b[1]) - Number(a[1]))
     : [];
-  $: total_status_count = statusEntries.reduce((s, [, v]) => s + (v as number), 0) || 1;
-  $: total_risk_count = riskEntries.reduce((s, [, v]) => s + (v as number), 0) || 1;
+  $: total_status_count = statusEntries.reduce((s, [, v]) => s + Number(v), 0) || 1;
+  $: total_risk_count = riskEntries.reduce((s, [, v]) => s + Number(v), 0) || 1;
 </script>
 
 <div class="stats-grid">
@@ -58,7 +58,7 @@
     </div>
     <div class="card-body">
       {#each statusEntries as [status, count]}
-        {@const pct = Math.round((count as number) / total_status_count * 100)}
+        {@const pct = Math.round(Number(count) / total_status_count * 100)}
         <div style="margin-bottom: 14px;">
           <div style="display:flex; justify-content:space-between; margin-bottom:4px; font-size:13px;">
             <span style="display:flex;align-items:center;gap:6px;">
@@ -82,7 +82,7 @@
     </div>
     <div class="card-body">
       {#each riskEntries as [risk, count]}
-        {@const pct = Math.round((count as number) / total_risk_count * 100)}
+        {@const pct = Math.round(Number(count) / total_risk_count * 100)}
         <div style="margin-bottom: 14px;">
           <div style="display:flex; justify-content:space-between; margin-bottom:4px; font-size:13px;">
             <span style="display:flex;align-items:center;gap:6px;">

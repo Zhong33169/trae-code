@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { currentUser } from '$lib/stores';
-  import { apiGet } from '$lib/api';
+  import { apiGet, apiPost } from '$lib/api';
   import {
     STATUS_LABEL, STATUS_COLOR, RISK_LABEL, RISK_COLOR, RISK_BG,
     ROLE_LABEL, EVIDENCE_LABEL, RESULT_LABEL
@@ -62,15 +62,21 @@
     else newForm.submitted_evidence.push(ev);
   }
 
-  $: myPending: FinancingApplication[] = $currentUser
-    ? all.filter(a => a.current_handler === $currentUser!.id
-        && !['ARCHIVED','REJECTED'].includes(a.status))
-    : [];
-  $: myCreated: FinancingApplication[] = $currentUser
-    ? all.filter(a => a.created_by === $currentUser!.id)
-    : [];
-  $: highRiskList: FinancingApplication[] = all.filter(a =>
-    ['HIGH','CRITICAL'].includes(a.risk_level));
+  let myPending: FinancingApplication[] = [];
+  let myCreated: FinancingApplication[] = [];
+  let highRiskList: FinancingApplication[] = [];
+
+  $: {
+    if ($currentUser) {
+      myPending = all.filter(a => a.current_handler === $currentUser!.id
+        && !['ARCHIVED','REJECTED'].includes(a.status));
+      myCreated = all.filter(a => a.created_by === $currentUser!.id);
+    } else {
+      myPending = [];
+      myCreated = [];
+    }
+    highRiskList = all.filter(a => ['HIGH','CRITICAL'].includes(a.risk_level));
+  }
 
   onMount(async () => {
     await loadData();
@@ -284,12 +290,11 @@
                   </div>
                 </td>
                 <td>
-                  {@const ev = evidenceStatusStr(a)}
-                  <div style="font-weight: 600; color: {ev.missing.length ? 'var(--danger)' : 'var(--success)'};">
-                    {ev.submitted}/{ev.required}
+                  <div style="font-weight: 600; color: {evidenceStatusStr(a).missing.length ? 'var(--danger)' : 'var(--success)'};">
+                    {evidenceStatusStr(a).submitted}/{evidenceStatusStr(a).required}
                   </div>
-                  {#if ev.missing.length}
-                    <div style="font-size: 11px; color: var(--danger);">缺 {ev.missing.length} 项</div>
+                  {#if evidenceStatusStr(a).missing.length}
+                    <div style="font-size: 11px; color: var(--danger);">缺 {evidenceStatusStr(a).missing.length} 项</div>
                   {/if}
                 </td>
                 <td style="max-width: 240px;">

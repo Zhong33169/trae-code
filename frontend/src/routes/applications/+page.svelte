@@ -7,7 +7,8 @@
     ROLE_LABEL, EVIDENCE_LABEL, RESULT_LABEL
   } from '$lib/types';
   import type { FinancingApplication, Statistics } from '$lib/types';
-  import { goto, page } from '$app/navigation';
+  import { goto } from '$app/navigation';
+  import { page } from '$app/stores';
 
   let loading = true;
   let all: FinancingApplication[] = [];
