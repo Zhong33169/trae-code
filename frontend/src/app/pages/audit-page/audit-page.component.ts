@@ -49,7 +49,10 @@ import { TopicService, AuditLog, ImportBatch } from '../../services/topic.servic
             <tr *ngFor="let log of logs()">
               <td>{{ log.created_at | slice : 0 : 19 }}</td>
               <td>{{ log.user_name }} <span class="muted">(id: {{ log.user_id | slice : 0 : 8 }})</span></td>
-              <td><span class="act act-{{ log.action }}">{{ actionLabel(log.action) }}</span></td>
+              <td>
+                <div><span class="act act-{{ log.action }}">{{ actionLabel(log.action) }}</span></div>
+                <div *ngIf="log.process_stage" class="stage-tag">{{ stageLabel(log.process_stage) }}</div>
+              </td>
               <td>
                 <span *ngIf="log.old_status" class="status-mini status-{{ log.old_status }}">{{ statusLabel(log.old_status) }}</span>
                 <span *ngIf="log.old_status && log.new_status"> → </span>
@@ -64,7 +67,26 @@ import { TopicService, AuditLog, ImportBatch } from '../../services/topic.servic
                 <span *ngIf="log.import_batch_id" class="muted" style="font-family: monospace; font-size: 12px;">{{ log.import_batch_id | slice : 0 : 8 }}</span>
                 <span *ngIf="!log.import_batch_id" class="muted">-</span>
               </td>
-              <td style="max-width: 360px;">{{ log.detail || '-' }}</td>
+              <td style="max-width: 400px;">
+                <div *ngIf="log.decision_summary" class="decision-summary">{{ log.decision_summary }}</div>
+                <div *ngIf="!log.decision_summary">{{ log.detail || '-' }}</div>
+                <div *ngIf="log.detail && log.decision_summary" class="muted" style="margin-top: 4px; font-size: 12px;">{{ log.detail }}</div>
+                <div *ngIf="log.field_snapshot_old && log.field_snapshot_new" class="snapshot-area">
+                  <button class="btn-link snapshot-btn" (click)="toggleSnapshot(log.id)">
+                    {{ snapshotExpanded()[log.id] ? '收起字段快照' : '展开字段快照' }}
+                  </button>
+                  <div *ngIf="snapshotExpanded()[log.id]" class="snapshot-compare">
+                    <div class="snapshot-col">
+                      <div class="muted" style="font-size: 11px;">原值：</div>
+                      <pre class="snapshot-pre">{{ formatSnapshot(log.field_snapshot_old) }}</pre>
+                    </div>
+                    <div class="snapshot-col">
+                      <div class="muted" style="font-size: 11px;">新值：</div>
+                      <pre class="snapshot-pre">{{ formatSnapshot(log.field_snapshot_new) }}</pre>
+                    </div>
+                  </div>
+                </div>
+              </td>
             </tr>
             <tr *ngIf="logs().length === 0"><td colspan="7" class="empty">暂无记录</td></tr>
           </tbody>
@@ -111,6 +133,13 @@ import { TopicService, AuditLog, ImportBatch } from '../../services/topic.servic
       .status-reviewed { background: #fff3d6; color: #a76b12; }
       .status-archived { background: #d8f3df; color: #1d7a38; }
       .status-rejected { background: #fde0dc; color: #a53225; }
+      .stage-tag { margin-top: 4px; display: inline-block; padding: 1px 8px; background: #eef2fb; color: #1f3a68; border-radius: 8px; font-size: 11px; }
+      .decision-summary { background: #f0f5ff; padding: 4px 8px; border-radius: 4px; border-left: 3px solid #1f5fb0; }
+      .snapshot-area { margin-top: 6px; }
+      .snapshot-btn { font-size: 12px; }
+      .snapshot-compare { display: flex; gap: 10px; margin-top: 4px; }
+      .snapshot-col { flex: 1; }
+      .snapshot-pre { margin: 0; font-size: 11px; background: #f7f9fc; padding: 6px; border-radius: 4px; white-space: pre-wrap; }
     `,
   ],
 })
@@ -119,12 +148,35 @@ export class AuditPageComponent implements OnInit {
   batches = signal<ImportBatch[]>([]);
   filterTopicId = '';
   filterBatchId = '';
+  snapshotExpanded = signal<Record<string, boolean>>({});
 
   constructor(public auth: AuthService, private service: TopicService) {}
 
   ngOnInit() {
     this.loadBatches();
     this.load();
+  }
+
+  toggleSnapshot(id: string) {
+    this.snapshotExpanded.update(m => ({ ...m, [id]: !m[id] }));
+  }
+
+  formatSnapshot(json?: string) {
+    if (!json) return '-';
+    try {
+      return JSON.stringify(JSON.parse(json), null, 2);
+    } catch {
+      return json;
+    }
+  }
+
+  stageLabel(s?: string) {
+    const map: Record<string, string> = {
+      submit: '阶段：登记员提交',
+      resolve: '阶段：采纳线下',
+      ignore: '阶段：保留线上',
+    };
+    return map[s || ''] || '';
   }
 
   loadBatches() {

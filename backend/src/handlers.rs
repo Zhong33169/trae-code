@@ -112,6 +112,10 @@ fn row_to_audit(row: &rusqlite::Row) -> rusqlite::Result<AuditLog> {
         new_status: row.get(7)?,
         detail: row.get(8)?,
         created_at: row.get(9)?,
+        decision_summary: row.get(10).unwrap_or(None),
+        process_stage: row.get(11).unwrap_or(None),
+        field_snapshot_old: row.get(12).unwrap_or(None),
+        field_snapshot_new: row.get(13).unwrap_or(None),
     })
 }
 
@@ -124,10 +128,14 @@ pub fn write_audit(
     old_status: Option<&str>,
     new_status: Option<&str>,
     detail: Option<&str>,
+    decision_summary: Option<&str>,
+    process_stage: Option<&str>,
+    field_snapshot_old: Option<&str>,
+    field_snapshot_new: Option<&str>,
 ) -> Result<()> {
     let conn = get_conn();
     conn.execute(
-        "INSERT INTO audit_logs (id, topic_id, import_batch_id, user_id, user_name, action, old_status, new_status, detail, created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
+        "INSERT INTO audit_logs (id, topic_id, import_batch_id, user_id, user_name, action, old_status, new_status, detail, created_at, decision_summary, process_stage, field_snapshot_old, field_snapshot_new) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
         params![
             new_uuid(),
             topic_id,
@@ -139,6 +147,10 @@ pub fn write_audit(
             new_status,
             detail,
             now_str(),
+            decision_summary,
+            process_stage,
+            field_snapshot_old,
+            field_snapshot_new,
         ],
     )?;
     Ok(())
@@ -352,6 +364,10 @@ pub async fn handle_create_topic(
         None,
         Some("registered"),
         Some("选题登记员发起选题登记"),
+        None,
+        None,
+        None,
+        None,
     )
     .ok();
 
@@ -426,6 +442,10 @@ pub async fn handle_review_topic(
         Some("registered"),
         Some(new_status),
         Some(&detail),
+        None,
+        None,
+        None,
+        None,
     )
     .ok();
 
@@ -477,6 +497,10 @@ pub async fn handle_archive_topic(
             "新闻采编中心复核归档：{}",
             body.comment.clone().unwrap_or_default()
         )),
+        None,
+        None,
+        None,
+        None,
     )
     .ok();
 
@@ -539,6 +563,10 @@ pub async fn handle_rectify_topic(
         Some("rejected"),
         Some("registered"),
         Some("选题登记员补正后重新发起登记"),
+        None,
+        None,
+        None,
+        None,
     )
     .ok();
 
@@ -607,6 +635,10 @@ pub async fn handle_add_attachment(
         None,
         None,
         Some(&format!("上传附件：{}", body.filename)),
+        None,
+        None,
+        None,
+        None,
     )
     .ok();
 
@@ -762,6 +794,10 @@ pub async fn handle_execute_import(
                     "离线台账回填冲突：选题单 {} 已存在，未覆盖",
                     item.topic_no
                 )),
+                None,
+                None,
+                None,
+                None,
             )
             .ok();
             continue;
@@ -823,6 +859,10 @@ pub async fn handle_execute_import(
                     "离线台账回填失败：选题单 {}，非法状态值：{}",
                     item.topic_no, status
                 )),
+                None,
+                None,
+                None,
+                None,
             )
             .ok();
             continue;
@@ -896,6 +936,10 @@ pub async fn handle_execute_import(
                         "离线台账回填成功导入：批次 {}，来源 {}",
                         batch_no, body.source
                     )),
+                    None,
+                    None,
+                    None,
+                    None,
                 )
                 .ok();
             }
@@ -946,6 +990,10 @@ pub async fn handle_execute_import(
                         item.topic_no,
                         e.to_string()
                     )),
+                    None,
+                    None,
+                    None,
+                    None,
                 )
                 .ok();
             }
@@ -1074,7 +1122,7 @@ pub async fn handle_list_audit(
         return json_err(&e.to_string());
     }
     let conn = get_conn();
-    let base_sql = "SELECT id, topic_id, import_batch_id, user_id, user_name, action, old_status, new_status, detail, created_at FROM audit_logs";
+    let base_sql = "SELECT id, topic_id, import_batch_id, user_id, user_name, action, old_status, new_status, detail, created_at, decision_summary, process_stage, field_snapshot_old, field_snapshot_new FROM audit_logs";
     let rows: Vec<AuditLog> = if let Some(tid) = q.topic_id.as_ref() {
         let mut stmt = conn
             .prepare(&format!("{} WHERE topic_id = ?1 ORDER BY created_at DESC", base_sql))
@@ -1176,6 +1224,10 @@ pub async fn handle_process_conflict(
                 Some("pending"),
                 Some("submitted"),
                 Some(&format!("登记员提交冲突处理申请：{}", body.remark)),
+                Some(&decision_summary),
+                Some("submit"),
+                snapshot_old.as_deref(),
+                snapshot_new.as_deref(),
             );
         }
         "resolve" | "ignore" => {
@@ -1288,6 +1340,10 @@ pub async fn handle_process_conflict(
                                 Some("submitted"),
                                 Some("resolved"),
                                 Some(&format!("审核主管采纳线下数据覆盖线上，影响字段[{}]：{}", changed_fields.join(","), body.remark)),
+                                Some(&decision_summary),
+                                Some(stage_label),
+                                Some(&snapshot_old),
+                                Some(&snapshot_new),
                             );
                         }
                     }
@@ -1323,6 +1379,10 @@ pub async fn handle_process_conflict(
                     Some("submitted"),
                     Some("resolved"),
                     Some(&format!("审核主管保留线上数据，冲突字段[{}]不覆盖：{}", diff_keys, body.remark)),
+                    Some(&decision_summary),
+                    Some(stage_label),
+                    snapshot_old.as_deref(),
+                    snapshot_new.as_deref(),
                 );
             }
         }

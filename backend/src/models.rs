@@ -228,6 +228,14 @@ pub struct AuditLog {
     #[serde(default)]
     pub detail: Option<String>,
     pub created_at: String,
+    #[serde(default)]
+    pub decision_summary: Option<String>,
+    #[serde(default)]
+    pub process_stage: Option<String>,
+    #[serde(default)]
+    pub field_snapshot_old: Option<String>,
+    #[serde(default)]
+    pub field_snapshot_new: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

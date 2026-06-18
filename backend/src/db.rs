@@ -100,7 +100,11 @@ pub fn init_db() -> Result<()> {
             old_status TEXT,
             new_status TEXT,
             detail TEXT,
-            created_at TEXT NOT NULL
+            created_at TEXT NOT NULL,
+            decision_summary TEXT,
+            process_stage TEXT,
+            field_snapshot_old TEXT,
+            field_snapshot_new TEXT
         );
         "#,
     )?;
@@ -139,6 +143,18 @@ pub fn init_db() -> Result<()> {
     );
     let _ = conn.execute_batch(
         "ALTER TABLE import_records ADD COLUMN process_stage TEXT;",
+    );
+    let _ = conn.execute_batch(
+        "ALTER TABLE audit_logs ADD COLUMN decision_summary TEXT;",
+    );
+    let _ = conn.execute_batch(
+        "ALTER TABLE audit_logs ADD COLUMN process_stage TEXT;",
+    );
+    let _ = conn.execute_batch(
+        "ALTER TABLE audit_logs ADD COLUMN field_snapshot_old TEXT;",
+    );
+    let _ = conn.execute_batch(
+        "ALTER TABLE audit_logs ADD COLUMN field_snapshot_new TEXT;",
     );
 
     Ok(())
@@ -218,7 +234,7 @@ pub fn seed_demo_data() -> Result<()> {
     )?;
 
     conn.execute(
-        "INSERT INTO audit_logs (id, topic_id, import_batch_id, user_id, user_name, action, old_status, new_status, detail, created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
+        "INSERT INTO audit_logs (id, topic_id, import_batch_id, user_id, user_name, action, old_status, new_status, detail, created_at, decision_summary, process_stage, field_snapshot_old, field_snapshot_new) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,NULL,NULL,NULL,NULL)",
         rusqlite::params![
             Uuid::new_v4().to_string(), rejected_id, None as Option<String>, reviewer_id, "李审核", "reject",
             "registered", "rejected", "退回原因：线索不充分、方向模糊", now
@@ -258,7 +274,7 @@ pub fn seed_demo_data() -> Result<()> {
         ],
     )?;
     conn.execute(
-        "INSERT INTO audit_logs (id, topic_id, import_batch_id, user_id, user_name, action, old_status, new_status, detail, created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
+        "INSERT INTO audit_logs (id, topic_id, import_batch_id, user_id, user_name, action, old_status, new_status, detail, created_at, decision_summary, process_stage, field_snapshot_old, field_snapshot_new) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,NULL,NULL,NULL,NULL)",
         rusqlite::params![
             Uuid::new_v4().to_string(), demo_offline_topic_id, demo_batch_id,
             register_id, "张登记", "import_create",
@@ -297,7 +313,7 @@ pub fn seed_demo_data() -> Result<()> {
         ],
     )?;
     conn.execute(
-        "INSERT INTO audit_logs (id, topic_id, import_batch_id, user_id, user_name, action, old_status, new_status, detail, created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
+        "INSERT INTO audit_logs (id, topic_id, import_batch_id, user_id, user_name, action, old_status, new_status, detail, created_at, decision_summary, process_stage, field_snapshot_old, field_snapshot_new) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,NULL,NULL,NULL,NULL)",
         rusqlite::params![
             Uuid::new_v4().to_string(), normal_id, demo_batch_id,
             register_id, "张登记", "import_conflict",
@@ -332,13 +348,16 @@ pub fn seed_demo_data() -> Result<()> {
         ],
     )?;
     conn.execute(
-        "INSERT INTO audit_logs (id, topic_id, import_batch_id, user_id, user_name, action, old_status, new_status, detail, created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
+        "INSERT INTO audit_logs (id, topic_id, import_batch_id, user_id, user_name, action, old_status, new_status, detail, created_at, decision_summary, process_stage, field_snapshot_old, field_snapshot_new) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,'submit',?12,?13)",
         rusqlite::params![
             Uuid::new_v4().to_string(), missing_id, demo_batch_id,
             register_id, "张登记", "conflict_submit",
             Some("pending"), Some("submitted"),
             "离线回填冲突已提交审核：线下台账核对确认，记者和截止日期信息以下发的纸质台账为准，请主管审核",
-            submitted_time
+            submitted_time,
+            submitted_summary,
+            submitted_snapshot_old,
+            submitted_snapshot_new
         ],
     )?;
 
@@ -367,13 +386,16 @@ pub fn seed_demo_data() -> Result<()> {
         ],
     )?;
     conn.execute(
-        "INSERT INTO audit_logs (id, topic_id, import_batch_id, user_id, user_name, action, old_status, new_status, detail, created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
+        "INSERT INTO audit_logs (id, topic_id, import_batch_id, user_id, user_name, action, old_status, new_status, detail, created_at, decision_summary, process_stage, field_snapshot_old, field_snapshot_new) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,'resolve',?12,?13)",
         rusqlite::params![
             Uuid::new_v4().to_string(), overdue_id, demo_batch_id,
             reviewer_id, "王主管", "conflict_resolve",
             Some("submitted"), Some("resolved"),
             "离线回填冲突已处理（采纳线下）：经与纸质台账核对，线下信息准确，采纳线下数据覆盖线上",
-            resolved_time
+            resolved_time,
+            resolved_summary,
+            resolved_snapshot_old,
+            resolved_snapshot_new
         ],
     )?;
 
@@ -389,7 +411,7 @@ pub fn seed_demo_data() -> Result<()> {
         ],
     )?;
     conn.execute(
-        "INSERT INTO audit_logs (id, topic_id, import_batch_id, user_id, user_name, action, old_status, new_status, detail, created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
+        "INSERT INTO audit_logs (id, topic_id, import_batch_id, user_id, user_name, action, old_status, new_status, detail, created_at, decision_summary, process_stage, field_snapshot_old, field_snapshot_new) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,NULL,NULL,NULL,NULL)",
         rusqlite::params![
             Uuid::new_v4().to_string(), None as Option<String>, demo_batch_id,
             register_id, "张登记", "import_error",

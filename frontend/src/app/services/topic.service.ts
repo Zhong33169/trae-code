@@ -52,6 +52,10 @@ export interface AuditLog {
   new_status?: string;
   detail?: string;
   created_at: string;
+  decision_summary?: string;
+  process_stage?: string;
+  field_snapshot_old?: string;
+  field_snapshot_new?: string;
 }
 
 export interface ImportBatch {
