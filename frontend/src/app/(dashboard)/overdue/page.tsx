@@ -11,6 +11,7 @@ import {
   Input,
   Form,
   Modal,
+  Select,
 } from 'antd';
 import {
   WarningOutlined,
@@ -57,7 +58,7 @@ export default function OverduePage() {
     try {
       const values = await form.validateFields();
       await orderApi.updateStatus(selectedItem.order_id, {
-        action: selectedItem.allowed_actions?.[0]?.action || 'SUBMIT',
+        action: values.action,
         overdue_reason: values.overdue_reason,
         follow_up_action: values.follow_up_action,
         remark: values.remark,
@@ -80,6 +81,15 @@ export default function OverduePage() {
       follow_up_action: item.follow_up_action,
     });
     setHandleModal(true);
+  };
+
+  const formatOverdueHours = (hours: number) => {
+    if (hours >= 24) {
+      const days = Math.floor(hours / 24);
+      const remainingHours = Math.floor(hours % 24);
+      return `${days}天${remainingHours}小时`;
+    }
+    return `${Math.floor(hours)}小时`;
   };
 
   const columns = [
@@ -140,18 +150,16 @@ export default function OverduePage() {
       key: 'overdue_duration',
       width: 120,
       render: (_: any, record: any) => {
-        const hours = Math.max(0, (Date.now() - dayjs(record.deadline).valueOf()) / 3600000);
-        const days = Math.floor(hours / 24);
-        const remainingHours = Math.floor(hours % 24);
+        const hours = record.overdue_hours ?? 0;
         return (
           <span style={{ color: '#ff4d4f', fontWeight: 500 }}>
-            {days > 0 ? `${days}天` : ''}{remainingHours}小时
+            {formatOverdueHours(hours)}
           </span>
         );
       },
       sorter: (a: any, b: any) => {
-        const aHours = (Date.now() - dayjs(a.deadline).valueOf()) / 3600000;
-        const bHours = (Date.now() - dayjs(b.deadline).valueOf()) / 3600000;
+        const aHours = a.overdue_hours ?? 0;
+        const bHours = b.overdue_hours ?? 0;
         return aHours - bHours;
       },
     },
@@ -243,6 +251,19 @@ export default function OverduePage() {
         width={600}
       >
         <Form form={form} layout="vertical">
+          <Form.Item
+            name="action"
+            label="选择操作"
+            rules={[{ required: true, message: '请选择操作' }]}
+          >
+            <Select
+              placeholder="请选择要执行的操作"
+              options={selectedItem?.allowed_actions?.map((a: any) => ({
+                value: a.action,
+                label: a.action_cn,
+              })) || []}
+            />
+          </Form.Item>
           <Form.Item
             name="overdue_reason"
             label="超时原因"

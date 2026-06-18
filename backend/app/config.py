@@ -39,3 +39,12 @@ NODE_DEADLINES = {
     "REVIEW_ARCHIVE": timedelta(hours=48),
     "DIRECTOR_CONFIRM": timedelta(hours=24),
 }
+
+NODE_NAMES_CN = {
+    "DEPARTMENT_SUBMIT": "科室提交",
+    "QUALITY_REVIEW": "质控审核",
+    "NOTICE_SEND": "发送整改通知",
+    "RECTIFICATION": "整改处理",
+    "REVIEW_ARCHIVE": "复核归档",
+    "DIRECTOR_CONFIRM": "医务部确认",
+}

@@ -6,17 +6,8 @@ from .models import (
     User, RectificationOrder, NodeRecord, OperationLog,
     QualityControl, RectificationNotice, ReviewArchive
 )
-from .config import STATUS, ROLES, NODE_DEADLINES
+from .config import STATUS, ROLES, NODE_DEADLINES, NODE_NAMES_CN
 from .auth import get_password_hash
-
-NODE_NAMES_CN = {
-    "DEPARTMENT_SUBMIT": "科室提交",
-    "QUALITY_REVIEW": "质控审核",
-    "NOTICE_SEND": "发送整改通知",
-    "RECTIFICATION": "整改处理",
-    "REVIEW_ARCHIVE": "复核归档",
-    "DIRECTOR_CONFIRM": "医务部确认",
-}
 
 STATUS_TRANSITIONS = {
     "PENDING_SUBMIT": {
@@ -685,7 +676,7 @@ def get_order_list(
     if status:
         query = query.filter(RectificationOrder.status == status)
 
-    if department:
+    if department and user.role != "DEPARTMENT_SECRETARY":
         query = query.filter(RectificationOrder.department == department)
 
     total = query.count()
@@ -696,6 +687,7 @@ def get_order_list(
     overdue_count = 0
     for order in orders:
         serialized = serialize_order(db, order, user, include_details=False)
+        serialized["allowed_actions"] = get_allowed_actions(db, order, user)
         if serialized.get("is_overdue"):
             overdue_count += 1
         if is_overdue is None or serialized.get("is_overdue") == is_overdue:
@@ -704,8 +696,8 @@ def get_order_list(
     stats = get_statistics(db, user)
 
     return {
-        "items": items if is_overdue is None else [o for o in items if o.get("is_overdue") == is_overdue],
-        "total": total if is_overdue is None else overdue_count,
+        "items": items,
+        "total": total if is_overdue is None else len(items),
         "page": skip // limit + 1,
         "page_size": limit,
         "overdue_count": overdue_count,
@@ -714,6 +706,8 @@ def get_order_list(
 
 
 def get_statistics(db: Session, user: User) -> Dict[str, Any]:
+    from sqlalchemy import func
+
     query = db.query(RectificationOrder)
 
     if user.role == "DEPARTMENT_SECRETARY":
@@ -722,7 +716,7 @@ def get_statistics(db: Session, user: User) -> Dict[str, Any]:
     total = query.count()
 
     by_status = {}
-    status_counts = db.query(
+    status_counts = query.with_entities(
         RectificationOrder.status, func.count(RectificationOrder.id)
     ).group_by(RectificationOrder.status).all()
     for s, count in status_counts:
@@ -730,7 +724,7 @@ def get_statistics(db: Session, user: User) -> Dict[str, Any]:
         by_status[STATUS.get(s, s)] = count
 
     by_dept = {}
-    dept_counts = db.query(
+    dept_counts = query.with_entities(
         RectificationOrder.department, func.count(RectificationOrder.id)
     ).group_by(RectificationOrder.department).all()
     for d, count in dept_counts:
@@ -770,6 +764,8 @@ def batch_update_status(
     results = []
     success_count = 0
     failed_count = 0
+    valid_orders = []
+    status_set = set()
 
     for order_id in order_ids:
         order = db.query(RectificationOrder).filter(RectificationOrder.id == order_id).first()
@@ -782,6 +778,42 @@ def batch_update_status(
             failed_count += 1
             continue
 
+        if user.role == "DEPARTMENT_SECRETARY" and order.department != user.department:
+            results.append({
+                "order_id": order_id,
+                "order_no": order.order_no,
+                "success": False,
+                "message": "科室秘书不能操作其他科室的订单",
+            })
+            failed_count += 1
+            continue
+
+        valid, error_msg, _ = validate_status_transition(db, order, action, user)
+        if not valid:
+            results.append({
+                "order_id": order_id,
+                "order_no": order.order_no,
+                "success": False,
+                "message": error_msg,
+            })
+            failed_count += 1
+            continue
+
+        valid_orders.append(order)
+        status_set.add(order.status)
+
+    if len(status_set) > 1:
+        for order in valid_orders:
+            results.append({
+                "order_id": order.id,
+                "order_no": order.order_no,
+                "success": False,
+                "message": "批量操作必须同一状态",
+            })
+            failed_count += 1
+        valid_orders = []
+
+    for order in valid_orders:
         try:
             result = update_order_status(
                 db, order, action, user,
@@ -791,22 +823,24 @@ def batch_update_status(
                 extra_data=data,
             )
             results.append({
-                "order_id": order_id,
+                "order_id": order.id,
                 "order_no": order.order_no,
                 "success": True,
                 **result,
             })
             success_count += 1
         except Exception as e:
+            db.rollback()
             results.append({
-                "order_id": order_id,
+                "order_id": order.id,
                 "order_no": order.order_no,
                 "success": False,
                 "message": str(e),
             })
             failed_count += 1
 
-    db.commit()
+    if valid_orders and success_count > 0:
+        db.commit()
 
     return {
         "success_count": success_count,

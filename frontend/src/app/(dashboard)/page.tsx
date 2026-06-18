@@ -171,6 +171,26 @@ export default function OrdersPage() {
     }
   };
 
+  const handleRowAction = (record: RectificationOrder, action: AllowedAction) => {
+    Modal.confirm({
+      title: `确认${action.action_cn}？`,
+      content: `整改单 ${record.order_no} 将从「${record.status_cn}」变更为「${action.new_status_cn}」`,
+      okText: '确认',
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          await orderApi.updateStatus(record.id, {
+            action: action.action,
+          });
+          message.success(`${action.action_cn}成功`);
+          fetchData();
+        } catch (error: any) {
+          message.error(error.message || '操作失败');
+        }
+      },
+    });
+  };
+
   const handleRowSelect = (newSelectedRowKeys: number[]) => {
     setSelectedRowKeys(newSelectedRowKeys);
     if (newSelectedRowKeys.length > 0) {
@@ -297,14 +317,27 @@ export default function OrdersPage() {
     {
       title: '操作',
       key: 'actions',
-      width: 100,
+      width: 200,
       fixed: 'right' as const,
       render: (_: any, record: RectificationOrder) => (
-        <Link href={`/orders/${record.id}`}>
-          <Button type="link" icon={<EyeOutlined />}>
-            详情
-          </Button>
-        </Link>
+        <Space size={4}>
+          <Link href={`/orders/${record.id}`}>
+            <Button type="link" icon={<EyeOutlined />} size="small">
+              详情
+            </Button>
+          </Link>
+          {record.allowed_actions?.map((action) => (
+            <Button
+              key={action.action}
+              type="link"
+              size="small"
+              danger={action.action.includes('REJECT')}
+              onClick={() => handleRowAction(record, action)}
+            >
+              {action.action_cn}
+            </Button>
+          ))}
+        </Space>
       ),
     },
   ];
