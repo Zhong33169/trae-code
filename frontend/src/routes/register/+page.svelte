@@ -22,6 +22,7 @@
   $: currentUser = $userStore.loading ? undefined : $userStore.users.find(u => u.id === $userStore.currentUserId);
   $: canRegister = !!currentUser && currentUser.role === 'FINANCIAL_ADVISOR';
   $: missingEvidence = requiredEvidence.filter(req => !selectedEvidence.some(e => e && e.includes(req)));
+  $: isFormValid = canRegister && !!customer_name && !!account_no && Number(trade_amount) > 0 && !!trade_date && missingEvidence.length === 0;
 
   afterUpdate(() => {
     if ($userStore.currentUserId && $userStore.currentUserId !== lastUserId && !$userStore.loading) {
@@ -47,12 +48,12 @@
   async function submit() {
     errorMsg = '';
     successMsg = '';
-    if (!canRegister) {
-      errorMsg = '仅理财顾问可以登记交易核查单，请切换身份';
+    if (!currentUser) {
+      errorMsg = '请先选择身份';
       return;
     }
-    if (!$userStore.currentUserId) {
-      errorMsg = '请先选择身份';
+    if (!canRegister) {
+      errorMsg = `仅理财顾问可以登记，当前身份为${currentUser.name}（${ROLE_LABEL[currentUser.role]}），请切换身份`;
       return;
     }
     try {
@@ -69,9 +70,13 @@
       if (deadline) body.deadline = deadline + ' 23:59:59';
       const r = await api.register(body);
       successMsg = `登记成功！单号 ${r.code}，即将跳转详情...`;
-      setTimeout(() => goto(`/review/${r.id}`), 1200);
+      userStore.refresh();
+      setTimeout(() => {
+        successMsg = '';
+        goto(`/review/${r.id}`);
+      }, 1200);
     } catch (e: any) {
-      errorMsg = e.message || '登记失败';
+      errorMsg = e.message || '登记失败，请检查表单或稍后重试';
     }
   }
 
@@ -165,7 +170,7 @@
       <div class="evidence-list">
         {#each requiredEvidence as ev}
           <label class="evidence-item">
-            <input type="checkbox" checked={selectedEvidence.includes(ev)} on:change={() => toggleEvidence(ev)} />
+            <input type="checkbox" bind:checked={selectedEvidence} value={ev} />
             <span style="color:var(--danger)">*</span>
             {ev}
           </label>
@@ -186,7 +191,7 @@
       <button
         class="primary"
         on:click={submit}
-        disabled={!canRegister || !customer_name || !account_no || !trade_amount || !trade_date || missingEvidence.length > 0}
+        disabled={!isFormValid}
       >
         提交登记
       </button>

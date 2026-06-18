@@ -54,7 +54,7 @@
     loading = false;
   }
 
-  $: currentUser = $userStore.users.find(u => u.id === $userStore.currentUserId);
+  $: currentUser = $userStore.loading ? undefined : $userStore.users.find(u => u.id === $userStore.currentUserId);
   $: requiredEvidence = review ? (RISK_REQUIRED_EVIDENCE[review.risk_level] || []) : [];
   $: missingEvidence = requiredEvidence.filter(r => !selectedEvidence.some(e => e && e.includes(r)));
 
@@ -127,9 +127,15 @@
   }
 
   function getPrevRecord(): ReviewRecord | null {
-    if (records.length < 2) return null;
+    if (records.length === 0) return null;
     const notReject = records.filter(r => r.action !== 'REJECT');
-    return notReject.length >= 2 ? notReject[1] : records[1];
+    if (notReject.length === 1) {
+      return notReject[0];
+    }
+    if (notReject.length >= 2) {
+      return notReject[notReject.length - 2];
+    }
+    return records.length >= 2 ? records[1] : records[0];
   }
 
   function getHandlerName(id: string | null): string {
@@ -223,8 +229,11 @@
 
       {#if getPrevRecord()}
         {@const prev = getPrevRecord()!}
+        {@const isOnlyRegister = records.filter(r => r.action !== 'REJECT').length === 1}
         <div style="margin-top:10px; padding:10px 12px; background:#f8fafc; border-radius:6px">
-          <div style="font-weight:600; margin-bottom:4px; color:var(--text-muted); font-size:13px">上一处理人意见</div>
+          <div style="font-weight:600; margin-bottom:4px; color:var(--text-muted); font-size:13px">
+            {isOnlyRegister ? '登记人意见' : '上一处理人意见'}
+          </div>
           <div>
             <strong>{prev.operator_name}（{ROLE_LABEL[prev.operator_role]}）</strong>
             · {ACTION_LABEL[prev.action]} · v{prev.version}
@@ -307,7 +316,7 @@
           <div class="evidence-list" style="margin-top:6px">
             {#each requiredEvidence as ev}
               <label class="evidence-item">
-                <input type="checkbox" checked={selectedEvidence.includes(ev)} on:change={() => toggleEvidence(ev)} />
+                <input type="checkbox" bind:checked={selectedEvidence} value={ev} />
                 <span style="color:var(--danger)">*</span> {ev}
               </label>
             {/each}
