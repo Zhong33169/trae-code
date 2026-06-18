@@ -4,6 +4,7 @@
   import { onMount } from 'svelte';
   import type { PageData } from './$types';
   import { ProgressStatus, TimeoutStatus, ProgressStatusLabel, TimeoutStatusLabel, OperationTypeLabel } from '$types';
+  import type { BatchResult } from '$types';
   import { formatDate, formatDateTime } from '$utils/format';
   import {
     canEditReport,
@@ -13,9 +14,14 @@
     canCorrect,
     canHandleTimeout,
     canDeleteReport,
+    canCreateWeeklyReport,
+    canCreateDeviationAnalysis,
+    canApproveDeviationAnalysis,
+    canCreateOwnerReport,
+    canAcknowledgeOwnerReport,
   } from '$utils/permissions';
   import { currentUser, showToast } from '$stores';
-  import { progressReportsApi } from '$api';
+  import { progressReportsApi, weeklyReportsApi, deviationAnalysisApi, ownerReportsApi } from '$api';
   import StatusTag from '$components/StatusTag.svelte';
   import Modal from '$components/Modal.svelte';
 
@@ -37,6 +43,12 @@
   let showTimeoutModal = false;
   let showDeleteModal = false;
 
+  let showWeeklyReportModal = false;
+  let showDeviationModal = false;
+  let showOwnerReportModal = false;
+  let showDeviationApproveModal = false;
+  let showOwnerAckModal = false;
+
   let submitRemarks = '';
   let reviewApproved = true;
   let reviewOpinion = '';
@@ -53,6 +65,34 @@
     timeoutFollowUp: '',
     remarks: '',
   };
+
+  let weeklyReportForm = {
+    weekStartDate: '',
+    weekEndDate: '',
+    weekProgress: '',
+    nextWeekPlan: '',
+    existingProblems: '',
+    completionRate: 0,
+  };
+
+  let deviationForm = {
+    deviationDescription: '',
+    causeAnalysis: '',
+    impactAssessment: '',
+    correctionMeasures: '',
+    deviationPercentage: 0,
+  };
+
+  let ownerReportForm = {
+    reportTitle: '',
+    reportContent: '',
+    reportDate: new Date().toISOString().split('T')[0],
+  };
+
+  let deviationApproveOpinion = '';
+  let ownerAckFeedback = '';
+  let activeDeviationId = '';
+  let activeOwnerReportId = '';
 
   $: action = $page.url.searchParams.get('action');
 
@@ -206,6 +246,110 @@
       remarks: '',
     };
     showTimeoutModal = true;
+  }
+
+  async function handleCreateWeeklyReport() {
+    if (!weeklyReportForm.weekStartDate || !weeklyReportForm.weekEndDate) {
+      showToast('请填写周报起止日期', 'error');
+      return;
+    }
+    try {
+      await weeklyReportsApi.create({ ...weeklyReportForm, progressReportId: reportId });
+      showToast('周报创建成功', 'success');
+      showWeeklyReportModal = false;
+      weeklyReportForm = {
+        weekStartDate: '',
+        weekEndDate: '',
+        weekProgress: '',
+        nextWeekPlan: '',
+        existingProblems: '',
+        completionRate: 0,
+      };
+      await invalidateAll();
+    } catch (e) {
+      const error = e as Error;
+      showToast(error.message || '创建失败', 'error');
+    }
+  }
+
+  async function handleCreateDeviation() {
+    if (!deviationForm.deviationDescription) {
+      showToast('请填写偏差描述', 'error');
+      return;
+    }
+    try {
+      await deviationAnalysisApi.create({ ...deviationForm, progressReportId: reportId });
+      showToast('偏差分析创建成功', 'success');
+      showDeviationModal = false;
+      deviationForm = {
+        deviationDescription: '',
+        causeAnalysis: '',
+        impactAssessment: '',
+        correctionMeasures: '',
+        deviationPercentage: 0,
+      };
+      await invalidateAll();
+    } catch (e) {
+      const error = e as Error;
+      showToast(error.message || '创建失败', 'error');
+    }
+  }
+
+  async function handleApproveDeviation() {
+    if (!deviationApproveOpinion) {
+      showToast('请输入审批意见', 'error');
+      return;
+    }
+    try {
+      await deviationAnalysisApi.approve(activeDeviationId, deviationApproveOpinion);
+      showToast('偏差分析审批成功', 'success');
+      showDeviationApproveModal = false;
+      deviationApproveOpinion = '';
+      activeDeviationId = '';
+      await invalidateAll();
+    } catch (e) {
+      const error = e as Error;
+      showToast(error.message || '审批失败', 'error');
+    }
+  }
+
+  async function handleCreateOwnerReport() {
+    if (!ownerReportForm.reportTitle || !ownerReportForm.reportContent) {
+      showToast('请填写汇报标题和内容', 'error');
+      return;
+    }
+    try {
+      await ownerReportsApi.create({ ...ownerReportForm, progressReportId: reportId });
+      showToast('业主汇报创建成功', 'success');
+      showOwnerReportModal = false;
+      ownerReportForm = {
+        reportTitle: '',
+        reportContent: '',
+        reportDate: new Date().toISOString().split('T')[0],
+      };
+      await invalidateAll();
+    } catch (e) {
+      const error = e as Error;
+      showToast(error.message || '创建失败', 'error');
+    }
+  }
+
+  async function handleAcknowledgeOwnerReport() {
+    if (!ownerAckFeedback) {
+      showToast('请输入业主反馈', 'error');
+      return;
+    }
+    try {
+      await ownerReportsApi.acknowledge(activeOwnerReportId, ownerAckFeedback);
+      showToast('业主汇报确认成功', 'success');
+      showOwnerAckModal = false;
+      ownerAckFeedback = '';
+      activeOwnerReportId = '';
+      await invalidateAll();
+    } catch (e) {
+      const error = e as Error;
+      showToast(error.message || '确认失败', 'error');
+    }
   }
 </script>
 
@@ -398,12 +542,19 @@
     {#if activeTab === 'related'}
       <div class="content-card">
         <div class="related-section">
-          <h3 class="section-title">
-            进度周报
-            {#if weeklyReports.length > 0}
-              <span class="count-badge">{weeklyReports.length}</span>
+          <div class="section-header">
+            <h3 class="section-title">
+              进度周报
+              {#if weeklyReports.length > 0}
+                <span class="count-badge">{weeklyReports.length}</span>
+              {/if}
+            </h3>
+            {#if canCreateWeeklyReport(user, report)}
+              <button class="btn btn-sm btn-outline" on:click={() => showWeeklyReportModal = true}>
+                + 新增周报
+              </button>
             {/if}
-          </h3>
+          </div>
           {#if weeklyReports.length === 0}
             <div class="empty-text">暂无周报数据</div>
           {:else}
@@ -432,12 +583,19 @@
         </div>
 
         <div class="related-section">
-          <h3 class="section-title">
-            偏差分析
-            {#if deviationAnalyses.length > 0}
-              <span class="count-badge">{deviationAnalyses.length}</span>
+          <div class="section-header">
+            <h3 class="section-title">
+              偏差分析
+              {#if deviationAnalyses.length > 0}
+                <span class="count-badge">{deviationAnalyses.length}</span>
+              {/if}
+            </h3>
+            {#if canCreateDeviationAnalysis(user)}
+              <button class="btn btn-sm btn-outline" on:click={() => showDeviationModal = true}>
+                + 新增偏差分析
+              </button>
             {/if}
-          </h3>
+          </div>
           {#if deviationAnalyses.length === 0}
             <div class="empty-text">暂无偏差分析数据</div>
           {:else}
@@ -446,9 +604,16 @@
                 <div class="related-item">
                   <div class="related-item-header">
                     <span class="related-item-title">偏差率 {da.deviationPercentage}%</span>
-                    <span class="status-badge" class:approved={da.isApproved}>
-                      {da.isApproved ? '已批准' : '待批准'}
-                    </span>
+                    <div class="item-actions">
+                      <span class="status-badge" class:approved={da.isApproved}>
+                        {da.isApproved ? '已批准' : '待批准'}
+                      </span>
+                      {#if !da.isApproved && canApproveDeviationAnalysis(user)}
+                        <button class="btn btn-sm btn-primary" on:click={() => { activeDeviationId = da.id; showDeviationApproveModal = true; }}>
+                          审批
+                        </button>
+                      {/if}
+                    </div>
                   </div>
                   <div class="related-item-row"><strong>偏差描述：</strong>{da.deviationDescription}</div>
                   <div class="related-item-row"><strong>原因分析：</strong>{da.causeAnalysis}</div>
@@ -464,12 +629,19 @@
         </div>
 
         <div class="related-section">
-          <h3 class="section-title">
-            业主汇报
-            {#if ownerReports.length > 0}
-              <span class="count-badge">{ownerReports.length}</span>
+          <div class="section-header">
+            <h3 class="section-title">
+              业主汇报
+              {#if ownerReports.length > 0}
+                <span class="count-badge">{ownerReports.length}</span>
+              {/if}
+            </h3>
+            {#if canCreateOwnerReport(user)}
+              <button class="btn btn-sm btn-outline" on:click={() => showOwnerReportModal = true}>
+                + 新增业主汇报
+              </button>
             {/if}
-          </h3>
+          </div>
           {#if ownerReports.length === 0}
             <div class="empty-text">暂无业主汇报数据</div>
           {:else}
@@ -478,9 +650,16 @@
                 <div class="related-item">
                   <div class="related-item-header">
                     <span class="related-item-title">{or.reportTitle}</span>
-                    <span class="status-badge" class:acknowledged={or.ownerAcknowledged}>
-                      {or.ownerAcknowledged ? '已确认' : '待确认'}
-                    </span>
+                    <div class="item-actions">
+                      <span class="status-badge" class:acknowledged={or.ownerAcknowledged}>
+                        {or.ownerAcknowledged ? '已确认' : '待确认'}
+                      </span>
+                      {#if !or.ownerAcknowledged && canAcknowledgeOwnerReport(user)}
+                        <button class="btn btn-sm btn-primary" on:click={() => { activeOwnerReportId = or.id; showOwnerAckModal = true; }}>
+                          确认
+                        </button>
+                      {/if}
+                    </div>
                   </div>
                   <div class="related-item-row"><strong>汇报日期：</strong>{formatDate(or.reportDate)}</div>
                   <div class="related-item-row"><strong>汇报内容：</strong>{or.reportContent}</div>
@@ -492,6 +671,13 @@
             </div>
           {/if}
         </div>
+
+        {#if report.batchResult}
+          <div class="batch-result-section">
+            <h3 class="section-title">批量办理结果</h3>
+            <div class="batch-result-content">{report.batchResult}</div>
+          </div>
+        {/if}
       </div>
     {/if}
 
@@ -690,6 +876,140 @@
   <div slot="footer">
     <button class="btn btn-outline" on:click={() => { showDeleteModal = false; }}>取消</button>
     <button class="btn btn-danger" on:click={handleDelete}>确认删除</button>
+  </div>
+</Modal>
+
+<!-- 新增周报弹窗 -->
+<Modal
+  show={showWeeklyReportModal}
+  title="新增进度周报"
+  onClose={() => { showWeeklyReportModal = false; }}
+  footer={true}
+  size="large"
+>
+  <div class="form-row">
+    <div class="form-group">
+      <label>周报起始日期 <span class="required">*</span></label>
+      <input type="date" bind:value={weeklyReportForm.weekStartDate} />
+    </div>
+    <div class="form-group">
+      <label>周报结束日期 <span class="required">*</span></label>
+      <input type="date" bind:value={weeklyReportForm.weekEndDate} />
+    </div>
+  </div>
+  <div class="form-group">
+    <label>完成率 (%)</label>
+    <input type="number" min="0" max="100" bind:value={weeklyReportForm.completionRate} />
+  </div>
+  <div class="form-group">
+    <label>本周进度</label>
+    <textarea rows="3" bind:value={weeklyReportForm.weekProgress}></textarea>
+  </div>
+  <div class="form-group">
+    <label>下周计划</label>
+    <textarea rows="3" bind:value={weeklyReportForm.nextWeekPlan}></textarea>
+  </div>
+  <div class="form-group">
+    <label>存在问题</label>
+    <textarea rows="2" bind:value={weeklyReportForm.existingProblems}></textarea>
+  </div>
+  <div slot="footer">
+    <button class="btn btn-outline" on:click={() => { showWeeklyReportModal = false; }}>取消</button>
+    <button class="btn btn-primary" on:click={handleCreateWeeklyReport}>创建周报</button>
+  </div>
+</Modal>
+
+<!-- 新增偏差分析弹窗 -->
+<Modal
+  show={showDeviationModal}
+  title="新增偏差分析"
+  onClose={() => { showDeviationModal = false; }}
+  footer={true}
+  size="large"
+>
+  <div class="form-group">
+    <label>偏差描述 <span class="required">*</span></label>
+    <textarea rows="3" placeholder="请描述偏差情况" bind:value={deviationForm.deviationDescription}></textarea>
+  </div>
+  <div class="form-group">
+    <label>偏差率 (%)</label>
+    <input type="number" min="0" step="0.01" bind:value={deviationForm.deviationPercentage} />
+  </div>
+  <div class="form-group">
+    <label>原因分析</label>
+    <textarea rows="3" bind:value={deviationForm.causeAnalysis}></textarea>
+  </div>
+  <div class="form-group">
+    <label>影响评估</label>
+    <textarea rows="3" bind:value={deviationForm.impactAssessment}></textarea>
+  </div>
+  <div class="form-group">
+    <label>纠正措施</label>
+    <textarea rows="3" bind:value={deviationForm.correctionMeasures}></textarea>
+  </div>
+  <div slot="footer">
+    <button class="btn btn-outline" on:click={() => { showDeviationModal = false; }}>取消</button>
+    <button class="btn btn-primary" on:click={handleCreateDeviation}>创建偏差分析</button>
+  </div>
+</Modal>
+
+<!-- 偏差分析审批弹窗 -->
+<Modal
+  show={showDeviationApproveModal}
+  title="审批偏差分析"
+  onClose={() => { showDeviationApproveModal = false; deviationApproveOpinion = ''; }}
+  footer={true}
+>
+  <div class="form-group">
+    <label>审批意见 <span class="required">*</span></label>
+    <textarea rows="4" placeholder="请输入审批意见" bind:value={deviationApproveOpinion}></textarea>
+  </div>
+  <div slot="footer">
+    <button class="btn btn-outline" on:click={() => { showDeviationApproveModal = false; deviationApproveOpinion = ''; }}>取消</button>
+    <button class="btn btn-primary" on:click={handleApproveDeviation}>确认审批通过</button>
+  </div>
+</Modal>
+
+<!-- 新增业主汇报弹窗 -->
+<Modal
+  show={showOwnerReportModal}
+  title="新增业主汇报"
+  onClose={() => { showOwnerReportModal = false; }}
+  footer={true}
+  size="large"
+>
+  <div class="form-group">
+    <label>汇报标题 <span class="required">*</span></label>
+    <input type="text" placeholder="请输入汇报标题" bind:value={ownerReportForm.reportTitle} />
+  </div>
+  <div class="form-group">
+    <label>汇报日期</label>
+    <input type="date" bind:value={ownerReportForm.reportDate} />
+  </div>
+  <div class="form-group">
+    <label>汇报内容 <span class="required">*</span></label>
+    <textarea rows="5" placeholder="请输入汇报内容" bind:value={ownerReportForm.reportContent}></textarea>
+  </div>
+  <div slot="footer">
+    <button class="btn btn-outline" on:click={() => { showOwnerReportModal = false; }}>取消</button>
+    <button class="btn btn-primary" on:click={handleCreateOwnerReport}>创建汇报</button>
+  </div>
+</Modal>
+
+<!-- 业主汇报确认弹窗 -->
+<Modal
+  show={showOwnerAckModal}
+  title="确认业主汇报"
+  onClose={() => { showOwnerAckModal = false; ownerAckFeedback = ''; }}
+  footer={true}
+>
+  <div class="form-group">
+    <label>业主反馈 <span class="required">*</span></label>
+    <textarea rows="4" placeholder="请输入业主反馈内容" bind:value={ownerAckFeedback}></textarea>
+  </div>
+  <div slot="footer">
+    <button class="btn btn-outline" on:click={() => { showOwnerAckModal = false; ownerAckFeedback = ''; }}>取消</button>
+    <button class="btn btn-primary" on:click={handleAcknowledgeOwnerReport}>确认</button>
   </div>
 </Modal>
 
@@ -1169,5 +1489,37 @@
   .radio-item input {
     width: auto;
     margin: 0;
+  }
+
+  .section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+  }
+
+  .item-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .btn-sm {
+    padding: 6px 12px;
+    font-size: 13px;
+  }
+
+  .batch-result-section {
+    margin-top: 24px;
+    padding: 16px;
+    background: #f0f9ff;
+    border: 1px solid #bae6fd;
+    border-radius: 8px;
+  }
+
+  .batch-result-content {
+    font-size: 14px;
+    color: #0c4a6e;
+    line-height: 1.6;
   }
 </style>

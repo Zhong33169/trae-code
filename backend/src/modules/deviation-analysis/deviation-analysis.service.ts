@@ -25,9 +25,10 @@ export class DeviationAnalysisService {
 
     await this.progressReportsService.updateStatusByRelatedModule(
       saved.progressReportId,
-      OperationType.UPDATE,
+      OperationType.DEVIATION_CREATE,
       `新增偏差分析：${data.deviationDescription.substring(0, 30)}${data.deviationDescription.length > 30 ? '...' : ''}，偏差率 ${data.deviationPercentage}%`,
       user,
+      `原因分析：${data.causeAnalysis || ''}`,
     );
 
     return saved;
@@ -65,9 +66,10 @@ export class DeviationAnalysisService {
 
     await this.progressReportsService.updateStatusByRelatedModule(
       saved.progressReportId,
-      OperationType.VERIFY_APPROVE,
+      OperationType.DEVIATION_APPROVE,
       `偏差分析已审批通过，意见：${opinion}`,
       user,
+      `偏差描述：${saved.deviationDescription.substring(0, 50)}`,
     );
 
     return saved;
@@ -88,9 +90,10 @@ export class DeviationAnalysisService {
 
     await this.progressReportsService.updateStatusByRelatedModule(
       saved.progressReportId,
-      OperationType.UPDATE,
+      OperationType.DEVIATION_UPDATE,
       `更新偏差分析：${saved.deviationDescription.substring(0, 30)}${saved.deviationDescription.length > 30 ? '...' : ''}`,
       user,
+      `原因分析：${saved.causeAnalysis || ''}`,
     );
 
     return saved;

@@ -1,5 +1,5 @@
 import { api } from './client';
-import type { ProgressReport, PageResult, Statistics } from '$types';
+import type { ProgressReport, PageResult, Statistics, BatchResult } from '$types';
 import type { ProgressStatus, TimeoutStatus } from '$types';
 
 export interface CreateProgressReportData {
@@ -97,4 +97,7 @@ export const progressReportsApi = {
   delete: (id: string, authToken?: string | null) => api.delete<void>(`/progress-reports/${id}`, authToken),
 
   getStatistics: (authToken?: string | null) => api.get<Statistics>('/progress-reports/statistics', undefined, authToken),
+
+  batchProcess: (ids: string[], action: string, data: Record<string, any>, authToken?: string | null) =>
+    api.post<BatchResult>('/progress-reports/batch/process', { ids, action, data }, authToken),
 };

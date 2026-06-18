@@ -76,6 +76,15 @@ export enum OperationType {
   TIMEOUT_HANDLE = 'timeout_handle',
   UPDATE_STATUS = 'update_status',
   DELETE = 'delete',
+  WEEKLY_REPORT_CREATE = 'weekly_report_create',
+  WEEKLY_REPORT_UPDATE = 'weekly_report_update',
+  DEVIATION_CREATE = 'deviation_create',
+  DEVIATION_UPDATE = 'deviation_update',
+  DEVIATION_APPROVE = 'deviation_approve',
+  OWNER_REPORT_CREATE = 'owner_report_create',
+  OWNER_REPORT_UPDATE = 'owner_report_update',
+  OWNER_REPORT_ACKNOWLEDGE = 'owner_report_acknowledge',
+  BATCH_PROCESS = 'batch_process',
 }
 
 export const OperationTypeLabel: Record<OperationType, string> = {
@@ -93,6 +102,15 @@ export const OperationTypeLabel: Record<OperationType, string> = {
   [OperationType.TIMEOUT_HANDLE]: '超时处理',
   [OperationType.UPDATE_STATUS]: '状态更新',
   [OperationType.DELETE]: '删除',
+  [OperationType.WEEKLY_REPORT_CREATE]: '新增周报',
+  [OperationType.WEEKLY_REPORT_UPDATE]: '更新周报',
+  [OperationType.DEVIATION_CREATE]: '新增偏差分析',
+  [OperationType.DEVIATION_UPDATE]: '更新偏差分析',
+  [OperationType.DEVIATION_APPROVE]: '偏差分析审批',
+  [OperationType.OWNER_REPORT_CREATE]: '新增业主汇报',
+  [OperationType.OWNER_REPORT_UPDATE]: '更新业主汇报',
+  [OperationType.OWNER_REPORT_ACKNOWLEDGE]: '业主汇报确认',
+  [OperationType.BATCH_PROCESS]: '批量办理',
 };
 
 export interface User {
@@ -125,6 +143,7 @@ export interface ProgressReport {
   timeoutReason?: string;
   timeoutFollowUp?: string;
   timeoutHandledAt?: string;
+  batchResult?: string;
   responsiblePersonId?: string;
   responsiblePerson?: User;
   weeklyReports?: WeeklyReport[];
@@ -208,4 +227,14 @@ export interface Statistics {
 export interface PageResult<T> {
   list: T[];
   total: number;
+}
+
+export interface BatchResultItem {
+  id: string;
+  success: boolean;
+  message: string;
+}
+
+export interface BatchResult {
+  results: BatchResultItem[];
 }

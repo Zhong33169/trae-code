@@ -96,6 +96,32 @@ export function canViewAllReports(user: User | null | undefined): boolean {
   );
 }
 
+export function canCreateWeeklyReport(user: User | null | undefined, report: ProgressReport): boolean {
+  if (!user) return false;
+  if (user.role === Role.SUPERVISOR_ENGINEER) return true;
+  return user.role === Role.REGISTRAR && report.responsiblePersonId === user.id;
+}
+
+export function canCreateDeviationAnalysis(user: User | null | undefined): boolean {
+  return !!user && (user.role === Role.SUPERVISOR || user.role === Role.SUPERVISOR_ENGINEER);
+}
+
+export function canApproveDeviationAnalysis(user: User | null | undefined): boolean {
+  return !!user && user.role === Role.SUPERVISOR_ENGINEER;
+}
+
+export function canCreateOwnerReport(user: User | null | undefined): boolean {
+  return !!user && (user.role === Role.SUPERVISOR || user.role === Role.SUPERVISOR_ENGINEER);
+}
+
+export function canAcknowledgeOwnerReport(user: User | null | undefined): boolean {
+  return !!user && user.role === Role.SUPERVISOR_ENGINEER;
+}
+
+export function canBatchProcess(user: User | null | undefined): boolean {
+  return !!user && user.role === Role.REGISTRAR;
+}
+
 export function getAvailableActions(user: User | null | undefined, report: ProgressReport) {
   return {
     edit: canEditReport(user, report),

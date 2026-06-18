@@ -524,8 +524,10 @@ export class ProgressReportsService {
     operationType: OperationType,
     detail: string,
     user: User,
+    remarks?: string,
   ): Promise<void> {
     const report = await this.findOne(progressReportId);
+    const fromStatus = report.status;
     report.lastProcessResult = detail;
 
     await this.progressReportsRepository.save(report);
@@ -534,7 +536,59 @@ export class ProgressReportsService {
       user,
       operationType,
       detail,
+      remarks,
+      fromStatus,
+      fromStatus,
     );
+  }
+
+  async batchProcess(
+    ids: string[],
+    action: string,
+    data: any,
+    user: User,
+  ): Promise<{ results: Array<{ id: string; success: boolean; message: string }> }> {
+    const results: Array<{ id: string; success: boolean; message: string }> = [];
+
+    for (const id of ids) {
+      try {
+        let report: ProgressReport;
+        const fromStatus: ProgressStatus = (await this.findOne(id)).status;
+
+        if (action === 'submit') {
+          report = await this.submitForReview(id, { remarks: data.remarks || '' }, user);
+        } else if (action === 'handle-timeout') {
+          report = await this.handleTimeout(
+            id,
+            { timeoutReason: data.timeoutReason, timeoutFollowUp: data.timeoutFollowUp, remarks: data.remarks },
+            user,
+          );
+        } else {
+          throw new BadRequestException(`不支持的批量操作类型: ${action}`);
+        }
+
+        const toStatus = report.status;
+        report.batchResult = `批量${action === 'submit' ? '提交审核' : '处理超时'}成功，操作人：${user.name}，时间：${new Date().toISOString()}`;
+        await this.progressReportsRepository.save(report);
+
+        await this.operationLogsService.create(
+          id,
+          user,
+          OperationType.BATCH_PROCESS,
+          `批量${action === 'submit' ? '提交审核' : '处理超时'}：${report.batchResult}`,
+          data.remarks,
+          fromStatus,
+          toStatus,
+        );
+
+        results.push({ id, success: true, message: '操作成功' });
+      } catch (e) {
+        const error = e as Error;
+        results.push({ id, success: false, message: error.message });
+      }
+    }
+
+    return { results };
   }
 
   async getStatistics(user?: User): Promise<any> {

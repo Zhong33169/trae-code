@@ -29,9 +29,10 @@ export class WeeklyReportsService {
 
     await this.progressReportsService.updateStatusByRelatedModule(
       saved.progressReportId,
-      OperationType.UPDATE,
+      OperationType.WEEKLY_REPORT_CREATE,
       `新增周报（${data.weekStartDate} 至 ${data.weekEndDate}），完成率 ${data.completionRate}%`,
       user,
+      `周报内容：${data.weekProgress || ''}`,
     );
 
     return saved;
@@ -68,9 +69,10 @@ export class WeeklyReportsService {
 
     await this.progressReportsService.updateStatusByRelatedModule(
       saved.progressReportId,
-      OperationType.UPDATE,
+      OperationType.WEEKLY_REPORT_UPDATE,
       `更新周报（${saved.weekStartDate.toISOString().split('T')[0]} 至 ${saved.weekEndDate.toISOString().split('T')[0]}）`,
       user,
+      `周报内容：${saved.weekProgress || ''}`,
     );
 
     return saved;

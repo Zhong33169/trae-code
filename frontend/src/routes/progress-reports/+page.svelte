@@ -1,10 +1,11 @@
 <script lang="ts">
-  import { page, goto } from '$app/navigation';
+  import { page, goto, invalidateAll } from '$app/navigation';
   import { onMount } from 'svelte';
   import type { PageData } from './$types';
   import { ProgressStatus, TimeoutStatus, ProgressStatusLabel, TimeoutStatusLabel, Role } from '$types';
+  import type { BatchResult } from '$types';
   import { formatDate, formatDateTime } from '$utils/format';
-  import { canCreateReport, canEditReport, canSubmitReview, canReview, canVerify, canCorrect, canHandleTimeout, canDeleteReport } from '$utils/permissions';
+  import { canCreateReport, canEditReport, canSubmitReview, canReview, canVerify, canCorrect, canHandleTimeout, canDeleteReport, canBatchProcess } from '$utils/permissions';
   import { currentUser, showToast } from '$stores';
   import { progressReportsApi } from '$api';
   import StatusTag from '$components/StatusTag.svelte';
@@ -32,6 +33,15 @@
   let deletingReportId: string | null = null;
   let currentPage = queryParams?.page || 1;
   let pageSize = queryParams?.pageSize || 10;
+
+  let selectedIds: Set<string> = new Set();
+  let showBatchModal = false;
+  let batchAction = 'submit';
+  let batchRemarks = '';
+  let batchTimeoutReason = '';
+  let batchTimeoutFollowUp = '';
+  let batchResult: BatchResult | null = null;
+  let showBatchResultModal = false;
 
   function handleFilterChange() {
     const params = new URLSearchParams();
@@ -120,6 +130,60 @@
     } catch (e) {
       const error = e as Error;
       showToast(error.message || '操作失败', 'error');
+    }
+  }
+
+  function toggleSelect(id: string) {
+    if (selectedIds.has(id)) {
+      selectedIds.delete(id);
+    } else {
+      selectedIds.add(id);
+    }
+    selectedIds = selectedIds;
+  }
+
+  function toggleSelectAll() {
+    if (selectedIds.size === reports.list.length) {
+      selectedIds = new Set();
+    } else {
+      selectedIds = new Set(reports.list.map((r: any) => r.id));
+    }
+  }
+
+  function openBatchModal() {
+    if (selectedIds.size === 0) {
+      showToast('请先选择要批量办理的报告', 'error');
+      return;
+    }
+    batchRemarks = '';
+    batchTimeoutReason = '';
+    batchTimeoutFollowUp = '';
+    showBatchModal = true;
+  }
+
+  async function handleBatchProcess() {
+    const ids = Array.from(selectedIds);
+    const data: Record<string, any> = {};
+    if (batchRemarks) data.remarks = batchRemarks;
+    if (batchAction === 'handle-timeout') {
+      if (!batchTimeoutReason || !batchTimeoutFollowUp) {
+        showToast('请填写超时原因和后续处理方案', 'error');
+        return;
+      }
+      data.timeoutReason = batchTimeoutReason;
+      data.timeoutFollowUp = batchTimeoutFollowUp;
+    }
+
+    try {
+      const res = await progressReportsApi.batchProcess(ids, batchAction, data);
+      batchResult = res.data;
+      showBatchModal = false;
+      showBatchResultModal = true;
+      selectedIds = new Set();
+      await invalidateAll();
+    } catch (e) {
+      const error = e as Error;
+      showToast(error.message || '批量办理失败', 'error');
     }
   }
 </script>
@@ -224,11 +288,28 @@
     </div>
   </div>
 
+  {#if canBatchProcess(user) && selectedIds.size > 0}
+    <div class="batch-bar">
+      <span class="batch-info">已选择 {selectedIds.size} 项</span>
+      <button class="btn btn-primary btn-sm" on:click={openBatchModal}>批量办理</button>
+      <button class="btn btn-outline btn-sm" on:click={() => { selectedIds = new Set(); }}>取消选择</button>
+    </div>
+  {/if}
+
   <div class="table-card">
     <div class="table-responsive">
       <table class="data-table">
         <thead>
           <tr>
+            {#if canBatchProcess(user)}
+              <th class="checkbox-col">
+                <input
+                  type="checkbox"
+                  checked={selectedIds.size === reports.list.length && reports.list.length > 0}
+                  on:change={toggleSelectAll}
+                />
+              </th>
+            {/if}
             <th>标题</th>
             <th>项目名称</th>
             <th>责任人</th>
@@ -243,11 +324,20 @@
         <tbody>
           {#if reports.list.length === 0}
             <tr>
-              <td colspan="9" class="empty-cell">暂无数据</td>
+              <td colspan={canBatchProcess(user) ? "10" : "9"} class="empty-cell">暂无数据</td>
             </tr>
           {/if}
           {#each reports.list as report (report.id)}
             <tr class:timeout-row={report.timeoutStatus === TimeoutStatus.OVERDUE}>
+              {#if canBatchProcess(user)}
+                <td class="checkbox-col">
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.has(report.id)}
+                    on:change={() => toggleSelect(report.id)}
+                  />
+                </td>
+              {/if}
               <td>
                 <div class="cell-title">
                   <a href="/progress-reports/{report.id}" class="link">
@@ -354,6 +444,79 @@
     <button class="btn btn-danger" on:click={handleDelete}>
       确认删除
     </button>
+  </div>
+</Modal>
+
+<!-- 批量办理弹窗 -->
+<Modal
+  show={showBatchModal}
+  title="批量办理进度报告"
+  onClose={() => { showBatchModal = false; }}
+  footer={true}
+  size="large"
+>
+  <p>将对 {selectedIds.size} 份进度报告执行批量操作</p>
+  <div class="form-group">
+    <label>操作类型</label>
+    <div class="radio-group">
+      <label class="radio-item">
+        <input type="radio" bind:group={batchAction} value="submit" />
+        <span>批量提交审核</span>
+      </label>
+      <label class="radio-item">
+        <input type="radio" bind:group={batchAction} value="handle-timeout" />
+        <span>批量处理超时</span>
+      </label>
+    </div>
+  </div>
+  {#if batchAction === 'handle-timeout'}
+    <div class="form-group">
+      <label>超时原因 <span class="required">*</span></label>
+      <textarea rows="2" placeholder="请说明超时原因" bind:value={batchTimeoutReason}></textarea>
+    </div>
+    <div class="form-group">
+      <label>后续处理方案 <span class="required">*</span></label>
+      <textarea rows="3" placeholder="请说明后续处理措施" bind:value={batchTimeoutFollowUp}></textarea>
+    </div>
+  {/if}
+  <div class="form-group">
+    <label>备注（可选）</label>
+    <textarea rows="2" placeholder="备注信息" bind:value={batchRemarks}></textarea>
+  </div>
+  <div slot="footer">
+    <button class="btn btn-outline" on:click={() => { showBatchModal = false; }}>取消</button>
+    <button class="btn btn-primary" on:click={handleBatchProcess}>确认批量办理</button>
+  </div>
+</Modal>
+
+<!-- 批量办理结果弹窗 -->
+<Modal
+  show={showBatchResultModal}
+  title="批量办理结果"
+  onClose={() => { showBatchResultModal = false; batchResult = null; }}
+  footer={true}
+>
+  {#if batchResult}
+    <div class="batch-result-summary">
+      <div class="batch-result-stat success">
+        成功：{batchResult.results.filter(r => r.success).length} 项
+      </div>
+      <div class="batch-result-stat error">
+        失败：{batchResult.results.filter(r => !r.success).length} 项
+      </div>
+    </div>
+    <div class="batch-result-list">
+      {#each batchResult.results as item}
+        <div class="batch-result-item" class:success={item.success} class:failed={!item.success}>
+          <span class="batch-result-icon">{item.success ? '✓' : '✗'}</span>
+          <span class="batch-result-id">{item.id.substring(0, 8)}...</span>
+          <span class="batch-result-msg">{item.message}</span>
+        </div>
+      {/each}
+    </div>
+  {/if}
+  <div slot="footer">
+    <button class="btn btn-primary" on:click={() => { showBatchResultModal = false; batchResult = null; }}>关闭</button>
   </div>
 </Modal>
 
@@ -583,5 +746,151 @@
   .btn-text {
     padding: 4px 8px;
     font-size: 13px;
+  }
+
+  .checkbox-col {
+    width: 40px;
+    text-align: center;
+  }
+
+  .checkbox-col input {
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+  }
+
+  .batch-bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 20px;
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
+    border-radius: 8px;
+  }
+
+  .batch-info {
+    font-size: 14px;
+    font-weight: 500;
+    color: #1e40af;
+  }
+
+  .btn-sm {
+    padding: 6px 12px;
+    font-size: 13px;
+  }
+
+  .batch-result-summary {
+    display: flex;
+    gap: 20px;
+    margin-bottom: 16px;
+  }
+
+  .batch-result-stat {
+    padding: 8px 16px;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 500;
+  }
+
+  .batch-result-stat.success {
+    background: #dcfce7;
+    color: #15803d;
+  }
+
+  .batch-result-stat.error {
+    background: #fef2f2;
+    color: #dc2626;
+  }
+
+  .batch-result-list {
+    max-height: 300px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .batch-result-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 13px;
+  }
+
+  .batch-result-item.success {
+    background: #f0fdf4;
+    color: #15803d;
+  }
+
+  .batch-result-item.failed {
+    background: #fef2f2;
+    color: #dc2626;
+  }
+
+  .batch-result-icon {
+    font-weight: bold;
+  }
+
+  .batch-result-id {
+    font-family: monospace;
+    color: #6b7280;
+  }
+
+  .batch-result-msg {
+    flex: 1;
+  }
+
+  .radio-group {
+    display: flex;
+    gap: 24px;
+  }
+
+  .radio-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+  }
+
+  .radio-item input {
+    width: auto;
+    margin: 0;
+  }
+
+  .form-group {
+    margin-bottom: 16px;
+  }
+
+  .form-group label {
+    display: block;
+    font-size: 14px;
+    font-weight: 500;
+    color: #374151;
+    margin-bottom: 8px;
+  }
+
+  .form-group input,
+  .form-group textarea {
+    width: 100%;
+    padding: 10px 14px;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    font-size: 14px;
+    font-family: inherit;
+    box-sizing: border-box;
+  }
+
+  .form-group input:focus,
+  .form-group textarea:focus {
+    outline: none;
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+  }
+
+  .required {
+    color: #ef4444;
   }
 </style>

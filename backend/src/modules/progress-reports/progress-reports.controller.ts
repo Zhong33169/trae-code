@@ -144,6 +144,14 @@ export class ProgressReportsController {
     return this.progressReportsService.handleTimeout(id, handleTimeoutDto, user);
   }
 
+  @Post('batch/process')
+  batchProcess(
+    @Body() body: { ids: string[]; action: string; data: any },
+    @CurrentUser() user: User,
+  ) {
+    return this.progressReportsService.batchProcess(body.ids, body.action, body.data, user);
+  }
+
   @Delete(':id')
   @Roles(Role.SUPERVISOR_ENGINEER)
   remove(@Param('id') id: string, @CurrentUser() user: User) {

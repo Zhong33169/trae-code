@@ -58,6 +58,9 @@ export class ProgressReport extends BaseEntity {
   @Column({ type: 'datetime', nullable: true })
   timeoutHandledAt: Date;
 
+  @Column({ type: 'text', nullable: true })
+  batchResult: string;
+
   @Column({ type: 'uuid', nullable: true })
   responsiblePersonId: string;
 

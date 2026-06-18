@@ -28,9 +28,10 @@ export class OwnerReportsService {
 
     await this.progressReportsService.updateStatusByRelatedModule(
       saved.progressReportId,
-      OperationType.UPDATE,
+      OperationType.OWNER_REPORT_CREATE,
       `新增业主汇报：${data.reportTitle}`,
       user,
+      `汇报内容：${data.reportContent ? data.reportContent.substring(0, 50) : ''}`,
     );
 
     return saved;
@@ -68,9 +69,10 @@ export class OwnerReportsService {
 
     await this.progressReportsService.updateStatusByRelatedModule(
       saved.progressReportId,
-      OperationType.VERIFY_APPROVE,
+      OperationType.OWNER_REPORT_ACKNOWLEDGE,
       `业主汇报已确认，反馈：${feedback}`,
       user,
+      `汇报标题：${saved.reportTitle}`,
     );
 
     return saved;
@@ -94,9 +96,10 @@ export class OwnerReportsService {
 
     await this.progressReportsService.updateStatusByRelatedModule(
       saved.progressReportId,
-      OperationType.UPDATE,
+      OperationType.OWNER_REPORT_UPDATE,
       `更新业主汇报：${saved.reportTitle}`,
       user,
+      `汇报内容：${saved.reportContent ? saved.reportContent.substring(0, 50) : ''}`,
     );
 
     return saved;
