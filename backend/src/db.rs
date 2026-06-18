@@ -250,6 +250,52 @@ pub async fn seed_data(pool: &DbPool) -> Result<()> {
             original_status: None,
             evidence: demo_evidence_normal(),
         },
+        DemoOrderSeed {
+            order_no: "BJ-2026-0006".to_string(),
+            title: "东风电站F区直流电缆更换".to_string(),
+            part_name: "光伏直流电缆".to_string(),
+            part_model: "PV1-F-1x6".to_string(),
+            quantity: 200,
+            reason: "直流电缆绝缘老化，多处破损需整体更换".to_string(),
+            station_name: "东风电站F区".to_string(),
+            status: OrderStatus::Reviewing.as_str().to_string(),
+            current_handler_id: "user_reviewer_1".to_string(),
+            current_handler_name: "赵复核负责人".to_string(),
+            current_handler_role: UserRole::Reviewer.as_str().to_string(),
+            registrar_id: "user_registrar_1".to_string(),
+            registrar_name: "张登记员".to_string(),
+            is_overdue: false,
+            is_evidence_missing: false,
+            deadline_days: Some(6),
+            appeal_reason: None,
+            review_opinion: None,
+            reject_reason: None,
+            original_status: None,
+            evidence: demo_evidence_normal(),
+        },
+        DemoOrderSeed {
+            order_no: "BJ-2026-0007".to_string(),
+            title: "金沙电站G组汇流箱防雷器更换".to_string(),
+            part_name: "直流防雷器".to_string(),
+            part_model: "SPD-DC-1000V-40kA".to_string(),
+            quantity: 8,
+            reason: "防雷器老化失效，雷雨季前需批量更换".to_string(),
+            station_name: "金沙电站G组".to_string(),
+            status: OrderStatus::ReviewReturned.as_str().to_string(),
+            current_handler_id: "user_registrar_1".to_string(),
+            current_handler_name: "张登记员".to_string(),
+            current_handler_role: UserRole::Registrar.as_str().to_string(),
+            registrar_id: "user_registrar_1".to_string(),
+            registrar_name: "张登记员".to_string(),
+            is_overdue: false,
+            is_evidence_missing: true,
+            deadline_days: Some(4),
+            appeal_reason: Some("复核退回后已补充防雷器检测报告，申请重新复核".to_string()),
+            review_opinion: None,
+            reject_reason: Some("缺少防雷器老化检测报告，无法判断是否确需批量更换，退回补正。".to_string()),
+            original_status: Some(OrderStatus::Reviewing.as_str().to_string()),
+            evidence: demo_evidence_partial(),
+        },
     ];
 
     for (idx, seed) in demo_orders.iter().enumerate() {
@@ -582,11 +628,11 @@ async fn seed_demo_records(
             add_record(
                 pool,
                 order_id,
-                "user_registrar_1",
-                "张登记员",
+                &seed.registrar_id,
+                &seed.registrar_name,
                 UserRole::Registrar.as_str(),
                 "提交登记",
-                "SVG功率模块IGBT损坏更换。",
+                &seed.reason,
                 OrderStatus::Draft.as_str(),
                 OrderStatus::Registered.as_str(),
                 base,
@@ -611,15 +657,85 @@ async fn seed_demo_records(
                 "user_auditor_1",
                 "王审核主管",
                 UserRole::Auditor.as_str(),
-                "核验通过",
-                "提交复核。",
+                "核验通过提交复核",
+                "核验完成，提交复核负责人。",
                 OrderStatus::Verifying.as_str(),
                 OrderStatus::Reviewing.as_str(),
                 base + Duration::hours(4),
             )
             .await?;
         }
+        "review_returned" => {
+            add_record(
+                pool,
+                order_id,
+                "user_registrar_1",
+                "张登记员",
+                UserRole::Registrar.as_str(),
+                "提交登记",
+                "防雷器批量更换申请。",
+                OrderStatus::Draft.as_str(),
+                OrderStatus::Registered.as_str(),
+                base,
+            )
+            .await?;
+            add_record(
+                pool,
+                order_id,
+                "user_auditor_1",
+                "王审核主管",
+                UserRole::Auditor.as_str(),
+                "核验通过",
+                "材料齐全，核验通过，提交复核。",
+                OrderStatus::Registered.as_str(),
+                OrderStatus::Verifying.as_str(),
+                base + Duration::hours(3),
+            )
+            .await?;
+            add_record(
+                pool,
+                order_id,
+                "user_auditor_1",
+                "王审核主管",
+                UserRole::Auditor.as_str(),
+                "核验通过提交复核",
+                "核验完成，提交复核负责人。",
+                OrderStatus::Verifying.as_str(),
+                OrderStatus::Reviewing.as_str(),
+                base + Duration::hours(6),
+            )
+            .await?;
+            add_record(
+                pool,
+                order_id,
+                "user_reviewer_1",
+                "赵复核负责人",
+                UserRole::Reviewer.as_str(),
+                "复核退回补正",
+                "缺少防雷器老化检测报告，无法判断是否确需批量更换，退回补正。",
+                OrderStatus::Reviewing.as_str(),
+                OrderStatus::ReviewReturned.as_str(),
+                base + Duration::hours(12),
+            )
+            .await?;
+        }
         _ => {}
+    }
+
+    if order_id == "order_00006" {
+        add_record(
+            pool,
+            order_id,
+            "user_reviewer_1",
+            "赵复核负责人",
+            UserRole::Reviewer.as_str(),
+            "复核失败-版本冲突",
+            "版本冲突：当前版本为 3，您提交的版本为 2，请刷新后重试",
+            OrderStatus::Reviewing.as_str(),
+            OrderStatus::Reviewing.as_str(),
+            base + Duration::hours(10),
+        )
+        .await?;
     }
 
     Ok(())

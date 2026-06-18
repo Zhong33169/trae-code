@@ -100,25 +100,25 @@ async fn update_order_status(
     Ok(())
 }
 
-fn validate_version(order: &SparePartOrder, req_version: i64) -> Result<()> {
+fn validate_version(order: &SparePartOrder, req_version: i64) -> Result<(), String> {
     if order.version != req_version {
-        return Err(anyhow!(format!(
-                "版本冲突：当前版本为 {}，您提交的版本为 {}，请刷新后重试",
-                order.version, req_version
-            )));
+        return Err(format!(
+            "版本冲突：当前版本为 {}，您提交的版本为 {}，请刷新后重试",
+            order.version, req_version
+        ));
     }
     Ok(())
 }
 
-fn validate_handler(order: &SparePartOrder, handler: &User) -> Result<()> {
+fn validate_handler(order: &SparePartOrder, handler: &User) -> Result<(), String> {
     if order.current_handler_id != handler.id {
-        return Err(anyhow!(format!(
-                "处理人不匹配：当前处理人为 {}，您没有权限处理此单据",
-                order.current_handler_name
-            )));
+        return Err(format!(
+            "处理人不匹配：当前处理人为 {}，您没有权限处理此单据",
+            order.current_handler_name
+        ));
     }
     if order.current_handler_role != handler.role {
-        return Err(anyhow!("角色不匹配：您的角色与当前处理角色不符".to_string(),));
+        return Err("角色不匹配：您的角色与当前处理角色不符".to_string());
     }
     Ok(())
 }
@@ -127,7 +127,7 @@ fn validate_evidence(
     order: &SparePartOrder,
     new_evidence: Option<&[EvidenceItem]>,
     require_count: usize,
-) -> Result<()> {
+) -> Result<(), String> {
     let current_count = order.evidence.len();
     let total = if let Some(ev) = new_evidence {
         current_count + ev.len()
@@ -135,12 +135,31 @@ fn validate_evidence(
         current_count
     };
     if total < require_count {
-        return Err(anyhow!(format!(
-                "证据不足：至少需要 {} 份证据材料，当前仅有 {} 份",
-                require_count, total
-            ),));
+        return Err(format!(
+            "证据不足：至少需要 {} 份证据材料，当前仅有 {} 份",
+            require_count, total
+        ));
     }
     Ok(())
+}
+
+async fn record_failure(
+    pool: &DbPool,
+    order: &SparePartOrder,
+    handler: &User,
+    action: &str,
+    reason: &str,
+) {
+    let _ = add_process_record(
+        pool,
+        &order.id,
+        handler,
+        action,
+        reason,
+        &order.status,
+        &order.status,
+    )
+    .await;
 }
 
 pub async fn handle_submit(
@@ -154,21 +173,37 @@ pub async fn handle_submit(
         .await?
         .ok_or_else(|| anyhow!("用户不存在"))?;
 
-    validate_version(&order, req.version)?;
-    validate_handler(&order, &handler)?;
+    if let Err(msg) = validate_version(&order, req.version) {
+        record_failure(pool, &order, &handler, "提交失败-版本冲突", &msg).await;
+        return Err(anyhow!(msg));
+    }
+    if let Err(msg) = validate_handler(&order, &handler) {
+        record_failure(pool, &order, &handler, "提交失败-处理人不匹配", &msg).await;
+        return Err(anyhow!(msg));
+    }
 
-    if order.status != OrderStatus::Draft.as_str()
-        && order.status != OrderStatus::VerifyReturned.as_str()
-        && order.status != OrderStatus::AppealRejectedCorrection.as_str()
-    {
-        return Err(anyhow!(format!("当前状态 {} 不允许提交登记", order.status),));
+    let allowed = [
+        OrderStatus::Draft.as_str(),
+        OrderStatus::VerifyReturned.as_str(),
+        OrderStatus::AppealRejectedCorrection.as_str(),
+        OrderStatus::ReviewReturned.as_str(),
+    ];
+    if !allowed.contains(&order.status.as_str()) {
+        let msg = format!("当前状态 {} 不允许提交登记", order.status);
+        record_failure(pool, &order, &handler, "提交失败-状态不允许", &msg).await;
+        return Err(anyhow!(msg));
     }
 
     if handler.role != UserRole::Registrar.as_str() {
-        return Err(anyhow!("只有备件更换登记员可以提交登记".to_string(),));
+        let msg = "只有备件更换登记员可以提交登记".to_string();
+        record_failure(pool, &order, &handler, "提交失败-角色不匹配", &msg).await;
+        return Err(anyhow!(msg));
     }
 
-    validate_evidence(&order, req.evidence.as_deref(), 2)?;
+    if let Err(msg) = validate_evidence(&order, req.evidence.as_deref(), 2) {
+        record_failure(pool, &order, &handler, "提交失败-证据不足", &msg).await;
+        return Err(anyhow!(msg));
+    }
 
     let evidence = if let Some(ev) = &req.evidence {
         let mut merged = order.evidence.clone();
@@ -183,10 +218,16 @@ pub async fn handle_submit(
     let new_version = order.version + 1;
 
     let (to_status, action, to_handler_id, to_handler_name, to_handler_role) =
-        if order.status == OrderStatus::AppealRejectedCorrection.as_str() {
+        if order.status == OrderStatus::AppealRejectedCorrection.as_str()
+            || order.status == OrderStatus::ReviewReturned.as_str()
+        {
             (
                 OrderStatus::AppealResubmitted.as_str().to_string(),
-                "申诉补正后重新提交",
+                if order.status == OrderStatus::ReviewReturned.as_str() {
+                    "复核退回补正后重新提交"
+                } else {
+                    "申诉补正后重新提交"
+                },
                 "user_reviewer_1".to_string(),
                 "赵复核负责人".to_string(),
                 UserRole::Reviewer.as_str().to_string(),
@@ -213,6 +254,7 @@ pub async fn handle_submit(
 
     let original_status = if order.status == OrderStatus::VerifyReturned.as_str()
         || order.status == OrderStatus::AppealRejectedCorrection.as_str()
+        || order.status == OrderStatus::ReviewReturned.as_str()
     {
         Some(order.status.clone())
     } else {
@@ -277,11 +319,19 @@ pub async fn handle_verify(
         .await?
         .ok_or_else(|| anyhow!("用户不存在"))?;
 
-    validate_version(&order, req.version)?;
-    validate_handler(&order, &handler)?;
+    if let Err(msg) = validate_version(&order, req.version) {
+        record_failure(pool, &order, &handler, "核验失败-版本冲突", &msg).await;
+        return Err(anyhow!(msg));
+    }
+    if let Err(msg) = validate_handler(&order, &handler) {
+        record_failure(pool, &order, &handler, "核验失败-处理人不匹配", &msg).await;
+        return Err(anyhow!(msg));
+    }
 
     if handler.role != UserRole::Auditor.as_str() {
-        return Err(anyhow!("只有备件更换审核主管可以办理核验".to_string(),));
+        let msg = "只有备件更换审核主管可以办理核验".to_string();
+        record_failure(pool, &order, &handler, "核验失败-角色不匹配", &msg).await;
+        return Err(anyhow!(msg));
     }
 
     let allowed_statuses = [
@@ -289,14 +339,19 @@ pub async fn handle_verify(
         OrderStatus::Verifying.as_str(),
     ];
     if !allowed_statuses.contains(&order.status.as_str()) {
-        return Err(anyhow!(format!("当前状态 {} 不允许办理核验", order.status),));
+        let msg = format!("当前状态 {} 不允许办理核验", order.status);
+        record_failure(pool, &order, &handler, "核验失败-状态不允许", &msg).await;
+        return Err(anyhow!(msg));
     }
 
     let opinion = req.opinion.clone().unwrap_or_default();
     let new_version = order.version + 1;
 
     let (to_status, action, to_handler_id, to_handler_name, to_handler_role, extra) = if pass {
-        validate_evidence(&order, None, 2)?;
+        if let Err(msg) = validate_evidence(&order, None, 2) {
+            record_failure(pool, &order, &handler, "核验失败-证据不足", &msg).await;
+            return Err(anyhow!(msg));
+        }
         (
             OrderStatus::Reviewing.as_str().to_string(),
             "核验通过提交复核",
@@ -307,7 +362,9 @@ pub async fn handle_verify(
         )
     } else {
         if opinion.trim().is_empty() {
-            return Err(anyhow!("退回必须填写处理意见".to_string(),));
+            let msg = "退回必须填写处理意见".to_string();
+            record_failure(pool, &order, &handler, "核验失败-意见为空", &msg).await;
+            return Err(anyhow!(msg));
         }
         (
             OrderStatus::VerifyReturned.as_str().to_string(),
@@ -359,11 +416,19 @@ pub async fn handle_review(
         .await?
         .ok_or_else(|| anyhow!("用户不存在"))?;
 
-    validate_version(&order, req.version)?;
-    validate_handler(&order, &handler)?;
+    if let Err(msg) = validate_version(&order, req.version) {
+        record_failure(pool, &order, &handler, "复核失败-版本冲突", &msg).await;
+        return Err(anyhow!(msg));
+    }
+    if let Err(msg) = validate_handler(&order, &handler) {
+        record_failure(pool, &order, &handler, "复核失败-处理人不匹配", &msg).await;
+        return Err(anyhow!(msg));
+    }
 
     if handler.role != UserRole::Reviewer.as_str() {
-        return Err(anyhow!("只有复核负责人可以办理复核".to_string(),));
+        let msg = "只有复核负责人可以办理复核".to_string();
+        record_failure(pool, &order, &handler, "复核失败-角色不匹配", &msg).await;
+        return Err(anyhow!(msg));
     }
 
     let allowed_statuses = [
@@ -373,7 +438,9 @@ pub async fn handle_review(
         OrderStatus::Reviewing.as_str(),
     ];
     if !allowed_statuses.contains(&order.status.as_str()) {
-        return Err(anyhow!(format!("当前状态 {} 不允许办理复核", order.status),));
+        let msg = format!("当前状态 {} 不允许办理复核", order.status);
+        record_failure(pool, &order, &handler, "复核失败-状态不允许", &msg).await;
+        return Err(anyhow!(msg));
     }
 
     let opinion = req.opinion.clone().unwrap_or_default();
@@ -382,7 +449,10 @@ pub async fn handle_review(
     let (to_status, action, to_handler_id, to_handler_name, to_handler_role, extra) =
         match decision {
             "confirm" => {
-                validate_evidence(&order, None, 2)?;
+                if let Err(msg) = validate_evidence(&order, None, 2) {
+                    record_failure(pool, &order, &handler, "复核失败-证据不足", &msg).await;
+                    return Err(anyhow!(msg));
+                }
                 (
                     OrderStatus::ReviewConfirmed.as_str().to_string(),
                     "复核确认通过",
@@ -394,7 +464,9 @@ pub async fn handle_review(
             }
             "return" => {
                 if opinion.trim().is_empty() {
-                    return Err(anyhow!("退回必须填写处理意见".to_string(),));
+                    let msg = "退回必须填写处理意见".to_string();
+                    record_failure(pool, &order, &handler, "复核失败-意见为空", &msg).await;
+                    return Err(anyhow!(msg));
                 }
                 (
                     OrderStatus::ReviewReturned.as_str().to_string(),
@@ -407,7 +479,9 @@ pub async fn handle_review(
             }
             "accept" => {
                 if order.status != OrderStatus::AppealSubmitted.as_str() {
-                    return Err(anyhow!("只有申诉提交状态可以受理申诉".to_string(),));
+                    let msg = "只有申诉提交状态可以受理申诉".to_string();
+                    record_failure(pool, &order, &handler, "复核失败-状态不允许", &msg).await;
+                    return Err(anyhow!(msg));
                 }
                 (
                     OrderStatus::AppealAccepted.as_str().to_string(),
@@ -422,10 +496,14 @@ pub async fn handle_review(
                 if order.status != OrderStatus::AppealSubmitted.as_str()
                     && order.status != OrderStatus::AppealAccepted.as_str()
                 {
-                    return Err(anyhow!("只有申诉提交/受理状态可以驳回补正".to_string(),));
+                    let msg = "只有申诉提交/受理状态可以驳回补正".to_string();
+                    record_failure(pool, &order, &handler, "复核失败-状态不允许", &msg).await;
+                    return Err(anyhow!(msg));
                 }
                 if opinion.trim().is_empty() {
-                    return Err(anyhow!("驳回补正必须填写处理意见".to_string(),));
+                    let msg = "驳回补正必须填写处理意见".to_string();
+                    record_failure(pool, &order, &handler, "复核失败-意见为空", &msg).await;
+                    return Err(anyhow!(msg));
                 }
                 (
                     OrderStatus::AppealRejectedCorrection.as_str().to_string(),
@@ -437,7 +515,9 @@ pub async fn handle_review(
                 )
             }
             _ => {
-                return Err(anyhow!(format!("未知的复核决定: {}", decision),));
+                let msg = format!("未知的复核决定: {}", decision);
+                record_failure(pool, &order, &handler, "复核失败-未知决定", &msg).await;
+                return Err(anyhow!(msg));
             }
         };
 
@@ -480,11 +560,19 @@ pub async fn handle_archive(
         .await?
         .ok_or_else(|| anyhow!("用户不存在"))?;
 
-    validate_version(&order, req.version)?;
-    validate_handler(&order, &handler)?;
+    if let Err(msg) = validate_version(&order, req.version) {
+        record_failure(pool, &order, &handler, "归档失败-版本冲突", &msg).await;
+        return Err(anyhow!(msg));
+    }
+    if let Err(msg) = validate_handler(&order, &handler) {
+        record_failure(pool, &order, &handler, "归档失败-处理人不匹配", &msg).await;
+        return Err(anyhow!(msg));
+    }
 
     if handler.role != UserRole::Reviewer.as_str() {
-        return Err(anyhow!("只有复核负责人可以办理归档".to_string(),));
+        let msg = "只有复核负责人可以办理归档".to_string();
+        record_failure(pool, &order, &handler, "归档失败-角色不匹配", &msg).await;
+        return Err(anyhow!(msg));
     }
 
     let allowed = [
@@ -492,7 +580,9 @@ pub async fn handle_archive(
         OrderStatus::VerifyPassed.as_str(),
     ];
     if !allowed.contains(&order.status.as_str()) {
-        return Err(anyhow!(format!("当前状态 {} 不允许归档", order.status),));
+        let msg = format!("当前状态 {} 不允许归档", order.status);
+        record_failure(pool, &order, &handler, "归档失败-状态不允许", &msg).await;
+        return Err(anyhow!(msg));
     }
 
     let opinion = req.opinion.clone().unwrap_or_else(|| "复核通过，同意归档。".to_string());

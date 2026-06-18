@@ -91,4 +91,5 @@ export interface ActionRequest {
   opinion?: string;
   evidence?: EvidenceItem[];
   appeal_reason?: string;
+  decision?: string;
 }

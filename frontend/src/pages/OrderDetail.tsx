@@ -169,7 +169,7 @@ export default function OrderDetail() {
           handler_id: currentUser!.id,
           opinion: opinion || '核验通过，提交复核。',
           decision: 'pass',
-        } as any),
+        }),
       false,
       2,
     );
@@ -183,7 +183,7 @@ export default function OrderDetail() {
           handler_id: currentUser!.id,
           opinion,
           decision: 'return',
-        } as any),
+        }),
       true,
       0,
     );
@@ -197,7 +197,7 @@ export default function OrderDetail() {
           handler_id: currentUser!.id,
           opinion: opinion || '申诉受理，证据充分，进入复核。',
           decision: 'accept',
-        } as any),
+        }),
       false,
       2,
     );
@@ -211,7 +211,7 @@ export default function OrderDetail() {
           handler_id: currentUser!.id,
           opinion: opinion || '复核通过，同意归档。',
           decision: 'confirm',
-        } as any),
+        }),
       false,
       2,
     );
@@ -225,7 +225,7 @@ export default function OrderDetail() {
           handler_id: currentUser!.id,
           opinion,
           decision: 'return',
-        } as any),
+        }),
       true,
       0,
     );
@@ -239,7 +239,7 @@ export default function OrderDetail() {
           handler_id: currentUser!.id,
           opinion,
           decision: 'reject_correction',
-        } as any),
+        }),
       true,
       0,
     );
@@ -469,17 +469,21 @@ export default function OrderDetail() {
                           ? '申诉被驳回补正，补充证据和理由后可重新提交。'
                           : status === 'verify_returned'
                           ? '核验退回，可补充材料后发起申诉。'
+                          : status === 'review_returned'
+                          ? '复核退回补正，补充材料后可重新提交复核。'
                           : '草稿已创建，补充证据后提交登记。'}
                       </div>
                       {status !== 'draft' && (
                         <div className="form-group">
                           <label>
-                            {status === 'appeal_rejected_correction' ? '补正说明' : '申诉理由'}
+                            {status === 'appeal_rejected_correction' || status === 'review_returned'
+                              ? '补正说明'
+                              : '申诉理由'}
                           </label>
                           <textarea
                             value={appealReason}
                             onChange={(e) => setAppealReason(e.target.value)}
-                            placeholder={status === 'appeal_rejected_correction' ? '说明补正了哪些内容' : '说明申诉理由、补充了哪些证据'}
+                            placeholder={status === 'appeal_rejected_correction' || status === 'review_returned' ? '说明补正了哪些内容' : '说明申诉理由、补充了哪些证据'}
                           />
                         </div>
                       )}
@@ -550,6 +554,8 @@ export default function OrderDetail() {
                           ? '补正后重新提交'
                           : status === 'verify_returned'
                           ? '提交申诉'
+                          : status === 'review_returned'
+                          ? '补正后重新提交复核'
                           : '提交登记'}
                       </button>
                     )}
@@ -655,6 +661,10 @@ export default function OrderDetail() {
               <div className="section-sep" />
               <p><b>异常申诉路径：</b></p>
               <p>核验退回 → 申诉提交 → 受理 / 驳回补正 → 补正重提 → 复核确认 → 归档</p>
+              <p>复核退回补正 → 补正后重新提交复核 → 复核确认 → 归档</p>
+              <div className="section-sep" />
+              <p><b>校验失败留痕：</b></p>
+              <p>版本/处理人/角色/状态/证据校验失败时，原状态保留，并写入处理记录（from=to）。</p>
             </div>
           </div>
         </div>

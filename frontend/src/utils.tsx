@@ -1,4 +1,4 @@
-import type { OrderStatus, UserRole } from '../types';
+import type { OrderStatus, UserRole } from './types';
 
 export const STATUS_LABELS: Record<string, string> = {
   draft: '草稿',
@@ -38,7 +38,7 @@ export function formatTime(t?: string) {
 
 export function canSubmit(s: OrderStatus, role: UserRole) {
   if (role !== 'registrar') return false;
-  return ['draft', 'verify_returned', 'appeal_rejected_correction'].includes(s);
+  return ['draft', 'verify_returned', 'appeal_rejected_correction', 'review_returned'].includes(s);
 }
 
 export function canVerify(s: OrderStatus, role: UserRole) {
