@@ -135,4 +135,22 @@ export interface StatResult {
   roleLabels: Record<string, string>;
   byBucket: Record<string, number>;
   bucketLabels: Record<string, string>;
+  handoverTotal: number;
+  handoverByState: Record<string, number>;
+  handoverStateLabels: Record<string, string>;
+  handoverByFromRole: Record<string, number>;
+  handoverFromRoleLabels: Record<string, string>;
+  handoverByFromShift: Record<string, number>;
+  handoverFromShiftLabels: Record<string, string>;
+  handoverByToRole: Record<string, number>;
+  handoverToRoleLabels: Record<string, string>;
+  handoverByToShift: Record<string, number>;
+  handoverToShiftLabels: Record<string, string>;
+  latestHandoverLogs: Array<{
+    id: number; planId: number; state: string; stateName: string;
+    handFrom: { id: number; realName: string; role: string; roleName: string } | null;
+    handTo: { id: number; realName: string; role: string; roleName: string } | null;
+    fromShift: string; fromShiftName: string; toShift: string; toShiftName: string;
+    confirmTime: string; acceptedAt?: string; remark?: string; acceptRemark?: string;
+  }>;
 }

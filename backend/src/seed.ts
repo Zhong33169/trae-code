@@ -104,7 +104,21 @@ export class SeedService {
       await addLog(p3.id, u3.id, 'AUDIT_PASS',
         `审核通过：${p3.planNo}，备注：${p3.auditRemark}`,
         { status: PlanStatus.PENDING_AUDIT }, { status: PlanStatus.AUDIT_PASSED });
-      console.log('[Seed] 样例 3 已创建：审核通过，张审核持有，可 提交素材审核');
+      const h3 = await mgr.save(HandoverRecord, {
+        planId: p3.id, handFromId: u3.id, handToId: u4.id,
+        fromShift: Shift.MORNING, toShift: Shift.AFTERNOON,
+        state: HandoverState.ACCEPTED,
+        confirmTime: new Date(Date.now() - 3600000 * 8),
+        acceptedAt: new Date(Date.now() - 3600000 * 7),
+        acceptRemark: '中班已接收，稍后提交素材',
+        remark: '早班已完成审核，中班请尽快提交素材审核',
+      });
+      await mgr.update(PropagandaPlan, p3.id, { currentHandlerId: u4.id });
+      await addLog(p3.id, u3.id, 'HANDOVER',
+        `早班张审核 → 中班赵主管，交接提交（待接收）；备注：${h3.remark}`);
+      await addLog(p3.id, u4.id, 'ACCEPT_HANDOVER',
+        `中班赵主管已确认接收，备注：${h3.acceptRemark}`);
+      console.log('[Seed] 样例 3 已创建：审核通过，赵主管中班持有，含早班→中班交接，可 提交素材审核');
 
       // ---- 4. 素材通过（投放前，含交接：张审核中班→赵主管夜班） ----
       const p4 = await mgr.save(PropagandaPlan, {
@@ -250,7 +264,21 @@ export class SeedService {
       await addLog(p6.id, u3.id, 'AUDIT_REJECT',
         `退回补正：${p6.auditRemark}`,
         { status: PlanStatus.PENDING_AUDIT }, { status: PlanStatus.NEED_CORRECT });
-      console.log('[Seed] 样例 6 已创建：需补正，王登记持有，含详细退回原因，可 编辑 → 补正后重提');
+      const h6 = await mgr.save(HandoverRecord, {
+        planId: p6.id, handFromId: u1.id, handToId: u2.id,
+        fromShift: Shift.AFTERNOON, toShift: Shift.NIGHT,
+        state: HandoverState.ACCEPTED,
+        confirmTime: new Date(Date.now() - 3600000 * 3),
+        acceptedAt: new Date(Date.now() - 3600000 * 2),
+        acceptRemark: '晚班已接收，今晚完成补正',
+        remark: '中班已退回，晚班请根据审核意见补正措辞和法律合规材料',
+      });
+      await mgr.update(PropagandaPlan, p6.id, { currentHandlerId: u2.id });
+      await addLog(p6.id, u1.id, 'HANDOVER',
+        `中班王登记 → 晚班李补正，交接提交（待接收）；备注：${h6.remark}`);
+      await addLog(p6.id, u2.id, 'ACCEPT_HANDOVER',
+        `晚班李补正已确认接收，备注：${h6.acceptRemark}`);
+      console.log('[Seed] 样例 6 已创建：需补正，李补正晚班持有，含中班→晚班登记员交接，含详细退回原因，可 编辑 → 补正后重提');
 
       // ---- 7. 待素材审核（演示素材退回补正路径） ----
       const p7 = await mgr.save(PropagandaPlan, {
@@ -267,7 +295,19 @@ export class SeedService {
       await addLog(p7.id, u2.id, 'SUBMIT_AUDIT', `提交审核`);
       await addLog(p7.id, u4.id, 'AUDIT_PASS', `审核通过`);
       await addLog(p7.id, u4.id, 'SUBMIT_MATERIAL', `提交素材审核`);
-      console.log('[Seed] 样例 7 已创建：待素材审核，赵主管持有，可 审核通过 / 退回补正素材');
+      const h7 = await mgr.save(HandoverRecord, {
+        planId: p7.id, handFromId: u4.id, handToId: u3.id,
+        fromShift: Shift.NIGHT, toShift: Shift.MORNING,
+        state: HandoverState.PENDING_ACCEPT,
+        confirmTime: new Date(Date.now() - 3600000 * 2),
+        remark: '晚班已提交素材，早班请优先审核明星贴片合规',
+      });
+      await mgr.update(PropagandaPlan, p7.id, { currentHandlerId: u3.id, awaitingAcceptId: h7.id });
+      await addLog(p7.id, u4.id, 'HANDOVER',
+        `晚班赵主管 → 早班张审核，交接提交，待张审核确认接收；备注：${h7.remark}`,
+        { currentHandlerId: u4.id, awaitingAcceptId: null },
+        { currentHandlerId: u3.id, awaitingAcceptId: h7.id });
+      console.log('[Seed] 样例 7 已创建：待素材审核，交接待接收，登录 audit1（张审核）早班可"确认接收"后继续审核素材');
 
       // ---- 8. 投放已确认（等复核负责人归档） ----
       const p8 = await mgr.save(PropagandaPlan, {

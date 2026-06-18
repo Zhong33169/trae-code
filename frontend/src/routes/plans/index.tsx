@@ -18,6 +18,14 @@ const STATUS_OPTIONS = [
   { v: 'ARCHIVED', l: '已归档' },
 ];
 
+const HANDOVER_STATE_OPTIONS = [
+  { v: '', l: '全部交接状态' },
+  { v: 'PENDING_ACCEPT', l: '⏳ 待接收' },
+  { v: 'ACCEPTED', l: '✅ 已接收' },
+];
+
+type ViewMode = 'all' | 'pending-to-me' | 'accepted-by-me';
+
 const fmt = (t: any) => t ? new Date(t).toLocaleString('zh-CN', { hour12: false }) : '-';
 
 function CreateModal(props: { show: boolean; close: () => void; done: () => void }) {
@@ -108,6 +116,8 @@ export default function PlansIndex() {
   const [kw, setKw] = createSignal('');
   const [st, setSt] = createSignal('');
   const [only, setOnly] = createSignal(false);
+  const [handoverState, setHandoverState] = createSignal('');
+  const [viewMode, setViewMode] = createSignal<ViewMode>('all');
   const [sel, setSel] = createSignal<number[]>([]);
   const [showCreate, setShowCreate] = createSignal(false);
   const [showBatch, setShowBatch] = createSignal(false);
@@ -117,7 +127,16 @@ export default function PlansIndex() {
 
   const load = async () => {
     setLoading(true);
-    const r = await listPlans({ page: page(), pageSize: pageSize(), keyword: kw(), status: st(), onlyMine: only() });
+    const params: any = { page: page(), pageSize: pageSize(), keyword: kw(), status: st(), onlyMine: only() };
+    if (handoverState()) params.handoverState = handoverState();
+    if (viewMode() === 'pending-to-me') {
+      params.handoverState = 'PENDING_ACCEPT';
+      params.receiverId = user()?.id;
+    } else if (viewMode() === 'accepted-by-me') {
+      params.handoverState = 'ACCEPTED';
+      params.receiverId = user()?.id;
+    }
+    const r = await listPlans(params);
     setLoading(false);
     if (r.code === 0) { setList(r.data.list); setTotal(r.data.total); }
     else notify(r.message || '加载失败', 'error');
@@ -128,7 +147,7 @@ export default function PlansIndex() {
     bus.on('plan:changed', () => { load(); });
     bus.on('plan:created', () => { setPage(1); load(); });
   });
-  createEffect(() => { page(); st(); only(); kw(); });
+  createEffect(() => { page(); st(); only(); kw(); handoverState(); viewMode(); });
 
   const toggleSel = (id: number, e: Event) => {
     const checked = (e.target as HTMLInputElement).checked;
@@ -156,10 +175,27 @@ export default function PlansIndex() {
           <select value={st()} onChange={(e) => { setSt(e.currentTarget.value); setPage(1); setTimeout(load, 0); }}>
             <For each={STATUS_OPTIONS}>{o => <option value={o.v}>{o.l}</option>}</For>
           </select>
+          <select value={handoverState()} onChange={(e) => { setHandoverState(e.currentTarget.value); setViewMode('all'); setPage(1); setTimeout(load, 0); }}>
+            <For each={HANDOVER_STATE_OPTIONS}>{o => <option value={o.v}>{o.l}</option>}</For>
+          </select>
           <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: '#374151' }}>
             <input type="checkbox" checked={only()} onChange={(e) => { setOnly(e.currentTarget.checked); setPage(1); setTimeout(load, 0); }} />
             仅看我的
           </label>
+          <div style={{ display: 'flex', gap: 4, marginRight: 8 }}>
+            <button class={`btn ${viewMode() === 'all' ? 'btn-primary' : 'btn-default'}`}
+              onClick={() => { setViewMode('all'); setHandoverState(''); setPage(1); setTimeout(load, 0); }}>
+              全部
+            </button>
+            <button class={`btn ${viewMode() === 'pending-to-me' ? 'btn-primary' : 'btn-default'}`}
+              onClick={() => { setViewMode('pending-to-me'); setHandoverState(''); setPage(1); setTimeout(load, 0); }}>
+              ⏳ 待我接收
+            </button>
+            <button class={`btn ${viewMode() === 'accepted-by-me' ? 'btn-primary' : 'btn-default'}`}
+              onClick={() => { setViewMode('accepted-by-me'); setHandoverState(''); setPage(1); setTimeout(load, 0); }}>
+              ✅ 已由我接收
+            </button>
+          </div>
           <div style={{ flex: 1 }} />
           <button class="btn btn-default" onClick={() => { setPage(1); load(); }}>刷新</button>
           <Show when={user()?.role === 'REGISTER'}>

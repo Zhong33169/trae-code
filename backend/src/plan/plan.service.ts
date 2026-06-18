@@ -65,7 +65,10 @@ export class PlanService {
 
   async list(
     user: User,
-    params: { page?: number; pageSize?: number; keyword?: string; status?: PlanStatus; onlyMine?: boolean },
+    params: {
+      page?: number; pageSize?: number; keyword?: string; status?: PlanStatus; onlyMine?: boolean;
+      handoverState?: HandoverState; receiverId?: number;
+    },
   ): Promise<PaginatedResult<any>> {
     const page = Math.max(1, params.page || 1);
     const pageSize = Math.min(100, params.pageSize || 20);
@@ -90,11 +93,18 @@ export class PlanService {
       }));
     }
     if (params.status) qb.andWhere('p.status = :st', { st: params.status });
+    if (params.handoverState) {
+      qb.andWhere('lh.state = :hs', { hs: params.handoverState });
+    }
+    if (params.receiverId) {
+      qb.andWhere('lh.handToId = :rid', { rid: params.receiverId });
+    }
     if (params.onlyMine) {
       qb.andWhere(new Brackets(q => {
         q.where('p.createdById = :uid', { uid: user.id })
           .orWhere('p.currentHandlerId = :uid', { uid: user.id })
-          .orWhere('awaT.id = :uid', { uid: user.id });
+          .orWhere('awaT.id = :uid', { uid: user.id })
+          .orWhere('lhT.id = :uid AND lh.state = :accepted', { uid: user.id, accepted: HandoverState.ACCEPTED });
       }));
     }
 
@@ -669,6 +679,44 @@ export class PlanService {
         byBucket[PlanBucket.PROCESSING]++;
       }
     }
+    const handovers = await this.handoverRepo.find({ relations: ['handFrom', 'handTo'], order: { id: 'DESC' }, take: 10 });
+    const handoverTotal = await this.handoverRepo.count();
+    const handoverByState: Record<string, number> = { [HandoverState.PENDING_ACCEPT]: 0, [HandoverState.ACCEPTED]: 0 };
+    const handoverByFromRole: Record<string, number> = {};
+    const handoverByFromShift: Record<string, number> = {};
+    const handoverByToRole: Record<string, number> = {};
+    const handoverByToShift: Record<string, number> = {};
+    for (const h of handovers) {
+      handoverByState[h.state] = (handoverByState[h.state] || 0) + 1;
+      if (h.handFrom?.role) handoverByFromRole[h.handFrom.role] = (handoverByFromRole[h.handFrom.role] || 0) + 1;
+      if (h.fromShift) handoverByFromShift[h.fromShift] = (handoverByFromShift[h.fromShift] || 0) + 1;
+      if (h.handTo?.role) handoverByToRole[h.handTo.role] = (handoverByToRole[h.handTo.role] || 0) + 1;
+      if (h.toShift) handoverByToShift[h.toShift] = (handoverByToShift[h.toShift] || 0) + 1;
+    }
+    const allHandovers = await this.handoverRepo.find({ relations: ['handFrom', 'handTo'] });
+    for (const h of allHandovers.slice(10)) {
+      handoverByState[h.state] = (handoverByState[h.state] || 0) + 1;
+      if (h.handFrom?.role) handoverByFromRole[h.handFrom.role] = (handoverByFromRole[h.handFrom.role] || 0) + 1;
+      if (h.fromShift) handoverByFromShift[h.fromShift] = (handoverByFromShift[h.fromShift] || 0) + 1;
+      if (h.handTo?.role) handoverByToRole[h.handTo.role] = (handoverByToRole[h.handTo.role] || 0) + 1;
+      if (h.toShift) handoverByToShift[h.toShift] = (handoverByToShift[h.toShift] || 0) + 1;
+    }
+    const latestHandoverLogs = handovers.slice(0, 10).map(h => ({
+      id: h.id, planId: h.planId, state: h.state, stateName: HANDOVER_STATE_NAME[h.state],
+      handFrom: h.handFrom ? { id: h.handFrom.id, realName: h.handFrom.realName, role: h.handFrom.role, roleName: ROLE_NAME[h.handFrom.role] } : null,
+      handTo: h.handTo ? { id: h.handTo.id, realName: h.handTo.realName, role: h.handTo.role, roleName: ROLE_NAME[h.handTo.role] } : null,
+      fromShift: h.fromShift, fromShiftName: SHIFT_NAME[h.fromShift],
+      toShift: h.toShift, toShiftName: SHIFT_NAME[h.toShift],
+      confirmTime: h.confirmTime, acceptedAt: h.acceptedAt, remark: h.remark, acceptRemark: h.acceptRemark,
+    }));
+    const handoverFromRoleLabels: Record<string, string> = {};
+    const handoverToRoleLabels: Record<string, string> = {};
+    Object.keys(ROLE_NAME).forEach(k => { handoverFromRoleLabels[k] = ROLE_NAME[k as UserRole]; handoverToRoleLabels[k] = ROLE_NAME[k as UserRole]; });
+    const handoverFromShiftLabels: Record<string, string> = {};
+    const handoverToShiftLabels: Record<string, string> = {};
+    Object.keys(SHIFT_NAME).forEach(k => { handoverFromShiftLabels[k] = SHIFT_NAME[k as Shift]; handoverToShiftLabels[k] = SHIFT_NAME[k as Shift]; });
+    const handoverStateLabels: Record<string, string> = {};
+    Object.keys(HANDOVER_STATE_NAME).forEach(k => { handoverStateLabels[k] = HANDOVER_STATE_NAME[k as HandoverState]; });
     const statusLabels: Record<string, string> = {};
     Object.keys(STATUS_NAME).forEach(k => { statusLabels[k] = STATUS_NAME[k as PlanStatus]; });
     const roleLabels: Record<string, string> = {};
@@ -687,6 +735,18 @@ export class PlanService {
       roleLabels,
       byBucket,
       bucketLabels,
+      handoverTotal,
+      handoverByState,
+      handoverStateLabels,
+      handoverByFromRole,
+      handoverFromRoleLabels,
+      handoverByFromShift,
+      handoverFromShiftLabels,
+      handoverByToRole,
+      handoverToRoleLabels,
+      handoverByToShift,
+      handoverToShiftLabels,
+      latestHandoverLogs,
     };
   }
 }

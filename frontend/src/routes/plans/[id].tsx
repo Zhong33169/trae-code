@@ -231,11 +231,12 @@ export default function PlanDetail() {
         setPlan((p: any) => p ? { ...p, latestHandover: r.data.latestHandover,
           handovers: [r.data.latestHandover, ...(p.handovers || [])] } : p);
       }
-      if (r.data?.awaitingAccept) {
+      if (r.data?.awaitingAccept !== undefined) {
         setPlan((p: any) => p ? { ...p, awaitingAccept: r.data.awaitingAccept,
-          latestHandover: r.data.awaitingAccept,
-          handovers: [r.data.awaitingAccept, ...(p.handovers || [])] } : p);
+          latestHandover: r.data.awaitingAccept || r.data?.latestHandover || p.latestHandover,
+          handovers: r.data.awaitingAccept ? [r.data.awaitingAccept, ...(p.handovers || [])] : p.handovers } : p);
       }
+      bus.emit('plan:changed');
       await load();
       return true;
     } else {
@@ -248,22 +249,22 @@ export default function PlanDetail() {
   const submitMaterial = (info?: string) => op(() => _submitMaterial(id(), info), '素材已提交');
   const audit = async (pass: boolean, remark?: string) => {
     const r = await _audit(id(), pass, remark);
-    if (r.code === 0) { notify(r.message || (pass ? '审核通过' : '已退回'), 'success'); await load(); setShowAudit(false); }
+    if (r.code === 0) { notify(r.message || (pass ? '审核通过' : '已退回'), 'success'); bus.emit('plan:changed'); await load(); setShowAudit(false); }
     else notify(r.message || '操作失败', 'error');
   };
   const auditMat = async (pass: boolean, remark?: string) => {
     const r = await _auditMaterial(id(), pass, remark);
-    if (r.code === 0) { notify(r.message || (pass ? '素材通过' : '素材不通过'), 'success'); await load(); setShowMatAudit(false); }
+    if (r.code === 0) { notify(r.message || (pass ? '素材通过' : '素材不通过'), 'success'); bus.emit('plan:changed'); await load(); setShowMatAudit(false); }
     else notify(r.message || '操作失败', 'error');
   };
   const confirmDeliv = async (_: boolean, remark?: string) => {
     const r = await _confirmDelivery(id(), remark);
-    if (r.code === 0) { notify(r.message || '投放已确认', 'success'); await load(); setShowDeliv(false); }
+    if (r.code === 0) { notify(r.message || '投放已确认', 'success'); bus.emit('plan:changed'); await load(); setShowDeliv(false); }
     else notify(r.message || '操作失败', 'error');
   };
   const archive = async (_: boolean, remark?: string) => {
     const r = await _archivePlan(id(), remark);
-    if (r.code === 0) { notify(r.message || '已归档', 'success'); await load(); setShowArch(false); }
+    if (r.code === 0) { notify(r.message || '已归档', 'success'); bus.emit('plan:changed'); await load(); setShowArch(false); }
     else notify(r.message || '操作失败', 'error');
   };
   const handover = async (data: any) => {
@@ -272,6 +273,7 @@ export default function PlanDetail() {
       notify(r.message || '交接成功', 'success');
       setPlan((p: any) => p ? { ...p, awaitingAccept: r.data.awaitingAccept, latestHandover: r.data.awaitingAccept,
         handovers: [r.data.awaitingAccept, ...(p.handovers || [])] } : p);
+      bus.emit('plan:changed');
       await load();
       setShowHand(false);
     } else notify(r.message || '交接失败', 'error');
@@ -280,6 +282,14 @@ export default function PlanDetail() {
     const r = await _acceptHandover(id(), acceptRemark);
     if (r.code === 0) {
       notify(r.message || '已确认接收', 'success');
+      setPlan((p: any) => p ? {
+        ...p,
+        awaitingAccept: r.data.awaitingAccept,
+        latestHandover: r.data.latestHandover || p.latestHandover,
+        handovers: r.data.handovers || p.handovers,
+        permissions: r.data.permissions || p.permissions,
+      } : p);
+      bus.emit('plan:changed');
       await load();
       setShowAccept(false);
     } else notify(r.message || '接收失败', 'error');

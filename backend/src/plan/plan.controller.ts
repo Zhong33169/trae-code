@@ -8,12 +8,13 @@ import {
 } from 'class-validator';
 import { PlanService } from './plan.service';
 import { ok } from '../common/dto';
-import { PlanStatus, Shift, UserRole } from '../common/constants';
+import { PlanStatus, Shift, UserRole, HandoverState } from '../common/constants';
 import { Type } from 'class-transformer';
 
 const STATUS_VALUES = Object.values(PlanStatus);
 const ROLE_VALUES = Object.values(UserRole);
 const SHIFT_VALUES = Object.values(Shift);
+const HANDOVER_STATE_VALUES = Object.values(HandoverState);
 
 export class CreateDto {
   @IsString({ message: '标题必须为字符串' })
@@ -70,6 +71,9 @@ export class ListQueryDto {
   status?: PlanStatus;
   @IsOptional() @IsIn(['true', 'false', true, false], { message: 'onlyMine 必须是 true/false' })
   onlyMine?: any;
+  @IsOptional() @IsIn(HANDOVER_STATE_VALUES, { message: `handoverState 必须是：${HANDOVER_STATE_VALUES.join('/')}` })
+  handoverState?: HandoverState;
+  @IsOptional() @Type(() => Number) @IsInt() receiverId?: number;
 }
 
 @Controller('plans')
@@ -82,6 +86,7 @@ export class PlanController {
     const onlyMine = q.onlyMine === true || String(q.onlyMine) === 'true';
     const result = await this.planService.list(req.user, {
       page: q.page, pageSize: q.pageSize, keyword: q.keyword, status: q.status, onlyMine,
+      handoverState: q.handoverState, receiverId: q.receiverId,
     });
     return ok(result);
   }
