@@ -233,18 +233,33 @@ export default function App() {
       setTimeout(() => setSuccess(""), 3000);
     } catch (e: any) {
       let msg = e.message;
+      const detail = e.detail || {};
+      const hasVersionInfo =
+        detail.expectedVersion !== undefined && detail.currentVersion !== undefined;
+      const versionSuffix = hasVersionInfo
+        ? ` (请求版本: v${detail.expectedVersion}，当前版本: ${
+            detail.currentVersion !== null ? `v${detail.currentVersion}` : "未知"
+          })`
+        : "";
+
       if (e.code === "version_conflict") {
-        msg = `版本冲突：你当前看到的是 v${e.detail.expectedVersion}，服务器已更新到 v${e.detail.currentVersion}，请刷新后重试`;
+        msg = `版本冲突：你当前看到的是 v${detail.expectedVersion}，服务器已更新到 v${detail.currentVersion}，请刷新后重试`;
       } else if (e.code === "missing_evidence") {
-        msg = `证据不足，缺少：${e.detail.missingEvidence?.join("、")}，请补充后再操作`;
+        msg = `证据不足，缺少：${
+          detail.missingEvidence?.join("、")
+        }，请补充后再操作${versionSuffix}`;
       } else if (e.code === "missing_version") {
-        msg = `缺少版本号：${e.message}，请刷新页面后重试`;
+        msg = `缺少版本号：${e.message}，请刷新页面后重试${versionSuffix}`;
       } else if (e.code === "invalid_version") {
-        msg = `版本号格式错误：${e.message}，请刷新页面后重试`;
+        msg = `版本号格式错误：${e.message}，请刷新页面后重试${versionSuffix}`;
+      } else if (e.code === "not_found") {
+        msg = `预算调整单不存在${versionSuffix}`;
       } else if (e.code === "wrong_role" || e.code === "wrong_role_action") {
-        msg = `角色无权：${e.message}`;
+        msg = `角色无权：${e.message}${versionSuffix}`;
       } else if (e.code === "wrong_status") {
-        msg = `状态不符：${e.message}`;
+        msg = `状态不符：${e.message}${versionSuffix}`;
+      } else {
+        msg = `${e.message}${versionSuffix}`;
       }
       setError(msg);
     }
@@ -331,6 +346,16 @@ export default function App() {
       if (failed.length > 0) {
         const errorLines = failed.map((f: any) => {
           let detail = "";
+          const hasVersionInfo =
+            f.expectedVersion !== undefined && f.currentVersion !== undefined;
+          const versionInfo = hasVersionInfo
+            ? ` (请求: v${f.expectedVersion}，当前: ${
+                f.currentVersion !== null ? `v${f.currentVersion}` : "未知"
+              })`
+            : f.expectedVersion !== undefined
+            ? ` (请求: v${f.expectedVersion})`
+            : "";
+
           if (f.code === "version_conflict") {
             detail = `(版本冲突: v${f.expectedVersion} → v${f.currentVersion})`;
           } else if (f.code === "missing_evidence") {
@@ -345,8 +370,10 @@ export default function App() {
             detail = `(版本格式错误)`;
           } else if (f.code === "not_found") {
             detail = `(表单不存在)`;
+          } else if (f.code === "batch_cancelled") {
+            detail = `(批量操作已取消)`;
           }
-          return `${f.formId}: ${f.error} ${detail}`;
+          return `${f.formId}: ${f.error} ${detail}${versionInfo}`;
         });
         setError(
           `批量操作完成：成功${result.successCount}条，失败${result.failCount}条\n${errorLines.join("\n")}\n\n失败项已保留选中，请修正后重试`
@@ -364,10 +391,23 @@ export default function App() {
       setTimeout(() => setSuccess(""), 3000);
     } catch (e: any) {
       let msg = e.message;
+      const detail = e.detail || {};
+      const hasVersionInfo =
+        detail.expectedVersion !== undefined && detail.currentVersion !== undefined;
+      const versionSuffix = hasVersionInfo
+        ? ` (请求版本: v${detail.expectedVersion}，当前版本: ${
+            detail.currentVersion !== null ? `v${detail.currentVersion}` : "未知"
+          })`
+        : "";
+
       if (e.code === "missing_version") {
-        msg = `缺少版本号：${e.message}，请刷新页面后重试`;
+        msg = `缺少版本号：${e.message}，请刷新页面后重试${versionSuffix}`;
       } else if (e.code === "invalid_version") {
-        msg = `版本号格式错误：${e.message}，请刷新页面后重试`;
+        msg = `版本号格式错误：${e.message}，请刷新页面后重试${versionSuffix}`;
+      } else if (e.code === "missing_params") {
+        msg = `参数错误：${e.message}${versionSuffix}`;
+      } else {
+        msg = `${e.message}${versionSuffix}`;
       }
       setError(msg);
     }

@@ -84,6 +84,36 @@ function initSchema() {
       FOREIGN KEY (actor_id) REFERENCES users(id)
     );
   `);
+
+  migrateFormActionsTable();
+}
+
+function migrateFormActionsTable() {
+  const d = getDb();
+
+  const columns = d
+    .prepare("PRAGMA table_info(form_actions)")
+    .all()
+    .map((col) => col.name);
+
+  const requiredColumns = [
+    { name: "expected_version", type: "INTEGER" },
+    { name: "current_version", type: "INTEGER" },
+    { name: "success", type: "INTEGER NOT NULL DEFAULT 1" },
+    { name: "failure_reason", type: "TEXT" },
+    { name: "failure_code", type: "TEXT" },
+  ];
+
+  requiredColumns.forEach(({ name, type }) => {
+    if (!columns.includes(name)) {
+      try {
+        d.prepare(`ALTER TABLE form_actions ADD COLUMN ${name} ${type}`).run();
+        console.log(`[DB Migrate] 已添加 form_actions 列: ${name}`);
+      } catch (e) {
+        console.warn(`[DB Migrate] 添加列 ${name} 失败: ${e.message}`);
+      }
+    }
+  });
 }
 
 function seedData() {
