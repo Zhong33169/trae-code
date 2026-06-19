@@ -78,14 +78,16 @@ func GetOrders(db *sql.DB, query model.OrderListQuery) ([]model.KnowledgeRevisio
 		LEFT JOIN users u1 ON o.creator_id = u1.id
 		LEFT JOIN users u2 ON o.current_handler_id = u2.id
 		LEFT JOIN (
-			SELECT order_id, failure_reason, created_at
-			FROM audit_logs
-			WHERE failure_reason IS NOT NULL AND failure_reason != ''
-			AND id IN (
-				SELECT MAX(id) FROM audit_logs
+			SELECT al1.order_id, al1.failure_reason, al1.created_at
+			FROM audit_logs al1
+			INNER JOIN (
+				SELECT order_id, MAX(created_at) AS max_created_at
+				FROM audit_logs
 				WHERE failure_reason IS NOT NULL AND failure_reason != ''
 				GROUP BY order_id
-			)
+			) al2 ON al1.order_id = al2.order_id AND al1.created_at = al2.max_created_at
+			WHERE al1.failure_reason IS NOT NULL AND al1.failure_reason != ''
+			GROUP BY al1.order_id
 		) al ON o.id = al.order_id
 		%s
 		ORDER BY o.created_at DESC
@@ -182,14 +184,16 @@ func GetOrderByID(db *sql.DB, id string) (*model.KnowledgeRevisionOrder, error) 
 		LEFT JOIN users u1 ON o.creator_id = u1.id
 		LEFT JOIN users u2 ON o.current_handler_id = u2.id
 		LEFT JOIN (
-			SELECT order_id, failure_reason, created_at
-			FROM audit_logs
-			WHERE failure_reason IS NOT NULL AND failure_reason != ''
-			AND id IN (
-				SELECT MAX(id) FROM audit_logs
+			SELECT al1.order_id, al1.failure_reason, al1.created_at
+			FROM audit_logs al1
+			INNER JOIN (
+				SELECT order_id, MAX(created_at) AS max_created_at
+				FROM audit_logs
 				WHERE failure_reason IS NOT NULL AND failure_reason != ''
 				GROUP BY order_id
-			)
+			) al2 ON al1.order_id = al2.order_id AND al1.created_at = al2.max_created_at
+			WHERE al1.failure_reason IS NOT NULL AND al1.failure_reason != ''
+			GROUP BY al1.order_id
 		) al ON o.id = al.order_id
 		WHERE o.id = $1
 	`, id).Scan(

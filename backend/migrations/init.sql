@@ -346,3 +346,32 @@ INSERT OR IGNORE INTO knowledge_feedbacks (id, order_id, content, is_resolved, r
 
 INSERT OR IGNORE INTO audit_logs (id, order_id, order_no, action, actor_id, actor_name, actor_role, from_status, to_status, opinion, reason, failure_reason, created_at)
 VALUES ('al13', 'ord8', 'KSX-20260601008', 'create', 'u1', '张登记', 'clerk', '', 'pending_review', '', '', '', '2026-06-12 14:00:00');
+
+
+-- =============================================
+-- Demo Failure Audit Logs (失败留痕样例)
+-- =============================================
+
+-- ord1: 伪造角色失败 - clerk冒充supervisor尝试推进
+INSERT OR IGNORE INTO audit_logs (id, order_id, order_no, action, actor_id, actor_name, actor_role, from_status, to_status, opinion, reason, failure_reason, created_at)
+VALUES ('al_fail1', 'ord1', 'KSX-20260601001', 'auth_failed', 'u1', '张登记', 'supervisor', 'pending_review', '', '', '', '伪造角色：用户 u1 实际角色为 clerk，请求角色为 supervisor', '2026-06-15 09:00:00');
+
+-- ord1: 业务越权失败 - clerk尝试推进
+INSERT OR IGNORE INTO audit_logs (id, order_id, order_no, action, actor_id, actor_name, actor_role, from_status, to_status, opinion, reason, failure_reason, created_at)
+VALUES ('al_fail2', 'ord1', 'KSX-20260601001', 'advance_failed', 'u1', '张登记', 'clerk', 'pending_review', '', '', '', '越权操作：角色 clerk 无权执行从 pending_review 到 pending_final_review 的状态转换，需要角色 supervisor', '2026-06-15 09:05:00');
+
+-- ord5: 逾期工单顺序错误 - clerk尝试推进（已逾期但仍越权操作）
+INSERT OR IGNORE INTO audit_logs (id, order_id, order_no, action, actor_id, actor_name, actor_role, from_status, to_status, opinion, reason, failure_reason, created_at)
+VALUES ('al_fail3', 'ord5', 'KSX-20260601005', 'advance_failed', 'u1', '张登记', 'clerk', 'pending_review', '', '', '', '越权操作：角色 clerk 无权执行从 pending_review 到 pending_final_review 的状态转换，需要角色 supervisor', '2026-06-15 10:00:00');
+
+-- ord7: 证据缺失失败 - 材料不全
+INSERT OR IGNORE INTO audit_logs (id, order_id, order_no, action, actor_id, actor_name, actor_role, from_status, to_status, opinion, reason, failure_reason, created_at)
+VALUES ('al_fail4', 'ord7', 'KSX-20260601007', 'advance_failed', 'u2', '李审核', 'supervisor', 'pending_review', '', '', '', '证据缺失：存在未完成的材料（智能客服话术模板.docx），无法推进', '2026-06-15 11:00:00');
+
+-- ord7: 证据缺失失败 - 反馈未解决
+INSERT OR IGNORE INTO audit_logs (id, order_id, order_no, action, actor_id, actor_name, actor_role, from_status, to_status, opinion, reason, failure_reason, created_at)
+VALUES ('al_fail5', 'ord7', 'KSX-20260601007', 'advance_failed', 'u2', '李审核', 'supervisor', 'pending_review', '', '', '', '证据缺失：存在未解决的反馈（智能客服话术需要覆盖多轮对话场景），无法推进', '2026-06-15 11:30:00');
+
+-- ord8: 版本冲突失败
+INSERT OR IGNORE INTO audit_logs (id, order_id, order_no, action, actor_id, actor_name, actor_role, from_status, to_status, opinion, reason, failure_reason, created_at)
+VALUES ('al_fail6', 'ord8', 'KSX-20260601008', 'advance_failed', 'u2', '李审核', 'supervisor', 'pending_review', '', '', '', '版本冲突：版本冲突：工单版本已变更，当前版本为 1，请求版本为 99', '2026-06-15 14:00:00');

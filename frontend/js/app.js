@@ -36,7 +36,8 @@ function formatAction(action) {
         batch_return: '批量退回',
         advance_failed: '推进失败',
         return_failed: '退回失败',
-        correct_failed: '补正失败'
+        correct_failed: '补正失败',
+        auth_failed: '身份验证失败'
     };
     return map[action] || action;
 }
@@ -302,6 +303,7 @@ async function handleAdvanceSubmit(orderId, version, isOverdue) {
     } catch (e) {
         closeModal();
         showFailureToast(e);
+        refreshCurrentPage();
     }
 }
 
@@ -319,6 +321,7 @@ async function handleReturnSubmit(orderId, version) {
     } catch (e) {
         closeModal();
         showFailureToast(e);
+        refreshCurrentPage();
     }
 }
 
@@ -332,12 +335,15 @@ function showFailureToast(e) {
     };
     const ft = e.failureType || '';
     const label = typeLabel[ft] || '操作失败';
+    const reason = e.failureReason || e.message || '';
     if (ft === 'version') {
         showToast(`${label}：请刷新页面后重试`, 'error');
-    } else if (ft === 'unauthorized') {
-        showToast(`${label}：${e.message}`, 'error');
+    } else if (ft === 'unauthorized' && e.code === 401) {
+        showToast(`身份无效：${reason}`, 'error');
+    } else if (ft === 'unauthorized' && e.code === 403) {
+        showToast(`伪造角色被拒：${reason}`, 'error');
     } else {
-        showToast(`${label}：${e.message}`, 'error');
+        showToast(`${label}：${reason}`, 'error');
     }
 }
 
@@ -411,7 +417,8 @@ async function handleBatchAdvanceSubmit() {
         showBatchResultModal('批量通过结果', succeeded, failed);
     } catch (e) {
         closeModal();
-        showToast(`批量通过失败：${e.message}`, 'error');
+        showFailureToast(e);
+        refreshCurrentPage();
     }
 }
 
@@ -433,7 +440,8 @@ async function handleBatchReturnSubmit() {
         showBatchResultModal('批量退回结果', succeeded, failed);
     } catch (e) {
         closeModal();
-        showToast(`批量退回失败：${e.message}`, 'error');
+        showFailureToast(e);
+        refreshCurrentPage();
     }
 }
 
@@ -1392,6 +1400,7 @@ async function renderStatsPage() {
                     <option value="advance_failed">推进失败</option>
                     <option value="return_failed">退回失败</option>
                     <option value="correct_failed">补正失败</option>
+                    <option value="auth_failed">身份验证失败</option>
                 </select>
                 <input type="date" id="audit-start-date" value="${state.auditFilters.start_date}">
                 <input type="date" id="audit-end-date" value="${state.auditFilters.end_date}">
