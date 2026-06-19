@@ -189,16 +189,27 @@ function RecordsPage() {
                       }}>{nodeLabel(r.current_node)}</span>
                     </td>
                     <td style={td}>
-                      <span style={{
-                        padding: '3px 10px', borderRadius: 10, fontSize: 12,
-                        background: statusColor(r.overall_status) + '1a',
-                        color: statusColor(r.overall_status),
-                        fontWeight: 600,
-                      }}>{statusLabel(r.overall_status)}</span>
+                      {r.overall_status === 'completed' ? (
+                        <span style={{
+                          padding: '3px 10px', borderRadius: 10, fontSize: 12,
+                          background: '#dcfce7', color: '#15803d', fontWeight: 600,
+                        }}>✓ 已结案</span>
+                      ) : (
+                        <span style={{
+                          padding: '3px 10px', borderRadius: 10, fontSize: 12,
+                          background: statusColor(r.overall_status) + '1a',
+                          color: statusColor(r.overall_status),
+                          fontWeight: 600,
+                        }}>{statusLabel(r.overall_status)}</span>
+                      )}
                     </td>
                     <td style={td}>
                       <a onClick={() => nav({ to: '/records/$id', params: { id: r.id } })}
                         style={{ color: '#2563eb', cursor: 'pointer', marginRight: 10 }}>查看</a>
+                      {r.overall_status === 'completed' && (
+                        <a onClick={() => nav({ to: '/records/$id', params: { id: r.id }, search: { tab: 'archive' } as any })}
+                          style={{ color: '#059669', cursor: 'pointer' }}>结案摘要</a>
+                      )}
                     </td>
                   </tr>
                 )

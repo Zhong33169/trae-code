@@ -86,6 +86,23 @@ export interface SeedRecordDetail {
   logs: OperationLog[]
 }
 
+export interface ArchiveSummaryPublic {
+  id: string
+  record_id: string
+  batch_no: string
+  archive_time: string
+  archive_remark: string
+  reviewer_name: string
+  total_duration_hours: number
+  node_count: number
+  completed_node_count: number
+  timeout_node_count: number
+  timeout_summary?: string
+  node_duration_summary?: string
+  final_status: string
+  created_at: string
+}
+
 export interface PaginatedRecords {
   items: SeedRecord[]
   total: number
@@ -190,6 +207,8 @@ export const api = {
     req<SeedRecordDetail>(`/records/${id}/survival-observe`, { method: 'POST', body: JSON.stringify(body) }),
   archive: (id: string, body: any) =>
     req<SeedRecordDetail>(`/records/${id}/archive`, { method: 'POST', body: JSON.stringify(body) }),
+  getArchiveSummary: (id: string) =>
+    req<ArchiveSummaryPublic>(`/records/${id}/archive-summary`),
   handleTimeout: (id: string, body: any) =>
     req<SeedRecordDetail>(`/records/${id}/handle-timeout`, { method: 'POST', body: JSON.stringify(body) }),
   batchAction: (body: any) =>

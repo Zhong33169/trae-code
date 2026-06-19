@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
-import { useState } from 'react'
-import { api, auth, NodeTracking, OperationLog, SeedRecordDetail } from '~/app/api'
+import { useEffect, useState } from 'react'
+import { api, ArchiveSummaryPublic, auth, NodeTracking, OperationLog, SeedRecordDetail } from '~/app/api'
 import { formatTime, nodeLabel, roleLabel, statusColor, statusLabel } from '~/app/constants'
 import { useRecordDetail } from '~/app/hooks'
 
@@ -13,7 +13,21 @@ function RecordDetailPage() {
   const nav = useNavigate()
   const user = auth.getUser()
   const { loading, data, msg, showMsg, refresh } = useRecordDetail(id)
-  const [activeTab, setActiveTab] = useState<'record' | 'nodes' | 'logs'>('record')
+  const [activeTab, setActiveTab] = useState<'record' | 'nodes' | 'logs' | 'archive'>('record')
+  const [archiveSummary, setArchiveSummary] = useState<ArchiveSummaryPublic | null>(null)
+  const [sumLoading, setSumLoading] = useState(false)
+
+  const loadArchiveSummary = async () => {
+    if (!data?.record || data.record.overall_status !== 'completed') return
+    setSumLoading(true)
+    const r = await api.getArchiveSummary(id)
+    setSumLoading(false)
+    if (r.success && r.data) setArchiveSummary(r.data)
+  }
+
+  useEffect(() => {
+    if (data?.record?.overall_status === 'completed') loadArchiveSummary()
+  }, [data?.record?.overall_status, id])
 
   if (loading) return <div style={{ padding: 40 }}>加载中...</div>
   if (!data) return <div style={{ padding: 40, color: '#b91c1c' }}>{msg?.text || '加载失败'}</div>
@@ -68,6 +82,11 @@ function RecordDetailPage() {
         <TabBtn
           label={`操作记录（${data.logs.length}）`}
           active={activeTab === 'logs'} onClick={() => setActiveTab('logs')} />
+        {isFinalized && (
+          <TabBtn
+            label="结案摘要"
+            active={activeTab === 'archive'} onClick={() => setActiveTab('archive')} />
+        )}
       </div>
 
       {activeTab === 'record' && (
@@ -89,6 +108,7 @@ function RecordDetailPage() {
         />
       )}
       {activeTab === 'logs' && <LogsPanel logs={data.logs} />}
+      {activeTab === 'archive' && <ArchivePanel summary={archiveSummary} loading={sumLoading} />}
     </div>
   )
 }
@@ -545,6 +565,85 @@ function LogsPanel({ logs }: { logs: OperationLog[] }) {
           </div>
         </div>
       ))}
+    </div>
+  )
+}
+
+function ArchivePanel({ summary, loading }: { summary: ArchiveSummaryPublic | null; loading: boolean }) {
+  if (loading) return <div style={{ ...card, padding: 30, textAlign: 'center' }}>加载结案摘要中...</div>
+  if (!summary) return <div style={card}>暂无结案摘要</div>
+  return (
+    <div style={card}>
+      <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 12, color: '#0f172a' }}>
+        <span style={{ color: '#059669' }}>✓</span> 结案摘要
+      </div>
+
+      <div style={{
+        display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12,
+        padding: '14px 16px', borderRadius: 8, background: '#ecfdf5',
+        border: '1px solid #a7f3d0', marginBottom: 18,
+      }}>
+        <StatBox label="总流程耗时" value={`${summary.total_duration_hours.toFixed(1)} 小时`} />
+        <StatBox label="节点总数" value={`${summary.node_count} 个`} />
+        <StatBox label="超时节点" value={`${summary.timeout_node_count} 个`} color={summary.timeout_node_count > 0 ? '#b91c1c' : '#059669'} />
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 16 }}>
+        <div>
+          <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8, color: '#334155' }}>归档复核意见</div>
+          <div style={{
+            padding: 12, borderRadius: 6, background: '#f8fafc', border: '1px solid #e2e8f0',
+            fontSize: 13, color: '#0f172a', lineHeight: 1.7,
+          }}>{summary.archive_remark || '无'}</div>
+
+          {summary.node_duration_summary && (
+            <div style={{ marginTop: 16 }}>
+              <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8, color: '#334155' }}>各节点耗时</div>
+              <div style={{
+                padding: 12, borderRadius: 6, background: '#f8fafc',
+                border: '1px solid #e2e8f0', fontSize: 13, color: '#0f172a',
+                lineHeight: 1.9,
+              }}>{summary.node_duration_summary.split('；').map((s, i) => (
+                <div key={i} style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span>{s.split(': ')[0]}</span>
+                  <b style={{ color: '#1d4ed8' }}>{s.split(': ')[1] || ''}</b>
+                </div>
+              ))}</div>
+            </div>
+          )}
+
+          {summary.timeout_summary && (
+            <div style={{ marginTop: 16 }}>
+              <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8, color: '#b91c1c' }}>
+                ⚠ 超时处理摘要
+              </div>
+              <div style={{
+                padding: 12, borderRadius: 6, background: '#fef2f2',
+                border: '1px solid #fecaca', fontSize: 13, color: '#7f1d1d',
+                lineHeight: 1.8,
+              }}>{summary.timeout_summary}</div>
+            </div>
+          )}
+        </div>
+
+        <div>
+          <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8, color: '#334155' }}>结案信息</div>
+          <KVInline k="批次号" v={summary.batch_no} />
+          <KVInline k="复核人" v={summary.reviewer_name} />
+          <KVInline k="结案时间" v={formatTime(summary.archive_time)} />
+          <KVInline k="完成节点" v={`${summary.completed_node_count} / ${summary.node_count}`} />
+          <KVInline k="最终状态" v={statusLabel(summary.final_status)} />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function StatBox({ label, value, color }: { label: string; value: string; color?: string }) {
+  return (
+    <div>
+      <div style={{ fontSize: 12, color: '#047857', marginBottom: 4 }}>{label}</div>
+      <div style={{ fontSize: 20, fontWeight: 700, color: color || '#065f46' }}>{value}</div>
     </div>
   )
 }

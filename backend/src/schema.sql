@@ -68,6 +68,26 @@ CREATE TABLE IF NOT EXISTS operation_logs (
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS archive_summary (
+    id TEXT PRIMARY KEY,
+    record_id TEXT NOT NULL UNIQUE,
+    batch_no TEXT NOT NULL,
+    archive_time TEXT NOT NULL,
+    archive_remark TEXT NOT NULL,
+    reviewer_id TEXT NOT NULL,
+    reviewer_name TEXT NOT NULL,
+    total_duration_hours REAL NOT NULL DEFAULT 0,
+    node_count INTEGER NOT NULL DEFAULT 0,
+    completed_node_count INTEGER NOT NULL DEFAULT 0,
+    timeout_node_count INTEGER NOT NULL DEFAULT 0,
+    timeout_summary TEXT,
+    node_duration_summary TEXT,
+    final_status TEXT NOT NULL DEFAULT 'completed',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (record_id) REFERENCES seed_records(id) ON DELETE CASCADE
+);
+
 CREATE INDEX IF NOT EXISTS idx_seed_records_status ON seed_records(overall_status);
 CREATE INDEX IF NOT EXISTS idx_seed_records_node ON seed_records(current_node);
 CREATE INDEX IF NOT EXISTS idx_node_tracking_record ON node_tracking(record_id);
@@ -75,3 +95,5 @@ CREATE INDEX IF NOT EXISTS idx_node_tracking_status ON node_tracking(status);
 CREATE INDEX IF NOT EXISTS idx_node_tracking_timeout ON node_tracking(is_timeout);
 CREATE INDEX IF NOT EXISTS idx_oplogs_record ON operation_logs(record_id);
 CREATE INDEX IF NOT EXISTS idx_oplogs_user ON operation_logs(user_id);
+CREATE INDEX IF NOT EXISTS idx_archive_summary_record ON archive_summary(record_id);
+CREATE INDEX IF NOT EXISTS idx_archive_summary_time ON archive_summary(archive_time);

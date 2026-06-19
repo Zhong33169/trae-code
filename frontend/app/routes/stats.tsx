@@ -1,4 +1,4 @@
-import { createFileRoute } from '@tanstack/react-router'
+import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { Statistics } from '~/app/api'
 import { nodeLabel, statusLabel } from '~/app/constants'
 import { useStats } from '~/app/hooks'
@@ -8,6 +8,7 @@ export const Route = createFileRoute('/stats')({
 })
 
 function StatsPage() {
+  const nav = useNavigate()
   const { loading, data, msg, refresh } = useStats()
 
   if (loading) return <div style={{ padding: 40 }}>加载中...</div>
@@ -107,6 +108,25 @@ function StatsPage() {
           <span style={{ display: 'inline-block', width: 10, height: 10, background: '#10b981', marginLeft: 18, marginRight: 6 }}></span>完成
         </div>
       </div>
+
+      <div style={{ ...card, marginTop: 16, background: '#ecfdf5', border: '1px solid #a7f3d0' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: '#065f46' }}>结案情况总览</div>
+          <button onClick={() => nav({ to: '/', search: { status: 'completed' } as any })}
+            style={{ ...btnGhost, borderColor: '#6ee7b7', color: '#065f46', background: '#fff' }}>
+            查看所有已结案 →
+          </button>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14 }}>
+          <StatMini label="已结案批次" value={`${data.completed_count} 条`} color="#059669" />
+          <StatMini label="结案率" value={data.total_records > 0 ? `${((data.completed_count / data.total_records) * 100).toFixed(1)}%` : '-'} color="#059669" />
+          <StatMini label="超时结案数" value={`${Math.min(data.timeout_count, data.completed_count)} 条`} color="#b91c1c" />
+          <StatMini label="待办积压" value={`${data.pending_count + data.processing_count + data.rejected_count} 条`} color="#b45309" />
+        </div>
+        <div style={{ marginTop: 12, fontSize: 12, color: '#047857' }}>
+          * 数据与苗种记录列表、详情页共享同一后端状态，刷新后完全一致
+        </div>
+      </div>
     </div>
   )
 }
@@ -121,6 +141,18 @@ function Bar({ label, value, max, color }: { label: string; value: number; max: 
       <div style={{ height: 8, background: '#f1f5f9', borderRadius: 4, overflow: 'hidden' }}>
         <div style={{ height: '100%', width: `${(value / max) * 100}%`, background: color, borderRadius: 4 }} />
       </div>
+    </div>
+  )
+}
+
+function StatMini({ label, value, color }: { label: string; value: string; color: string }) {
+  return (
+    <div style={{
+      background: '#fff', borderRadius: 8, padding: '12px 14px',
+      border: '1px solid #bbf7d0',
+    }}>
+      <div style={{ fontSize: 12, color: '#047857', marginBottom: 4 }}>{label}</div>
+      <div style={{ fontSize: 22, fontWeight: 700, color }}>{value}</div>
     </div>
   )
 }

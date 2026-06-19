@@ -1022,6 +1022,7 @@ pub fn archive(
     );
 
     refresh_node_timeout(pool, id);
+    let _ = build_and_save_archive_summary(pool, id, &user);
     let record = query_record(pool, id).unwrap();
     let nodes = query_nodes(pool, id);
     let logs = query_logs(pool, id);
@@ -1213,13 +1214,228 @@ fn archive_inner(pool: &State<DbPool>, user: &AuthUser, id: &str, remark: &Optio
         None,
     );
     refresh_node_timeout(pool, id);
+    let _ = build_and_save_archive_summary(pool, id, user);
     Ok(())
+}
+
+fn build_and_save_archive_summary(
+    pool: &State<DbPool>,
+    record_id: &str,
+    user: &AuthUser,
+) -> Result<ArchiveSummary, String> {
+    let record = query_record(pool, record_id).ok_or_else(|| "未找到苗种记录".to_string())?;
+    if record.overall_status != "completed" {
+        return Err("仅已完成归档的记录可生成结案摘要".into());
+    }
+    let nodes = query_nodes(pool, record_id);
+
+    let mut total_duration_hours: f64 = 0.0;
+    let mut completed_count: i64 = 0;
+    let mut timeout_count: i64 = 0;
+    let mut node_duration_parts: Vec<String> = vec![];
+    let mut timeout_parts: Vec<String> = vec![];
+
+    for n in &nodes {
+        if n.status == "completed" {
+            completed_count += 1;
+            if let (Some(started), Some(completed)) = (Some(n.created_at.clone()), n.completed_at.clone()) {
+                if let (Ok(s), Ok(c)) = (
+                    DateTime::parse_from_rfc3339(&started),
+                    DateTime::parse_from_rfc3339(&completed),
+                ) {
+                    let dur = c.signed_duration_since(s);
+                    let hours = dur.num_seconds() as f64 / 3600.0;
+                    total_duration_hours += hours.max(0.0);
+                    node_duration_parts.push(format!("{}: {:.1} 小时", n.node_name, hours.max(0.0)));
+                }
+            }
+        }
+        if n.is_timeout {
+            timeout_count += 1;
+            let reason = n.timeout_reason.as_deref().unwrap_or("未记录");
+            let follow = n.follow_up_action.as_deref().unwrap_or("未记录");
+            timeout_parts.push(format!("[{}] 原因：{}；后续：{}", n.node_name, reason, follow));
+        }
+    }
+
+    let timeout_summary = if timeout_parts.is_empty() {
+        None
+    } else {
+        Some(timeout_parts.join("；"))
+    };
+    let node_duration_summary = if node_duration_parts.is_empty() {
+        None
+    } else {
+        Some(node_duration_parts.join("；"))
+    };
+
+    let now = now_str();
+    let id = Uuid::new_v4().to_string();
+    let reviewer_name = user.real_name.clone();
+    let reviewer_id = user.user_id.clone();
+    let archive_remark = record.archive_remark.clone().unwrap_or_default();
+    let archive_time = record.archive_time.clone().unwrap_or_else(|| now.clone());
+
+    {
+        let conn = pool.lock();
+        let existing: Result<String, _> = conn.query_row(
+            "SELECT id FROM archive_summary WHERE record_id = ?1",
+            rusqlite::params![record_id],
+            |row| row.get(0),
+        );
+        if let Ok(existing_id) = existing {
+            let _ = conn.execute(
+                "UPDATE archive_summary SET archive_time=?1, archive_remark=?2, reviewer_id=?3, reviewer_name=?4, \
+                 total_duration_hours=?5, node_count=?6, completed_node_count=?7, timeout_node_count=?8, \
+                 timeout_summary=?9, node_duration_summary=?10, final_status=?11, updated_at=?12 WHERE id=?13",
+                rusqlite::params![
+                    archive_time,
+                    archive_remark,
+                    reviewer_id,
+                    reviewer_name,
+                    total_duration_hours,
+                    nodes.len() as i64,
+                    completed_count,
+                    timeout_count,
+                    timeout_summary,
+                    node_duration_summary,
+                    "completed",
+                    now,
+                    existing_id,
+                ],
+            );
+            return Ok(query_archive_summary_inner(pool, record_id).unwrap());
+        }
+
+        let _ = conn.execute(
+            "INSERT INTO archive_summary (
+                id, record_id, batch_no, archive_time, archive_remark, reviewer_id, reviewer_name,
+                total_duration_hours, node_count, completed_node_count, timeout_node_count,
+                timeout_summary, node_duration_summary, final_status, created_at, updated_at
+            ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)",
+            rusqlite::params![
+                id,
+                record_id,
+                record.batch_no,
+                archive_time,
+                archive_remark,
+                reviewer_id,
+                reviewer_name,
+                total_duration_hours,
+                nodes.len() as i64,
+                completed_count,
+                timeout_count,
+                timeout_summary,
+                node_duration_summary,
+                "completed",
+                now,
+                now,
+            ],
+        );
+    }
+
+    query_archive_summary_inner(pool, record_id).ok_or_else(|| "生成结案摘要失败".into())
+}
+
+fn query_archive_summary_inner(pool: &State<DbPool>, record_id: &str) -> Option<ArchiveSummary> {
+    let conn = pool.lock();
+    conn.query_row(
+        "SELECT id, record_id, batch_no, archive_time, archive_remark, reviewer_id, reviewer_name,
+                total_duration_hours, node_count, completed_node_count, timeout_node_count,
+                timeout_summary, node_duration_summary, final_status, created_at, updated_at
+         FROM archive_summary WHERE record_id = ?1",
+        rusqlite::params![record_id],
+        |row| {
+            Ok(ArchiveSummary {
+                id: row.get(0)?,
+                record_id: row.get(1)?,
+                batch_no: row.get(2)?,
+                archive_time: row.get(3)?,
+                archive_remark: row.get(4)?,
+                reviewer_id: row.get(5)?,
+                reviewer_name: row.get(6)?,
+                total_duration_hours: row.get(7)?,
+                node_count: row.get(8)?,
+                completed_node_count: row.get(9)?,
+                timeout_node_count: row.get(10)?,
+                timeout_summary: row.get(11).ok(),
+                node_duration_summary: row.get(12).ok(),
+                final_status: row.get(13)?,
+                created_at: row.get(14)?,
+                updated_at: row.get(15)?,
+            })
+        },
+    )
+    .ok()
+}
+
+fn to_public_summary(s: &ArchiveSummary) -> ArchiveSummaryPublic {
+    ArchiveSummaryPublic {
+        id: s.id.clone(),
+        record_id: s.record_id.clone(),
+        batch_no: s.batch_no.clone(),
+        archive_time: s.archive_time.clone(),
+        archive_remark: s.archive_remark.clone(),
+        reviewer_name: s.reviewer_name.clone(),
+        total_duration_hours: s.total_duration_hours,
+        node_count: s.node_count,
+        completed_node_count: s.completed_node_count,
+        timeout_node_count: s.timeout_node_count,
+        timeout_summary: s.timeout_summary.clone(),
+        node_duration_summary: s.node_duration_summary.clone(),
+        final_status: s.final_status.clone(),
+        created_at: s.created_at.clone(),
+    }
+}
+
+#[get("/<id>/archive-summary")]
+pub fn get_archive_summary(
+    pool: &State<DbPool>,
+    user: AuthUser,
+    id: &str,
+) -> Result<Json<ApiResponse<ArchiveSummaryPublic>>, Custom<Json<ApiResponse<()>>>> {
+    let _ = user;
+    let record = query_record(pool, id)
+        .ok_or_else(|| Custom(Status::NotFound, Json(ApiResponse::err("未找到该苗种记录"))))?;
+
+    if record.overall_status != "completed" {
+        return Err(Custom(
+            Status::BadRequest,
+            Json(ApiResponse::err("该记录尚未归档结案，暂无结案摘要")),
+        ));
+    }
+
+    let summary = query_archive_summary_inner(pool, id);
+    let summary = match summary {
+        Some(s) => s,
+        None => {
+            return Err(Custom(
+                Status::NotFound,
+                Json(ApiResponse::err("未找到结案摘要")),
+            ))
+        }
+    };
+
+    let can_see_full = user.role == "reviewer" || user.role == "auditor";
+    let public = if can_see_full {
+        to_public_summary(&summary)
+    } else {
+        let mut pub_s = to_public_summary(&summary);
+        pub_s.reviewer_name = if user.role == "registrar" {
+            summary.reviewer_name.clone()
+        } else {
+            "复核负责人".to_string()
+        };
+        pub_s
+    };
+
+    Ok(Json(ApiResponse::ok(public, "获取结案摘要成功")))
 }
 
 pub fn routes() -> Vec<rocket::Route> {
     routes![
         list_records, get_record, create_record, update_record,
         approve_audit, reject_audit, pond_entry, survival_observe, archive,
-        handle_timeout, batch_action
+        handle_timeout, batch_action, get_archive_summary
     ]
 }

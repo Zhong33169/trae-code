@@ -240,3 +240,41 @@ pub struct BatchActionRequest {
     pub action: String,
     pub remark: Option<String>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArchiveSummary {
+    pub id: String,
+    pub record_id: String,
+    pub batch_no: String,
+    pub archive_time: String,
+    pub archive_remark: String,
+    pub reviewer_id: String,
+    pub reviewer_name: String,
+    pub total_duration_hours: f64,
+    pub node_count: i64,
+    pub completed_node_count: i64,
+    pub timeout_node_count: i64,
+    pub timeout_summary: Option<String>,
+    pub node_duration_summary: Option<String>,
+    pub final_status: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArchiveSummaryPublic {
+    pub id: String,
+    pub record_id: String,
+    pub batch_no: String,
+    pub archive_time: String,
+    pub archive_remark: String,
+    pub reviewer_name: String,
+    pub total_duration_hours: f64,
+    pub node_count: i64,
+    pub completed_node_count: i64,
+    pub timeout_node_count: i64,
+    pub timeout_summary: Option<String>,
+    pub node_duration_summary: Option<String>,
+    pub final_status: String,
+    pub created_at: String,
+}
