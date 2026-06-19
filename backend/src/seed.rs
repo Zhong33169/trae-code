@@ -64,6 +64,8 @@ pub async fn seed_data(pool: &SqlitePool) -> anyhow::Result<()> {
 
     seed_plans(pool, &registrar_id, &auditor_id, &reviewer_id).await?;
 
+    seed_batch_audit_history(pool).await?;
+
     Ok(())
 }
 
@@ -494,6 +496,191 @@ async fn seed_operation_logs(
         .bind(old_status)
         .bind(new_status)
         .bind(remark)
+        .execute(pool)
+        .await?;
+    }
+
+    Ok(())
+}
+
+async fn seed_batch_audit_history(pool: &SqlitePool) -> anyhow::Result<()> {
+    let plans: Vec<(String, String, String)> = sqlx::query_as(
+        "SELECT id, plan_no, status FROM media_plans ORDER BY plan_no"
+    )
+    .fetch_all(pool)
+    .await?;
+
+    let users: Vec<(String, String, String)> = sqlx::query_as(
+        "SELECT id, real_name, role FROM users ORDER BY role"
+    )
+    .fetch_all(pool)
+    .await?;
+
+    let registrar_id = users.iter().find(|(_, _, r)| r == "registrar").map(|(id, _, _)| id.clone()).unwrap_or_default();
+    let auditor_id = users.iter().find(|(_, _, r)| r == "auditor").map(|(id, _, _)| id.clone()).unwrap_or_default();
+    let reviewer_id = users.iter().find(|(_, _, r)| r == "reviewer").map(|(id, _, _)| id.clone()).unwrap_or_default();
+
+    let mut batch_history: Vec<(String, &str, Option<String>, Option<String>, &str, &str)> = Vec::new();
+
+    // 登记员批量提交成功样例：第2、3条 pending_audit
+    for (plan_id, _, _) in plans.iter().filter(|(_, plan_no, _)| plan_no.as_str() == "MP20250602002" || plan_no.as_str() == "MP20250603003") {
+        batch_history.push((
+            plan_id.clone(),
+            "batch_submit",
+            Some("draft".to_string()),
+            Some("pending_audit".to_string()),
+            "批量提交审核成功",
+            registrar_id.as_str(),
+        ));
+    }
+
+    // 审核员批量审核通过成功样例：第4条 audit_approved / 第8条 review_approved
+    for (plan_id, _, _) in plans.iter().filter(|(_, plan_no, _)| plan_no.as_str() == "MP20250604004" || plan_no.as_str() == "MP20250608008") {
+        batch_history.push((
+            plan_id.clone(),
+            "batch_approve",
+            Some("pending_audit".to_string()),
+            Some("pending_review".to_string()),
+            "批量审核通过",
+            auditor_id.as_str(),
+        ));
+    }
+
+    // 复核员批量复核成功样例：第4条 audit_approved / 第10条 archived
+    for (plan_id, _, _) in plans.iter().filter(|(_, plan_no, _)| plan_no.as_str() == "MP20250604004" || plan_no.as_str() == "MP20250610010") {
+        batch_history.push((
+            plan_id.clone(),
+            "batch_review",
+            Some("pending_review".to_string()),
+            Some("review_approved".to_string()),
+            "批量复核通过",
+            reviewer_id.as_str(),
+        ));
+    }
+
+    // 审核员批量审核失败样例：第7条 audit_rejected（错状态）
+    if let Some((plan_id, _, _)) = plans.iter().find(|(_, plan_no, _)| plan_no.as_str() == "MP20250607007") {
+        batch_history.push((
+            plan_id.clone(),
+            "batch_approve_failed",
+            Some("audit_rejected".to_string()),
+            Some("audit_rejected".to_string()),
+            "当前状态 '审核驳回' 不允许审核通过，请先由登记员补正",
+            auditor_id.as_str(),
+        ));
+        batch_history.push((
+            plan_id.clone(),
+            "batch_reject_failed",
+            Some("audit_rejected".to_string()),
+            Some("audit_rejected".to_string()),
+            "当前状态 '审核驳回' 不允许审核驳回",
+            auditor_id.as_str(),
+        ));
+    }
+
+    // 登记员批量提交失败样例：第10条 archived（错状态）
+    if let Some((plan_id, _, _)) = plans.iter().find(|(_, plan_no, _)| plan_no.as_str() == "MP20250610010") {
+        batch_history.push((
+            plan_id.clone(),
+            "batch_submit_failed",
+            Some("archived".to_string()),
+            Some("archived".to_string()),
+            "当前状态 '已归档' 不允许提交",
+            registrar_id.as_str(),
+        ));
+    }
+
+    // 复核员批量复核失败样例：第2条 pending_audit（错状态）
+    if let Some((plan_id, _, _)) = plans.iter().find(|(_, plan_no, _)| plan_no.as_str() == "MP20250602002") {
+        batch_history.push((
+            plan_id.clone(),
+            "batch_review_failed",
+            Some("pending_audit".to_string()),
+            Some("pending_audit".to_string()),
+            "当前状态 '待审核' 不允许复核，请先由审核主管完成审核",
+            reviewer_id.as_str(),
+        ));
+    }
+
+    // 登记员批量提交需重试样例：第3条 pending_audit（旧版本冲突场景）
+    if let Some((plan_id, _, _)) = plans.iter().find(|(_, plan_no, _)| plan_no.as_str() == "MP20250603003") {
+        batch_history.push((
+            plan_id.clone(),
+            "batch_submit_retry",
+            Some("pending_audit".to_string()),
+            Some("pending_audit".to_string()),
+            "版本冲突：当前版本为 v2，你基于 v1 操作，请刷新后重试",
+            registrar_id.as_str(),
+        ));
+    }
+
+    // 审核员批量审核需重试样例：第6条 review_rejected（版本冲突）
+    if let Some((plan_id, _, _)) = plans.iter().find(|(_, plan_no, _)| plan_no.as_str() == "MP20250606006") {
+        batch_history.push((
+            plan_id.clone(),
+            "batch_approve_retry",
+            Some("review_rejected".to_string()),
+            Some("review_rejected".to_string()),
+            "版本冲突：当前版本为 v4，你基于 v3 操作，请刷新后重试",
+            auditor_id.as_str(),
+        ));
+    }
+
+    // 复核员批量复核需重试样例：第5条 pending_review（版本冲突）
+    if let Some((plan_id, _, _)) = plans.iter().find(|(_, plan_no, _)| plan_no.as_str() == "MP20250605005") {
+        batch_history.push((
+            plan_id.clone(),
+            "batch_review_retry",
+            Some("pending_review".to_string()),
+            Some("pending_review".to_string()),
+            "版本冲突：当前版本为 v6，你基于 v5 操作，请刷新后重试",
+            reviewer_id.as_str(),
+        ));
+    }
+
+    // 登记员批量提交缺证据需重试：第1条 draft（已有一条种子，但再补一条登记员视角的历史）
+    if let Some((plan_id, _, _)) = plans.iter().find(|(_, plan_no, _)| plan_no.as_str() == "MP20250601001") {
+        batch_history.push((
+            plan_id.clone(),
+            "batch_submit_retry",
+            Some("draft".to_string()),
+            Some("draft".to_string()),
+            "提交前请至少上传客户合同、媒体报价单或创意稿其中之一",
+            registrar_id.as_str(),
+        ));
+    }
+
+    // 审核员批量驳回成功样例：第9条 review_rejected（之前是审核驳回）
+    if let Some((plan_id, _, _)) = plans.iter().find(|(_, plan_no, _)| plan_no.as_str() == "MP20250609009") {
+        batch_history.push((
+            plan_id.clone(),
+            "batch_reject",
+            Some("pending_audit".to_string()),
+            Some("audit_rejected".to_string()),
+            "批量审核驳回：创意稿不符合品牌规范",
+            auditor_id.as_str(),
+        ));
+    }
+
+    let base_time = Utc::now() - Duration::days(2);
+    for (idx, (plan_id, operation, old_status, new_status, remark, operator_id)) in batch_history.iter().enumerate() {
+        let id = Uuid::new_v4().to_string();
+        let created_at = base_time + Duration::minutes(idx as i64 * 3);
+
+        sqlx::query(
+            r#"
+            INSERT INTO operation_logs (id, plan_id, operator_id, operation, old_status, new_status, remark, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            "#
+        )
+        .bind(&id)
+        .bind(plan_id)
+        .bind(operator_id)
+        .bind(operation)
+        .bind(old_status.as_deref())
+        .bind(new_status.as_deref())
+        .bind(Some(*remark))
+        .bind(Some(created_at))
         .execute(pool)
         .await?;
     }

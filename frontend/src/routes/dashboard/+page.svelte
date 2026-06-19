@@ -2,7 +2,7 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { page } from '$app/stores';
 	import { api } from '$lib/api';
-	import { auth, statusNames, statusColors, roleNames, evidenceTypeNames } from '$lib/store';
+	import { auth, statusNames, statusColors, roleNames, evidenceTypeNames, operationNames, operationColors } from '$lib/store';
 	import { goto } from '$app/navigation';
 
 	let lastRefreshKey = '';
@@ -32,6 +32,14 @@
 	let showBatchModal = false;
 	let batchResult = null;
 	let errorMessage = '';
+
+	// 审计复盘筛选
+	let auditView = false;
+	let auditOperationFilter = '';
+	let auditStatusFilter = '';
+	let auditLogs = [];
+	let auditLogsLoading = false;
+	let auditTotal = 0;
 
 	const statusOptions = [
 		{ value: '', label: '全部状态' },
@@ -101,6 +109,45 @@
 			return '请修正问题后重试该操作';
 		}
 		return '请检查计划单状态或联系系统管理员';
+	}
+
+	async function loadAuditLogs() {
+		auditLogsLoading = true;
+		try {
+			const params = {};
+			if (auditOperationFilter) params.operation = auditOperationFilter;
+			if (auditStatusFilter) params.audit_status = auditStatusFilter;
+			const data = await api.listOperationLogs(params);
+			auditLogs = data.items;
+			auditTotal = data.total;
+		} catch (e) {
+			console.error('加载审计日志失败:', e);
+		} finally {
+			auditLogsLoading = false;
+		}
+	}
+
+	function getLogResultClass(op) {
+		if (op.endsWith('_failed')) return 'failed';
+		if (op.endsWith('_retry')) return 'retry';
+		return 'success';
+	}
+
+	function getLogResultLabel(op) {
+		if (op.endsWith('_failed')) return '❌ 失败';
+		if (op.endsWith('_retry')) return '🔄 需重试';
+		return '✅ 成功';
+	}
+
+	function goToPlanDetail(planId) {
+		goto(`/plans/${planId}`);
+	}
+
+	function toggleAuditView() {
+		auditView = !auditView;
+		if (auditView) {
+			loadAuditLogs();
+		}
 	}
 
 	function toggleSelect(id) {
@@ -257,7 +304,11 @@
 		</div>
 
 		<div class="header-actions">
-			{#if currentTab === 'all'}
+			<button class={`audit-toggle ${auditView ? 'active' : ''}`} on:click={toggleAuditView}>
+				{auditView ? '📁 返回计划单' : '🔍 审计复盘'}
+			</button>
+
+			{#if currentTab === 'all' && !auditView}
 				<select bind:value={statusFilter} on:change={loadAllPlans} class="filter-select">
 					{#each statusOptions as opt}
 						<option value={opt.value}>{opt.label}</option>
@@ -265,7 +316,7 @@
 				</select>
 			{/if}
 
-			<button class="refresh-btn" on:click={refreshAll}>🔄 刷新</button>
+			<button class="refresh-btn" on:click={auditView ? loadAuditLogs() : refreshAll()}>🔄 刷新</button>
 		</div>
 	</div>
 
@@ -295,7 +346,90 @@
 		</div>
 	{/if}
 
-	<div class="dashboard-content">
+	{#if auditView}
+		<div class="audit-panel">
+			<div class="audit-filters">
+				<select bind:value={auditOperationFilter} on:change={loadAuditLogs} class="filter-select">
+					<option value="">全部操作类型</option>
+					<option value="batch_*">批量操作（全部）</option>
+					<option value="batch_submit">批量提交</option>
+					<option value="batch_submit_*">批量提交（含异常）</option>
+					<option value="batch_approve">批量审核通过</option>
+					<option value="batch_approve_*">批量审核（含异常）</option>
+					<option value="batch_reject">批量审核驳回</option>
+					<option value="batch_reject_*">批量驳回（含异常）</option>
+					<option value="batch_review">批量复核通过</option>
+					<option value="batch_review_*">批量复核（含异常）</option>
+					<option value="submit">提交（单条）</option>
+					<option value="approve">审核通过（单条）</option>
+					<option value="review">复核通过（单条）</option>
+				</select>
+				<select bind:value={auditStatusFilter} on:change={loadAuditLogs} class="filter-select">
+					<option value="">全部结果</option>
+					<option value="success">✅ 成功</option>
+					<option value="abnormal">⚠️ 异常（失败+需重试）</option>
+					<option value="failed">❌ 失败</option>
+					<option value="retry">🔄 需重试</option>
+				</select>
+				<span class="audit-total">共 {auditTotal} 条记录</span>
+			</div>
+
+			<div class="audit-log-list">
+				{#if auditLogsLoading}
+					<div class="empty-state">加载中...</div>
+				{:else if auditLogs.length === 0}
+					<div class="empty-state">暂无审计记录</div>
+				{:else}
+					{#each auditLogs as log (log.id)}
+						<div class={`audit-log-item ${getLogResultClass(log.operation)}`}>
+							<div class="log-main">
+								<div class="log-header">
+									<span class="log-op" style="color: {operationColors[log.operation] || '#64748b'}">
+										{operationNames[log.operation] || log.operation}
+									</span>
+									<span class={`log-result ${getLogResultClass(log.operation)}`}>
+										{getLogResultLabel(log.operation)}
+									</span>
+									<button class="log-goto-btn" on:click={() => goToPlanDetail(log.plan_id)}>
+										📂 查看计划单 →
+									</button>
+								</div>
+								<div class="log-meta">
+									<span>操作人：{log.operator_name}</span>
+									{#if log.old_status && log.new_status}
+										<span>
+											{statusNames[log.old_status] || log.old_status}
+											{log.old_status !== log.new_status ? ` → ${statusNames[log.new_status] || log.new_status}` : ''}
+										</span>
+									{/if}
+								</div>
+								{#if log.remark}
+									<div class="log-remark">💬 {log.remark}</div>
+								{/if}
+								{#if log.operation.endsWith('_retry')}
+									<button class="handle-btn retry" on:click={() => goToPlanDetail(log.plan_id)}>
+										🔄 前往处理 / 补正
+									</button>
+								{/if}
+								{#if log.operation.endsWith('_failed') && (log.remark?.includes('证据') || log.remark?.includes('材料'))}
+									<button class="handle-btn retry" on:click={() => goToPlanDetail(log.plan_id)}>
+										📄 补充证据材料
+									</button>
+								{/if}
+								{#if log.operation.endsWith('_failed') && log.remark?.includes('版本')}
+									<button class="handle-btn retry" on:click={() => goToPlanDetail(log.plan_id)}>
+										🔄 刷新获取最新版本
+									</button>
+								{/if}
+							</div>
+							<div class="log-time">{formatDate(log.created_at)}</div>
+						</div>
+					{/each}
+				{/if}
+			</div>
+		</div>
+	{:else}
+		<div class="dashboard-content">
 		<div class="plan-list-panel">
 			<div class="panel-header">
 				<label class="select-all">
@@ -542,6 +676,7 @@
 				{/if}
 			</div>
 		</div>
+	{/if}
 	{/if}
 </div>
 
@@ -1247,5 +1382,189 @@
 
 	.suggestion-text {
 		flex: 1;
+	}
+
+	.audit-toggle {
+		padding: 8px 16px;
+		border: 1px solid #e2e8f0;
+		background: white;
+		border-radius: 8px;
+		cursor: pointer;
+		font-size: 13px;
+		font-weight: 500;
+		transition: all 0.2s;
+	}
+
+	.audit-toggle.active {
+		background: #6366f1;
+		color: white;
+		border-color: #6366f1;
+	}
+
+	.audit-panel {
+		display: flex;
+		flex-direction: column;
+		height: 100%;
+		min-height: 400px;
+	}
+
+	.audit-filters {
+		display: flex;
+		gap: 12px;
+		align-items: center;
+		margin-bottom: 16px;
+		padding: 12px 16px;
+		background: #f8fafc;
+		border-radius: 8px;
+	}
+
+	.audit-total {
+		font-size: 13px;
+		color: #64748b;
+	}
+
+	.audit-log-list {
+		flex: 1;
+		overflow-y: auto;
+		padding-right: 8px;
+	}
+
+	.audit-log-item {
+		display: flex;
+		justify-content: space-between;
+		align-items: flex-start;
+		gap: 16px;
+		padding: 14px 16px;
+		border: 1px solid #e2e8f0;
+		border-radius: 8px;
+		margin-bottom: 10px;
+		background: white;
+		transition: box-shadow 0.2s;
+	}
+
+	.audit-log-item:hover {
+		box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+	}
+
+	.audit-log-item.success {
+		border-left: 3px solid #10b981;
+	}
+
+	.audit-log-item.failed {
+		border-left: 3px solid #ef4444;
+		background: #fff5f5;
+	}
+
+	.audit-log-item.retry {
+		border-left: 3px solid #f59e0b;
+		background: #fffbeb;
+	}
+
+	.log-main {
+		flex: 1;
+		min-width: 0;
+	}
+
+	.log-header {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		margin-bottom: 6px;
+	}
+
+	.log-op {
+		font-size: 14px;
+		font-weight: 600;
+	}
+
+	.log-result {
+		font-size: 11px;
+		padding: 2px 8px;
+		border-radius: 10px;
+		font-weight: 500;
+	}
+
+	.log-result.success {
+		background: #d1fae5;
+		color: #059669;
+	}
+
+	.log-result.failed {
+		background: #fee2e2;
+		color: #dc2626;
+	}
+
+	.log-result.retry {
+		background: #fef3c7;
+		color: #d97706;
+	}
+
+	.log-goto-btn {
+		margin-left: auto;
+		font-size: 12px;
+		padding: 4px 10px;
+		border: 1px solid #6366f1;
+		background: white;
+		color: #6366f1;
+		border-radius: 6px;
+		cursor: pointer;
+		transition: all 0.2s;
+	}
+
+	.log-goto-btn:hover {
+		background: #6366f1;
+		color: white;
+	}
+
+	.log-meta {
+		font-size: 12px;
+		color: #64748b;
+		display: flex;
+		gap: 16px;
+		margin-bottom: 4px;
+	}
+
+	.log-remark {
+		font-size: 12px;
+		color: #475569;
+		padding: 6px 10px;
+		background: #f1f5f9;
+		border-radius: 6px;
+		margin: 4px 0;
+		line-height: 1.5;
+	}
+
+	.handle-btn {
+		margin-top: 6px;
+		padding: 6px 12px;
+		border: none;
+		border-radius: 6px;
+		cursor: pointer;
+		font-size: 12px;
+		font-weight: 500;
+		transition: all 0.2s;
+	}
+
+	.handle-btn.retry {
+		background: #f59e0b;
+		color: white;
+	}
+
+	.handle-btn.retry:hover {
+		background: #d97706;
+	}
+
+	.log-time {
+		font-size: 11px;
+		color: #94a3b8;
+		white-space: nowrap;
+		flex-shrink: 0;
+	}
+
+	.empty-state {
+		text-align: center;
+		padding: 60px 20px;
+		color: #94a3b8;
+		font-size: 14px;
 	}
 </style>

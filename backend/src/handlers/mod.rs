@@ -4,3 +4,4 @@ pub mod batch;
 pub mod schedules;
 pub mod budgets;
 pub mod evidences;
+pub mod logs;

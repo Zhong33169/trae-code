@@ -65,6 +65,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/plans/:id/budgets", get(handlers::budgets::list_budgets))
         .route("/api/plans/:id/evidences", get(handlers::evidences::list_evidences))
         .route("/api/todo", get(handlers::plans::todo_list))
+        .route("/api/operation-logs", get(handlers::logs::list_operation_logs))
         .layer(cors)
         .with_state(state);
 

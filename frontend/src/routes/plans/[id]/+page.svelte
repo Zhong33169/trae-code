@@ -15,6 +15,8 @@
 	let showRemarkModal = false;
 	let remarkText = '';
 	let currentAction = '';
+	let logStatusFilter = '';
+	let logOperationFilter = '';
 
 	$effect(() => {
 		planId = $page.params.id ?? '';
@@ -206,6 +208,45 @@
 		return 'success';
 	}
 
+	const filteredLogs = $derived((() => {
+		if (!planDetail?.operation_logs) return [];
+		return planDetail.operation_logs.filter(log => {
+			if (logStatusFilter === 'success' && (log.operation.endsWith('_failed') || log.operation.endsWith('_retry'))) return false;
+			if (logStatusFilter === 'failed' && !log.operation.endsWith('_failed')) return false;
+			if (logStatusFilter === 'retry' && !log.operation.endsWith('_retry')) return false;
+			if (logStatusFilter === 'abnormal' && !log.operation.endsWith('_failed') && !log.operation.endsWith('_retry')) return false;
+			if (logOperationFilter === 'batch' && !log.operation.startsWith('batch_')) return false;
+			if (logOperationFilter === 'normal' && log.operation.startsWith('batch_')) return false;
+			return true;
+		});
+	})());
+
+	const retryLogs = $derived(filteredLogs.filter(l => l.operation.endsWith('_retry')));
+	const failedLogs = $derived(filteredLogs.filter(l => l.operation.endsWith('_failed')));
+
+	function getLogHandleAction(log) {
+		const msg = (log.remark || '').toLowerCase();
+		if (msg.includes('证据') || msg.includes('材料')) {
+			return { label: '📄 补充证据材料', enabled: canSubmit() };
+		}
+		if (msg.includes('版本') || log.operation.endsWith('_retry')) {
+			return { label: '🔄 刷新获取最新版本', enabled: true };
+		}
+		if (msg.includes('状态')) {
+			return { label: 'ℹ️ 查看状态流转', enabled: true };
+		}
+		return null;
+	}
+
+	function handleLogAction(log) {
+		const msg = log.remark || '';
+		if (msg.includes('版本') || log.operation.endsWith('_retry')) {
+			loadDetail();
+		} else if (msg.includes('状态')) {
+			document.querySelector('.info-card')?.scrollIntoView({ behavior: 'smooth' });
+		}
+	}
+
 	function goBack() {
 		goto('/dashboard?refresh=1');
 	}
@@ -381,10 +422,34 @@
 				<div class="info-card">
 					<div class="card-header">
 						<h2>📋 办理记录</h2>
-						<span class="count-badge">{planDetail.operation_logs.length} 条</span>
+						<span class="count-badge">
+							{filteredLogs.length} 条
+							{#if retryLogs.length > 0}
+								<span class="warn-pill">🔄 {retryLogs.length} 需处理</span>
+							{/if}
+							{#if failedLogs.length > 0}
+								<span class="fail-pill">❌ {failedLogs.length} 失败</span>
+							{/if}
+						</span>
 					</div>
+
+					<div class="log-filters">
+						<select bind:value={logOperationFilter} class="filter-select small">
+							<option value="">全部操作</option>
+							<option value="batch">批量操作</option>
+							<option value="normal">单条操作</option>
+						</select>
+						<select bind:value={logStatusFilter} class="filter-select small">
+							<option value="">全部结果</option>
+							<option value="success">✅ 成功</option>
+							<option value="abnormal">⚠️ 异常（失败+重试）</option>
+							<option value="failed">❌ 失败</option>
+							<option value="retry">🔄 需重试</option>
+						</select>
+					</div>
+
 					<div class="audit-timeline">
-						{#each planDetail.operation_logs as log (log.id)}
+						{#each filteredLogs as log (log.id)}
 							<div class="audit-item">
 								<div
 									class="audit-dot"
@@ -414,6 +479,17 @@
 									</div>
 									{#if log.remark}
 										<div class="audit-remark">{log.remark}</div>
+									{/if}
+									{#if getLogHandleAction(log)}
+										{@const action = getLogHandleAction(log)}
+										<button
+											class="log-handle-btn"
+											class:disabled={!action.enabled}
+											on:click={() => handleLogAction(log)}
+											disabled={!action.enabled}
+										>
+											{action.label}
+										</button>
 									{/if}
 									<div class="audit-time">{formatDate(log.created_at)}</div>
 								</div>
@@ -1271,5 +1347,60 @@
 	.op-result.retry {
 		background: #fef3c7;
 		color: #d97706;
+	}
+
+	.warn-pill {
+		background: #fef3c7;
+		color: #92400e;
+		font-size: 11px;
+		padding: 2px 8px;
+		border-radius: 10px;
+		margin-left: 6px;
+	}
+
+	.fail-pill {
+		background: #fee2e2;
+		color: #991b1b;
+		font-size: 11px;
+		padding: 2px 8px;
+		border-radius: 10px;
+		margin-left: 6px;
+	}
+
+	.log-filters {
+		display: flex;
+		gap: 10px;
+		margin-bottom: 16px;
+		padding: 10px;
+		background: #f8fafc;
+		border-radius: 8px;
+	}
+
+	.filter-select.small {
+		font-size: 12px;
+		padding: 5px 10px;
+	}
+
+	.log-handle-btn {
+		margin: 4px 0;
+		padding: 5px 12px;
+		font-size: 12px;
+		border: none;
+		border-radius: 6px;
+		cursor: pointer;
+		background: #f59e0b;
+		color: white;
+		font-weight: 500;
+		transition: background 0.2s;
+	}
+
+	.log-handle-btn:hover {
+		background: #d97706;
+	}
+
+	.log-handle-btn.disabled,
+	.log-handle-btn:disabled {
+		background: #cbd5e1;
+		cursor: not-allowed;
 	}
 </style>

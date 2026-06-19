@@ -204,6 +204,22 @@ pub struct PlanDetailResponse {
     pub created_by_name: String,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct OperationLogQuery {
+    pub plan_id: Option<String>,
+    pub operation: Option<String>,
+    pub operator_id: Option<String>,
+    pub audit_status: Option<String>,
+    pub limit: Option<i32>,
+    pub offset: Option<i32>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct OperationLogListResponse {
+    pub total: i64,
+    pub items: Vec<OperationLogWithOperator>,
+}
+
 impl User {
     pub fn new(username: &str, password_hash: &str, real_name: &str, role: &str) -> Self {
         Self {

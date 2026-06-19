@@ -109,5 +109,16 @@ export const api = {
 
 	getBudgets: (planId) => request(`/plans/${planId}/budgets`),
 
-	getEvidences: (planId) => request(`/plans/${planId}/evidences`)
+	getEvidences: (planId) => request(`/plans/${planId}/evidences`),
+
+	listOperationLogs: (params = {}) => {
+		const query = new URLSearchParams();
+		Object.entries(params).forEach(([key, value]) => {
+			if (value !== undefined && value !== null && value !== '') {
+				query.append(key, String(value));
+			}
+		});
+		const url = query.toString() ? `/operation-logs?${query.toString()}` : '/operation-logs';
+		return request(url);
+	}
 };
