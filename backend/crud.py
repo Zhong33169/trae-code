@@ -247,6 +247,12 @@ def publish_release(db: Session, app_id: int, operator_id: int):
     ).count()
     if unconfirmed > 0:
         raise ValueError(f"存在 {unconfirmed} 条未确认的换班交接，所有交接确认后方可发布")
+    confirmed = db.query(ShiftHandover).filter(
+        ShiftHandover.release_application_id == app_id,
+        ShiftHandover.is_confirmed == True
+    ).count()
+    if confirmed == 0:
+        raise ValueError("发布前必须至少有一条已确认的换班交接，交接是发布就绪的必经证据链")
     db_app.status = ReleaseStatusEnum.PUBLISHED
     db.commit()
     db.refresh(db_app)

@@ -213,6 +213,22 @@ def init_db():
                     if target.value not in [ReleaseStatusEnum.REVIEW_APPROVED.value, ReleaseStatusEnum.PENDING_RECHECK.value]:
                         approve_rollback_plan(db, plan.id, supervisor1.id)
 
+                if handover_data and target.value in [
+                    ReleaseStatusEnum.RECHECK_APPROVED.value,
+                    ReleaseStatusEnum.PUBLISHED.value,
+                    ReleaseStatusEnum.REVIEWED_POST_LAUNCH.value,
+                    ReleaseStatusEnum.ROLLED_BACK.value
+                ]:
+                    to_user = created_users[handover_data["to_user"]]
+                    handover_create = ShiftHandoverCreate(
+                        release_application_id=app.id,
+                        to_user_id=to_user.id,
+                        shift=handover_data["shift"],
+                        handover_content=handover_data["content"]
+                    )
+                    handover = create_shift_handover(db, handover_create, registrar1.id)
+                    confirm_shift_handover(db, handover.id, to_user.id)
+
                 if target == ReleaseStatusEnum.DRAFT:
                     pass
 
@@ -235,17 +251,6 @@ def init_db():
                     recheck_approve(db, app.id, reviewer1.id, "复核通过")
 
                 elif target == ReleaseStatusEnum.PUBLISHED:
-                    if handover_data:
-                        to_user = created_users[handover_data["to_user"]]
-                        handover_create = ShiftHandoverCreate(
-                            release_application_id=app.id,
-                            to_user_id=to_user.id,
-                            shift=handover_data["shift"],
-                            handover_content=handover_data["content"]
-                        )
-                        handover = create_shift_handover(db, handover_create, registrar1.id)
-                        confirm_shift_handover(db, handover.id, to_user.id)
-
                     submit_for_review(db, app.id, registrar1.id)
                     review_approve(db, app.id, supervisor1.id, "初审通过")
                     submit_for_recheck(db, app.id, supervisor1.id)
@@ -253,17 +258,6 @@ def init_db():
                     publish_release(db, app.id, reviewer1.id)
 
                 elif target == ReleaseStatusEnum.REVIEWED_POST_LAUNCH:
-                    if handover_data:
-                        to_user = created_users[handover_data["to_user"]]
-                        handover_create = ShiftHandoverCreate(
-                            release_application_id=app.id,
-                            to_user_id=to_user.id,
-                            shift=handover_data["shift"],
-                            handover_content=handover_data["content"]
-                        )
-                        handover = create_shift_handover(db, handover_create, registrar1.id)
-                        confirm_shift_handover(db, handover.id, to_user.id)
-
                     submit_for_review(db, app.id, registrar1.id)
                     review_approve(db, app.id, supervisor1.id, "初审通过")
                     submit_for_recheck(db, app.id, supervisor1.id)
@@ -282,17 +276,6 @@ def init_db():
                         complete_post_launch_review(db, review.id, reviewer1.id)
 
                 elif target == ReleaseStatusEnum.ROLLED_BACK:
-                    if handover_data:
-                        to_user = created_users[handover_data["to_user"]]
-                        handover_create = ShiftHandoverCreate(
-                            release_application_id=app.id,
-                            to_user_id=to_user.id,
-                            shift=handover_data["shift"],
-                            handover_content=handover_data["content"]
-                        )
-                        handover = create_shift_handover(db, handover_create, registrar1.id)
-                        confirm_shift_handover(db, handover.id, to_user.id)
-
                     submit_for_review(db, app.id, registrar1.id)
                     review_approve(db, app.id, supervisor1.id, "初审通过")
                     submit_for_recheck(db, app.id, supervisor1.id)

@@ -50,10 +50,11 @@ import { Role, User } from '../../models/auth.model';
             <span *ngIf="rollbackPlan && !rollbackPlan.is_approved" style="color: #999; margin-left: 4px;">（待审核）</span>
           </div>
           <div>
-            <span style="color: {{ allHandoversConfirmed ? '#52c41a' : '#ff4d4f' }}">{{ allHandoversConfirmed ? '✓' : '✗' }}</span>
-            所有换班交接已确认
-            <span *ngIf="handovers.length === 0" style="color: #52c41a; margin-left: 4px;">（无需交接）</span>
-            <span *ngIf="handovers.length > 0 && !allHandoversConfirmed" style="color: #999; margin-left: 4px;">（{{ unconfirmedHandoverCount }} 条待确认）</span>
+            <span style="color: {{ hasConfirmedHandover && allHandoversConfirmed ? '#52c41a' : '#ff4d4f' }}">{{ hasConfirmedHandover && allHandoversConfirmed ? '✓' : '✗' }}</span>
+            至少一条已确认的换班交接
+            <span *ngIf="handovers.length === 0" style="color: #ff4d4f; margin-left: 4px;">（请先发起并完成交接）</span>
+            <span *ngIf="handovers.length > 0 && !hasConfirmedHandover" style="color: #ff4d4f; margin-left: 4px;">（尚无已确认交接）</span>
+            <span *ngIf="handovers.length > 0 && hasConfirmedHandover && !allHandoversConfirmed" style="color: #999; margin-left: 4px;">（{{ unconfirmedHandoverCount }} 条待确认）</span>
           </div>
         </div>
       </div>
@@ -68,7 +69,8 @@ import { Role, User } from '../../models/auth.model';
           <span *ngIf="postLaunchReview && !postLaunchReview.reviewed_at" class="badge" style="background: #faad14;">进行中</span>
         </div>
         <div class="tab-item" [class.active]="activeTab === 'handover'" (click)="activeTab = 'handover'">换班交接
-          <span *ngIf="handovers.length > 0 && unconfirmedHandoverCount > 0" class="badge" style="background: #ff4d4f;">{{ unconfirmedHandoverCount }}</span>
+          <span *ngIf="confirmedHandoverCount > 0" class="badge" style="background: #52c41a;">{{ confirmedHandoverCount }}</span>
+          <span *ngIf="unconfirmedHandoverCount > 0" class="badge" style="background: #ff4d4f;">{{ unconfirmedHandoverCount }}</span>
         </div>
         <div class="tab-item" [class.active]="activeTab === 'logs'" (click)="activeTab = 'logs'">操作记录</div>
       </div>
@@ -219,9 +221,12 @@ import { Role, User } from '../../models/auth.model';
       </div>
 
       <div *ngIf="activeTab === 'handover'" class="card">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
           <h3 style="font-size: 16px;">换班交接记录</h3>
           <button class="btn-primary" (click)="showHandoverForm()">发起交接</button>
+        </div>
+        <div *ngIf="canPublish && !hasConfirmedHandover" style="background: #fff7e6; border: 1px solid #ffd591; color: #d48806; padding: 8px 12px; border-radius: 4px; font-size: 13px; margin-bottom: 16px;">
+          ⚠️ 发布前必须至少有一条已确认的换班交接，交接是发布就绪的必经证据链
         </div>
 
         <div *ngIf="handoverLoading" class="loading">加载中...</div>
@@ -573,12 +578,21 @@ export class ReleaseDetailComponent implements OnInit {
     return this.handovers.every(h => h.is_confirmed);
   }
 
+  get hasConfirmedHandover(): boolean {
+    return this.handovers.some(h => h.is_confirmed);
+  }
+
+  get confirmedHandoverCount(): number {
+    return this.handovers.filter(h => h.is_confirmed).length;
+  }
+
   get unconfirmedHandoverCount(): number {
     return this.handovers.filter(h => !h.is_confirmed).length;
   }
 
   get publishReady(): boolean {
     if (!this.rollbackPlan || !this.rollbackPlan.is_approved) return false;
+    if (!this.hasConfirmedHandover) return false;
     return this.allHandoversConfirmed;
   }
 
@@ -787,7 +801,12 @@ export class ReleaseDetailComponent implements OnInit {
 
   publish(): void {
     if (!this.publishReady) {
-      this.toastService.warning('发布条件未满足，请检查回滚预案和交接确认状态');
+      const missing: string[] = [];
+      if (!this.rollbackPlan) missing.push('回滚预案尚未创建');
+      else if (!this.rollbackPlan.is_approved) missing.push('回滚预案尚未审核');
+      if (!this.hasConfirmedHandover) missing.push('尚无已确认交接');
+      else if (!this.allHandoversConfirmed) missing.push(`${this.unconfirmedHandoverCount} 条交接待确认`);
+      this.toastService.warning(`发布条件未满足：${missing.join('、')}`);
       return;
     }
     if (!confirm('确定发布此版本？发布前请确认回滚预案已审核、交接已确认。')) return;
