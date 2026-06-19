@@ -31,7 +31,7 @@ import { Role, User } from '../../models/auth.model';
         <button *ngIf="canSubmitRecheck" class="btn-warning" (click)="submitRecheck()">提交复核</button>
         <button *ngIf="canRecheckApprove" class="btn-success" (click)="showRecheckModal('approve')">复核通过</button>
         <button *ngIf="canRecheckReject" class="btn-danger" (click)="showRecheckModal('reject')">复核驳回</button>
-        <button *ngIf="canPublish" class="btn-success" (click)="publish()">发布</button>
+        <button *ngIf="canPublish" class="btn-success" (click)="publish()" [disabled]="!publishReady">发布</button>
         <button *ngIf="canRollback" class="btn-danger" (click)="showRollbackModal()">回滚</button>
         <button *ngIf="canArchive" class="btn-default" (click)="archive()">归档</button>
       </div>
@@ -40,11 +40,36 @@ import { Role, User } from '../../models/auth.model';
     <div *ngIf="loading" class="loading">加载中...</div>
 
     <div *ngIf="!loading && application">
+      <div *ngIf="canPublish && !publishReady" class="card" style="border-left: 4px solid #faad14; margin-bottom: 16px;">
+        <h4 style="color: #d48806; margin-bottom: 8px;">发布就绪条件</h4>
+        <div style="font-size: 14px; line-height: 2;">
+          <div>
+            <span style="color: {{ rollbackPlan?.is_approved ? '#52c41a' : '#ff4d4f' }}">{{ rollbackPlan?.is_approved ? '✓' : '✗' }}</span>
+            回滚预案已审核通过
+            <span *ngIf="!rollbackPlan" style="color: #999; margin-left: 4px;">（尚未创建）</span>
+            <span *ngIf="rollbackPlan && !rollbackPlan.is_approved" style="color: #999; margin-left: 4px;">（待审核）</span>
+          </div>
+          <div>
+            <span style="color: {{ allHandoversConfirmed ? '#52c41a' : '#ff4d4f' }}">{{ allHandoversConfirmed ? '✓' : '✗' }}</span>
+            所有换班交接已确认
+            <span *ngIf="handovers.length === 0" style="color: #52c41a; margin-left: 4px;">（无需交接）</span>
+            <span *ngIf="handovers.length > 0 && !allHandoversConfirmed" style="color: #999; margin-left: 4px;">（{{ unconfirmedHandoverCount }} 条待确认）</span>
+          </div>
+        </div>
+      </div>
+
       <div class="tabs">
         <div class="tab-item" [class.active]="activeTab === 'info'" (click)="activeTab = 'info'">基本信息</div>
-        <div class="tab-item" [class.active]="activeTab === 'rollback'" (click)="activeTab = 'rollback'">回滚预案</div>
-        <div class="tab-item" [class.active]="activeTab === 'review'" (click)="activeTab = 'review'">上线复盘</div>
-        <div class="tab-item" [class.active]="activeTab === 'handover'" (click)="activeTab = 'handover'">换班交接</div>
+        <div class="tab-item" [class.active]="activeTab === 'rollback'" (click)="activeTab = 'rollback'">回滚预案
+          <span *ngIf="rollbackPlan" class="badge" style="background: {{ rollbackPlan.is_approved ? '#52c41a' : '#faad14' }}">{{ rollbackPlan.is_approved ? '已审核' : '待审核' }}</span>
+        </div>
+        <div class="tab-item" [class.active]="activeTab === 'review'" (click)="activeTab = 'review'">上线复盘
+          <span *ngIf="postLaunchReview?.reviewed_at" class="badge" style="background: #722ed1;">已完成</span>
+          <span *ngIf="postLaunchReview && !postLaunchReview.reviewed_at" class="badge" style="background: #faad14;">进行中</span>
+        </div>
+        <div class="tab-item" [class.active]="activeTab === 'handover'" (click)="activeTab = 'handover'">换班交接
+          <span *ngIf="handovers.length > 0 && unconfirmedHandoverCount > 0" class="badge" style="background: #ff4d4f;">{{ unconfirmedHandoverCount }}</span>
+        </div>
         <div class="tab-item" [class.active]="activeTab === 'logs'" (click)="activeTab = 'logs'">操作记录</div>
       </div>
 
@@ -111,19 +136,22 @@ import { Role, User } from '../../models/auth.model';
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
           <h3 style="font-size: 16px;">回滚预案</h3>
           <div>
-            <button *ngIf="!rollbackPlan && canCreateRollback" class="btn-primary" (click)="showRollbackPlanForm()">创建预案</button>
-            <button *ngIf="rollbackPlan && canEditRollback" class="btn-default" (click)="showRollbackPlanForm()">编辑</button>
-            <button *ngIf="rollbackPlan && canApproveRollback && !rollbackPlan.is_approved" class="btn-success" (click)="approveRollbackPlan()">审核通过</button>
+            <button *ngIf="!rollbackPlan && isRegistrarOrSupervisor" class="btn-primary" (click)="showRollbackPlanForm()">创建预案</button>
+            <button *ngIf="rollbackPlan && !rollbackPlan.is_approved && isRegistrar" class="btn-default" (click)="showRollbackPlanForm()">编辑</button>
+            <button *ngIf="rollbackPlan && !rollbackPlan.is_approved && isSupervisor" class="btn-success" (click)="approveRollbackPlan()">审核通过</button>
           </div>
         </div>
 
         <div *ngIf="rollbackPlanLoading" class="loading">加载中...</div>
-        <div *ngIf="!rollbackPlanLoading && !rollbackPlan" class="empty">暂无回滚预案</div>
+        <div *ngIf="!rollbackPlanLoading && !rollbackPlan" class="empty">暂无回滚预案<span *ngIf="isRegistrar">，请先创建</span></div>
 
         <div *ngIf="rollbackPlan && !rollbackPlanLoading">
           <div style="margin-bottom: 12px;">
             <span class="status-tag" [class.status-published]="rollbackPlan.is_approved" [class.status-draft]="!rollbackPlan.is_approved">
               {{ rollbackPlan.is_approved ? '已审核' : '待审核' }}
+            </span>
+            <span *ngIf="rollbackPlan.approved_by" style="margin-left: 8px; font-size: 12px; color: #999;">
+              审核时间: {{ formatDate(rollbackPlan.approved_at!) }}
             </span>
           </div>
           <div class="detail-item">
@@ -156,9 +184,25 @@ import { Role, User } from '../../models/auth.model';
         </div>
 
         <div *ngIf="reviewLoading" class="loading">加载中...</div>
-        <div *ngIf="!reviewLoading && !postLaunchReview" class="empty">暂无上线复盘</div>
+        <div *ngIf="!reviewLoading && !postLaunchReview" class="empty">暂无上线复盘<span *ngIf="application?.status === ReleaseStatus.PUBLISHED && isReviewer">，请创建复盘</span></div>
 
         <div *ngIf="postLaunchReview && !reviewLoading">
+          <div style="margin-bottom: 12px;">
+            <span *ngIf="postLaunchReview.reviewed_at" class="status-tag status-reviewed_post_launch">已完成</span>
+            <span *ngIf="!postLaunchReview.reviewed_at" class="status-tag status-pending_review">进行中</span>
+            <span *ngIf="postLaunchReview.reviewed_at" style="margin-left: 8px; font-size: 12px; color: #999;">
+              完成时间: {{ formatDate(postLaunchReview.reviewed_at) }}
+            </span>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">发布结果</span>
+            <span class="detail-value">
+              <span *ngIf="postLaunchReview.release_result === 'success'" style="color: #52c41a;">成功</span>
+              <span *ngIf="postLaunchReview.release_result === 'partial'" style="color: #faad14;">部分成功</span>
+              <span *ngIf="postLaunchReview.release_result === 'failed'" style="color: #ff4d4f;">失败</span>
+              <span *ngIf="!postLaunchReview.release_result">-</span>
+            </span>
+          </div>
           <div class="detail-item">
             <span class="detail-label">复盘内容</span>
             <span class="detail-value" style="white-space: pre-wrap;">{{ postLaunchReview.review_content || '-' }}</span>
@@ -170,14 +214,6 @@ import { Role, User } from '../../models/auth.model';
           <div class="detail-item">
             <span class="detail-label">改进措施</span>
             <span class="detail-value" style="white-space: pre-wrap;">{{ postLaunchReview.improvement_measures || '-' }}</span>
-          </div>
-          <div class="detail-item">
-            <span class="detail-label">发布结果</span>
-            <span class="detail-value">{{ postLaunchReview.release_result || '-' }}</span>
-          </div>
-          <div class="detail-item">
-            <span class="detail-label">复盘人</span>
-            <span class="detail-value">{{ postLaunchReview.reviewer_id ? '已完成' : '未完成' }}</span>
           </div>
         </div>
       </div>
@@ -195,9 +231,9 @@ import { Role, User } from '../../models/auth.model';
           <div class="handover-header">
             <div>
               <span class="status-tag status-{{ h.shift }}">{{ getShiftLabel(h.shift) }}</span>
-              <span style="margin-left: 8px; color: #666; font-size: 13px;">
-                {{ h.from_user?.full_name }} → {{ h.to_user?.full_name }}
-              </span>
+              <span style="margin-left: 8px; color: #333; font-weight: 500;">{{ h.from_user?.full_name }}</span>
+              <span style="color: #999;"> → </span>
+              <span style="color: #333; font-weight: 500;">{{ h.to_user?.full_name }}</span>
             </div>
             <div>
               <span class="handover-status" [class.handover-confirmed]="h.is_confirmed" [class.handover-pending]="!h.is_confirmed">
@@ -368,6 +404,7 @@ export class ReleaseDetailComponent implements OnInit {
   application: ReleaseApplication | null = null;
   loading = true;
   activeTab = 'info';
+  ReleaseStatus = ReleaseStatus;
 
   rollbackPlan: RollbackPlan | null = null;
   rollbackPlanLoading = true;
@@ -512,6 +549,39 @@ export class ReleaseDetailComponent implements OnInit {
     });
   }
 
+  refreshAll(): void {
+    this.loadDetail();
+  }
+
+  get isRegistrar(): boolean {
+    return this.authService.hasRole(Role.REGISTRAR);
+  }
+
+  get isSupervisor(): boolean {
+    return this.authService.hasRole(Role.SUPERVISOR);
+  }
+
+  get isReviewer(): boolean {
+    return this.authService.hasRole(Role.REVIEWER);
+  }
+
+  get isRegistrarOrSupervisor(): boolean {
+    return this.authService.hasRole([Role.REGISTRAR, Role.SUPERVISOR]);
+  }
+
+  get allHandoversConfirmed(): boolean {
+    return this.handovers.every(h => h.is_confirmed);
+  }
+
+  get unconfirmedHandoverCount(): number {
+    return this.handovers.filter(h => !h.is_confirmed).length;
+  }
+
+  get publishReady(): boolean {
+    if (!this.rollbackPlan || !this.rollbackPlan.is_approved) return false;
+    return this.allHandoversConfirmed;
+  }
+
   get canEdit(): boolean {
     if (!this.application) return false;
     if (!this.authService.hasRole(Role.REGISTRAR)) return false;
@@ -572,18 +642,6 @@ export class ReleaseDetailComponent implements OnInit {
     if (!this.authService.hasRole(Role.REVIEWER)) return false;
     return [ReleaseStatus.REVIEWED_POST_LAUNCH, ReleaseStatus.ROLLED_BACK]
       .includes(this.application.status);
-  }
-
-  get canCreateRollback(): boolean {
-    return this.authService.hasRole([Role.REGISTRAR, Role.SUPERVISOR]);
-  }
-
-  get canEditRollback(): boolean {
-    return this.authService.hasRole([Role.REGISTRAR, Role.SUPERVISOR]);
-  }
-
-  get canApproveRollback(): boolean {
-    return this.authService.hasRole(Role.SUPERVISOR);
   }
 
   get canCreateReview(): boolean {
@@ -651,7 +709,7 @@ export class ReleaseDetailComponent implements OnInit {
     return labels[type] || type;
   }
 
-  formatDate(dateStr: string): string {
+  formatDate(dateStr: string | null): string {
     if (!dateStr) return '';
     const date = new Date(dateStr);
     return date.toLocaleString('zh-CN');
@@ -662,7 +720,7 @@ export class ReleaseDetailComponent implements OnInit {
     this.apiService.submitForReview(this.id).subscribe({
       next: () => {
         this.toastService.success('提交审核成功');
-        this.loadDetail();
+        this.refreshAll();
       },
       error: (err) => {
         this.toastService.error(err.error?.detail || '操作失败');
@@ -687,7 +745,7 @@ export class ReleaseDetailComponent implements OnInit {
         next: () => {
           this.toastService.success('审核通过');
           this.closeReviewModal();
-          this.loadDetail();
+          this.refreshAll();
         },
         error: (err) => {
           this.toastService.error(err.error?.detail || '操作失败');
@@ -698,7 +756,7 @@ export class ReleaseDetailComponent implements OnInit {
         next: () => {
           this.toastService.success('审核驳回');
           this.closeReviewModal();
-          this.loadDetail();
+          this.refreshAll();
         },
         error: (err) => {
           this.toastService.error(err.error?.detail || '操作失败');
@@ -712,7 +770,7 @@ export class ReleaseDetailComponent implements OnInit {
     this.apiService.submitForRecheck(this.id).subscribe({
       next: () => {
         this.toastService.success('提交复核成功');
-        this.loadDetail();
+        this.refreshAll();
       },
       error: (err) => {
         this.toastService.error(err.error?.detail || '操作失败');
@@ -728,14 +786,18 @@ export class ReleaseDetailComponent implements OnInit {
   }
 
   publish(): void {
-    if (!confirm('确定发布此版本？')) return;
+    if (!this.publishReady) {
+      this.toastService.warning('发布条件未满足，请检查回滚预案和交接确认状态');
+      return;
+    }
+    if (!confirm('确定发布此版本？发布前请确认回滚预案已审核、交接已确认。')) return;
     this.apiService.publishRelease(this.id).subscribe({
       next: () => {
         this.toastService.success('发布成功');
-        this.loadDetail();
+        this.refreshAll();
       },
       error: (err) => {
-        this.toastService.error(err.error?.detail || '操作失败');
+        this.toastService.error(err.error?.detail || '发布失败');
       }
     });
   }
@@ -754,7 +816,7 @@ export class ReleaseDetailComponent implements OnInit {
       next: () => {
         this.toastService.success('回滚成功');
         this.closeRollbackModal();
-        this.loadDetail();
+        this.refreshAll();
       },
       error: (err) => {
         this.toastService.error(err.error?.detail || '操作失败');
@@ -767,7 +829,7 @@ export class ReleaseDetailComponent implements OnInit {
     this.apiService.archiveRelease(this.id).subscribe({
       next: () => {
         this.toastService.success('归档成功');
-        this.loadDetail();
+        this.refreshAll();
       },
       error: (err) => {
         this.toastService.error(err.error?.detail || '操作失败');
@@ -805,6 +867,7 @@ export class ReleaseDetailComponent implements OnInit {
           this.toastService.success('更新成功');
           this.closeRollbackPlanForm();
           this.loadRollbackPlan();
+          this.loadLogs();
         },
         error: (err) => {
           this.toastService.error(err.error?.detail || '保存失败');
@@ -819,6 +882,7 @@ export class ReleaseDetailComponent implements OnInit {
           this.toastService.success('创建成功');
           this.closeRollbackPlanForm();
           this.loadRollbackPlan();
+          this.loadLogs();
         },
         error: (err) => {
           this.toastService.error(err.error?.detail || '创建失败');
@@ -832,8 +896,9 @@ export class ReleaseDetailComponent implements OnInit {
     if (!confirm('确定审核通过此回滚预案？')) return;
     this.apiService.approveRollbackPlan(this.rollbackPlan.id).subscribe({
       next: () => {
-        this.toastService.success('审核通过');
+        this.toastService.success('回滚预案审核通过');
         this.loadRollbackPlan();
+        this.loadLogs();
       },
       error: (err) => {
         this.toastService.error(err.error?.detail || '操作失败');
@@ -866,6 +931,7 @@ export class ReleaseDetailComponent implements OnInit {
           this.toastService.success('更新成功');
           this.closeReviewForm();
           this.loadPostLaunchReview();
+          this.loadLogs();
         },
         error: (err) => {
           this.toastService.error(err.error?.detail || '保存失败');
@@ -880,6 +946,7 @@ export class ReleaseDetailComponent implements OnInit {
           this.toastService.success('创建成功');
           this.closeReviewForm();
           this.loadPostLaunchReview();
+          this.loadLogs();
         },
         error: (err) => {
           this.toastService.error(err.error?.detail || '创建失败');
@@ -894,8 +961,7 @@ export class ReleaseDetailComponent implements OnInit {
     this.apiService.completePostLaunchReview(this.postLaunchReview.id).subscribe({
       next: () => {
         this.toastService.success('复盘完成');
-        this.loadPostLaunchReview();
-        this.loadDetail();
+        this.refreshAll();
       },
       error: (err) => {
         this.toastService.error(err.error?.detail || '操作失败');
@@ -931,6 +997,7 @@ export class ReleaseDetailComponent implements OnInit {
         this.toastService.success('交接发起成功');
         this.closeHandoverForm();
         this.loadHandovers();
+        this.loadLogs();
       },
       error: (err) => {
         this.toastService.error(err.error?.detail || '创建失败');
@@ -942,8 +1009,9 @@ export class ReleaseDetailComponent implements OnInit {
     if (!confirm('确认接收此交接？')) return;
     this.apiService.confirmShiftHandover(handoverId).subscribe({
       next: () => {
-        this.toastService.success('确认成功');
+        this.toastService.success('交接确认成功');
         this.loadHandovers();
+        this.loadLogs();
       },
       error: (err) => {
         this.toastService.error(err.error?.detail || '操作失败');

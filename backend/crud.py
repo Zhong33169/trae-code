@@ -113,7 +113,7 @@ def submit_for_review(db: Session, app_id: int, operator_id: int):
         return None
     old_status = db_app.status
     if db_app.status not in [ReleaseStatusEnum.DRAFT, ReleaseStatusEnum.REVIEW_REJECTED, ReleaseStatusEnum.RECHECK_REJECTED]:
-        raise ValueError(f"当前状态 {db_app.status.value} 不允许提交审核")
+        raise ValueError("当前状态不允许提交审核，仅草稿、审核驳回或复核驳回状态可提交")
     db_app.status = ReleaseStatusEnum.PENDING_REVIEW
     db.commit()
     db.refresh(db_app)
@@ -132,7 +132,7 @@ def review_approve(db: Session, app_id: int, operator_id: int, comment: Optional
         return None
     old_status = db_app.status
     if db_app.status != ReleaseStatusEnum.PENDING_REVIEW:
-        raise ValueError(f"当前状态 {db_app.status.value} 不允许审核通过")
+        raise ValueError("当前状态不允许审核通过，需先提交审核")
     db_app.status = ReleaseStatusEnum.REVIEW_APPROVED
     db_app.reviewer_id = operator_id
     db_app.review_comment = comment
@@ -153,7 +153,7 @@ def review_reject(db: Session, app_id: int, operator_id: int, comment: Optional[
         return None
     old_status = db_app.status
     if db_app.status != ReleaseStatusEnum.PENDING_REVIEW:
-        raise ValueError(f"当前状态 {db_app.status.value} 不允许审核驳回")
+        raise ValueError("当前状态不允许审核驳回，需先提交审核")
     db_app.status = ReleaseStatusEnum.REVIEW_REJECTED
     db_app.reviewer_id = operator_id
     db_app.review_comment = comment
@@ -174,7 +174,7 @@ def submit_for_recheck(db: Session, app_id: int, operator_id: int):
         return None
     old_status = db_app.status
     if db_app.status != ReleaseStatusEnum.REVIEW_APPROVED:
-        raise ValueError(f"当前状态 {db_app.status.value} 不允许提交复核")
+        raise ValueError("当前状态不允许提交复核，需先审核通过")
     db_app.status = ReleaseStatusEnum.PENDING_RECHECK
     db.commit()
     db.refresh(db_app)
@@ -193,7 +193,7 @@ def recheck_approve(db: Session, app_id: int, operator_id: int, comment: Optiona
         return None
     old_status = db_app.status
     if db_app.status != ReleaseStatusEnum.PENDING_RECHECK:
-        raise ValueError(f"当前状态 {db_app.status.value} 不允许复核通过")
+        raise ValueError("当前状态不允许复核通过，需先提交复核")
     db_app.status = ReleaseStatusEnum.RECHECK_APPROVED
     db_app.rechecker_id = operator_id
     db_app.recheck_comment = comment
@@ -214,7 +214,7 @@ def recheck_reject(db: Session, app_id: int, operator_id: int, comment: Optional
         return None
     old_status = db_app.status
     if db_app.status != ReleaseStatusEnum.PENDING_RECHECK:
-        raise ValueError(f"当前状态 {db_app.status.value} 不允许复核驳回")
+        raise ValueError("当前状态不允许复核驳回，需先提交复核")
     db_app.status = ReleaseStatusEnum.RECHECK_REJECTED
     db_app.rechecker_id = operator_id
     db_app.recheck_comment = comment
@@ -235,13 +235,24 @@ def publish_release(db: Session, app_id: int, operator_id: int):
         return None
     old_status = db_app.status
     if db_app.status != ReleaseStatusEnum.RECHECK_APPROVED:
-        raise ValueError(f"当前状态 {db_app.status.value} 不允许发布")
+        raise ValueError("当前状态不允许发布，需先完成复核通过")
+    rollback_plan = db.query(RollbackPlan).filter(RollbackPlan.release_application_id == app_id).first()
+    if not rollback_plan:
+        raise ValueError("发布前必须创建回滚预案")
+    if not rollback_plan.is_approved:
+        raise ValueError("回滚预案尚未审核通过，无法发布")
+    unconfirmed = db.query(ShiftHandover).filter(
+        ShiftHandover.release_application_id == app_id,
+        ShiftHandover.is_confirmed == False
+    ).count()
+    if unconfirmed > 0:
+        raise ValueError(f"存在 {unconfirmed} 条未确认的换班交接，所有交接确认后方可发布")
     db_app.status = ReleaseStatusEnum.PUBLISHED
     db.commit()
     db.refresh(db_app)
     create_operation_log(
         db, operator_id, "publish", app_id,
-        f"版本已发布",
+        f"版本已发布（回滚预案已审核、交接已全部确认）",
         old_status=old_status.value,
         new_status=ReleaseStatusEnum.PUBLISHED.value
     )
@@ -254,7 +265,7 @@ def rollback_release(db: Session, app_id: int, operator_id: int, reason: Optiona
         return None
     old_status = db_app.status
     if db_app.status not in [ReleaseStatusEnum.PUBLISHED, ReleaseStatusEnum.REVIEWED_POST_LAUNCH]:
-        raise ValueError(f"当前状态 {db_app.status.value} 不允许回滚")
+        raise ValueError("仅已发布或已复盘状态可以回滚")
     db_app.status = ReleaseStatusEnum.ROLLED_BACK
     db.commit()
     db.refresh(db_app)
@@ -273,7 +284,7 @@ def archive_release(db: Session, app_id: int, operator_id: int):
         return None
     old_status = db_app.status
     if db_app.status not in [ReleaseStatusEnum.REVIEWED_POST_LAUNCH, ReleaseStatusEnum.ROLLED_BACK]:
-        raise ValueError(f"当前状态 {db_app.status.value} 不允许归档")
+        raise ValueError("仅已完成上线复盘或已回滚的发布申请可以归档")
     db_app.status = ReleaseStatusEnum.ARCHIVED
     db.commit()
     db.refresh(db_app)
@@ -350,7 +361,7 @@ def create_post_launch_review(db: Session, review_in: PostLaunchReviewCreate, op
     if not db_app:
         return None
     if db_app.status != ReleaseStatusEnum.PUBLISHED:
-        raise ValueError(f"当前状态 {db_app.status.value} 不允许创建上线复盘")
+        raise ValueError("仅已发布状态可以创建上线复盘")
     existing = get_post_launch_review(db, review_in.release_application_id)
     if existing:
         raise ValueError("上线复盘已存在")
@@ -387,7 +398,7 @@ def complete_post_launch_review(db: Session, review_id: int, operator_id: int):
         return None
     db_app = get_release_application(db, db_review.release_application_id)
     if not db_app or db_app.status != ReleaseStatusEnum.PUBLISHED:
-        raise ValueError("发布申请状态不允许完成上线复盘")
+        raise ValueError("发布申请状态不允许完成上线复盘，需先发布")
     from datetime import datetime
     db_review.reviewer_id = operator_id
     db_review.reviewed_at = datetime.utcnow()
