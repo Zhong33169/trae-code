@@ -14,6 +14,46 @@ from schemas import (
 from auth import get_password_hash
 
 
+ROLE_LABELS = {
+    RoleEnum.REGISTRAR: "发布登记员",
+    RoleEnum.SUPERVISOR: "发布审核主管",
+    RoleEnum.REVIEWER: "复核负责人"
+}
+
+STATUS_LABELS = {
+    ReleaseStatusEnum.DRAFT: "草稿",
+    ReleaseStatusEnum.PENDING_REVIEW: "待审核",
+    ReleaseStatusEnum.REVIEW_APPROVED: "审核通过",
+    ReleaseStatusEnum.REVIEW_REJECTED: "审核驳回",
+    ReleaseStatusEnum.PENDING_RECHECK: "待复核",
+    ReleaseStatusEnum.RECHECK_APPROVED: "复核通过",
+    ReleaseStatusEnum.RECHECK_REJECTED: "复核驳回",
+    ReleaseStatusEnum.PUBLISHED: "已发布",
+    ReleaseStatusEnum.ROLLED_BACK: "已回滚",
+    ReleaseStatusEnum.REVIEWED_POST_LAUNCH: "已复盘",
+    ReleaseStatusEnum.ARCHIVED: "已归档"
+}
+
+
+def _get_operator(db: Session, operator_id: int):
+    u = db.query(User).filter(User.id == operator_id).first()
+    if not u:
+        raise ValueError("操作用户不存在")
+    return u
+
+
+def _role(db: Session, operator_id: int) -> RoleEnum:
+    return _get_operator(db, operator_id).role
+
+
+def _role_label(db: Session, operator_id: int) -> str:
+    return ROLE_LABELS.get(_role(db, operator_id), "未知岗位")
+
+
+def _status_label(status: ReleaseStatusEnum) -> str:
+    return STATUS_LABELS.get(status, status.value)
+
+
 def create_user(db: Session, username: str, full_name: str, password: str, role: RoleEnum):
     hashed_password = get_password_hash(password)
     db_user = User(
@@ -311,16 +351,31 @@ def create_rollback_plan(db: Session, plan_in: RollbackPlanCreate, operator_id: 
     db_app = get_release_application(db, plan_in.release_application_id)
     if not db_app:
         return None
+    role = _role(db, operator_id)
+    role_label = _role_label(db, operator_id)
+    if role not in (RoleEnum.REGISTRAR, RoleEnum.SUPERVISOR):
+        raise ValueError(f"当前岗位为【{role_label}】，只有发布登记员或发布审核主管可以创建回滚预案")
+    allowed_status = (
+        ReleaseStatusEnum.DRAFT, ReleaseStatusEnum.PENDING_REVIEW,
+        ReleaseStatusEnum.REVIEW_REJECTED, ReleaseStatusEnum.RECHECK_REJECTED,
+        ReleaseStatusEnum.REVIEW_APPROVED, ReleaseStatusEnum.PENDING_RECHECK,
+        ReleaseStatusEnum.RECHECK_APPROVED
+    )
+    if db_app.status not in allowed_status:
+        raise ValueError(
+            f"当前发布申请状态为【{_status_label(db_app.status)}】，仅草稿、待审核、审核驳回、复核驳回、审核通过、待复核、复核通过状态可创建回滚预案"
+        )
     existing = get_rollback_plan(db, plan_in.release_application_id)
     if existing:
         raise ValueError("回滚预案已存在")
     db_plan = RollbackPlan(**plan_in.model_dump())
+    db_plan.created_by = operator_id
     db.add(db_plan)
     db.commit()
     db.refresh(db_plan)
     create_operation_log(
         db, operator_id, "create_rollback_plan", plan_in.release_application_id,
-        f"创建回滚预案"
+        f"[{role_label}] 创建回滚预案"
     )
     return db_plan
 
@@ -329,6 +384,14 @@ def update_rollback_plan(db: Session, plan_id: int, plan_in: RollbackPlanUpdate,
     db_plan = db.query(RollbackPlan).filter(RollbackPlan.id == plan_id).first()
     if not db_plan:
         return None
+    role = _role(db, operator_id)
+    role_label = _role_label(db, operator_id)
+    if role != RoleEnum.REGISTRAR:
+        raise ValueError(f"当前岗位为【{role_label}】，只有发布登记员可以编辑回滚预案")
+    if db_plan.is_approved:
+        db_app = get_release_application(db, db_plan.release_application_id)
+        status_label = _status_label(db_app.status) if db_app else ""
+        raise ValueError(f"当前回滚预案已审核通过（申请状态：{status_label}），不允许再编辑")
     update_data = plan_in.model_dump(exclude_unset=True)
     for key, value in update_data.items():
         setattr(db_plan, key, value)
@@ -336,7 +399,7 @@ def update_rollback_plan(db: Session, plan_id: int, plan_in: RollbackPlanUpdate,
     db.refresh(db_plan)
     create_operation_log(
         db, operator_id, "update_rollback_plan", db_plan.release_application_id,
-        f"更新回滚预案"
+        f"[{role_label}] 更新回滚预案"
     )
     return db_plan
 
@@ -345,6 +408,18 @@ def approve_rollback_plan(db: Session, plan_id: int, operator_id: int):
     db_plan = db.query(RollbackPlan).filter(RollbackPlan.id == plan_id).first()
     if not db_plan:
         return None
+    role = _role(db, operator_id)
+    role_label = _role_label(db, operator_id)
+    if role != RoleEnum.SUPERVISOR:
+        raise ValueError(f"当前岗位为【{role_label}】，只有发布审核主管可以审核回滚预案")
+    if db_plan.is_approved:
+        raise ValueError("该回滚预案已审核通过，无需重复审核")
+    db_app = get_release_application(db, db_plan.release_application_id)
+    if db_app and db_app.status in (ReleaseStatusEnum.PUBLISHED, ReleaseStatusEnum.ROLLED_BACK,
+                                     ReleaseStatusEnum.REVIEWED_POST_LAUNCH, ReleaseStatusEnum.ARCHIVED):
+        raise ValueError(
+            f"当前发布申请状态为【{_status_label(db_app.status)}】，发布后不再允许审核回滚预案"
+        )
     db_plan.is_approved = True
     db_plan.approved_by = operator_id
     from datetime import datetime
@@ -353,7 +428,7 @@ def approve_rollback_plan(db: Session, plan_id: int, operator_id: int):
     db.refresh(db_plan)
     create_operation_log(
         db, operator_id, "approve_rollback_plan", db_plan.release_application_id,
-        f"审核通过回滚预案"
+        f"[{role_label}] 审核通过回滚预案"
     )
     return db_plan
 
@@ -366,18 +441,25 @@ def create_post_launch_review(db: Session, review_in: PostLaunchReviewCreate, op
     db_app = get_release_application(db, review_in.release_application_id)
     if not db_app:
         return None
+    role = _role(db, operator_id)
+    role_label = _role_label(db, operator_id)
+    if role != RoleEnum.REVIEWER:
+        raise ValueError(f"当前岗位为【{role_label}】，只有复核负责人可以创建上线复盘")
     if db_app.status != ReleaseStatusEnum.PUBLISHED:
-        raise ValueError("仅已发布状态可以创建上线复盘")
+        raise ValueError(
+            f"当前发布申请状态为【{_status_label(db_app.status)}】，仅已发布状态可以创建上线复盘"
+        )
     existing = get_post_launch_review(db, review_in.release_application_id)
     if existing:
         raise ValueError("上线复盘已存在")
     db_review = PostLaunchReview(**review_in.model_dump())
+    db_review.created_by = operator_id
     db.add(db_review)
     db.commit()
     db.refresh(db_review)
     create_operation_log(
         db, operator_id, "create_post_launch_review", review_in.release_application_id,
-        f"创建上线复盘"
+        f"[{role_label}] 创建上线复盘"
     )
     return db_review
 
@@ -386,6 +468,17 @@ def update_post_launch_review(db: Session, review_id: int, review_in: PostLaunch
     db_review = db.query(PostLaunchReview).filter(PostLaunchReview.id == review_id).first()
     if not db_review:
         return None
+    role = _role(db, operator_id)
+    role_label = _role_label(db, operator_id)
+    if role != RoleEnum.REVIEWER:
+        raise ValueError(f"当前岗位为【{role_label}】，只有复核负责人可以编辑上线复盘")
+    if db_review.reviewed_at:
+        raise ValueError("该上线复盘已完成，不允许再编辑")
+    db_app = get_release_application(db, db_review.release_application_id)
+    if db_app and db_app.status != ReleaseStatusEnum.PUBLISHED:
+        raise ValueError(
+            f"当前发布申请状态为【{_status_label(db_app.status)}】，仅已发布状态可编辑上线复盘"
+        )
     update_data = review_in.model_dump(exclude_unset=True)
     for key, value in update_data.items():
         setattr(db_review, key, value)
@@ -393,7 +486,7 @@ def update_post_launch_review(db: Session, review_id: int, review_in: PostLaunch
     db.refresh(db_review)
     create_operation_log(
         db, operator_id, "update_post_launch_review", db_review.release_application_id,
-        f"更新上线复盘"
+        f"[{role_label}] 更新上线复盘"
     )
     return db_review
 
@@ -402,9 +495,18 @@ def complete_post_launch_review(db: Session, review_id: int, operator_id: int):
     db_review = db.query(PostLaunchReview).filter(PostLaunchReview.id == review_id).first()
     if not db_review:
         return None
+    role = _role(db, operator_id)
+    role_label = _role_label(db, operator_id)
+    if role != RoleEnum.REVIEWER:
+        raise ValueError(f"当前岗位为【{role_label}】，只有复核负责人可以完成上线复盘")
+    if db_review.reviewed_at:
+        raise ValueError("该上线复盘已完成，无需重复操作")
     db_app = get_release_application(db, db_review.release_application_id)
     if not db_app or db_app.status != ReleaseStatusEnum.PUBLISHED:
-        raise ValueError("发布申请状态不允许完成上线复盘，需先发布")
+        status_label = _status_label(db_app.status) if db_app else "不存在"
+        raise ValueError(
+            f"发布申请状态为【{status_label}】，仅已发布状态允许完成上线复盘"
+        )
     from datetime import datetime
     db_review.reviewer_id = operator_id
     db_review.reviewed_at = datetime.utcnow()
@@ -415,7 +517,7 @@ def complete_post_launch_review(db: Session, review_id: int, operator_id: int):
     db.refresh(db_app)
     create_operation_log(
         db, operator_id, "complete_post_launch_review", db_review.release_application_id,
-        f"完成上线复盘，状态变更为已复盘",
+        f"[{role_label}] 完成上线复盘，状态变更为已复盘",
         old_status=old_status.value,
         new_status=ReleaseStatusEnum.REVIEWED_POST_LAUNCH.value
     )
@@ -426,6 +528,21 @@ def create_shift_handover(db: Session, handover_in: ShiftHandoverCreate, from_us
     db_app = get_release_application(db, handover_in.release_application_id)
     if not db_app:
         return None
+    role = _role(db, from_user_id)
+    role_label = _role_label(db, from_user_id)
+    if role not in (RoleEnum.REGISTRAR, RoleEnum.SUPERVISOR, RoleEnum.REVIEWER):
+        raise ValueError(f"当前岗位为【{role_label}】，无权发起换班交接")
+    if handover_in.to_user_id == from_user_id:
+        raise ValueError("接收人不能是发起人本人")
+    to_user = db.query(User).filter(User.id == handover_in.to_user_id).first()
+    if not to_user:
+        raise ValueError("指定的接收人不存在")
+    blocked_status = (ReleaseStatusEnum.ARCHIVED,)
+    if db_app.status in blocked_status:
+        raise ValueError(
+            f"当前发布申请状态为【{_status_label(db_app.status)}】，已归档的申请不允许发起交接"
+        )
+    to_user_role_label = ROLE_LABELS.get(to_user.role, "未知岗位")
     db_handover = ShiftHandover(
         release_application_id=handover_in.release_application_id,
         from_user_id=from_user_id,
@@ -436,9 +553,10 @@ def create_shift_handover(db: Session, handover_in: ShiftHandoverCreate, from_us
     db.add(db_handover)
     db.commit()
     db.refresh(db_handover)
+    shift_label = "白班" if handover_in.shift.value == "day" else "夜班"
     create_operation_log(
         db, from_user_id, "create_handover", handover_in.release_application_id,
-        f"发起换班交接，班次: {handover_in.shift.value}"
+        f"[{role_label}] 发起{shift_label}交接，交由【{to_user.full_name}({to_user_role_label})】接收"
     )
     return db_handover
 
@@ -447,18 +565,28 @@ def confirm_shift_handover(db: Session, handover_id: int, to_user_id: int):
     db_handover = db.query(ShiftHandover).filter(ShiftHandover.id == handover_id).first()
     if not db_handover:
         return None
+    role = _role(db, to_user_id)
+    role_label = _role_label(db, to_user_id)
     if db_handover.to_user_id != to_user_id:
-        raise ValueError("只有接收人可以确认交接")
+        raise ValueError(
+            f"当前登录账号为【{role_label}】，该交接指定接收人不是您，无权确认"
+        )
     if db_handover.is_confirmed:
-        raise ValueError("该交接已确认")
+        raise ValueError("该交接已确认，无需重复操作")
+    db_app = get_release_application(db, db_handover.release_application_id)
+    if db_app and db_app.status == ReleaseStatusEnum.ARCHIVED:
+        raise ValueError("该发布申请已归档，无法确认交接")
     from datetime import datetime
     db_handover.is_confirmed = True
     db_handover.confirmed_at = datetime.utcnow()
     db.commit()
     db.refresh(db_handover)
+    shift_label = "白班" if db_handover.shift.value == "day" else "夜班"
+    from_user = db.query(User).filter(User.id == db_handover.from_user_id).first()
+    from_info = f"{from_user.full_name}({ROLE_LABELS.get(from_user.role, '')})" if from_user else ""
     create_operation_log(
         db, to_user_id, "confirm_handover", db_handover.release_application_id,
-        f"确认换班交接，班次: {db_handover.shift.value}"
+        f"[{role_label}] 确认接收{shift_label}交接，交接人【{from_info}】"
     )
     return db_handover
 

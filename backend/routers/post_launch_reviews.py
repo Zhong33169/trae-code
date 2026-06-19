@@ -1,8 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from database import get_db
-from auth import get_current_user, require_role
-from models import RoleEnum
+from auth import get_current_user
 from schemas import (
     PostLaunchReviewCreate, PostLaunchReviewUpdate, PostLaunchReviewResponse
 )
@@ -27,7 +26,7 @@ def get_review(app_id: int, db: Session = Depends(get_db), current_user=Depends(
 def create_review(
     review_in: PostLaunchReviewCreate,
     db: Session = Depends(get_db),
-    current_user=Depends(require_role([RoleEnum.REVIEWER]))
+    current_user=Depends(get_current_user)
 ):
     app = get_release_application(db, review_in.release_application_id)
     if not app:
@@ -59,7 +58,7 @@ def update_review(
 def complete_review(
     review_id: int,
     db: Session = Depends(get_db),
-    current_user=Depends(require_role([RoleEnum.REVIEWER]))
+    current_user=Depends(get_current_user)
 ):
     try:
         review = complete_post_launch_review(db, review_id, current_user.id)

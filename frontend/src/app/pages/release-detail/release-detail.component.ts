@@ -138,9 +138,11 @@ import { Role, User } from '../../models/auth.model';
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
           <h3 style="font-size: 16px;">回滚预案</h3>
           <div>
-            <button *ngIf="!rollbackPlan && isRegistrarOrSupervisor" class="btn-primary" (click)="showRollbackPlanForm()">创建预案</button>
-            <button *ngIf="rollbackPlan && !rollbackPlan.is_approved && isRegistrar" class="btn-default" (click)="showRollbackPlanForm()">编辑</button>
-            <button *ngIf="rollbackPlan && !rollbackPlan.is_approved && isSupervisor" class="btn-success" (click)="approveRollbackPlan()">审核通过</button>
+            <button *ngIf="canCreateRollbackPlan" class="btn-primary" (click)="showRollbackPlanForm()">创建预案</button>
+            <button *ngIf="canEditRollbackPlan" class="btn-default" (click)="showRollbackPlanForm()">编辑</button>
+            <button *ngIf="canApproveRollbackPlan" class="btn-success" (click)="approveRollbackPlan()">审核通过</button>
+            <span *ngIf="rollbackPlan?.is_approved && isSupervisor" style="font-size: 12px; color: #52c41a; margin-left: 8px;">（已审核，不可修改）</span>
+            <span *ngIf="!canCreateRollbackPlan && !rollbackPlan && !canEditRollbackPlan && !canApproveRollbackPlan" style="font-size: 12px; color: #999; margin-left: 4px;">（当前状态或岗位不允许操作）</span>
           </div>
         </div>
 
@@ -223,7 +225,7 @@ import { Role, User } from '../../models/auth.model';
       <div *ngIf="activeTab === 'handover'" class="card">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
           <h3 style="font-size: 16px;">换班交接记录</h3>
-          <button class="btn-primary" (click)="showHandoverForm()">发起交接</button>
+          <button *ngIf="canCreateHandover" class="btn-primary" (click)="showHandoverForm()">发起交接</button>
         </div>
         <div *ngIf="canPublish && !hasConfirmedHandover" style="background: #fff7e6; border: 1px solid #ffd591; color: #d48806; padding: 8px 12px; border-radius: 4px; font-size: 13px; margin-bottom: 16px;">
           ⚠️ 发布前必须至少有一条已确认的换班交接，交接是发布就绪的必经证据链
@@ -572,6 +574,47 @@ export class ReleaseDetailComponent implements OnInit {
 
   get isRegistrarOrSupervisor(): boolean {
     return this.authService.hasRole([Role.REGISTRAR, Role.SUPERVISOR]);
+  }
+
+  get isAnyRole(): boolean {
+    return this.authService.hasRole([Role.REGISTRAR, Role.SUPERVISOR, Role.REVIEWER]);
+  }
+
+  get canCreateRollbackPlan(): boolean {
+    if (!this.application) return false;
+    if (!this.isRegistrarOrSupervisor) return false;
+    if (this.rollbackPlan) return false;
+    const allowed = [
+      ReleaseStatus.DRAFT, ReleaseStatus.PENDING_REVIEW,
+      ReleaseStatus.REVIEW_REJECTED, ReleaseStatus.RECHECK_REJECTED,
+      ReleaseStatus.REVIEW_APPROVED, ReleaseStatus.PENDING_RECHECK,
+      ReleaseStatus.RECHECK_APPROVED
+    ];
+    return allowed.includes(this.application.status);
+  }
+
+  get canEditRollbackPlan(): boolean {
+    if (!this.rollbackPlan) return false;
+    if (!this.isRegistrar) return false;
+    return !this.rollbackPlan.is_approved;
+  }
+
+  get canApproveRollbackPlan(): boolean {
+    if (!this.rollbackPlan) return false;
+    if (!this.isSupervisor) return false;
+    if (this.rollbackPlan.is_approved) return false;
+    if (!this.application) return false;
+    const blocked = [
+      ReleaseStatus.PUBLISHED, ReleaseStatus.ROLLED_BACK,
+      ReleaseStatus.REVIEWED_POST_LAUNCH, ReleaseStatus.ARCHIVED
+    ];
+    return !blocked.includes(this.application.status);
+  }
+
+  get canCreateHandover(): boolean {
+    if (!this.application) return false;
+    if (!this.isAnyRole) return false;
+    return this.application.status !== ReleaseStatus.ARCHIVED;
   }
 
   get allHandoversConfirmed(): boolean {

@@ -285,6 +285,66 @@ def init_db():
 
                 print(f"创建样例申请: {app_data['title']} - {target.value}")
 
+            # 补充跨角色可见动作样例：给已发布、待复核等申请添加额外的跨岗位交接
+            registrar2 = created_users["registrar2"]
+            supervisor2 = created_users["supervisor2"]
+            reviewer2 = created_users["reviewer2"]
+
+            extra_handovers = [
+                # app 3: 已发布首页优化 - 额外添加一个 registrar2→supervisor2 的白班交接（已确认）
+                {
+                    "app_id": 3,
+                    "from": registrar2,
+                    "to": supervisor2,
+                    "shift": ShiftEnum.DAY,
+                    "content": "补充日班交接：CDN缓存命中率已提升至96.2%\n首页LCP稳定在1.3s-1.5s区间\n无异常告警",
+                    "confirm": True,
+                    "by": supervisor2
+                },
+                # app 6: 已复盘登录模块 - 额外添加 supervisor1→reviewer2 的夜班交接（已确认）
+                {
+                    "app_id": 6,
+                    "from": supervisor1,
+                    "to": reviewer2,
+                    "shift": ShiftEnum.NIGHT,
+                    "content": "复盘报告已归档\n验证码服务新增华东节点\n登录成功率保持99.1%",
+                    "confirm": True,
+                    "by": reviewer2
+                },
+                # app 5: 待复核消息推送 - 添加 registrar1→supervisor2 的未确认交接（演示待确认状态+主管可见待接收）
+                {
+                    "app_id": 5,
+                    "from": registrar1,
+                    "to": supervisor2,
+                    "shift": ShiftEnum.NIGHT,
+                    "content": "消息推送模块已完成初审\n夜班请主管跟进复核环节\n如发现推送延迟问题请先检查队列堆积",
+                    "confirm": False,
+                    "by": None
+                },
+                # app 5: 待复核消息推送 - 添加 registrar2→registrar1 的白班交接（已确认，同岗位交接）
+                {
+                    "app_id": 5,
+                    "from": registrar2,
+                    "to": registrar1,
+                    "shift": ShiftEnum.DAY,
+                    "content": "消息推送服务待复核\n已完成20万条压力测试，成功率99.7%\n交付文档已同步至共享目录",
+                    "confirm": True,
+                    "by": registrar1
+                },
+            ]
+
+            for hx in extra_handovers:
+                hc = ShiftHandoverCreate(
+                    release_application_id=hx["app_id"],
+                    to_user_id=hx["to"].id,
+                    shift=hx["shift"],
+                    handover_content=hx["content"]
+                )
+                handover = create_shift_handover(db, hc, hx["from"].id)
+                if handover and hx["confirm"]:
+                    confirm_shift_handover(db, handover.id, hx["by"].id)
+            print(f"补充了 {len(extra_handovers)} 条跨角色交接样例")
+
         print("\n数据库初始化完成!")
         print("\n样例账号:")
         print("  发布登记员: registrar1 / 123456 (张登记)")

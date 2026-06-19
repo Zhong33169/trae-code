@@ -31,10 +31,13 @@ def create_handover(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    handover = create_shift_handover(db, handover_in, current_user.id)
-    if not handover:
-        raise HTTPException(status_code=404, detail="发布申请不存在")
-    return handover
+    try:
+        handover = create_shift_handover(db, handover_in, current_user.id)
+        if not handover:
+            raise HTTPException(status_code=404, detail="发布申请不存在")
+        return handover
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.post("/{handover_id}/confirm", response_model=ShiftHandoverResponse)

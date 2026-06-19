@@ -1,8 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from database import get_db
-from auth import get_current_user, require_role
-from models import RoleEnum
+from auth import get_current_user
 from schemas import (
     RollbackPlanCreate, RollbackPlanUpdate, RollbackPlanResponse
 )
@@ -26,7 +25,7 @@ def get_plan(app_id: int, db: Session = Depends(get_db), current_user=Depends(ge
 def create_plan(
     plan_in: RollbackPlanCreate,
     db: Session = Depends(get_db),
-    current_user=Depends(require_role([RoleEnum.REGISTRAR, RoleEnum.SUPERVISOR]))
+    current_user=Depends(get_current_user)
 ):
     app = get_release_application(db, plan_in.release_application_id)
     if not app:
@@ -58,9 +57,12 @@ def update_plan(
 def approve_plan(
     plan_id: int,
     db: Session = Depends(get_db),
-    current_user=Depends(require_role([RoleEnum.SUPERVISOR]))
+    current_user=Depends(get_current_user)
 ):
-    plan = approve_rollback_plan(db, plan_id, current_user.id)
-    if not plan:
-        raise HTTPException(status_code=404, detail="回滚预案不存在")
-    return plan
+    try:
+        plan = approve_rollback_plan(db, plan_id, current_user.id)
+        if not plan:
+            raise HTTPException(status_code=404, detail="回滚预案不存在")
+        return plan
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
