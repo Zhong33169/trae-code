@@ -49,9 +49,10 @@ const DashboardPage: React.FC = () => {
     if (user) loadData();
   }, [user]);
 
-  const handleStatClick = (statuses: HarvestStatus[]) => {
+  const handleStatClick = (q: { statuses: HarvestStatus[]; queue: string }) => {
     const params = new URLSearchParams();
-    statuses.forEach((s) => params.append('status', s));
+    params.set('queue', q.queue);
+    q.statuses.forEach((s) => params.append('status', s));
     navigate(`/harvest?${params.toString()}`);
   };
 
@@ -75,7 +76,7 @@ const DashboardPage: React.FC = () => {
           ? <FileTextOutlined style={{ color: q.color }} />
           : <CheckCircleOutlined style={{ color: q.color }} />,
       color: q.color,
-      onClick: () => handleStatClick(q.statuses),
+      onClick: () => handleStatClick(q),
     }));
 
   const columns = [

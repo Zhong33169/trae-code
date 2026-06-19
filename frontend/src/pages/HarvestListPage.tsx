@@ -49,14 +49,23 @@ const HarvestListPage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [statusFilter, setStatusFilter] = useState<string[]>(searchParams.getAll('status'));
+  const [queueFilter, setQueueFilter] = useState<string>(searchParams.get('queue') || '');
   const [keyword, setKeyword] = useState<string>(searchParams.get('keyword') || '');
 
   useEffect(() => {
     if (user) loadRecords();
-  }, [user, statusFilter, keyword]);
+  }, [user, statusFilter, queueFilter, keyword]);
 
   useEffect(() => {
-    if (statusFilter.length === 1) {
+    if (queueFilter) {
+      if (queueFilter === 'FIELD_ADMIN') {
+        setBatchAction('SUBMIT');
+      } else if (queueFilter === 'TECHNICIAN') {
+        setBatchAction('VERIFY_PASS');
+      } else if (queueFilter === 'COOP_DIRECTOR') {
+        setBatchAction('REVIEW_PASS');
+      }
+    } else if (statusFilter.length > 0) {
       if (statusFilter.includes(HarvestStatus.DRAFT) || statusFilter.includes(HarvestStatus.PENDING_CORRECTION)) {
         setBatchAction('SUBMIT');
       } else if (statusFilter.includes(HarvestStatus.SUBMITTED)) {
@@ -64,19 +73,14 @@ const HarvestListPage: React.FC = () => {
       } else if (statusFilter.includes(HarvestStatus.VERIFIED) || statusFilter.includes(HarvestStatus.PENDING_REVIEW)) {
         setBatchAction('REVIEW_PASS');
       }
-    } else if (statusFilter.length > 1) {
-      if (statusFilter.includes(HarvestStatus.VERIFIED) || statusFilter.includes(HarvestStatus.PENDING_REVIEW)) {
-        setBatchAction('REVIEW_PASS');
-      } else if (statusFilter.includes(HarvestStatus.SUBMITTED)) {
-        setBatchAction('VERIFY_PASS');
-      }
     }
-  }, [statusFilter]);
+  }, [statusFilter, queueFilter]);
 
   const loadRecords = async () => {
     setLoading(true);
     try {
       const params: any = {};
+      if (queueFilter) params.queue = queueFilter;
       if (statusFilter.length > 0) params.status = statusFilter;
       if (keyword) params.keyword = keyword;
       const data = (await harvestApi.findAll(params)) as HarvestRecord[];
@@ -91,6 +95,7 @@ const HarvestListPage: React.FC = () => {
   const handleSearch = (value: string) => {
     setKeyword(value);
     const newParams = new URLSearchParams();
+    if (queueFilter) newParams.set('queue', queueFilter);
     statusFilter.forEach((s) => newParams.append('status', s));
     if (value) newParams.set('keyword', value);
     setSearchParams(newParams);
@@ -99,6 +104,7 @@ const HarvestListPage: React.FC = () => {
   const handleStatusChange = (value: string[]) => {
     setStatusFilter(value || []);
     const newParams = new URLSearchParams();
+    if (queueFilter) newParams.set('queue', queueFilter);
     (value || []).forEach((s) => newParams.append('status', s));
     if (keyword) newParams.set('keyword', keyword);
     setSearchParams(newParams);

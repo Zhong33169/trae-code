@@ -71,7 +71,7 @@ export class HarvestService {
     return `${prefix}${seq}`;
   }
 
-  findAll(userId: string, userRole: Role, filters?: { status?: string | string[]; keyword?: string }): HarvestRecord[] {
+  findAll(userId: string, userRole: Role, filters?: { status?: string | string[]; queue?: string; keyword?: string }): HarvestRecord[] {
     let sql = 'SELECT * FROM harvest_records WHERE 1=1';
     const params: any[] = [];
 
@@ -81,6 +81,11 @@ export class HarvestService {
     } else if (userRole === Role.TECHNICIAN) {
       sql += ' AND current_queue IN (?, ?)';
       params.push(Role.TECHNICIAN, Role.FIELD_ADMIN);
+    }
+
+    if (filters?.queue) {
+      sql += ' AND current_queue = ?';
+      params.push(filters.queue);
     }
 
     if (filters?.status) {
@@ -124,38 +129,38 @@ export class HarvestService {
   }
 
   getStatistics(userId: string, userRole: Role): Statistics {
-    let baseSql = 'SELECT status, COUNT(*) as cnt FROM harvest_records WHERE 1=1';
+    let baseSql = 'SELECT status, current_queue, COUNT(*) as cnt FROM harvest_records WHERE 1=1';
     const params: any[] = [];
 
     if (userRole === Role.FIELD_ADMIN) {
       baseSql += ' AND created_by = ?';
       params.push(userId);
+    } else if (userRole === Role.TECHNICIAN) {
+      baseSql += ' AND current_queue IN (?, ?)';
+      params.push(Role.TECHNICIAN, Role.FIELD_ADMIN);
     }
 
-    const sql = `${baseSql} GROUP BY status`;
-    const rows = this.db.prepare(sql).all(...params) as { status: string; cnt: number }[];
+    const sql = `${baseSql} GROUP BY status, current_queue`;
+    const rows = this.db.prepare(sql).all(...params) as { status: string; current_queue: string; cnt: number }[];
+
+    const statusCount: Record<string, number> = {};
+    let total = 0;
+    for (const row of rows) {
+      total += row.cnt;
+      statusCount[row.status] = (statusCount[row.status] || 0) + row.cnt;
+    }
 
     const result: Statistics = {
-      total: 0,
-      pending_correction: 0,
-      pending_verification: 0,
-      pending_review: 0,
-      archived: 0,
-      draft: 0,
+      total,
+      pending_correction: statusCount[HarvestStatus.PENDING_CORRECTION] || 0,
+      pending_verification: statusCount[HarvestStatus.SUBMITTED] || 0,
+      pending_review: (statusCount[HarvestStatus.VERIFIED] || 0) + (statusCount[HarvestStatus.PENDING_REVIEW] || 0),
+      archived: statusCount[HarvestStatus.ARCHIVED] || 0,
+      draft: statusCount[HarvestStatus.DRAFT] || 0,
       queues: [],
     };
 
-    for (const row of rows) {
-      result.total += row.cnt;
-      if (row.status === HarvestStatus.PENDING_CORRECTION) result.pending_correction = row.cnt;
-      if (row.status === HarvestStatus.SUBMITTED) result.pending_verification = row.cnt;
-      if (row.status === HarvestStatus.PENDING_REVIEW) result.pending_review = row.cnt;
-      if (row.status === HarvestStatus.VERIFIED) result.pending_review += row.cnt;
-      if (row.status === HarvestStatus.ARCHIVED) result.archived = row.cnt;
-      if (row.status === HarvestStatus.DRAFT) result.draft = row.cnt;
-    }
-
-    result.queues = [
+    const allQueues = [
       {
         key: 'pending_correction',
         label: '待补正',
@@ -197,6 +202,14 @@ export class HarvestService {
         color: '#8c8c8c',
       },
     ];
+
+    if (userRole === Role.FIELD_ADMIN) {
+      result.queues = allQueues.filter((q) => q.queue === Role.FIELD_ADMIN);
+    } else if (userRole === Role.TECHNICIAN) {
+      result.queues = allQueues.filter((q) => q.queue === Role.TECHNICIAN || q.queue === Role.FIELD_ADMIN);
+    } else {
+      result.queues = allQueues;
+    }
 
     return result;
   }

@@ -18,9 +18,10 @@ export class HarvestController {
   findAll(
     @Req() req: AuthRequest,
     @Query('status') status?: string,
+    @Query('queue') queue?: string,
     @Query('keyword') keyword?: string
   ) {
-    return this.harvestService.findAll(req.user.id, req.user.role as Role, { status, keyword });
+    return this.harvestService.findAll(req.user.id, req.user.role as Role, { status, queue, keyword });
   }
 
   @Get('statistics')
