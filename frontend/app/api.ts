@@ -111,17 +111,25 @@ const USER_KEY = 'seed_tracking_user'
 
 export const auth = {
   saveToken: (t: string, u: User) => {
-    sessionStorage.setItem(TOKEN_KEY, t)
-    sessionStorage.setItem(USER_KEY, JSON.stringify(u))
+    if (typeof window !== 'undefined') {
+      sessionStorage.setItem(TOKEN_KEY, t)
+      sessionStorage.setItem(USER_KEY, JSON.stringify(u))
+    }
   },
-  getToken: () => sessionStorage.getItem(TOKEN_KEY) || '',
+  getToken: () => {
+    if (typeof window === 'undefined') return ''
+    return sessionStorage.getItem(TOKEN_KEY) || ''
+  },
   getUser: (): User | null => {
+    if (typeof window === 'undefined') return null
     const s = sessionStorage.getItem(USER_KEY)
     return s ? JSON.parse(s) : null
   },
   clear: () => {
-    sessionStorage.removeItem(TOKEN_KEY)
-    sessionStorage.removeItem(USER_KEY)
+    if (typeof window !== 'undefined') {
+      sessionStorage.removeItem(TOKEN_KEY)
+      sessionStorage.removeItem(USER_KEY)
+    }
   },
 }
 

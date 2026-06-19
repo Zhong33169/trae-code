@@ -1,7 +1,8 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { api, auth, SeedRecord } from '~/app/api'
 import { formatTime, nodeLabel, statusColor, statusLabel } from '~/app/constants'
+import { useRecordList } from '~/app/hooks'
 
 export const Route = createFileRoute('/')({
   component: RecordsPage,
@@ -15,44 +16,28 @@ function RecordsPage() {
   const [keyword, setKeyword] = useState<string>('')
   const [page, setPage] = useState(1)
   const [pageSize] = useState(10)
-  const [loading, setLoading] = useState(false)
-  const [data, setData] = useState<{ items: SeedRecord[]; total: number; timeout_count: number } | null>(null)
-  const [msg, setMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
+  const [searchKw, setSearchKw] = useState<string>('')
+  const { loading, data, msg, setMsg, load, refresh } = useRecordList({
+    status: status || undefined,
+    node: node || undefined,
+    keyword: searchKw || undefined,
+    page,
+    page_size: pageSize,
+  })
   const [selected, setSelected] = useState<Set<string>>(new Set())
-
-  const load = async () => {
-    setLoading(true)
-    setMsg(null)
-    const r = await api.listRecords({
-      status: status || undefined,
-      node: node || undefined,
-      keyword: keyword || undefined,
-      page,
-      page_size: pageSize,
-    })
-    setLoading(false)
-    if (r.success && r.data) setData(r.data)
-    else setMsg({ type: 'err', text: r.message })
-  }
-
-  useEffect(() => { load() }, [status, node, page, pageSize])
-
-  const refresh = () => { load() }
 
   const doBatch = async (action: string) => {
     if (selected.size === 0) {
-      setMsg({ type: 'err', text: '请先选择需要批量处理的苗种记录' })
+      setMsg!({ type: 'err', text: '请先选择需要批量处理的苗种记录' })
       return
     }
-    setLoading(true)
     const r = await api.batchAction({ record_ids: Array.from(selected), action })
-    setLoading(false)
     if (r.success) {
-      setMsg({ type: 'ok', text: r.message })
+      setMsg!({ type: 'ok', text: r.message })
       setSelected(new Set())
       load()
     } else {
-      setMsg({ type: 'err', text: r.message })
+      setMsg!({ type: 'err', text: r.message })
     }
   }
 
@@ -121,10 +106,10 @@ function RecordsPage() {
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 240 }}>
             <input value={keyword} onChange={e => setKeyword(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') { setPage(1); load() } }}
+              onKeyDown={e => { if (e.key === 'Enter') { setSearchKw(keyword); setPage(1); load() } }}
               placeholder="搜索批次号/苗种/供应商"
               style={{ ...inputStyle, flex: 1 }} />
-            <button onClick={() => { setPage(1); load() }} style={btnGhost}>搜索</button>
+            <button onClick={() => { setSearchKw(keyword); setPage(1); load() }} style={btnGhost}>搜索</button>
           </div>
         </div>
 

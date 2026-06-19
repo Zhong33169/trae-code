@@ -35,6 +35,12 @@ fn rand() -> u32 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos() as u32).unwrap_or(42)
 }
 
+pub struct NodeAdvanceResult {
+    pub old_record_status: String,
+    pub new_record_status: String,
+    pub new_record_node: String,
+}
+
 fn write_log(
     pool: &State<DbPool>,
     user: &AuthUser,
@@ -83,6 +89,7 @@ fn upsert_node(
     assignee_name: Option<&str>,
     deadline_hours: i64,
     status: &str,
+    remark: Option<&str>,
 ) -> String {
     let conn = pool.lock();
     let existing: Result<String, _> = conn.query_row(
@@ -92,14 +99,14 @@ fn upsert_node(
     );
     if let Ok(id) = existing {
         let _ = conn.execute(
-            "UPDATE node_tracking SET updated_at = ?1 WHERE id = ?2",
-            rusqlite::params![now_str(), id],
+            "UPDATE node_tracking SET status = ?1, remark = COALESCE(?2, remark), updated_at = ?3 WHERE id = ?4",
+            rusqlite::params![status, remark, now_str(), id],
         );
         return id;
     }
     let id = Uuid::new_v4().to_string();
     let _ = conn.execute(
-        "INSERT INTO node_tracking (id, record_id, node_type, node_name, assignee_id, assignee_name, deadline, status, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
+        "INSERT INTO node_tracking (id, record_id, node_type, node_name, assignee_id, assignee_name, deadline, status, remark, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
         rusqlite::params![
             id,
             record_id,
@@ -109,11 +116,87 @@ fn upsert_node(
             assignee_name,
             add_hours_str(deadline_hours),
             status,
+            remark,
             now_str(),
             now_str(),
         ],
     );
     id
+}
+
+fn complete_node_and_advance(
+    pool: &State<DbPool>,
+    record_id: &str,
+    current_node_type: &str,
+    next_node_type: &str,
+    next_node_role: &str,
+    next_deadline_hours: i64,
+    next_overall_status: &str,
+    extra_updates: &[(&str, &dyn rusqlite::ToSql)],
+    node_remark: Option<&str>,
+) -> NodeAdvanceResult {
+    let (old_record, old_status) = {
+        let conn = pool.lock();
+        let row: Result<(String, String), _> = conn.query_row(
+            "SELECT id, overall_status FROM seed_records WHERE id = ?1",
+            rusqlite::params![record_id],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        );
+        row.unwrap_or_else(|_| (record_id.to_string(), "pending".to_string()))
+    };
+    let _ = old_record;
+    let now = now_str();
+    {
+        let conn = pool.lock();
+        let status_owned = next_overall_status.to_string();
+        let node_owned = next_node_type.to_string();
+        let now_owned = now.clone();
+        let id_owned = record_id.to_string();
+
+        let mut set_clauses: Vec<String> = vec![
+            "overall_status = ?".to_string(),
+            "current_node = ?".to_string(),
+            "updated_at = ?".to_string(),
+        ];
+        let mut values: Vec<&dyn rusqlite::ToSql> = vec![
+            &status_owned,
+            &node_owned,
+            &now_owned,
+        ];
+        for (col, val) in extra_updates {
+            set_clauses.push(format!("{} = ?", col));
+            values.push(*val);
+        }
+        values.push(&id_owned);
+        let sql = format!(
+            "UPDATE seed_records SET {} WHERE id = ?",
+            set_clauses.join(", ")
+        );
+        let _ = conn.execute(&sql, rusqlite::params_from_iter(values.into_iter()));
+        let _ = conn.execute(
+            "UPDATE node_tracking SET status = 'completed', completed_at = ?1, remark = COALESCE(?2, remark), updated_at = ?3 WHERE record_id = ?4 AND node_type = ?5",
+            rusqlite::params![now, node_remark, now, record_id, current_node_type],
+        );
+    }
+    let assignee = find_user_by_role(pool, next_node_role);
+    if !next_node_type.is_empty() {
+        upsert_node(
+            pool,
+            record_id,
+            next_node_type,
+            node_label(next_node_type),
+            assignee.as_ref().map(|(i, _)| i.as_str()),
+            assignee.as_ref().map(|(_, n)| n.as_str()),
+            next_deadline_hours,
+            "pending",
+            None,
+        );
+    }
+    NodeAdvanceResult {
+        old_record_status: old_status,
+        new_record_status: next_overall_status.to_string(),
+        new_record_node: next_node_type.to_string(),
+    }
 }
 
 fn refresh_node_timeout(pool: &State<DbPool>, record_id: &str) {
@@ -140,7 +223,7 @@ fn refresh_node_timeout(pool: &State<DbPool>, record_id: &str) {
 fn count_timeout_for_record(pool: &State<DbPool>, record_id: &str) -> i64 {
     let conn = pool.lock();
     conn.query_row(
-        "SELECT COUNT(*) FROM node_tracking WHERE record_id = ?1 AND is_timeout = 1",
+        "SELECT COUNT(*) FROM node_tracking WHERE record_id = ?1 AND is_timeout = 1 AND status != 'completed'",
         rusqlite::params![record_id],
         |row| row.get(0),
     )
@@ -150,7 +233,7 @@ fn count_timeout_for_record(pool: &State<DbPool>, record_id: &str) -> i64 {
 fn role_to_assign(node: &str) -> &'static str {
     match node {
         "audit" => "auditor",
-        "pond_entry" | "survival_observe" => "registrar",
+        "pond_entry" | "survival_observe" | "registration" => "registrar",
         "archive_review" => "reviewer",
         _ => "registrar",
     }
@@ -461,7 +544,7 @@ pub fn create_record(
                 user.user_id,
                 user.real_name,
                 now,
-                "registration",
+                "audit",
                 "pending",
                 now,
                 now,
@@ -479,6 +562,7 @@ pub fn create_record(
         Some(&user.real_name),
         deadline_hours,
         "completed",
+        Some("登记员发起苗种记录，自动进入审核节点"),
     );
 
     let auditor = find_user_by_role(pool, role_to_assign("audit"));
@@ -491,21 +575,23 @@ pub fn create_record(
         auditor.as_ref().map(|(_, n)| n.as_str()),
         deadline_hours,
         "pending",
+        None,
     );
 
     write_log(
         pool,
         &user,
         Some(&id),
-        "创建苗种记录",
+        "创建苗种记录并提交审核",
         &format!("批次号 {}", batch_no),
         Some(&format!(
-            "苗种类型：{}，品种：{}，数量：{}{}，来源：{}",
+            "苗种类型：{}，品种：{}，数量：{}{}，来源：{}，节点时限：{}小时",
             req.seed_type,
             req.seed_species,
             req.quantity,
             req.unit.clone().unwrap_or_else(|| "尾".to_string()),
-            req.source
+            req.source,
+            deadline_hours,
         )),
         None,
         Some("pending"),
@@ -517,7 +603,11 @@ pub fn create_record(
     let logs = query_logs(pool, &id);
     Ok(Json(ApiResponse::ok(
         SeedRecordDetail { record, nodes, logs },
-        &format!("苗种记录创建成功，批次号：{}，已提交至{}审核", batch_no, role_label("auditor")),
+        &format!("苗种记录创建成功，批次号：{}，已进入「{}」节点（责任人：{}）",
+            batch_no,
+            node_label("audit"),
+            auditor.map(|(_, n)| n).unwrap_or_else(|| role_label("auditor").to_string()),
+        ),
     )))
 }
 
@@ -531,7 +621,7 @@ pub fn update_record(
     require_role(&user, &["registrar"])
         .map_err(|e| Custom(Status::Forbidden, Json(ApiResponse::err(&e))))?;
 
-    let mut record = query_record(pool, id)
+    let record = query_record(pool, id)
         .ok_or_else(|| Custom(Status::NotFound, Json(ApiResponse::err("未找到该苗种记录"))))?;
 
     if record.overall_status != "correction" && record.overall_status != "pending" {
@@ -544,52 +634,59 @@ pub fn update_record(
         ));
     }
 
-    if let Some(v) = &req.seed_type { record.seed_type = v.clone(); }
-    if let Some(v) = &req.seed_species { record.seed_species = v.clone(); }
-    if let Some(v) = req.quantity { record.quantity = v; }
-    if let Some(v) = &req.unit { record.unit = v.clone(); }
-    if let Some(v) = &req.source { record.source = v.clone(); }
-    if req.supplier.is_some() { record.supplier = req.supplier.clone(); }
+    let mut seed_type = record.seed_type.clone();
+    let mut seed_species = record.seed_species.clone();
+    let mut quantity = record.quantity;
+    let mut unit = record.unit.clone();
+    let mut source = record.source.clone();
+    let mut supplier = record.supplier.clone();
 
+    if let Some(v) = &req.seed_type { seed_type = v.clone(); }
+    if let Some(v) = &req.seed_species { seed_species = v.clone(); }
+    if let Some(v) = req.quantity { quantity = v; }
+    if let Some(v) = &req.unit { unit = v.clone(); }
+    if let Some(v) = &req.source { source = v.clone(); }
+    if req.supplier.is_some() { supplier = req.supplier.clone(); }
+
+    let is_correction = record.overall_status == "correction";
+    let now = now_str();
     {
         let conn = pool.lock();
         conn.execute(
             "UPDATE seed_records SET seed_type=?1, seed_species=?2, quantity=?3, unit=?4, source=?5, supplier=?6, updated_at=?7 WHERE id=?8",
-            rusqlite::params![
-                record.seed_type, record.seed_species, record.quantity, record.unit,
-                record.source, record.supplier, now_str(), id,
-            ],
+            rusqlite::params![seed_type, seed_species, quantity, unit, source, supplier, now, id],
         ).map_err(|e| Custom(Status::InternalServerError, Json(ApiResponse::err(&format!("更新失败：{}", e)))))?;
-    }
-
-    if record.overall_status == "correction" {
-        let conn = pool.lock();
-        let _ = conn.execute(
-            "UPDATE seed_records SET overall_status = 'pending', current_node = 'audit', updated_at = ?1 WHERE id = ?2",
-            rusqlite::params![now_str(), id],
-        );
-        record.overall_status = "pending".to_string();
-        record.current_node = "audit".to_string();
+        if is_correction {
+            let _ = conn.execute(
+                "UPDATE seed_records SET overall_status = 'pending', current_node = 'audit', updated_at = ?1 WHERE id = ?2",
+                rusqlite::params![now, id],
+            );
+            let _ = conn.execute(
+                "UPDATE node_tracking SET status='pending', completed_at=NULL, updated_at=?1 WHERE record_id=?2 AND node_type='audit'",
+                rusqlite::params![now, id],
+            );
+        }
     }
 
     write_log(
         pool,
         &user,
         Some(id),
-        if record.overall_status == "pending" { "补正苗种记录并重新提交审核" } else { "修改苗种记录" },
+        if is_correction { "补正苗种记录并重新提交审核" } else { "修改苗种记录" },
         &format!("批次号 {}", record.batch_no),
-        Some("登记员更新了苗种记录信息"),
-        Some("correction"),
+        Some(if is_correction { "登记员补正后重新提交至审核节点" } else { "登记员在待处理状态下修改苗种记录" }),
+        if is_correction { Some("correction") } else { Some(&record.overall_status) },
         Some("pending"),
         None,
     );
 
+    refresh_node_timeout(pool, id);
     let record = query_record(pool, id).unwrap();
     let nodes = query_nodes(pool, id);
     let logs = query_logs(pool, id);
     Ok(Json(ApiResponse::ok(
         SeedRecordDetail { record, nodes, logs },
-        "苗种记录已更新并重新提交审核",
+        if is_correction { "补正完成，已重新提交至苗种审核节点" } else { "苗种记录已更新" },
     )))
 }
 
@@ -604,34 +701,24 @@ pub fn approve_audit(
         .map_err(|e| Custom(Status::Forbidden, Json(ApiResponse::err(&e))))?;
     let record = query_record(pool, id)
         .ok_or_else(|| Custom(Status::NotFound, Json(ApiResponse::err("未找到该苗种记录"))))?;
-    if record.current_node != "audit" || (record.overall_status != "pending" && record.overall_status != "processing") {
+    if record.current_node != "audit" {
         return Err(Custom(Status::BadRequest, Json(ApiResponse::err(&format!(
-            "当前节点「{}」状态「{}」不允许审核通过，需在审核节点待处理或处理中",
-            node_label(&record.current_node), status_label(&record.overall_status)
+            "当前节点「{}」不允许审核通过，需在苗种审核节点",
+            node_label(&record.current_node)
         )))));
     }
 
-    let conn = pool.lock();
-    let _ = conn.execute(
-        "UPDATE seed_records SET overall_status='approved', current_node='pond_entry', updated_at=?1 WHERE id=?2",
-        rusqlite::params![now_str(), id],
-    );
-    let _ = conn.execute(
-        "UPDATE node_tracking SET status='completed', completed_at=?1, updated_at=?2 WHERE record_id=?3 AND node_type='audit'",
-        rusqlite::params![now_str(), now_str(), id],
-    );
-    drop(conn);
-
-    let deadline_hours = req.deadline_hours.unwrap_or(48);
-    upsert_node(
+    let next_deadline = req.deadline_hours.unwrap_or(48);
+    let advance = complete_node_and_advance(
         pool,
         id,
+        "audit",
         "pond_entry",
-        node_label("pond_entry"),
-        Some(&user.user_id),
-        Some(&user.real_name),
-        deadline_hours,
-        "pending",
+        role_to_assign("pond_entry"),
+        next_deadline,
+        "approved",
+        &[],
+        req.evidence_note.as_deref(),
     );
 
     write_log(
@@ -640,9 +727,14 @@ pub fn approve_audit(
         Some(id),
         "审核通过",
         &format!("批次号 {}", record.batch_no),
-        Some(&format!("审核主管已通过该批次苗种记录，进入下一节点：{}", node_label("pond_entry"))),
-        Some(&record.overall_status),
-        Some("approved"),
+        Some(&format!(
+            "审核主管通过该批次苗种记录，下一节点「{}」（责任人：{}，时限 {} 小时）",
+            node_label("pond_entry"),
+            role_label(role_to_assign("pond_entry")),
+            next_deadline
+        )),
+        Some(&advance.old_record_status),
+        Some(&advance.new_record_status),
         req.evidence_note.as_deref(),
     );
 
@@ -652,7 +744,10 @@ pub fn approve_audit(
     let logs = query_logs(pool, id);
     Ok(Json(ApiResponse::ok(
         SeedRecordDetail { record, nodes, logs },
-        "审核已通过，记录转入苗种入塘节点",
+        &format!("审核已通过，记录转入「{}」节点（责任人：{}）",
+            node_label("pond_entry"),
+            role_label(role_to_assign("pond_entry"))
+        ),
     )))
 }
 
@@ -674,35 +769,44 @@ pub fn reject_audit(
         return Err(Custom(Status::BadRequest, Json(ApiResponse::err("请填写驳回原因"))));
     }
 
-    let conn = pool.lock();
-    let _ = conn.execute(
-        "UPDATE seed_records SET overall_status='correction', current_node='registration', updated_at=?1 WHERE id=?2",
-        rusqlite::params![now_str(), id],
-    );
-    let _ = conn.execute(
-        "UPDATE node_tracking SET status='rejected', completed_at=?1, updated_at=?2 WHERE record_id=?3 AND node_type='audit'",
-        rusqlite::params![now_str(), now_str(), id],
-    );
-    drop(conn);
+    let old_status = record.overall_status.clone();
+    let now = now_str();
+    {
+        let conn = pool.lock();
+        let _ = conn.execute(
+            "UPDATE seed_records SET overall_status='correction', current_node='registration', updated_at=?1 WHERE id=?2",
+            rusqlite::params![now, id],
+        );
+        let _ = conn.execute(
+            "UPDATE node_tracking SET status='rejected', completed_at=?1, remark=?2, updated_at=?3 WHERE record_id=?4 AND node_type='audit'",
+            rusqlite::params![now, req.reason.trim(), now, id],
+        );
+    }
 
+    let detail_full = format!(
+        "驳回原因：{}{}",
+        req.reason,
+        req.evidence_note.as_deref().map(|e| format!("；证据说明：{}", e)).unwrap_or_default()
+    );
     write_log(
         pool,
         &user,
         Some(id),
-        "审核驳回",
+        "审核驳回（退回登记员补正）",
         &format!("批次号 {}", record.batch_no),
-        Some(&format!("驳回原因：{}", req.reason)),
-        Some(&record.overall_status),
+        Some(&detail_full),
+        Some(&old_status),
         Some("correction"),
         req.evidence_note.as_deref(),
     );
 
+    refresh_node_timeout(pool, id);
     let record = query_record(pool, id).unwrap();
     let nodes = query_nodes(pool, id);
     let logs = query_logs(pool, id);
     Ok(Json(ApiResponse::ok(
         SeedRecordDetail { record, nodes, logs },
-        &format!("已驳回至登记员补正，原因：{}", req.reason),
+        &format!("已退回至苗种登记节点，登记员需补正。原因：{}", req.reason),
     )))
 }
 
@@ -728,52 +832,52 @@ pub fn pond_entry(
     }
 
     let now = now_str();
-    {
-        let conn = pool.lock();
-        let _ = conn.execute(
-            "UPDATE seed_records SET pond_entry_time=?1, pond_id=?2, pond_quantity=?3, overall_status='processing', current_node='survival_observe', updated_at=?4 WHERE id=?5",
-            rusqlite::params![now, req.pond_id.trim(), req.pond_quantity, now, id],
-        );
-        let _ = conn.execute(
-            "UPDATE node_tracking SET status='completed', completed_at=?1, updated_at=?2 WHERE record_id=?3 AND node_type='pond_entry'",
-            rusqlite::params![now, now, id],
-        );
-    }
-
-    let deadline_hours = req.deadline_hours.unwrap_or(240);
-    upsert_node(
+    let pond_qty_str = req.pond_quantity.to_string();
+    let next_deadline = req.deadline_hours.unwrap_or(240);
+    let advance = complete_node_and_advance(
         pool,
         id,
+        "pond_entry",
         "survival_observe",
-        node_label("survival_observe"),
-        Some(&user.user_id),
-        Some(&user.real_name),
-        deadline_hours,
-        "pending",
+        role_to_assign("survival_observe"),
+        next_deadline,
+        "processing",
+        &[
+            ("pond_entry_time", &now as &dyn rusqlite::ToSql),
+            ("pond_id", &req.pond_id.trim() as &dyn rusqlite::ToSql),
+            ("pond_quantity", &pond_qty_str.parse::<i64>().unwrap_or(0) as &dyn rusqlite::ToSql),
+        ],
+        req.remark.as_deref(),
     );
 
+    let detail = format!(
+        "池塘编号：{}，入塘数量：{} {}；{}",
+        req.pond_id, req.pond_quantity, record.unit,
+        req.remark.as_deref().map(|r| format!("备注：{}", r)).unwrap_or_default()
+    );
     write_log(
         pool,
         &user,
         Some(id),
-        "苗种入塘登记",
+        "苗种入塘登记完成",
         &format!("批次号 {}", record.batch_no),
-        Some(&format!(
-            "池塘：{}，入塘数量：{}{}",
-            req.pond_id, req.pond_quantity, record.unit
-        )),
-        Some(&record.overall_status),
-        Some("processing"),
+        Some(&detail),
+        Some(&advance.old_record_status),
+        Some(&advance.new_record_status),
         req.remark.as_deref(),
     );
 
     refresh_node_timeout(pool, id);
     let record = query_record(pool, id).unwrap();
- let nodes = query_nodes(pool, id);
+    let nodes = query_nodes(pool, id);
     let logs = query_logs(pool, id);
     Ok(Json(ApiResponse::ok(
         SeedRecordDetail { record, nodes, logs },
-        &format!("苗种入塘登记已完成，进入「{}」节点", node_label("survival_observe")),
+        &format!("苗种入塘登记完成，进入「{}」节点（责任人：{}，时限 {} 小时）",
+            node_label("survival_observe"),
+            role_label(role_to_assign("survival_observe")),
+            next_deadline
+        ),
     )))
 }
 
@@ -799,40 +903,37 @@ pub fn survival_observe(
     }
 
     let now = now_str();
-    let reviewer = find_user_by_role(pool, role_to_assign("archive_review"));
-    {
-        let conn = pool.lock();
-        let _ = conn.execute(
-            "UPDATE seed_records SET survival_rate=?1, survival_observe_time=?2, current_node='archive_review', updated_at=?3 WHERE id=?4",
-            rusqlite::params![req.survival_rate, now, now, id],
-        );
-        let _ = conn.execute(
-            "UPDATE node_tracking SET status='completed', completed_at=?1, updated_at=?2 WHERE record_id=?3 AND node_type='survival_observe'",
-            rusqlite::params![now, now, id],
-        );
-    }
-
-    let deadline_hours = req.deadline_hours.unwrap_or(72);
-    upsert_node(
+    let rate_str = req.survival_rate.to_string();
+    let next_deadline = req.deadline_hours.unwrap_or(72);
+    let advance = complete_node_and_advance(
         pool,
         id,
+        "survival_observe",
         "archive_review",
-        node_label("archive_review"),
-        reviewer.as_ref().map(|(i, _)| i.as_str()),
-        reviewer.as_ref().map(|(_, n)| n.as_str()),
-        deadline_hours,
-        "pending",
+        role_to_assign("archive_review"),
+        next_deadline,
+        "processing",
+        &[
+            ("survival_rate", &rate_str.parse::<f64>().unwrap_or(0.0) as &dyn rusqlite::ToSql),
+            ("survival_observe_time", &now as &dyn rusqlite::ToSql),
+        ],
+        req.remark.as_deref(),
     );
 
+    let detail = format!(
+        "成活率：{:.2}%{}",
+        req.survival_rate,
+        req.remark.as_deref().map(|r| format!("；观察备注：{}", r)).unwrap_or_default()
+    );
     write_log(
         pool,
         &user,
         Some(id),
-        "成活观察登记",
+        "成活观察登记完成",
         &format!("批次号 {}", record.batch_no),
-        Some(&format!("成活率：{:.2}%", req.survival_rate)),
-        Some(&record.overall_status),
-        Some("processing"),
+        Some(&detail),
+        Some(&advance.old_record_status),
+        Some(&advance.new_record_status),
         req.remark.as_deref(),
     );
 
@@ -842,7 +943,11 @@ pub fn survival_observe(
     let logs = query_logs(pool, id);
     Ok(Json(ApiResponse::ok(
         SeedRecordDetail { record, nodes, logs },
-        &format!("成活观察已登记，进入「{}」节点", node_label("archive_review")),
+        &format!("成活观察登记完成，进入「{}」节点（责任人：{}，时限 {} 小时）",
+            node_label("archive_review"),
+            role_label(role_to_assign("archive_review")),
+            next_deadline
+        ),
     )))
 }
 
@@ -868,26 +973,30 @@ pub fn archive(
     }
 
     let now = now_str();
-    {
-        let conn = pool.lock();
-        let _ = conn.execute(
-            "UPDATE seed_records SET archive_time=?1, archive_remark=?2, overall_status='completed', current_node='done', updated_at=?3 WHERE id=?4",
-            rusqlite::params![now, req.archive_remark.trim(), now, id],
-        );
-        let _ = conn.execute(
-            "UPDATE node_tracking SET status='completed', completed_at=?1, updated_at=?2 WHERE record_id=?3 AND node_type='archive_review'",
-            rusqlite::params![now, now, id],
-        );
-    }
+    let rm_str = req.archive_remark.trim().to_string();
+    let advance = complete_node_and_advance(
+        pool,
+        id,
+        "archive_review",
+        "done",
+        "",
+        0,
+        "completed",
+        &[
+            ("archive_time", &now as &dyn rusqlite::ToSql),
+            ("archive_remark", &rm_str.as_str() as &dyn rusqlite::ToSql),
+        ],
+        Some(req.archive_remark.trim()),
+    );
 
     write_log(
         pool,
         &user,
         Some(id),
-        "批次归档复核完成",
+        "批次归档复核完成（结案）",
         &format!("批次号 {}", record.batch_no),
         Some(&format!("归档复核意见：{}", req.archive_remark)),
-        Some(&record.overall_status),
+        Some(&advance.old_record_status),
         Some("completed"),
         None,
     );
@@ -898,7 +1007,7 @@ pub fn archive(
     let logs = query_logs(pool, id);
     Ok(Json(ApiResponse::ok(
         SeedRecordDetail { record, nodes, logs },
-        "批次归档完成，记录已结案",
+        "批次归档完成，记录已结案，状态与节点不再允许变更",
     )))
 }
 
@@ -921,43 +1030,50 @@ pub fn handle_timeout(
         return Err(Custom(Status::BadRequest, Json(ApiResponse::err("超时原因与后续处理措施均为必填"))));
     }
 
-    let conn = pool.lock();
-    let _ = conn.execute(
-        "UPDATE node_tracking SET timeout_reason=?1, follow_up_action=?2, timeout_remark=?3, updated_at=?4 WHERE record_id=?5 AND is_timeout=1 AND status != 'completed'",
-        rusqlite::params![
-            req.timeout_reason.trim(),
-            req.follow_up_action.trim(),
-            req.timeout_remark,
-            now_str(),
-            id,
-        ],
-    );
-    drop(conn);
+    let now = now_str();
+    {
+        let conn = pool.lock();
+        let remark_for_coalesce = req.timeout_remark.clone().unwrap_or_default();
+        let _ = conn.execute(
+            "UPDATE node_tracking SET timeout_reason=?1, follow_up_action=?2, timeout_remark=?3, updated_at=?4, remark=COALESCE(remark, ?5) WHERE record_id=?6 AND is_timeout=1 AND status != 'completed'",
+            rusqlite::params![
+                req.timeout_reason.trim(),
+                req.follow_up_action.trim(),
+                req.timeout_remark.clone(),
+                now,
+                remark_for_coalesce,
+                id,
+            ],
+        );
+    }
     update_record_timestamp(pool, id);
 
+    let detail_full = format!(
+        "超时原因：{}；后续处理措施：{}{}{}",
+        req.timeout_reason,
+        req.follow_up_action,
+        req.timeout_remark.as_deref().map(|r| format!("；超时处理备注：{}", r)).unwrap_or_default(),
+        req.evidence_note.as_deref().map(|e| format!("；证据说明：{}", e)).unwrap_or_default()
+    );
     write_log(
         pool,
         &user,
         Some(id),
-        "处理节点超时",
+        "节点超时处理登记",
         &format!("批次号 {}", record.batch_no),
-        Some(&format!(
-            "超时原因：{}；后续处理措施：{}；备注：{}",
-            req.timeout_reason,
-            req.follow_up_action,
-            req.timeout_remark.clone().unwrap_or_default()
-        )),
+        Some(&detail_full),
         None,
         None,
         req.evidence_note.as_deref(),
     );
 
+    refresh_node_timeout(pool, id);
     let record = query_record(pool, id).unwrap();
     let nodes = query_nodes(pool, id);
     let logs = query_logs(pool, id);
     Ok(Json(ApiResponse::ok(
         SeedRecordDetail { record, nodes, logs },
-        "超时节点已登记原因与处理措施，证据已留存",
+        "超时节点的原因、后续处理、证据说明已全部留存，节点追踪与操作记录均可回查",
     )))
 }
 
@@ -980,24 +1096,24 @@ pub fn batch_action(
                 let res = approve_audit_inner(pool, &user, rid, &req.remark);
                 match res {
                     Ok(_) => ok_count += 1,
-                    Err(msg) => { fail_count += 1; messages.push(format!("批次 {}: {}", rid, msg)); }
+                    Err(msg) => { fail_count += 1; messages.push(format!("记录 {}: {}", rid, msg)); }
                 }
             }
             "archive" => {
                 let res = archive_inner(pool, &user, rid, &req.remark);
                 match res {
                     Ok(_) => ok_count += 1,
-                    Err(msg) => { fail_count += 1; messages.push(format!("批次 {}: {}", rid, msg)); }
+                    Err(msg) => { fail_count += 1; messages.push(format!("记录 {}: {}", rid, msg)); }
                 }
             }
             _ => {
-                return Err(Custom(Status::BadRequest, Json(ApiResponse::err("不支持的批量操作"))));
+                return Err(Custom(Status::BadRequest, Json(ApiResponse::err("不支持的批量操作（支持 approve-audit / archive）"))));
             }
         }
     }
 
     let msg = if fail_count == 0 {
-        format!("批量操作成功，共处理 {} 条记录", ok_count)
+        format!("批量操作成功，共处理 {} 条记录（与单条流程完全一致：状态流转/责任人/节点时限/日志均相同）", ok_count)
     } else {
         format!("批量操作完成：成功 {} 条，失败 {} 条", ok_count, fail_count)
     };
@@ -1009,47 +1125,74 @@ pub fn batch_action(
 
 fn approve_audit_inner(pool: &State<DbPool>, user: &AuthUser, id: &str, remark: &Option<String>) -> Result<(), String> {
     if user.role != "auditor" { return Err("仅苗种审核主管可批量审核通过".into()); }
-    let record = query_record(pool, id).ok_or_else(|| "未找到记录".to_string())?;
-    if record.current_node != "audit" { return Err("非审核节点".into()); }
-    let now = now_str();
-    let conn = pool.lock();
-    let _ = conn.execute(
-        "UPDATE seed_records SET overall_status='approved', current_node='pond_entry', updated_at=?1 WHERE id=?2",
-        rusqlite::params![now, id],
+    let record = query_record(pool, id).ok_or_else(|| "未找到苗种记录".to_string())?;
+    if record.current_node != "audit" {
+        return Err(format!("当前节点为「{}」，非审核节点，已跳过", node_label(&record.current_node)));
+    }
+    let advance = complete_node_and_advance(
+        pool,
+        id,
+        "audit",
+        "pond_entry",
+        role_to_assign("pond_entry"),
+        48,
+        "approved",
+        &[],
+        remark.as_deref(),
     );
-    let _ = conn.execute(
-        "UPDATE node_tracking SET status='completed', completed_at=?1, updated_at=?2 WHERE record_id=?3 AND node_type='audit'",
-        rusqlite::params![now, now, id],
+    write_log(
+        pool,
+        user,
+        Some(id),
+        "批量审核通过",
+        &format!("批次号 {}", record.batch_no),
+        Some(&format!(
+            "批量审核通过，下一节点「{}」（责任人：{}，时限 48 小时）",
+            node_label("pond_entry"),
+            role_label(role_to_assign("pond_entry"))
+        )),
+        Some(&advance.old_record_status),
+        Some(&advance.new_record_status),
+        remark.as_deref(),
     );
-    drop(conn);
-    let registrar = find_user_by_role(pool, "registrar");
-    upsert_node(pool, id, "pond_entry", node_label("pond_entry"),
-        registrar.as_ref().map(|(i, _)| i.as_str()),
-        registrar.as_ref().map(|(_, n)| n.as_str()),
-        48, "pending");
-    write_log(pool, user, Some(id), "批量审核通过", &format!("批次号 {}", record.batch_no),
-        remark.as_deref(), Some(&record.overall_status), Some("approved"), remark.as_deref());
+    refresh_node_timeout(pool, id);
     Ok(())
 }
 
 fn archive_inner(pool: &State<DbPool>, user: &AuthUser, id: &str, remark: &Option<String>) -> Result<(), String> {
-    if user.role != "reviewer" { return Err("仅复核负责人可批量归档".into()); }
-    let record = query_record(pool, id).ok_or_else(|| "未找到记录".to_string())?;
-    if record.current_node != "archive_review" { return Err("非归档复核节点".into()); }
+    if user.role != "reviewer" { return Err("仅水产养殖基地复核负责人可批量归档".into()); }
+    let record = query_record(pool, id).ok_or_else(|| "未找到苗种记录".to_string())?;
+    if record.current_node != "archive_review" {
+        return Err(format!("当前节点为「{}」，非归档复核节点，已跳过", node_label(&record.current_node)));
+    }
     let now = now_str();
     let rm = remark.clone().unwrap_or_else(|| "批量归档，复核通过".to_string());
-    let conn = pool.lock();
-    let _ = conn.execute(
-        "UPDATE seed_records SET archive_time=?1, archive_remark=?2, overall_status='completed', current_node='done', updated_at=?3 WHERE id=?4",
-        rusqlite::params![now, rm, now, id],
+    let advance = complete_node_and_advance(
+        pool,
+        id,
+        "archive_review",
+        "done",
+        "",
+        0,
+        "completed",
+        &[
+            ("archive_time", &now as &dyn rusqlite::ToSql),
+            ("archive_remark", &rm.as_str() as &dyn rusqlite::ToSql),
+        ],
+        Some(&rm),
     );
-    let _ = conn.execute(
-        "UPDATE node_tracking SET status='completed', completed_at=?1, updated_at=?2 WHERE record_id=?3 AND node_type='archive_review'",
-        rusqlite::params![now, now, id],
+    write_log(
+        pool,
+        user,
+        Some(id),
+        "批量归档复核完成（结案）",
+        &format!("批次号 {}", record.batch_no),
+        Some(&format!("归档复核意见：{}", rm)),
+        Some(&advance.old_record_status),
+        Some("completed"),
+        None,
     );
-    drop(conn);
-    write_log(pool, user, Some(id), "批量归档复核", &format!("批次号 {}", record.batch_no),
-        Some(&rm), Some(&record.overall_status), Some("completed"), None);
+    refresh_node_timeout(pool, id);
     Ok(())
 }
 

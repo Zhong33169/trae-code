@@ -1,7 +1,8 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { api, auth, NodeTracking, OperationLog, SeedRecordDetail } from '~/app/api'
 import { formatTime, nodeLabel, roleLabel, statusColor, statusLabel } from '~/app/constants'
+import { useRecordDetail } from '~/app/hooks'
 
 export const Route = createFileRoute('/records/$id')({
   component: RecordDetailPage,
@@ -11,26 +12,8 @@ function RecordDetailPage() {
   const { id } = Route.useParams() as { id: string } as { id: string }
   const nav = useNavigate()
   const user = auth.getUser()
-  const [loading, setLoading] = useState(true)
-  const [data, setData] = useState<SeedRecordDetail | null>(null)
-  const [msg, setMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
+  const { loading, data, msg, showMsg, refresh } = useRecordDetail(id)
   const [activeTab, setActiveTab] = useState<'record' | 'nodes' | 'logs'>('record')
-
-  const load = async () => {
-    setLoading(true)
-    const r = await api.getRecord(id)
-    setLoading(false)
-    if (r.success && r.data) setData(r.data)
-    else setMsg({ type: 'err', text: r.message })
-  }
-
-  useEffect(() => { load() }, [id])
-
-  const showMsg = (type: 'ok' | 'err', text: string) => {
-    setMsg({ type, text })
-  }
-
-  const refresh = () => { setMsg(null); load() }
 
   if (loading) return <div style={{ padding: 40 }}>加载中...</div>
   if (!data) return <div style={{ padding: 40, color: '#b91c1c' }}>{msg?.text || '加载失败'}</div>
@@ -249,7 +232,7 @@ function RecordPanel({
         </div>
       </div>
 
-      <div style={card + '; marginTop: 16' as any}>
+      <div style={{ ...card, marginTop: 16 }}>
         <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 12, color: '#0f172a' }}>操作动作（按当前岗位可见）</div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
           {hasTimeout && (

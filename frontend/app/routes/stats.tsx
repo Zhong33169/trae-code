@@ -1,30 +1,17 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { useEffect, useState } from 'react'
-import { api, Statistics } from '~/app/api'
+import { Statistics } from '~/app/api'
 import { nodeLabel, statusLabel } from '~/app/constants'
+import { useStats } from '~/app/hooks'
 
 export const Route = createFileRoute('/stats')({
   component: StatsPage,
 })
 
 function StatsPage() {
-  const [loading, setLoading] = useState(true)
-  const [data, setData] = useState<Statistics | null>(null)
-  const [err, setErr] = useState('')
-
-  const load = async () => {
-    setLoading(true); setErr('')
-    const r = await api.stats()
-    setLoading(false)
-    if (r.success && r.data) setData(r.data)
-    else setErr(r.message)
-  }
-
-  useEffect(() => { load() }, [])
+  const { loading, data, msg, refresh } = useStats()
 
   if (loading) return <div style={{ padding: 40 }}>加载中...</div>
-  if (err) return <div style={{ padding: 40, color: '#b91c1c' }}>{err}</div>
-  if (!data) return null
+  if (!data) return <div style={{ padding: 40, color: '#b91c1c' }}>{msg?.text || '加载失败'}</div>
 
   const cards = [
     { label: '全部苗种记录', value: data.total_records, color: '#0ea5e9', bg: '#e0f2fe' },
@@ -39,7 +26,7 @@ function StatsPage() {
     <div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
         <h2 style={{ margin: 0, fontSize: 22 }}>统计看板</h2>
-        <button onClick={load} style={btnGhost}>刷新</button>
+        <button onClick={refresh} style={btnGhost}>刷新</button>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 12, marginBottom: 20 }}>
