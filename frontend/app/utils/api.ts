@@ -14,7 +14,12 @@ export async function fetchApi<T>(path: string, options?: RequestInit): Promise<
   return res.json();
 }
 
-export async function fetchFailedRecords(params?: { operator_id?: string; failure_scope?: string; limit?: number }): Promise<OperationRecord[]> {
+export async function fetchFailedRecords(params?: {
+  operator_id?: string;
+  failure_scope?: string;
+  failure_type?: string;
+  limit?: number;
+}): Promise<OperationRecord[]> {
   const qs = params ? "?" + new URLSearchParams(params as Record<string, string>).toString() : "";
   return fetchApi<OperationRecord[]>(`/appeals/failures${qs}`);
 }

@@ -11,6 +11,8 @@ import {
   ACTION_LABELS,
   ROLE_LABELS,
   STATUS_BAR_COLORS,
+  FAILURE_TYPE_LABELS,
+  FAILURE_TYPE_COLORS,
 } from "~/utils/types";
 import { useUser } from "~/utils/store";
 
@@ -149,15 +151,25 @@ function PrevHandlerInfo({ records, currentUserId }: { records: OperationRecord[
           <span className="font-medium text-amber-900">{prev.operator_name}</span>
           <span className="text-amber-600 ml-2">({ROLE_LABELS[prev.operator_role]})</span>
         </p>
-        <p className="flex items-center gap-2">
+        <p className="flex items-center gap-2 flex-wrap">
           <span className="text-amber-600">操作:</span>{" "}
           <span className="font-medium text-amber-900">{ACTION_LABELS[prev.action]}</span>
+          {prev.failure_type && (
+            <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${FAILURE_TYPE_COLORS[prev.failure_type] || "bg-gray-100 text-gray-700"}`}>
+              {FAILURE_TYPE_LABELS[prev.failure_type] || prev.failure_type}
+            </span>
+          )}
           {prev.original_version != null && (
             <span className="px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 text-xs font-medium">
               原版本: v{prev.original_version}
             </span>
           )}
         </p>
+        {(prev.from_status || prev.to_status) && (
+          <p className="text-xs text-gray-500">
+            {STATUS_LABELS[prev.from_status]} → {STATUS_LABELS[prev.to_status]}
+          </p>
+        )}
         {prev.opinion && (
           <p>
             <span className="text-amber-600">意见:</span>{" "}
@@ -234,17 +246,27 @@ function Timeline({ records }: { records: OperationRecord[] }) {
                     {(isValidationFailed || record.failure_reason) && <AlertTriangle className="inline w-3 h-3 mr-1 -mt-0.5" />}
                     {ACTION_LABELS[record.action]}
                   </span>
+                  {record.failure_type && (
+                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${FAILURE_TYPE_COLORS[record.failure_type] || "bg-gray-100 text-gray-700"}`}>
+                      {FAILURE_TYPE_LABELS[record.failure_type] || record.failure_type}
+                    </span>
+                  )}
                   {record.original_version != null && (
                     <span className="px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 text-xs font-medium">
                       原版本: v{record.original_version}
                     </span>
                   )}
                 </div>
-                {record.opinion && (
-                  <p className="text-sm text-gray-600 mb-1">{record.opinion}</p>
+                {(record.from_status || record.to_status) && (
+                  <p className="text-xs text-gray-400 mb-1">
+                    {STATUS_LABELS[record.from_status]} → {STATUS_LABELS[record.to_status]}
+                  </p>
                 )}
                 {record.request_summary && (
                   <p className="text-xs text-gray-400 mb-1">{record.request_summary}</p>
+                )}
+                {record.opinion && (
+                  <p className="text-sm text-gray-600 mb-1">{record.opinion}</p>
                 )}
                 {record.failure_reason && (
                   <div className="mb-2">
@@ -256,9 +278,6 @@ function Timeline({ records }: { records: OperationRecord[] }) {
                   </div>
                 )}
                 <div className="flex items-center gap-2 text-xs text-gray-400">
-                  <span className="font-medium">
-                    {STATUS_LABELS[record.from_status]} → {STATUS_LABELS[record.to_status]}
-                  </span>
                   <span>
                     {new Date(record.created_at).toLocaleString("zh-CN")}
                   </span>

@@ -62,6 +62,7 @@ class OperationRecordResponse:
     request_summary: Optional[str]
     failure_reason: Optional[str]
     original_version: Optional[int]
+    failure_type: Optional[str]
     created_at: str
 
 

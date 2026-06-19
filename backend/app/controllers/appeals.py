@@ -21,9 +21,10 @@ class AppealsController(Controller):
         session: AsyncSession,
         operator_id: Optional[str] = Parameter(query="operator_id", default=None, required=False),
         failure_scope: Optional[str] = Parameter(query="failure_scope", default=None, required=False),
+        failure_type: Optional[str] = Parameter(query="failure_type", default=None, required=False),
         limit: int = Parameter(query="limit", default=20, required=False),
     ) -> list:
-        return await service.get_failed_records(session, operator_id, failure_scope, limit)
+        return await service.get_failed_records(session, operator_id, failure_scope, failure_type, limit)
 
     @get()
     async def list_appeals(

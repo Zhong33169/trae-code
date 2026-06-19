@@ -43,6 +43,7 @@ export interface OperationRecord {
   request_summary?: string | null;
   failure_reason?: string | null;
   original_version?: number | null;
+  failure_type?: string | null;
 }
 
 export interface Stats {
@@ -125,4 +126,22 @@ export const STATUS_BAR_COLORS: Record<Status, string> = {
   returned: "bg-amber-500",
   rejected: "bg-red-500",
   archived: "bg-gray-500",
+};
+
+export const FAILURE_TYPE_LABELS: Record<string, string> = {
+  operator_not_found: "操作员不存在",
+  wrong_role: "角色不匹配",
+  missing_evidence: "证据不足",
+  version_conflict: "版本冲突",
+  invalid_status: "状态不合法",
+  permission_denied: "无权处理",
+};
+
+export const FAILURE_TYPE_COLORS: Record<string, string> = {
+  operator_not_found: "bg-gray-100 text-gray-700",
+  wrong_role: "bg-orange-100 text-orange-700",
+  missing_evidence: "bg-amber-100 text-amber-700",
+  version_conflict: "bg-purple-100 text-purple-700",
+  invalid_status: "bg-pink-100 text-pink-700",
+  permission_denied: "bg-red-100 text-red-700",
 };

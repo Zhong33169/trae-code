@@ -1,9 +1,10 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useNavigate, useActionData, Form, useNavigation, redirect } from "react-router";
 import type { ActionFunctionArgs } from "react-router";
 import { ArrowLeft, AlertTriangle } from "lucide-react";
 import { fetchApi, fetchFailedRecords } from "~/utils/api";
 import type { Appeal, AnomalyType, AppealCreate, OperationRecord } from "~/utils/types";
+import { FAILURE_TYPE_LABELS, FAILURE_TYPE_COLORS } from "~/utils/types";
 import { useUser } from "~/utils/store";
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -56,16 +57,31 @@ export default function AppealsNew() {
   });
   const [failedRecords, setFailedRecords] = useState<OperationRecord[]>([]);
   const [loadingFailures, setLoadingFailures] = useState(false);
+  const [failureTypeFilter, setFailureTypeFilter] = useState<string>("all");
+
+  const loadFailedRecords = useCallback(() => {
+    if (!currentUser.id) return;
+    setLoadingFailures(true);
+    fetchFailedRecords({
+      operator_id: currentUser.id,
+      failure_scope: "no_appeal",
+      failure_type: failureTypeFilter === "all" ? undefined : failureTypeFilter,
+      limit: 10,
+    })
+      .then(setFailedRecords)
+      .catch(() => setFailedRecords([]))
+      .finally(() => setLoadingFailures(false));
+  }, [currentUser.id, failureTypeFilter]);
 
   useEffect(() => {
-    if (currentUser.id) {
-      setLoadingFailures(true);
-      fetchFailedRecords({ operator_id: currentUser.id, failure_scope: "no_appeal", limit: 10 })
-        .then(setFailedRecords)
-        .catch(() => setFailedRecords([]))
-        .finally(() => setLoadingFailures(false));
+    loadFailedRecords();
+  }, [loadFailedRecords]);
+
+  useEffect(() => {
+    if (actionData?.error) {
+      loadFailedRecords();
     }
-  }, [currentUser.id]);
+  }, [actionData, loadFailedRecords]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
@@ -209,6 +225,28 @@ export default function AppealsNew() {
 
       <div className="mt-8">
         <h3 className="text-lg font-serif font-bold text-gray-900 mb-4">最近发起失败记录</h3>
+        <div className="flex flex-wrap gap-2 mb-4">
+          {[
+            { value: "all", label: "全部" },
+            { value: "operator_not_found", label: "操作员不存在" },
+            { value: "wrong_role", label: "角色不匹配" },
+            { value: "missing_evidence", label: "证据不足" },
+            { value: "version_conflict", label: "版本冲突" },
+          ].map((opt) => (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => setFailureTypeFilter(opt.value)}
+              className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+                failureTypeFilter === opt.value
+                  ? "bg-blue-600 text-white"
+                  : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
         {loadingFailures ? (
           <p className="text-sm text-gray-400">加载中...</p>
         ) : failedRecords.length === 0 ? (
@@ -217,10 +255,15 @@ export default function AppealsNew() {
           <div className="space-y-3">
             {failedRecords.map((record) => (
               <div key={record.id} className="p-4 border border-red-200 rounded-lg bg-red-50/50">
-                <div className="flex items-center gap-2 mb-2">
+                <div className="flex items-center gap-2 mb-2 flex-wrap">
                   <span className="text-xs text-gray-500">
                     {new Date(record.created_at).toLocaleString("zh-CN")}
                   </span>
+                  {record.failure_type && (
+                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${FAILURE_TYPE_COLORS[record.failure_type] || "bg-gray-100 text-gray-700"}`}>
+                      {FAILURE_TYPE_LABELS[record.failure_type] || record.failure_type}
+                    </span>
+                  )}
                   {record.original_version != null && (
                     <span className="px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 text-xs font-medium">
                       原版本: v{record.original_version}
@@ -232,8 +275,13 @@ export default function AppealsNew() {
                   <p className="text-sm font-medium text-red-700">{record.failure_reason || "未知失败原因"}</p>
                 </div>
                 {record.request_summary && (
-                  <p className="text-xs text-gray-500 ml-6">{record.request_summary}</p>
+                  <p className="text-xs text-gray-500 ml-6 mb-1">{record.request_summary}</p>
                 )}
+                {record.from_status || record.to_status ? (
+                  <p className="text-xs text-gray-500 ml-6">
+                    原状态→新状态: {record.from_status || "-"} → {record.to_status || "-"}
+                  </p>
+                ) : null}
               </div>
             ))}
           </div>
