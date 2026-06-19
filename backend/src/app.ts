@@ -13,7 +13,7 @@ app.use(
   cors({
     origin: process.env.FRONTEND_ORIGIN || 'http://localhost:3004',
     allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowHeaders: ['Content-Type', 'X-Handler', 'X-Role', 'X-Version'],
+    allowHeaders: ['Content-Type'],
     exposeHeaders: ['Content-Type'],
   })
 );
@@ -59,65 +59,48 @@ app.post('/api/samples', async (c) => {
 
 app.post('/api/samples/:id/submit', async (c) => {
   const id = c.req.param('id');
-  const handler = c.req.header('X-Handler') || '';
-  const role = (c.req.header('X-Role') as UserRole) || 'clerk';
-  const version = Number(c.req.header('X-Version') || '0');
   const body = await c.req.json();
-  const result = sampleService.submitForReview(id, handler, role, version, body.evidences || []);
+  const result = sampleService.submitForReview(id, body.handler, body.role, body.version, body.evidences || []);
   if (!result.ok) return c.json({ ok: false, errors: result.errors }, 400);
   return c.json({ ok: true, record: result.record });
 });
 
 app.post('/api/samples/:id/qc-review', async (c) => {
   const id = c.req.param('id');
-  const handler = c.req.header('X-Handler') || '';
-  const role = (c.req.header('X-Role') as UserRole) || 'qc_supervisor';
-  const version = Number(c.req.header('X-Version') || '0');
   const body = await c.req.json();
-  const result = sampleService.qcReview(id, handler, role, version, body.decision, body.opinion);
+  const result = sampleService.qcReview(id, body.handler, body.role, body.version, body.decision, body.opinion);
   if (!result.ok) return c.json({ ok: false, errors: result.errors }, 400);
   return c.json({ ok: true, record: result.record });
 });
 
 app.post('/api/samples/:id/manager-review', async (c) => {
   const id = c.req.param('id');
-  const handler = c.req.header('X-Handler') || '';
-  const role = (c.req.header('X-Role') as UserRole) || 'production_manager';
-  const version = Number(c.req.header('X-Version') || '0');
   const body = await c.req.json();
-  const result = sampleService.managerReview(id, handler, role, version, body.decision, body.opinion);
+  const result = sampleService.managerReview(id, body.handler, body.role, body.version, body.decision, body.opinion);
   if (!result.ok) return c.json({ ok: false, errors: result.errors }, 400);
   return c.json({ ok: true, record: result.record });
 });
 
 app.post('/api/samples/:id/appeal', async (c) => {
   const id = c.req.param('id');
-  const handler = c.req.header('X-Handler') || '';
-  const role = (c.req.header('X-Role') as UserRole) || 'clerk';
-  const version = Number(c.req.header('X-Version') || '0');
   const body = await c.req.json();
-  const result = sampleService.submitAppeal(id, handler, role, body.reason, version);
+  const result = sampleService.submitAppeal(id, body.handler, body.role, body.reason, body.version);
   if (!result.ok) return c.json({ ok: false, errors: result.errors }, 400);
   return c.json({ ok: true, record: result.record });
 });
 
 app.post('/api/samples/:id/appeal-review', async (c) => {
   const id = c.req.param('id');
-  const handler = c.req.header('X-Handler') || '';
-  const role = (c.req.header('X-Role') as UserRole) || 'qc_supervisor';
   const body = await c.req.json();
-  const result = sampleService.reviewAppeal(id, handler, role, body.decision, body.opinion, body.rejectReason);
+  const result = sampleService.reviewAppeal(id, body.handler, body.role, body.version, body.decision, body.opinion, body.rejectReason);
   if (!result.ok) return c.json({ ok: false, errors: result.errors }, 400);
   return c.json({ ok: true, record: result.record });
 });
 
 app.post('/api/samples/:id/appeal-resubmit', async (c) => {
   const id = c.req.param('id');
-  const handler = c.req.header('X-Handler') || '';
-  const role = (c.req.header('X-Role') as UserRole) || 'clerk';
-  const version = Number(c.req.header('X-Version') || '0');
   const body = await c.req.json();
-  const result = sampleService.resubmitAppeal(id, handler, role, body.reason, version);
+  const result = sampleService.resubmitAppeal(id, body.handler, body.role, body.reason, body.version);
   if (!result.ok) return c.json({ ok: false, errors: result.errors }, 400);
   return c.json({ ok: true, record: result.record });
 });

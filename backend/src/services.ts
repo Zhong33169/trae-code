@@ -19,11 +19,15 @@ export interface ValidationError {
   message: string;
 }
 
+const ALLOWED_SUBMIT_STATUSES: SampleStatus[] = ['draft', 'evidence_missing'];
+const ALLOWED_APPEAL_STATUSES: SampleStatus[] = ['qc_rejected', 'manager_rejected', 'evidence_missing', 'appeal_rejected'];
+
 function validateSubmission(
   sample: SampleRecord,
   handler: string,
   role: UserRole,
-  evidences: SampleEvidence[]
+  existingEvidenceCount: number,
+  newEvidences: Omit<SampleEvidence, 'id' | 'sample_id' | 'uploaded_at'>[]
 ): ValidationError[] {
   const errors: ValidationError[] = [];
 
@@ -35,15 +39,33 @@ function validateSubmission(
     errors.push({ field: 'role', message: `当前处理角色应为 ${sample.current_role}，但提交人角色为 ${role}` });
   }
 
+  if (!ALLOWED_SUBMIT_STATUSES.includes(sample.status)) {
+    errors.push({ field: 'status', message: `当前状态「${sample.status}」不可提交审核，仅「草稿」或「待补正证据」状态可提交` });
+  }
+
+  const newValid = newEvidences.filter(e => e.name.trim().length > 0);
+  const combinedTotal = existingEvidenceCount + newValid.length;
+
   if (sample.status === 'draft') {
-    if (evidences.length < 2) {
-      errors.push({ field: 'evidences', message: '首次提交至少需要 2 项证据（留样照片 + 温度记录）' });
+    if (combinedTotal < 2) {
+      errors.push({ field: 'evidences', message: `首次提交至少需要 2 项证据（当前已有 ${existingEvidenceCount} 项 + 新增 ${newValid.length} 项 = ${combinedTotal} 项）` });
+    }
+    const hasPhoto = newValid.some(e => e.type === 'photo') || existingEvidenceCount > 0;
+    const hasTemp = newValid.some(e => e.type === 'temperature');
+    if (!hasPhoto) {
+      errors.push({ field: 'evidences', message: '首次提交必须包含留样照片' });
+    }
+    if (!hasTemp && existingEvidenceCount === 0) {
+      errors.push({ field: 'evidences', message: '首次提交必须包含温度记录' });
     }
   }
 
   if (sample.status === 'evidence_missing') {
-    if (evidences.length <= sample.evidence_count) {
-      errors.push({ field: 'evidences', message: '补正需补充至少 1 项新证据' });
+    if (newValid.length === 0) {
+      errors.push({ field: 'evidences', message: '补正需补充至少 1 项新证据（文件名不能为空）' });
+    }
+    if (combinedTotal <= sample.evidence_count) {
+      errors.push({ field: 'evidences', message: `补正后证据总数须大于原 ${sample.evidence_count} 项（当前已有 ${existingEvidenceCount} 项 + 新增 ${newValid.length} 项 = ${combinedTotal} 项）` });
     }
   }
 
@@ -118,11 +140,13 @@ export const sampleService = {
     const sample = this.getById(id);
     if (!sample) return { ok: false, errors: [{ message: '记录不存在' }] };
     if (sample.version !== version) {
+      this.log(id, handler, role, '提交失败', sample.status, sample.status,
+        `版本冲突：当前版本 ${sample.version}，提交版本 ${version}`);
       return { ok: false, errors: [{ field: 'version', message: `版本冲突：当前版本 ${sample.version}，提交版本 ${version}` }] };
     }
 
     const existingEvidences = this.listEvidences(id);
-    const errors = validateSubmission(sample, handler, role, existingEvidences as any);
+    const errors = validateSubmission(sample, handler, role, existingEvidences.length, evidences);
     if (errors.length > 0) {
       this.log(id, handler, role, '提交失败', sample.status, sample.status, JSON.stringify(errors.map(e => e.message)));
       return { ok: false, errors };
@@ -130,18 +154,19 @@ export const sampleService = {
 
     const ts = now();
     for (const ev of evidences) {
+      if (!ev.name.trim()) continue;
       db.prepare(
         'INSERT INTO sample_evidences (id, sample_id, type, name, url, uploaded_at) VALUES (?, ?, ?, ?, ?, ?)'
       ).run(uuid(), id, ev.type, ev.name, ev.url, ts);
     }
-    const totalCount = existingEvidences.length + evidences.length;
+    const totalCount = existingEvidences.length + evidences.filter(e => e.name.trim()).length;
     const newStatus: SampleStatus = 'pending_review';
     db.prepare(
       `UPDATE sample_records SET status = ?, current_handler = ?, current_role = ?,
        evidence_count = ?, version = version + 1, updated_at = ? WHERE id = ?`
     ).run(newStatus, '李主管', 'qc_supervisor', totalCount, ts, id);
 
-    this.log(id, handler, role, '提交审核', sample.status, newStatus, `证据共 ${totalCount} 项`);
+    this.log(id, handler, role, '提交审核', sample.status, newStatus, `证据共 ${totalCount} 项（原有 ${existingEvidences.length} + 新增 ${evidences.filter(e => e.name.trim()).length}）`);
     return { ok: true, record: this.getById(id) };
   },
 
@@ -156,11 +181,22 @@ export const sampleService = {
     const sample = this.getById(id);
     if (!sample) return { ok: false, errors: [{ message: '记录不存在' }] };
     if (sample.version !== version) {
+      this.log(id, handler, role, '推进失败', sample.status, sample.status,
+        `版本冲突：当前版本 ${sample.version}，提交版本 ${version}`);
       return { ok: false, errors: [{ field: 'version', message: `版本冲突：当前版本 ${sample.version}，提交版本 ${version}` }] };
     }
-    if (sample.current_role !== 'qc_supervisor' || sample.current_handler !== handler) {
-      this.log(id, handler, role, '推进失败', sample.status, sample.status, '非品控主管或处理人不匹配');
-      return { ok: false, errors: [{ message: '仅当前品控主管可推进' }] };
+    if (sample.status !== 'pending_review') {
+      this.log(id, handler, role, '推进失败', sample.status, sample.status,
+        `状态不匹配：当前状态「${sample.status}」不可审核，仅「待品控审核」可审核`);
+      return { ok: false, errors: [{ field: 'status', message: `当前状态「${sample.status}」不可审核` }] };
+    }
+    if (sample.current_role !== 'qc_supervisor') {
+      this.log(id, handler, role, '推进失败', sample.status, sample.status, `角色不匹配：当前处理角色应为 ${sample.current_role}`);
+      return { ok: false, errors: [{ field: 'role', message: `仅品控主管可审核，当前处理角色为 ${sample.current_role}` }] };
+    }
+    if (sample.current_handler !== handler) {
+      this.log(id, handler, role, '推进失败', sample.status, sample.status, `处理人不匹配：当前处理人应为 ${sample.current_handler}`);
+      return { ok: false, errors: [{ field: 'handler', message: `当前处理人应为 ${sample.current_handler}，但提交人为 ${handler}` }] };
     }
 
     const ts = now();
@@ -176,6 +212,8 @@ export const sampleService = {
       action = '品控审核通过';
     } else if (decision === 'reject') {
       newStatus = 'qc_rejected';
+      nextHandler = sample.operator;
+      nextRole = 'clerk';
       action = '品控驳回';
     } else if (decision === 'need_evidence') {
       newStatus = 'evidence_missing';
@@ -204,18 +242,32 @@ export const sampleService = {
     const sample = this.getById(id);
     if (!sample) return { ok: false, errors: [{ message: '记录不存在' }] };
     if (sample.version !== version) {
-      return { ok: false, errors: [{ field: 'version', message: `版本冲突` }] };
+      this.log(id, handler, role, '复核失败', sample.status, sample.status,
+        `版本冲突：当前版本 ${sample.version}，提交版本 ${version}`);
+      return { ok: false, errors: [{ field: 'version', message: `版本冲突：当前版本 ${sample.version}，提交版本 ${version}` }] };
     }
-    if (sample.current_role !== 'production_manager' || sample.current_handler !== handler) {
-      this.log(id, handler, role, '复核失败', sample.status, sample.status, '非生产经理或处理人不匹配');
-      return { ok: false, errors: [{ message: '仅当前生产经理可复核' }] };
+    if (sample.status !== 'qc_approved') {
+      this.log(id, handler, role, '复核失败', sample.status, sample.status,
+        `状态不匹配：当前状态「${sample.status}」不可复核`);
+      return { ok: false, errors: [{ field: 'status', message: `当前状态「${sample.status}」不可复核，仅「品控通过待复核」可复核` }] };
+    }
+    if (sample.current_role !== 'production_manager') {
+      this.log(id, handler, role, '复核失败', sample.status, sample.status, `角色不匹配：当前处理角色应为 ${sample.current_role}`);
+      return { ok: false, errors: [{ field: 'role', message: `仅生产经理可复核` }] };
+    }
+    if (sample.current_handler !== handler) {
+      this.log(id, handler, role, '复核失败', sample.status, sample.status, `处理人不匹配：当前处理人应为 ${sample.current_handler}`);
+      return { ok: false, errors: [{ field: 'handler', message: `当前处理人应为 ${sample.current_handler}，但提交人为 ${handler}` }] };
     }
 
     const ts = now();
     const newStatus: SampleStatus = decision === 'approve' ? 'manager_approved' : 'manager_rejected';
+    const nextHandler = decision === 'reject' ? sample.operator : sample.current_handler;
+    const nextRole: UserRole = decision === 'reject' ? 'clerk' : sample.current_role;
     db.prepare(
-      `UPDATE sample_records SET status = ?, version = version + 1, updated_at = ? WHERE id = ?`
-    ).run(newStatus, ts, id);
+      `UPDATE sample_records SET status = ?, current_handler = ?, current_role = ?,
+       version = version + 1, updated_at = ? WHERE id = ?`
+    ).run(newStatus, nextHandler, nextRole, ts, id);
 
     this.log(id, handler, role, decision === 'approve' ? '生产经理复核通过' : '生产经理复核驳回',
       sample.status, newStatus, opinion || '');
@@ -232,10 +284,26 @@ export const sampleService = {
     const sample = this.getById(id);
     if (!sample) return { ok: false, errors: [{ message: '记录不存在' }] };
     if (sample.version !== version) {
-      return { ok: false, errors: [{ field: 'version', message: '版本冲突' }] };
+      this.log(id, submitter, role, '申诉失败', sample.status, sample.status,
+        `版本冲突：当前版本 ${sample.version}，提交版本 ${version}`);
+      return { ok: false, errors: [{ field: 'version', message: `版本冲突：当前版本 ${sample.version}，提交版本 ${version}` }] };
     }
-    if (!['qc_rejected', 'manager_rejected', 'evidence_missing'].includes(sample.status)) {
-      return { ok: false, errors: [{ message: '当前状态不可申诉' }] };
+    if (!ALLOWED_APPEAL_STATUSES.includes(sample.status)) {
+      this.log(id, submitter, role, '申诉失败', sample.status, sample.status,
+        `状态不可申诉：当前状态「${sample.status}」`);
+      return { ok: false, errors: [{ field: 'status', message: `当前状态「${sample.status}」不可申诉，仅 ${ALLOWED_APPEAL_STATUSES.join('、')} 可申诉` }] };
+    }
+    if (role !== 'clerk') {
+      this.log(id, submitter, role, '申诉失败', sample.status, sample.status, '仅排产文员可提交申诉');
+      return { ok: false, errors: [{ field: 'role', message: '仅排产文员可提交申诉' }] };
+    }
+    if (sample.operator !== submitter) {
+      this.log(id, submitter, role, '申诉失败', sample.status, sample.status,
+        `处理人不匹配：仅登记员 ${sample.operator} 可申诉`);
+      return { ok: false, errors: [{ field: 'handler', message: `仅登记员 ${sample.operator} 可对此记录申诉` }] };
+    }
+    if (!reason.trim()) {
+      return { ok: false, errors: [{ field: 'reason', message: '申诉理由不能为空' }] };
     }
 
     const ts = now();
@@ -260,14 +328,31 @@ export const sampleService = {
     id: string,
     handler: string,
     role: UserRole,
+    version: number,
     decision: 'accept' | 'reject',
     opinion: string,
     rejectReason?: string
   ): { ok: boolean; errors?: ValidationError[]; record?: SampleRecord } {
     const sample = this.getById(id);
     if (!sample) return { ok: false, errors: [{ message: '记录不存在' }] };
+    if (sample.version !== version) {
+      this.log(id, handler, role, '申诉复核失败', sample.status, sample.status,
+        `版本冲突：当前版本 ${sample.version}，提交版本 ${version}`);
+      return { ok: false, errors: [{ field: 'version', message: `版本冲突：当前版本 ${sample.version}，提交版本 ${version}` }] };
+    }
     if (sample.status !== 'appeal_submitted') {
-      return { ok: false, errors: [{ message: '当前无待受理申诉' }] };
+      this.log(id, handler, role, '申诉复核失败', sample.status, sample.status,
+        `状态不匹配：当前状态「${sample.status}」不可复核申诉`);
+      return { ok: false, errors: [{ field: 'status', message: `当前状态「${sample.status}」不可复核申诉，仅「申诉待受理」可复核` }] };
+    }
+    if (sample.current_role !== 'qc_supervisor') {
+      this.log(id, handler, role, '申诉复核失败', sample.status, sample.status, '角色不匹配：仅品控主管可复核申诉');
+      return { ok: false, errors: [{ field: 'role', message: '仅品控主管可复核申诉' }] };
+    }
+    if (sample.current_handler !== handler) {
+      this.log(id, handler, role, '申诉复核失败', sample.status, sample.status,
+        `处理人不匹配：当前处理人应为 ${sample.current_handler}`);
+      return { ok: false, errors: [{ field: 'handler', message: `当前处理人应为 ${sample.current_handler}，但提交人为 ${handler}` }] };
     }
 
     const ts = now();
@@ -290,8 +375,9 @@ export const sampleService = {
     } else {
       newStatus = 'appeal_rejected';
       db.prepare(
-        `UPDATE sample_records SET status = ?, version = version + 1, updated_at = ? WHERE id = ?`
-      ).run(newStatus, ts, id);
+        `UPDATE sample_records SET current_handler = ?, current_role = ?,
+         status = ?, version = version + 1, updated_at = ? WHERE id = ?`
+      ).run(sample.operator, 'clerk', newStatus, ts, id);
       db.prepare(
         'UPDATE sample_appeals SET status = ?, review_opinion = ?, reject_reason = ?, reviewed_at = ? WHERE id = ?'
       ).run('rejected', opinion, rejectReason || '', ts, appeal.id);
@@ -311,11 +397,27 @@ export const sampleService = {
   ): { ok: boolean; errors?: ValidationError[]; record?: SampleRecord } {
     const sample = this.getById(id);
     if (!sample) return { ok: false, errors: [{ message: '记录不存在' }] };
-    if (sample.status !== 'appeal_rejected') {
-      return { ok: false, errors: [{ message: '仅申诉被驳回可再次提交' }] };
-    }
     if (sample.version !== version) {
-      return { ok: false, errors: [{ field: 'version', message: '版本冲突' }] };
+      this.log(id, submitter, role, '再次申诉失败', sample.status, sample.status,
+        `版本冲突：当前版本 ${sample.version}，提交版本 ${version}`);
+      return { ok: false, errors: [{ field: 'version', message: `版本冲突：当前版本 ${sample.version}，提交版本 ${version}` }] };
+    }
+    if (sample.status !== 'appeal_rejected') {
+      this.log(id, submitter, role, '再次申诉失败', sample.status, sample.status,
+        `状态不匹配：当前状态「${sample.status}」不可再次提交申诉`);
+      return { ok: false, errors: [{ field: 'status', message: `仅申诉被驳回可再次提交，当前状态「${sample.status}」` }] };
+    }
+    if (role !== 'clerk') {
+      this.log(id, submitter, role, '再次申诉失败', sample.status, sample.status, '仅排产文员可再次提交申诉');
+      return { ok: false, errors: [{ field: 'role', message: '仅排产文员可再次提交申诉' }] };
+    }
+    if (sample.operator !== submitter) {
+      this.log(id, submitter, role, '再次申诉失败', sample.status, sample.status,
+        `处理人不匹配：仅登记员 ${sample.operator} 可申诉`);
+      return { ok: false, errors: [{ field: 'handler', message: `仅登记员 ${sample.operator} 可对此记录申诉` }] };
+    }
+    if (!reason.trim()) {
+      return { ok: false, errors: [{ field: 'reason', message: '申诉理由不能为空' }] };
     }
 
     const ts = now();

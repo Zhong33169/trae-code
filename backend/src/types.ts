@@ -97,7 +97,7 @@ export type SampleStatusKey =
   | 'rejected';
 
 export const STATUS_GROUPS: Record<SampleStatusKey, SampleStatus[]> = {
-  pending: ['pending_review', 'evidence_missing'],
+  pending: ['draft', 'pending_review', 'evidence_missing'],
   processing: ['qc_approved', 'resubmitted'],
   appeal: ['appeal_submitted', 'appeal_accepted', 'appeal_rejected'],
   completed: ['manager_approved', 'completed'],

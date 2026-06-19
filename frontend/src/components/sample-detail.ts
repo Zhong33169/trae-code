@@ -183,7 +183,9 @@ export class SampleDetail extends LitElement {
       '建单': '', '提交审核': '', '品控审核通过': 'success', '品控驳回': 'danger',
       '要求补正证据': 'warn', '生产经理复核通过': 'success', '生产经理复核驳回': 'danger',
       '提交异常申诉': 'warn', '申诉受理通过': 'success', '申诉驳回': 'danger',
-      '再次提交申诉': '', '超时标记': 'danger', '提交失败': 'danger', '推进失败': 'danger', '复核失败': 'danger',
+      '再次提交申诉': '', '超时标记': 'danger',
+      '提交失败': 'danger', '推进失败': 'danger', '复核失败': 'danger',
+      '申诉失败': 'danger', '申诉复核失败': 'danger', '再次申诉失败': 'danger',
     };
     return html`
       <div class="timeline">

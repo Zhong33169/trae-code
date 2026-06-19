@@ -21,13 +21,12 @@ export interface ApiResult<T> {
 
 async function request<T>(
   path: string,
-  options: RequestInit & { headers?: Record<string, string> } = {}
+  options: RequestInit = {}
 ): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
-      ...(options.headers || {}),
     },
   });
   const text = await res.text();
@@ -81,12 +80,7 @@ export const api = {
   ): Promise<{ ok: boolean; errors?: any[]; record?: SampleRecord }> {
     return request(`/api/samples/${id}/submit`, {
       method: 'POST',
-      headers: {
-        'X-Handler': handler,
-        'X-Role': role,
-        'X-Version': String(version),
-      },
-      body: JSON.stringify({ evidences }),
+      body: JSON.stringify({ handler, role, version, evidences }),
     });
   },
 
@@ -100,12 +94,7 @@ export const api = {
   ): Promise<{ ok: boolean; errors?: any[]; record?: SampleRecord }> {
     return request(`/api/samples/${id}/qc-review`, {
       method: 'POST',
-      headers: {
-        'X-Handler': handler,
-        'X-Role': role,
-        'X-Version': String(version),
-      },
-      body: JSON.stringify({ decision, opinion }),
+      body: JSON.stringify({ handler, role, version, decision, opinion }),
     });
   },
 
@@ -119,12 +108,7 @@ export const api = {
   ): Promise<{ ok: boolean; errors?: any[]; record?: SampleRecord }> {
     return request(`/api/samples/${id}/manager-review`, {
       method: 'POST',
-      headers: {
-        'X-Handler': handler,
-        'X-Role': role,
-        'X-Version': String(version),
-      },
-      body: JSON.stringify({ decision, opinion }),
+      body: JSON.stringify({ handler, role, version, decision, opinion }),
     });
   },
 
@@ -137,12 +121,7 @@ export const api = {
   ): Promise<{ ok: boolean; errors?: any[]; record?: SampleRecord }> {
     return request(`/api/samples/${id}/appeal`, {
       method: 'POST',
-      headers: {
-        'X-Handler': submitter,
-        'X-Role': role,
-        'X-Version': String(version),
-      },
-      body: JSON.stringify({ reason }),
+      body: JSON.stringify({ handler: submitter, role, version, reason }),
     });
   },
 
@@ -150,14 +129,14 @@ export const api = {
     id: string,
     handler: string,
     role: UserRole,
+    version: number,
     decision: 'accept' | 'reject',
     opinion: string,
     rejectReason?: string
   ): Promise<{ ok: boolean; errors?: any[]; record?: SampleRecord }> {
     return request(`/api/samples/${id}/appeal-review`, {
       method: 'POST',
-      headers: { 'X-Handler': handler, 'X-Role': role },
-      body: JSON.stringify({ decision, opinion, rejectReason }),
+      body: JSON.stringify({ handler, role, version, decision, opinion, rejectReason }),
     });
   },
 
@@ -170,12 +149,7 @@ export const api = {
   ): Promise<{ ok: boolean; errors?: any[]; record?: SampleRecord }> {
     return request(`/api/samples/${id}/appeal-resubmit`, {
       method: 'POST',
-      headers: {
-        'X-Handler': submitter,
-        'X-Role': role,
-        'X-Version': String(version),
-      },
-      body: JSON.stringify({ reason }),
+      body: JSON.stringify({ handler: submitter, role, version, reason }),
     });
   },
 };

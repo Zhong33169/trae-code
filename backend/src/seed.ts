@@ -407,12 +407,20 @@ const logs: any[] = [
 
   { id: uuid(), sample_id: 's9', operator: '张三(登记员)', operator_role: 'clerk', action: '建单', from_status: null, to_status: 'draft', remark: '排产文员创建留样记录', created_at: fmt(addHours(now, -30)) },
 
+  { id: uuid(), sample_id: 's9', operator: '张三(登记员)', operator_role: 'clerk', action: '提交失败', from_status: 'draft', to_status: 'draft', remark: '["当前处理人应为 张三(登记员)，但提交人为 李主管","首次提交至少需要 2 项证据（当前已有 0 项 + 新增 0 项 = 0 项）"]', created_at: fmt(addHours(now, -28)) },
+  { id: uuid(), sample_id: 's9', operator: '张三(登记员)', operator_role: 'clerk', action: '提交失败', from_status: 'draft', to_status: 'draft', remark: '["首次提交至少需要 2 项证据（当前已有 0 项 + 新增 1 项 = 1 项）","首次提交必须包含温度记录"]', created_at: fmt(addHours(now, -27)) },
+
+  { id: uuid(), sample_id: 's6', operator: '张三(登记员)', operator_role: 'clerk', action: '推进失败', from_status: 'pending_review', to_status: 'pending_review', remark: '角色不匹配：当前处理角色应为 qc_supervisor', created_at: fmt(addHours(now, -6)) },
+
   { id: uuid(), sample_id: 's10', operator: '张三(登记员)', operator_role: 'clerk', action: '建单', from_status: null, to_status: 'draft', remark: '排产文员创建留样记录', created_at: fmt(addHours(now, -12)) },
   { id: uuid(), sample_id: 's10', operator: '张三(登记员)', operator_role: 'clerk', action: '提交审核', from_status: 'draft', to_status: 'pending_review', remark: '证据共 2 项', created_at: fmt(addHours(now, -11)) },
   { id: uuid(), sample_id: 's10', operator: '李主管', operator_role: 'qc_supervisor', action: '品控驳回', from_status: 'pending_review', to_status: 'qc_rejected', remark: '批次号与生产计划不一致', created_at: fmt(addHours(now, -9)) },
   { id: uuid(), sample_id: 's10', operator: '张三(登记员)', operator_role: 'clerk', action: '提交异常申诉', from_status: 'qc_rejected', to_status: 'appeal_submitted', remark: '生产批次关联记录混淆，已梳理清楚各批次流向', created_at: fmt(addHours(now, -6)) },
   { id: uuid(), sample_id: 's10', operator: '李主管', operator_role: 'qc_supervisor', action: '申诉受理通过', from_status: 'appeal_submitted', to_status: 'qc_approved', remark: '品控已复核，材料完整，建议经理复核', created_at: fmt(addHours(now, -4)) },
   { id: uuid(), sample_id: 's10', operator: '王经理', operator_role: 'production_manager', action: '生产经理复核驳回', from_status: 'qc_approved', to_status: 'manager_rejected', remark: '仍需补充配送单原始单据作为佐证', created_at: fmt(addHours(now, -1)) },
+
+  { id: uuid(), sample_id: 's10', operator: '张三(登记员)', operator_role: 'clerk', action: '提交失败', from_status: 'manager_rejected', to_status: 'manager_rejected', remark: '["当前状态「manager_rejected」不可提交审核，仅「草稿」或「待补正证据」状态可提交"]', created_at: fmt(addHours(now, -0.5)) },
+  { id: uuid(), sample_id: 's5', operator: '李主管', operator_role: 'qc_supervisor', action: '申诉复核失败', from_status: 'appeal_rejected', to_status: 'appeal_rejected', remark: '状态不匹配：当前状态「appeal_rejected」不可复核申诉', created_at: fmt(addHours(now, -2)) },
 ];
 
 for (const l of logs) {

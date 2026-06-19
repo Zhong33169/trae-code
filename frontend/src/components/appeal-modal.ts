@@ -1,6 +1,7 @@
 import { LitElement, html, css } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import type { SampleRecord, User } from '../types';
+import { STATUS_LABELS, ROLE_LABELS } from '../types';
 import { api } from '../api';
 
 @customElement('appeal-modal')
@@ -28,13 +29,14 @@ export class AppealModal extends LitElement {
       res = await api.submitAppeal(this.record.id, this.currentUser.name, this.currentUser.role, this.record.version, this.reason);
     }
     if (!res.ok) {
-      this.errors = (res.errors || []).map(e => e.message);
+      this.errors = (res.errors || []).map((e: any) => e.message);
       return;
     }
     this.dispatchEvent(new CustomEvent('submitted'));
   }
 
   render() {
+    const statusInfo = STATUS_LABELS[this.record.status];
     return html`
       <div class="modal-mask" @click=${(e: Event) => { if ((e.target as HTMLElement).classList.contains('modal-mask')) this.dispatchEvent(new CustomEvent('close')); }}>
         <div class="modal">
@@ -44,7 +46,12 @@ export class AppealModal extends LitElement {
           </div>
           <div class="modal-body">
             <div class="form-row"><label>产品名称</label><input .value=${this.record.product_name} disabled /></div>
-            <div class="form-row"><label>当前状态</label><input .value=${this.record.status} disabled /></div>
+            <div class="form-row"><label>当前状态</label>
+              <input .value=${statusInfo ? statusInfo.label : this.record.status} disabled />
+            </div>
+            <div class="form-row"><label>当前处理人</label>
+              <input .value=${this.record.current_handler + '（' + ROLE_LABELS[this.record.current_role] + '）'} disabled />
+            </div>
             <div class="form-row"><label>提交人</label><input .value=${this.currentUser?.name || ''} disabled /></div>
             <div class="form-row"><label>版本号</label><input .value=${'v' + this.record.version} disabled /></div>
             <div class="form-row" style="align-items:flex-start"><label style="padding-top:6px">申诉理由</label>
@@ -53,6 +60,7 @@ export class AppealModal extends LitElement {
             <div class="hint muted small" style="margin:-6px 0 8px 122px">申诉受理后将流转至品控主管复核</div>
             ${this.errors.length > 0 ? html`
               <div style="margin-top:12px; padding:10px; background:#fff1f0; border:1px solid #ffa39e; border-radius:6px;">
+                <div style="color: var(--danger); font-weight:600; margin-bottom:4px">申诉失败</div>
                 ${this.errors.map(m => html`<div class="error-text">• ${m}</div>`)}
               </div>
             ` : ''}

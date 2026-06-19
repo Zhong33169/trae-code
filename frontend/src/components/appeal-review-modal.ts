@@ -17,10 +17,11 @@ export class AppealReviewModal extends LitElement {
   async submit() {
     if (!this.currentUser) return;
     const res = await api.reviewAppeal(
-      this.record.id, this.currentUser.name, this.currentUser.role, this.decision, this.opinion, this.rejectReason
+      this.record.id, this.currentUser.name, this.currentUser.role, this.record.version,
+      this.decision, this.opinion, this.rejectReason
     );
     if (!res.ok) {
-      this.errors = (res.errors || []).map(e => e.message);
+      this.errors = (res.errors || []).map((e: any) => e.message);
       return;
     }
     this.dispatchEvent(new CustomEvent('submitted'));
@@ -37,6 +38,8 @@ export class AppealReviewModal extends LitElement {
           <div class="modal-body">
             <div class="form-row"><label>产品名称</label><input .value=${this.record.product_name} disabled /></div>
             <div class="form-row"><label>处理人</label><input .value=${this.currentUser?.name || ''} disabled /></div>
+            <div class="form-row"><label>版本号</label><input .value=${'v' + this.record.version} disabled /></div>
+            <div class="form-row"><label>当前状态</label><input .value=${this.record.status} disabled /></div>
             <div class="form-row"><label>复核决定</label>
               <select .value=${this.decision} @change=${(e: Event) => { this.decision = (e.target as HTMLSelectElement).value as any; }}>
                 <option value="accept">受理通过（流转至生产经理复核）</option>
@@ -53,6 +56,7 @@ export class AppealReviewModal extends LitElement {
             ` : ''}
             ${this.errors.length > 0 ? html`
               <div style="margin-top:12px; padding:10px; background:#fff1f0; border:1px solid #ffa39e; border-radius:6px;">
+                <div style="color: var(--danger); font-weight:600; margin-bottom:4px">复核失败</div>
                 ${this.errors.map(m => html`<div class="error-text">• ${m}</div>`)}
               </div>
             ` : ''}

@@ -293,6 +293,7 @@ export class SampleApp extends LitElement {
         <submit-modal
           .record=${this.detail.record}
           .currentUser=${this.currentUser}
+          .existingEvidences=${this.detail.evidences}
           @close=${() => { this.showSubmit = false; }}
           @submitted=${async () => { this.showSubmit = false; await this.refresh(); }}
         ></submit-modal>
