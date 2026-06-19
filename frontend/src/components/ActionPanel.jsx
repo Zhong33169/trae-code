@@ -71,9 +71,20 @@ export default function ActionPanel({ order, currentUser, onAction }) {
     );
   };
 
-  const finalizeRefresh = () => {
+  const finalizeWithData = (data) => {
     triggerGlobalRefresh();
-    if (onAction) onAction();
+    if (onAction) onAction(data);
+  };
+
+  const extractErrorData = (e) => {
+    if (e && e.details && e.details.order) {
+      return {
+        order: e.details.order,
+        record: e.details.record,
+        missing: e.details.missing,
+      };
+    }
+    return null;
   };
 
   const handleSubmit = async (action) => {
@@ -83,6 +94,9 @@ export default function ActionPanel({ order, currentUser, onAction }) {
     }
     setError('');
     setSubmitting(true);
+
+    let lastData = null;
+
     try {
       if (showEvidencePanel) {
         const finalEvidence = checkedEvidence.length > 0 ? checkedEvidence : providedEvidence;
@@ -90,19 +104,21 @@ export default function ActionPanel({ order, currentUser, onAction }) {
           finalEvidence.some((e, i) => e !== providedEvidence[i]);
         const hasEvidence = finalEvidence.length > 0;
         if (evidenceChanged || hasEvidence) {
-          await updateEvidence(order.id, {
+          const eviData = await updateEvidence(order.id, {
             evidence: finalEvidence,
             handler_id: currentUser.id,
             version: order.version,
           });
+          lastData = eviData;
         }
       }
-      await submitAction(order.id, {
+      const actionData = await submitAction(order.id, {
         action,
         opinion: opinion.trim(),
         handler_id: currentUser.id,
         version: order.version,
       });
+      lastData = actionData;
       setOpinion('');
     } catch (e) {
       const msg = e.message || '操作失败';
@@ -111,9 +127,11 @@ export default function ActionPanel({ order, currentUser, onAction }) {
       } else {
         setError(msg);
       }
+      const errData = extractErrorData(e);
+      if (errData) lastData = errData;
     } finally {
       setSubmitting(false);
-      finalizeRefresh();
+      finalizeWithData(lastData);
     }
   };
 

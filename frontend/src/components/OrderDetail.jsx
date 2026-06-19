@@ -47,6 +47,26 @@ export default function OrderDetail({ id, currentUser }) {
     }
   }, [id]);
 
+  const updateFromResponse = useCallback((data) => {
+    if (!data) return;
+    if (data.order) setOrder(data.order);
+    if (data.record) {
+      setRecords((prev) => {
+        const exists = prev.some((r) => r.id === data.record.id);
+        if (exists) return prev;
+        return [...prev, data.record];
+      });
+    }
+  }, []);
+
+  const handleActionUpdate = useCallback((data) => {
+    if (data && data.order) {
+      updateFromResponse(data);
+    } else {
+      loadOrder();
+    }
+  }, [updateFromResponse, loadOrder]);
+
   useEffect(() => {
     loadOrder();
   }, [loadOrder]);
@@ -172,7 +192,7 @@ export default function OrderDetail({ id, currentUser }) {
           <ActionPanel
             order={order}
             currentUser={currentUser}
-            onAction={loadOrder}
+            onAction={handleActionUpdate}
           />
         </div>
       )}

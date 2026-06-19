@@ -227,7 +227,8 @@ func SeedData(db *sql.DB) {
 
 		{orderIDs[2], "refund", "initiate", "initiate", "clerk", "张三(登记员)", "提交退款申请", "已提交审核", "2024-06-01 11:00:00"},
 		{orderIDs[2], "refund", "process", "review_archive", "supervisor", "李四(审核主管)", "审核通过，进入仓库阶段", "进入仓库阶段", "2024-06-01 11:30:00"},
-		{orderIDs[2], "warehouse", "initiate", "evidence_update_failed", "clerk", "张三(登记员)", "", "状态 pending_review 不允许维护证据", "2024-06-01 11:35:00"},
+		{orderIDs[2], "warehouse", "initiate", "evidence_update_failed", "clerk", "张三(登记员)", "", "证据未覆盖必填项: 退货物流单、退款申请", "2024-06-01 11:35:00"},
+		{orderIDs[2], "warehouse", "initiate", "evidence_update_failed", "reviewer", "王五(复核负责人)", "", "越权变更证据: 角色 reviewer 不允许操作", "2024-06-01 11:38:00"},
 		{orderIDs[2], "warehouse", "initiate", "validation_failed", "clerk", "张三(登记员)", "", "缺少必要证据: 退货物流单、退款申请", "2024-06-01 11:45:00"},
 
 		{orderIDs[3], "refund", "initiate", "initiate", "clerk", "张三(登记员)", "提交退款申请", "已提交审核", "2024-06-01 12:00:00"},
