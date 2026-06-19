@@ -6,11 +6,12 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/labstack/echo/v4"
 	"transfer-system/db"
 	"transfer-system/middleware"
 	"transfer-system/models"
 	"transfer-system/utils"
+
+	"github.com/labstack/echo/v4"
 )
 
 const nodeTimeoutHours = 24
@@ -78,11 +79,11 @@ func prerequisitesForType(appType string) (needBudget bool, needSalary bool) {
 }
 
 type actionPermission struct {
-	action    string
-	role      string
-	node      string
-	status    string
-	forTypes  []string // 空表示所有类型
+	action   string
+	role     string
+	node     string
+	status   string
+	forTypes []string // 空表示所有类型
 }
 
 var actionWhitelist = []actionPermission{
@@ -297,6 +298,78 @@ func enrichTrails(app *models.TransferApplication) {
 	app.Trails = trails
 }
 
+func getAllowedActions(app *models.TransferApplication, userRole string) []models.AllowedAction {
+	appType := string(app.Type)
+	appStatus := string(app.Status)
+	appNode := app.CurrentNode
+
+	actions := []struct {
+		action     string
+		label      string
+		buttonType string
+	}{
+		{"submit", getSubmitLabel(appNode), "primary"},
+		{"reject", "驳回", "danger"},
+		{"verify_budget", "预算校验", "default"},
+		{"process_salary", "调薪处理", "default"},
+		{"register", "异动登记", "success"},
+	}
+
+	result := make([]models.AllowedAction, 0)
+	for _, a := range actions {
+		allowed := canPerformAction(appType, appStatus, appNode, userRole, a.action)
+		reason := ""
+		if !allowed {
+			reason = actionPermissionError(appType, a.action, userRole, appNode, appStatus)
+		}
+		if allowed && a.action == "register" && app.Registered {
+			allowed = false
+			reason = "已完成异动登记"
+		}
+		if allowed && a.action == "verify_budget" && app.BudgetVerified {
+			allowed = false
+			reason = "预算已校验"
+		}
+		if allowed && a.action == "process_salary" && app.SalaryProcessed {
+			allowed = false
+			reason = "调薪已处理"
+		}
+		if allowed && (a.action == "submit") && (appNode == "salary_supervisor" || appNode == "hrbp_leader") {
+			if msg := validatePrerequisites(appType, a.action, app); msg != "" {
+				allowed = false
+				reason = msg
+			}
+		}
+		if allowed && a.action == "register" {
+			if msg := validatePrerequisites(appType, a.action, app); msg != "" {
+				allowed = false
+				reason = msg
+			}
+		}
+		result = append(result, models.AllowedAction{
+			Action:     a.action,
+			Allowed:    allowed,
+			Reason:     reason,
+			Label:      a.label,
+			ButtonType: a.buttonType,
+		})
+	}
+	return result
+}
+
+func getSubmitLabel(node string) string {
+	switch node {
+	case "hr_specialist":
+		return "提交审核"
+	case "salary_supervisor":
+		return "提交确认"
+	case "hrbp_leader":
+		return "审核通过"
+	default:
+		return "提交"
+	}
+}
+
 func txRecalcApplicationStatus(tx *sql.Tx, appID int64) error {
 	var appType string
 	var status string
@@ -441,6 +514,7 @@ func ListApplications(c echo.Context) error {
 			continue
 		}
 		enrichApplication(app)
+		app.AllowedActions = getAllowedActions(app, uc.Role)
 		apps = append(apps, app)
 	}
 
@@ -448,6 +522,7 @@ func ListApplications(c echo.Context) error {
 }
 
 func GetApplication(c echo.Context) error {
+	uc := middleware.GetUserContext(c)
 	idStr := c.Param("id")
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
@@ -469,6 +544,7 @@ func GetApplication(c echo.Context) error {
 
 	enrichApplication(app)
 	enrichTrails(app)
+	app.AllowedActions = getAllowedActions(app, uc.Role)
 
 	return utils.Success(c, app)
 }

@@ -137,20 +137,11 @@ export class ApplicationList extends LitElement {
 
   canBatchAction(action) {
     if (!this.user || this.selectedCount === 0) return false;
-    const role = this.user.role;
     return this.selectedIds.every(id => {
       const app = this.applications.find(a => a.id === id);
-      if (!app) return false;
-      if (!canPerformAction(app.type, app.status, app.current_node, role, action)) return false;
-      if ((action === 'submit' && ['salary_supervisor', 'hrbp_leader'].includes(app.current_node)) || action === 'register') {
-        const { needBudget, needSalary } = prerequisitesForType(app.type);
-        if (needBudget && !app.budget_verified) return false;
-        if (needSalary && !app.salary_processed) return false;
-      }
-      if (action === 'register' && app.registered) return false;
-      if (action === 'verify_budget' && app.budget_verified) return false;
-      if (action === 'process_salary' && app.salary_processed) return false;
-      return true;
+      if (!app || !app.allowed_actions) return false;
+      const aa = app.allowed_actions.find(a => a.action === action);
+      return aa && aa.allowed;
     });
   }
 

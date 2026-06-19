@@ -32,12 +32,12 @@ type Employee struct {
 type ApplicationStatus string
 
 const (
-	StatusPendingReview   ApplicationStatus = "pending_review"
-	StatusBudgetChecking  ApplicationStatus = "budget_checking"
-	StatusPendingConfirm  ApplicationStatus = "pending_confirm"
-	StatusApproved        ApplicationStatus = "approved"
-	StatusSynced          ApplicationStatus = "synced"
-	StatusRejected        ApplicationStatus = "rejected"
+	StatusPendingReview  ApplicationStatus = "pending_review"
+	StatusBudgetChecking ApplicationStatus = "budget_checking"
+	StatusPendingConfirm ApplicationStatus = "pending_confirm"
+	StatusApproved       ApplicationStatus = "approved"
+	StatusSynced         ApplicationStatus = "synced"
+	StatusRejected       ApplicationStatus = "rejected"
 )
 
 type ApplicationType string
@@ -75,6 +75,7 @@ type TransferApplication struct {
 	IsTimeout       bool              `json:"is_timeout"`
 	TimeoutReason   string            `json:"timeout_reason,omitempty"`
 	Trails          []ProcessingTrail `json:"trails,omitempty"`
+	AllowedActions  []AllowedAction   `json:"allowed_actions,omitempty"`
 }
 
 type ProcessingTrail struct {
@@ -149,4 +150,12 @@ type BatchOperationRequest struct {
 	Action        string  `json:"action"`
 	Remark        string  `json:"remark"`
 	TimeoutReason string  `json:"timeout_reason"`
+}
+
+type AllowedAction struct {
+	Action     string `json:"action"`
+	Allowed    bool   `json:"allowed"`
+	Reason     string `json:"reason,omitempty"`
+	Label      string `json:"label"`
+	ButtonType string `json:"button_type"`
 }

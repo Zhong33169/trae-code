@@ -109,38 +109,19 @@ export class ApplicationDetail extends LitElement {
     return '';
   }
 
-  canRegister() {
-    if (!this.app || !this.user) return false;
-    if (this.app.registered) return false;
-    if (!canPerformAction(this.app.type, this.app.status, this.app.current_node, this.user.role, 'register')) return false;
-    return !this.getRegisterBlockReason(this.app);
+  getAllowedAction(action) {
+    if (!this.app || !this.app.allowed_actions) return null;
+    return this.app.allowed_actions.find(a => a.action === action) || null;
   }
 
-  canSubmitAtCurrentNode() {
-    if (!this.app || !this.user) return false;
-    if (['synced', 'rejected'].includes(this.app.status)) return false;
-    if (!canPerformAction(this.app.type, this.app.status, this.app.current_node, this.user.role, 'submit')) return false;
-    return !this.getSubmitBlockReason(this.app);
+  isActionAllowed(action) {
+    const a = this.getAllowedAction(action);
+    return a && a.allowed;
   }
 
-  canVerifyBudget() {
-    if (!this.app || !this.user) return false;
-    return canPerformAction(this.app.type, this.app.status, this.app.current_node, this.user.role, 'verify_budget');
-  }
-
-  canProcessSalary() {
-    if (!this.app || !this.user) return false;
-    return canPerformAction(this.app.type, this.app.status, this.app.current_node, this.user.role, 'process_salary');
-  }
-
-  canReject() {
-    if (!this.app || !this.user) return false;
-    if (['synced', 'rejected'].includes(this.app.status)) return false;
-    return canPerformAction(this.app.type, this.app.status, this.app.current_node, this.user.role, 'reject');
-  }
-
-  hasAnyAction() {
-    return this.canSubmitAtCurrentNode() || this.canReject() || this.canVerifyBudget() || this.canProcessSalary() || this.canRegister();
+  hasAnyAllowedAction() {
+    if (!this.app || !this.app.allowed_actions) return false;
+    return this.app.allowed_actions.some(a => a.allowed);
   }
 
   connectedCallback() {
@@ -235,30 +216,27 @@ export class ApplicationDetail extends LitElement {
           </div>
         </div>
         <div class="actions-bar">
-          ${this.canVerifyBudget() ? html`
-            <button class="btn btn-default" ?disabled=${app.budget_verified} @click=${() => this.openDialog('verify_budget')} title=${app.budget_verified ? '已完成预算校验' : '点击执行预算校验'}>
-              ${app.budget_verified ? '预算已校验 ✓' : '预算校验'}
+          ${(app.allowed_actions || []).filter(a => a.action === 'verify_budget' || a.action === 'process_salary').map(a => html`
+            <button class="btn btn-${a.button_type}" ?disabled=${!a.allowed} @click=${() => a.allowed && this.openDialog(a.action)} title=${a.allowed ? '点击执行' + a.label : a.reason}>
+              ${a.allowed ? a.label : (a.reason || a.label)}
             </button>
-          ` : ''}
-          ${this.canProcessSalary() ? html`
-            <button class="btn btn-default" ?disabled=${app.salary_processed} @click=${() => this.openDialog('process_salary')} title=${app.salary_processed ? '已完成调薪处理' : '点击执行调薪处理'}>
-              ${app.salary_processed ? '调薪已处理 ✓' : '调薪处理'}
+          `)}
+          ${(app.allowed_actions || []).filter(a => a.action === 'register').map(a => html`
+            <button class="btn btn-${a.button_type}" ?disabled=${!a.allowed} @click=${() => a.allowed && this.openDialog(a.action)} title=${a.allowed ? '点击完成异动登记' : a.reason}>
+              ${a.allowed ? a.label : (a.reason || a.label)}
             </button>
-          ` : ''}
-          ${this.canRegister() ? html`
-            <button class="btn btn-success" @click=${() => this.openDialog('register')} title="点击完成异动登记">
-              异动登记
+          `)}
+          ${(app.allowed_actions || []).filter(a => a.action === 'submit').map(a => html`
+            <button class="btn btn-${a.button_type}" ?disabled=${!a.allowed} @click=${() => a.allowed && this.openDialog(a.action)} title=${a.allowed ? '' : a.reason}>
+              ${a.allowed ? a.label : a.reason}
             </button>
-          ` : ''}
-          ${this.canSubmitAtCurrentNode() || submitBlockReason ? html`
-            <button class="btn btn-primary" ?disabled=${!!submitBlockReason} @click=${() => this.openDialog('submit')} title=${submitBlockReason || ''}>
-              ${submitBlockReason || (app.current_node === 'hr_specialist' ? '提交审核' : app.current_node === 'salary_supervisor' ? '提交确认' : '审核通过')}
+          `)}
+          ${(app.allowed_actions || []).filter(a => a.action === 'reject' && a.allowed).map(a => html`
+            <button class="btn btn-${a.button_type}" @click=${() => this.openDialog(a.action)}>
+              ${a.label}
             </button>
-          ` : ''}
-          ${this.canReject() ? html`
-            <button class="btn btn-danger" @click=${() => this.openDialog('reject')}>驳回</button>
-          ` : ''}
-          ${!this.hasAnyAction() ? html`
+          `)}
+          ${!this.hasAnyAllowedAction() ? html`
             <span style="color:#999; font-size:13px;">
               ${['synced'].includes(app.status) ? '申请已同步，流程闭环' :
                 ['rejected'].includes(app.status) ? '申请已驳回' :
