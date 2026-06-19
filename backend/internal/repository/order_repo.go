@@ -71,11 +71,22 @@ func GetOrders(db *sql.DB, query model.OrderListQuery) ([]model.KnowledgeRevisio
 			o.current_handler_id, u2.name AS current_handler_name, o.current_handler_role,
 			o.time_limit_hours, o.deadline,
 			o.revision_before, o.revision_after, o.revision_description, o.processing_opinion,
-			o.version, o.created_at, o.updated_at
+			o.version, o.created_at, o.updated_at,
+			COALESCE(al.failure_reason, ''), COALESCE(al.created_at, '')
 		FROM knowledge_revision_orders o
 		LEFT JOIN knowledge_items ki ON o.knowledge_item_id = ki.id
 		LEFT JOIN users u1 ON o.creator_id = u1.id
 		LEFT JOIN users u2 ON o.current_handler_id = u2.id
+		LEFT JOIN (
+			SELECT order_id, failure_reason, created_at
+			FROM audit_logs
+			WHERE failure_reason IS NOT NULL AND failure_reason != ''
+			AND id IN (
+				SELECT MAX(id) FROM audit_logs
+				WHERE failure_reason IS NOT NULL AND failure_reason != ''
+				GROUP BY order_id
+			)
+		) al ON o.id = al.order_id
 		%s
 		ORDER BY o.created_at DESC
 		LIMIT $%d OFFSET $%d
@@ -98,6 +109,8 @@ func GetOrders(db *sql.DB, query model.OrderListQuery) ([]model.KnowledgeRevisio
 		var overdueReason sql.NullString
 		var overdueAction sql.NullString
 		var processingOpinion sql.NullString
+		var lastFailureReason sql.NullString
+		var lastFailureAt sql.NullString
 
 		err := rows.Scan(
 			&o.ID, &o.OrderNo, &o.Title, &o.KnowledgeItemID, &knowledgeItemTitle,
@@ -107,6 +120,7 @@ func GetOrders(db *sql.DB, query model.OrderListQuery) ([]model.KnowledgeRevisio
 			&o.TimeLimitHours, &o.Deadline,
 			&o.RevisionBefore, &o.RevisionAfter, &o.RevisionDesc, &processingOpinion,
 			&o.Version, &o.CreatedAt, &o.UpdatedAt,
+			&lastFailureReason, &lastFailureAt,
 		)
 		if err != nil {
 			return nil, 0, fmt.Errorf("扫描工单数据失败: %w", err)
@@ -130,6 +144,12 @@ func GetOrders(db *sql.DB, query model.OrderListQuery) ([]model.KnowledgeRevisio
 		if processingOpinion.Valid {
 			o.ProcessingOpinion = processingOpinion.String
 		}
+		if lastFailureReason.Valid {
+			o.LastFailureReason = lastFailureReason.String
+		}
+		if lastFailureAt.Valid {
+			o.LastFailureAt = lastFailureAt.String
+		}
 
 		orders = append(orders, o)
 	}
@@ -145,6 +165,8 @@ func GetOrderByID(db *sql.DB, id string) (*model.KnowledgeRevisionOrder, error) 
 	var overdueReason sql.NullString
 	var overdueAction sql.NullString
 	var processingOpinion sql.NullString
+	var lastFailureReason sql.NullString
+	var lastFailureAt sql.NullString
 
 	err := db.QueryRow(`
 		SELECT o.id, o.order_no, o.title, o.knowledge_item_id, ki.title AS knowledge_item_title,
@@ -153,11 +175,22 @@ func GetOrderByID(db *sql.DB, id string) (*model.KnowledgeRevisionOrder, error) 
 			o.current_handler_id, u2.name AS current_handler_name, o.current_handler_role,
 			o.time_limit_hours, o.deadline,
 			o.revision_before, o.revision_after, o.revision_description, o.processing_opinion,
-			o.version, o.created_at, o.updated_at
+			o.version, o.created_at, o.updated_at,
+			COALESCE(al.failure_reason, ''), COALESCE(al.created_at, '')
 		FROM knowledge_revision_orders o
 		LEFT JOIN knowledge_items ki ON o.knowledge_item_id = ki.id
 		LEFT JOIN users u1 ON o.creator_id = u1.id
 		LEFT JOIN users u2 ON o.current_handler_id = u2.id
+		LEFT JOIN (
+			SELECT order_id, failure_reason, created_at
+			FROM audit_logs
+			WHERE failure_reason IS NOT NULL AND failure_reason != ''
+			AND id IN (
+				SELECT MAX(id) FROM audit_logs
+				WHERE failure_reason IS NOT NULL AND failure_reason != ''
+				GROUP BY order_id
+			)
+		) al ON o.id = al.order_id
 		WHERE o.id = $1
 	`, id).Scan(
 		&o.ID, &o.OrderNo, &o.Title, &o.KnowledgeItemID, &knowledgeItemTitle,
@@ -167,6 +200,7 @@ func GetOrderByID(db *sql.DB, id string) (*model.KnowledgeRevisionOrder, error) 
 		&o.TimeLimitHours, &o.Deadline,
 		&o.RevisionBefore, &o.RevisionAfter, &o.RevisionDesc, &processingOpinion,
 		&o.Version, &o.CreatedAt, &o.UpdatedAt,
+		&lastFailureReason, &lastFailureAt,
 	)
 
 	if err == sql.ErrNoRows {
@@ -193,6 +227,12 @@ func GetOrderByID(db *sql.DB, id string) (*model.KnowledgeRevisionOrder, error) 
 	}
 	if processingOpinion.Valid {
 		o.ProcessingOpinion = processingOpinion.String
+	}
+	if lastFailureReason.Valid {
+		o.LastFailureReason = lastFailureReason.String
+	}
+	if lastFailureAt.Valid {
+		o.LastFailureAt = lastFailureAt.String
 	}
 
 	materials, err := GetMaterialsByOrderID(db, id)

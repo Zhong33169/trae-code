@@ -36,7 +36,7 @@ func main() {
 	r := gin.Default()
 
 	r.Use(middleware.CORS(cfg))
-	r.Use(middleware.Auth())
+	r.Use(middleware.Auth(db))
 
 	orderCtrl := controller.NewOrderController(db)
 	auditCtrl := controller.NewAuditController(db)

@@ -33,7 +33,10 @@ function formatAction(action) {
         correct: '补正',
         overdue_process: '逾期处理',
         batch_advance: '批量推进',
-        batch_return: '批量退回'
+        batch_return: '批量退回',
+        advance_failed: '推进失败',
+        return_failed: '退回失败',
+        correct_failed: '补正失败'
     };
     return map[action] || action;
 }
@@ -56,6 +59,35 @@ function formatDateTime(dt) {
     } catch {
         return dt;
     }
+}
+
+function classifyFailureReason(reason) {
+    if (!reason) return { type: '', label: '', text: reason };
+    if (reason.startsWith('越权操作：')) {
+        return { type: 'unauthorized', label: '越权', text: reason.replace('越权操作：', '') };
+    }
+    if (reason.startsWith('顺序错误：')) {
+        return { type: 'sequence', label: '顺序错误', text: reason.replace('顺序错误：', '') };
+    }
+    if (reason.startsWith('证据缺失：')) {
+        return { type: 'evidence', label: '证据缺失', text: reason.replace('证据缺失：', '') };
+    }
+    if (reason.startsWith('版本冲突：')) {
+        return { type: 'version', label: '版本冲突', text: reason.replace('版本冲突：', '') };
+    }
+    return { type: 'other', label: '失败', text: reason };
+}
+
+function renderFailureTypeTag(reason) {
+    const { type, label } = classifyFailureReason(reason);
+    if (!type) return '';
+    return `<span class="failure-type-tag ${type}">${label}</span>`;
+}
+
+function renderFailureBadge(order) {
+    if (!order.last_failure_reason) return '';
+    const { type, label } = classifyFailureReason(order.last_failure_reason);
+    return `<span class="failure-badge" title="${order.last_failure_reason}">⚠ ${label} · ${formatDateTime(order.last_failure_at)}</span>`;
 }
 
 function showToast(message, type = 'success') {
@@ -298,6 +330,57 @@ async function handleReturnSubmit(orderId, version) {
     }
 }
 
+function showBatchResultModal(title, succeeded, failed) {
+    const modal = document.getElementById('modal');
+
+    const succeededHtml = succeeded.length > 0 ? `
+        <div style="margin-bottom:16px;">
+            <h4 style="color:var(--success);margin-bottom:8px;">成功 (${succeeded.length})</h4>
+            ${succeeded.map(o => `
+                <div class="batch-result-item success">
+                    <span class="result-icon">✓</span>
+                    <span class="order-no">${o.order_no || o.id}</span>
+                    <span>${escapeHtml(o.title || '')}</span>
+                </div>
+            `).join('')}
+        </div>
+    ` : '';
+
+    const failedHtml = failed.length > 0 ? `
+        <div>
+            <h4 style="color:var(--danger);margin-bottom:8px;">失败 (${failed.length})</h4>
+            ${failed.map(f => {
+                const [orderNo, ...reasonParts] = f.split(': ');
+                const reason = reasonParts.join(': ');
+                return `
+                <div class="batch-result-item failed">
+                    <span class="result-icon">✗</span>
+                    <span class="order-no">${orderNo}</span>
+                    <span>${renderFailureTypeTag(reason)} ${escapeHtml(reason)}</span>
+                </div>
+            `}).join('')}
+        </div>
+    ` : '';
+
+    modal.innerHTML = `
+        <div class="modal-overlay" onclick="if(event.target===this)closeModal()">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>${title}</h3>
+                    <button class="modal-close" onclick="closeModal(); refreshCurrentPage();">&times;</button>
+                </div>
+                <div style="max-height:60vh;overflow-y:auto;">
+                    ${succeededHtml}
+                    ${failedHtml}
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-primary" onclick="closeModal(); refreshCurrentPage();">确定</button>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
 async function handleBatchAdvanceSubmit() {
     const opinion = document.getElementById('batch-advance-opinion')?.value?.trim() || '';
     if (!opinion) {
@@ -311,14 +394,9 @@ async function handleBatchAdvanceSubmit() {
         const failed = data.failed || [];
         const succeeded = data.succeeded || [];
         closeModal();
-        if (failed.length > 0) {
-            showToast(`批量通过完成：成功 ${succeeded.length} 个，失败 ${failed.length} 个`, 'warning');
-        } else {
-            showToast(`批量通过 ${succeeded.length} 个修订单成功`, 'success');
-        }
         state.selectedOrders.clear();
         updateBatchBar();
-        refreshCurrentPage();
+        showBatchResultModal('批量通过结果', succeeded, failed);
     } catch (e) {
         closeModal();
         showToast(`批量通过失败：${e.message}`, 'error');
@@ -338,14 +416,9 @@ async function handleBatchReturnSubmit() {
         const failed = data.failed || [];
         const succeeded = data.succeeded || [];
         closeModal();
-        if (failed.length > 0) {
-            showToast(`批量退回完成：成功 ${succeeded.length} 个，失败 ${failed.length} 个`, 'warning');
-        } else {
-            showToast(`批量退回 ${succeeded.length} 个修订单成功`, 'success');
-        }
         state.selectedOrders.clear();
         updateBatchBar();
-        refreshCurrentPage();
+        showBatchResultModal('批量退回结果', succeeded, failed);
     } catch (e) {
         closeModal();
         showToast(`批量退回失败：${e.message}`, 'error');
@@ -507,6 +580,7 @@ async function renderListPage() {
                         <th>标题</th>
                         <th>关联知识条目</th>
                         <th>状态</th>
+                        <th>失败留痕</th>
                         <th>发起人</th>
                         <th>当前处理人</th>
                         <th>时限(小时)</th>
@@ -515,7 +589,7 @@ async function renderListPage() {
                     </tr>
                 </thead>
                 <tbody id="order-tbody">
-                    <tr><td colspan="10" class="empty-state"><p>加载中...</p></td></tr>
+                    <tr><td colspan="11" class="empty-state"><p>加载中...</p></td></tr>
                 </tbody>
             </table>
         </div>
@@ -545,7 +619,7 @@ async function fetchAndRenderOrders() {
         state.totalOrders = total;
 
         if (orders.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="10" class="empty-state"><div class="empty-icon">📋</div><p>暂无修订单数据</p></td></tr>';
+            tbody.innerHTML = '<tr><td colspan="11" class="empty-state"><div class="empty-icon">📋</div><p>暂无修订单数据</p></td></tr>';
             renderPagination(0);
             return;
         }
@@ -571,6 +645,7 @@ async function fetchAndRenderOrders() {
                 : '<span style="color:var(--success);">✓</span>';
 
             const statusBadge = `<span class="status-badge ${o.status}">${formatStatus(o.status)}</span>`;
+            const failureHtml = renderFailureBadge(o);
 
             return `<tr>
                 <td><label class="checkbox-wrapper"><input type="checkbox" class="order-checkbox" ${isSelected ? 'checked' : ''} onchange="toggleOrderSelection('${o.id}')"></label></td>
@@ -578,6 +653,7 @@ async function fetchAndRenderOrders() {
                 <td>${escapeHtml(o.title)}</td>
                 <td>${escapeHtml(o.knowledge_item_title || o.knowledge_item_id || '-')}</td>
                 <td>${statusBadge}</td>
+                <td>${failureHtml || '<span style="color:var(--text-light);">-</span>'}</td>
                 <td>${escapeHtml(o.creator_name || o.creator_id || '-')}</td>
                 <td>${escapeHtml(o.current_handler_name || o.current_handler_id || '-')}</td>
                 <td>${o.time_limit_hours || '-'}</td>
@@ -588,7 +664,7 @@ async function fetchAndRenderOrders() {
 
         renderPagination(total);
     } catch (e) {
-        tbody.innerHTML = `<tr><td colspan="10" class="empty-state"><p>加载失败：${escapeHtml(e.message)}</p></td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="11" class="empty-state"><p>加载失败：${escapeHtml(e.message)}</p></td></tr>`;
     }
 }
 
@@ -667,6 +743,15 @@ async function renderDetailPage(orderId) {
                     ${order.overdue_reason ? `<br>逾期原因：${escapeHtml(order.overdue_reason)}` : ''}
                     ${order.overdue_action ? `<br>逾期处理动作：${escapeHtml(order.overdue_action)}` : ''}
                 </div>
+            </div>
+        ` : '';
+
+        const failureWarning = order.last_failure_reason ? `
+            <div class="failure-warning-card">
+                <h4>⚠️ 最近操作失败</h4>
+                ${renderFailureTypeTag(order.last_failure_reason)}
+                <p>${escapeHtml(classifyFailureReason(order.last_failure_reason).text)}</p>
+                <div class="failure-time">失败时间：${formatDateTime(order.last_failure_at)}</div>
             </div>
         ` : '';
 
@@ -781,16 +866,25 @@ async function renderDetailPage(orderId) {
             const logsData = await getOrderAuditLogs(orderId);
             const logs = Array.isArray(logsData.data) ? logsData.data : [];
             if (logs.length > 0) {
-                timelineHtml = logs.map(log => `
-                    <div class="timeline-item action-${log.action}">
-                        <div class="timeline-time">${formatDateTime(log.created_at)}</div>
-                        <div class="timeline-action">${formatAction(log.action)}</div>
-                        <div class="timeline-actor">${escapeHtml(log.actor_name || log.actor_id || '-')} (${formatRole(log.actor_role || '')})</div>
-                        ${log.opinion ? `<div class="timeline-detail">意见：${escapeHtml(log.opinion)}</div>` : ''}
-                        ${log.reason ? `<div class="timeline-detail">原因：${escapeHtml(log.reason)}</div>` : ''}
-                        ${log.failure_reason ? `<div class="timeline-detail" style="color:var(--danger);">失败原因：${escapeHtml(log.failure_reason)}</div>` : ''}
+                timelineHtml = logs.map(log => {
+                    const isFailed = log.failure_reason && log.failure_reason !== '';
+                    const failedClass = isFailed ? ' failed' : '';
+                    return `
+                    <div class="timeline-item action-${log.action}${failedClass}">
+                        <div class="timeline-dot"></div>
+                        <div class="timeline-content">
+                            <div class="timeline-time">${formatDateTime(log.created_at)}</div>
+                            <div class="timeline-action">
+                                ${isFailed ? '⚠️ ' : ''}${formatAction(log.action)}
+                                ${isFailed ? renderFailureTypeTag(log.failure_reason) : ''}
+                            </div>
+                            <div class="timeline-actor">${escapeHtml(log.actor_name || log.actor_id || '-')} (${formatRole(log.actor_role || '')})</div>
+                            ${log.opinion ? `<div class="timeline-detail">意见：${escapeHtml(log.opinion)}</div>` : ''}
+                            ${log.reason ? `<div class="timeline-detail">原因：${escapeHtml(log.reason)}</div>` : ''}
+                            ${log.failure_reason ? `<div class="failure-reason-text">${escapeHtml(log.failure_reason)}</div>` : ''}
+                        </div>
                     </div>
-                `).join('');
+                `}).join('');
             } else {
                 timelineHtml = '<p style="color:var(--text-light);font-size:14px;">暂无审计记录</p>';
             }
@@ -800,6 +894,7 @@ async function renderDetailPage(orderId) {
 
         app.innerHTML = `
             <button class="back-btn" onclick="navigateTo('#list')">← 返回列表</button>
+            ${failureWarning}
             ${overdueWarning}
             <div class="detail-card">
                 <div class="section-header">修订单信息</div>
@@ -1289,6 +1384,9 @@ async function renderStatsPage() {
                     <option value="return">退回</option>
                     <option value="correct">补正</option>
                     <option value="overdue_process">逾期处理</option>
+                    <option value="advance_failed">推进失败</option>
+                    <option value="return_failed">退回失败</option>
+                    <option value="correct_failed">补正失败</option>
                 </select>
                 <input type="date" id="audit-start-date" value="${state.auditFilters.start_date}">
                 <input type="date" id="audit-end-date" value="${state.auditFilters.end_date}">
@@ -1351,19 +1449,26 @@ async function fetchAndRenderAuditLogs() {
             return;
         }
 
-        tbody.innerHTML = logs.map(log => `
-            <tr>
+        tbody.innerHTML = logs.map(log => {
+            const isFailed = log.failure_reason && log.failure_reason !== '';
+            const rowClass = isFailed ? 'style="background:#fff5f5;"' : '';
+            const actionBadgeClass = isFailed ? 'status-badge failed' : `status-badge ${log.action === 'return' ? 'pending_correction' : log.action === 'advance' || log.action === 'overdue_process' ? 'pending_final_review' : log.action === 'create' ? 'pending_review' : 'archived'}`;
+            const failureContent = isFailed 
+                ? `${renderFailureTypeTag(log.failure_reason)}<span style="color:var(--danger);">${escapeHtml(classifyFailureReason(log.failure_reason).text)}</span>`
+                : '-';
+            return `
+            <tr ${rowClass}>
                 <td>${escapeHtml(log.order_no || '-')}</td>
-                <td><span class="status-badge ${log.action === 'return' ? 'pending_correction' : log.action === 'advance' || log.action === 'overdue_process' ? 'pending_final_review' : log.action === 'create' ? 'pending_review' : 'archived'}">${formatAction(log.action)}</span></td>
+                <td><span class="${actionBadgeClass}">${formatAction(log.action)}</span></td>
                 <td>${escapeHtml(log.actor_name || '-')}</td>
                 <td>${formatRole(log.actor_role || '')}</td>
                 <td>${formatStatus(log.from_status) || '-'}</td>
                 <td>${formatStatus(log.to_status) || '-'}</td>
                 <td>${escapeHtml(log.opinion || log.reason || '-')}</td>
-                <td>${log.failure_reason ? escapeHtml(log.failure_reason) : '-'}</td>
+                <td>${failureContent}</td>
                 <td>${formatDateTime(log.created_at)}</td>
             </tr>
-        `).join('');
+        `}).join('');
 
         renderAuditPagination(total);
     } catch (e) {

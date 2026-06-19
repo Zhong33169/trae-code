@@ -39,6 +39,8 @@ type KnowledgeRevisionOrder struct {
 	Version            int                 `json:"version" db:"version"`
 	CreatedAt          string              `json:"created_at" db:"created_at"`
 	UpdatedAt          string              `json:"updated_at" db:"updated_at"`
+	LastFailureReason  string              `json:"last_failure_reason" db:"last_failure_reason"`
+	LastFailureAt      string              `json:"last_failure_at" db:"last_failure_at"`
 	Materials          []Material          `json:"materials"`
 	Feedbacks          []KnowledgeFeedback `json:"feedbacks"`
 }
