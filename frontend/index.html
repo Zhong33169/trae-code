@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>知识修订单系统</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <nav class="top-nav">
+        <div class="nav-title">知识修订单系统</div>
+        <div class="nav-controls">
+            <div class="role-switcher">
+                <button class="role-btn" data-role="clerk" onclick="handleRoleSwitch('clerk')">知识修登记员</button>
+                <button class="role-btn" data-role="supervisor" onclick="handleRoleSwitch('supervisor')">知识修审核主管</button>
+                <button class="role-btn" data-role="reviewer" onclick="handleRoleSwitch('reviewer')">复核负责人</button>
+            </div>
+            <div class="current-user" id="current-user">未登录</div>
+        </div>
+    </nav>
+    <div class="main-content">
+        <div id="app"></div>
+    </div>
+    <div id="modal"></div>
+    <div id="toast-container"></div>
+    <div id="batch-bar" class="batch-action-bar">
+        <div class="batch-info">已选择 <span id="batch-count">0</span> 项</div>
+        <div class="batch-actions">
+            <button class="btn btn-primary btn-small" id="batch-advance-btn" onclick="handleBatchAdvance()">批量通过</button>
+            <button class="btn btn-danger btn-small" id="batch-return-btn" onclick="handleBatchReturn()">批量退回</button>
+            <button class="btn btn-outline btn-small" onclick="clearSelection()">取消选择</button>
+        </div>
+    </div>
+    <script src="js/api.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>
