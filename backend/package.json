@@ -1,0 +1,19 @@
+{
+  "name": "requirement-tracker-backend",
+  "version": "1.0.0",
+  "description": "需求跟踪单系统后端",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "init-db": "node init_db.js"
+  },
+  "dependencies": {
+    "fastify": "^4.26.0",
+    "@fastify/cors": "^9.0.1",
+    "better-sqlite3": "^9.4.3",
+    "dayjs": "^1.11.10",
+    "uuid": "^9.0.1"
+  }
+}
