@@ -92,19 +92,10 @@ export class ApplicationDetail extends LitElement {
     this.processData = { remark: '', timeout_reason: '' };
   }
 
-  prerequisitesForType(type) {
-    switch (type) {
-      case 'transfer': return { needBudget: true, needSalary: false };
-      case 'salary_adjustment': return { needBudget: true, needSalary: true };
-      case 'both':
-      default: return { needBudget: true, needSalary: true };
-    }
-  }
-
   getSubmitBlockReason(app) {
     if (!app) return '';
     if (!['salary_supervisor', 'hrbp_leader'].includes(app.current_node)) return '';
-    const { needBudget, needSalary } = this.prerequisitesForType(app.type);
+    const { needBudget, needSalary } = prerequisitesForType(app.type);
     if (needBudget && !app.budget_verified) return '此异动类型需要先完成【预算校验】';
     if (needSalary && !app.salary_processed) return '此异动类型需要先完成【调薪处理】';
     return '';
@@ -112,7 +103,7 @@ export class ApplicationDetail extends LitElement {
 
   getRegisterBlockReason(app) {
     if (!app) return '';
-    const { needBudget, needSalary } = this.prerequisitesForType(app.type);
+    const { needBudget, needSalary } = prerequisitesForType(app.type);
     if (needBudget && !app.budget_verified) return '异动类型要求【预算校验】未完成';
     if (needSalary && !app.salary_processed) return '异动类型要求【调薪处理】未完成';
     return '';
@@ -120,44 +111,36 @@ export class ApplicationDetail extends LitElement {
 
   canRegister() {
     if (!this.app || !this.user) return false;
-    return this.user.role === 'hr_specialist' &&
-      this.app.status === 'approved' &&
-      !this.app.registered &&
-      !this.getRegisterBlockReason(this.app);
+    if (this.app.registered) return false;
+    if (!canPerformAction(this.app.type, this.app.status, this.app.current_node, this.user.role, 'register')) return false;
+    return !this.getRegisterBlockReason(this.app);
   }
 
   canSubmitAtCurrentNode() {
     if (!this.app || !this.user) return false;
     if (['synced', 'rejected'].includes(this.app.status)) return false;
-    if (this.getSubmitBlockReason(this.app)) return false;
-    switch (this.user.role) {
-      case 'hr_specialist':
-        return this.app.current_node === 'hr_specialist' && this.app.status === 'pending_review';
-      case 'salary_supervisor':
-        return this.app.current_node === 'salary_supervisor' && this.app.status === 'budget_checking';
-      case 'hrbp_leader':
-        return this.app.current_node === 'hrbp_leader' && this.app.status === 'pending_confirm';
-      default:
-        return false;
-    }
-  }
-
-  canDoBudgetOrSalary() {
-    if (!this.app || !this.user) return false;
-    if (this.user.role !== 'salary_supervisor') return false;
-    if (this.app.current_node !== 'salary_supervisor' || this.app.status !== 'budget_checking') return false;
-    const { needBudget, needSalary } = this.prerequisitesForType(this.app.type);
-    return needBudget || needSalary;
+    if (!canPerformAction(this.app.type, this.app.status, this.app.current_node, this.user.role, 'submit')) return false;
+    return !this.getSubmitBlockReason(this.app);
   }
 
   canVerifyBudget() {
-    if (!this.canDoBudgetOrSalary()) return false;
-    return this.prerequisitesForType(this.app.type).needBudget;
+    if (!this.app || !this.user) return false;
+    return canPerformAction(this.app.type, this.app.status, this.app.current_node, this.user.role, 'verify_budget');
   }
 
   canProcessSalary() {
-    if (!this.canDoBudgetOrSalary()) return false;
-    return this.prerequisitesForType(this.app.type).needSalary;
+    if (!this.app || !this.user) return false;
+    return canPerformAction(this.app.type, this.app.status, this.app.current_node, this.user.role, 'process_salary');
+  }
+
+  canReject() {
+    if (!this.app || !this.user) return false;
+    if (['synced', 'rejected'].includes(this.app.status)) return false;
+    return canPerformAction(this.app.type, this.app.status, this.app.current_node, this.user.role, 'reject');
+  }
+
+  hasAnyAction() {
+    return this.canSubmitAtCurrentNode() || this.canReject() || this.canVerifyBudget() || this.canProcessSalary() || this.canRegister();
   }
 
   connectedCallback() {
@@ -180,10 +163,6 @@ export class ApplicationDetail extends LitElement {
     } finally {
       this.loading = false;
     }
-  }
-
-  hasAnyAction() {
-    return this.canSubmitAtCurrentNode() || this.canDoBudgetOrSalary() || this.canRegister();
   }
 
   openDialog(action) {
@@ -214,12 +193,10 @@ export class ApplicationDetail extends LitElement {
     const app = this.app;
     const showTransfer = app.type !== 'salary_adjustment';
     const showSalary = app.type !== 'transfer';
-    const { needBudget, needSalary } = this.prerequisitesForType(app.type);
+    const { needBudget, needSalary } = prerequisitesForType(app.type);
 
     const submitBlockReason = this.getSubmitBlockReason(app);
     const registerBlockReason = this.getRegisterBlockReason(app);
-    const submitDisabled = !!submitBlockReason || !this.canSubmitAtCurrentNode();
-    const registerDisabled = !!registerBlockReason;
 
     return html`
       <div class="back" @click=${() => this.dispatchEvent(new CustomEvent('back'))}>← 返回列表</div>
@@ -232,8 +209,8 @@ export class ApplicationDetail extends LitElement {
       ` : ''}
 
       ${app.status === 'approved' && this.user?.role === 'hr_specialist' && !app.registered ? html`
-        <div style="background:${registerDisabled ? '#fff1f0' : '#fffbe6'}; border:1px solid ${registerDisabled ? '#ffa39e' : '#ffe58f'}; border-radius:4px; padding:10px 16px; margin-bottom:12px; font-size:13px; color:${registerDisabled ? '#cf1322' : '#d48806'};">
-          ${registerDisabled ? html`⚠️ ${registerBlockReason}，暂不可进行异动登记` : html`📋 此申请已审核通过，请您进行异动登记以完成闭环`}
+        <div style="background:${registerBlockReason ? '#fff1f0' : '#fffbe6'}; border:1px solid ${registerBlockReason ? '#ffa39e' : '#ffe58f'}; border-radius:4px; padding:10px 16px; margin-bottom:12px; font-size:13px; color:${registerBlockReason ? '#cf1322' : '#d48806'};">
+          ${registerBlockReason ? html`⚠️ ${registerBlockReason}，暂不可进行异动登记` : html`📋 此申请已审核通过，请您进行异动登记以完成闭环`}
           ${needBudget ? html`· 预算校验：${app.budget_verified ? '✅ 已完成' : '❌ 未完成'}` : ''}
           ${needSalary ? html` · 调薪处理：${app.salary_processed ? '✅ 已完成' : '❌ 未完成'}` : ''}
         </div>
@@ -268,15 +245,17 @@ export class ApplicationDetail extends LitElement {
               ${app.salary_processed ? '调薪已处理 ✓' : '调薪处理'}
             </button>
           ` : ''}
-          ${this.user?.role === 'hr_specialist' && app.status === 'approved' && !app.registered ? html`
-            <button class="btn btn-success" ?disabled=${registerDisabled} @click=${() => this.openDialog('register')} title=${registerBlockReason || '点击完成异动登记'}>
-              ${registerBlockReason || '异动登记'}
+          ${this.canRegister() ? html`
+            <button class="btn btn-success" @click=${() => this.openDialog('register')} title="点击完成异动登记">
+              异动登记
             </button>
           ` : ''}
-          ${(this.canSubmitAtCurrentNode() || submitBlockReason) ? html`
-            <button class="btn btn-primary" ?disabled=${submitDisabled} @click=${() => this.openDialog('submit')} title=${submitBlockReason || ''}>
-              ${submitBlockReason ? submitBlockReason : (app.current_node === 'hr_specialist' ? '提交审核' : app.current_node === 'salary_supervisor' ? '提交确认' : '审核通过')}
+          ${this.canSubmitAtCurrentNode() || submitBlockReason ? html`
+            <button class="btn btn-primary" ?disabled=${!!submitBlockReason} @click=${() => this.openDialog('submit')} title=${submitBlockReason || ''}>
+              ${submitBlockReason || (app.current_node === 'hr_specialist' ? '提交审核' : app.current_node === 'salary_supervisor' ? '提交确认' : '审核通过')}
             </button>
+          ` : ''}
+          ${this.canReject() ? html`
             <button class="btn btn-danger" @click=${() => this.openDialog('reject')}>驳回</button>
           ` : ''}
           ${!this.hasAnyAction() ? html`

@@ -135,3 +135,59 @@ export const TYPE_LABELS = {
   salary_adjustment: '调薪',
   both: '调岗调薪'
 };
+
+const ACTION_WHITELIST = [
+  { action: 'submit', role: 'hr_specialist', node: 'hr_specialist', status: 'pending_review', types: null },
+  { action: 'submit', role: 'salary_supervisor', node: 'salary_supervisor', status: 'budget_checking', types: null },
+  { action: 'submit', role: 'hrbp_leader', node: 'hrbp_leader', status: 'pending_confirm', types: null },
+
+  { action: 'reject', role: 'hr_specialist', node: 'hr_specialist', status: 'pending_review', types: null },
+  { action: 'reject', role: 'salary_supervisor', node: 'salary_supervisor', status: 'budget_checking', types: null },
+  { action: 'reject', role: 'hrbp_leader', node: 'hrbp_leader', status: 'pending_confirm', types: null },
+
+  { action: 'verify_budget', role: 'salary_supervisor', node: 'salary_supervisor', status: 'budget_checking',
+    types: ['transfer', 'salary_adjustment', 'both'] },
+  { action: 'process_salary', role: 'salary_supervisor', node: 'salary_supervisor', status: 'budget_checking',
+    types: ['salary_adjustment', 'both'] },
+
+  { action: 'register', role: 'hr_specialist', node: 'completed', status: 'approved', types: null },
+];
+
+export function prerequisitesForType(type) {
+  switch (type) {
+    case 'transfer': return { needBudget: true, needSalary: false };
+    case 'salary_adjustment': return { needBudget: true, needSalary: true };
+    case 'both':
+    default: return { needBudget: true, needSalary: true };
+  }
+}
+
+export function canPerformAction(appType, appStatus, appNode, userRole, action) {
+  return ACTION_WHITELIST.some(rule =>
+    rule.action === action &&
+    rule.role === userRole &&
+    rule.node === appNode &&
+    rule.status === appStatus &&
+    (!rule.types || rule.types.includes(appType))
+  );
+}
+
+export function actionPermissionError(appType, action, userRole, appNode, appStatus) {
+  switch (action) {
+    case 'verify_budget':
+      if (userRole !== 'salary_supervisor') return '仅薪酬主管可执行预算校验';
+      return '当前节点/状态不支持预算校验';
+    case 'process_salary':
+      if (userRole !== 'salary_supervisor') return '仅薪酬主管可执行调薪处理';
+      const { needSalary } = prerequisitesForType(appType);
+      if (!needSalary) return '此异动类型（调岗）不涉及调薪，无需执行调薪处理';
+      return '当前节点/状态不支持调薪处理';
+    case 'register':
+      return '仅人事专员可在审核通过后进行异动登记';
+    case 'submit':
+    case 'reject':
+      return '当前节点需由' + (NODE_LABELS[appNode] || appNode) + '处理，您无操作权限';
+    default:
+      return '不支持的操作类型';
+  }
+}

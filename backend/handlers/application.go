@@ -77,6 +77,81 @@ func prerequisitesForType(appType string) (needBudget bool, needSalary bool) {
 	}
 }
 
+type actionPermission struct {
+	action    string
+	role      string
+	node      string
+	status    string
+	forTypes  []string // 空表示所有类型
+}
+
+var actionWhitelist = []actionPermission{
+	{"submit", string(models.RoleHRSpecialist), "hr_specialist", string(models.StatusPendingReview), nil},
+	{"submit", string(models.RoleSalarySupervisor), "salary_supervisor", string(models.StatusBudgetChecking), nil},
+	{"submit", string(models.RoleHRBPLeader), "hrbp_leader", string(models.StatusPendingConfirm), nil},
+
+	{"reject", string(models.RoleHRSpecialist), "hr_specialist", string(models.StatusPendingReview), nil},
+	{"reject", string(models.RoleSalarySupervisor), "salary_supervisor", string(models.StatusBudgetChecking), nil},
+	{"reject", string(models.RoleHRBPLeader), "hrbp_leader", string(models.StatusPendingConfirm), nil},
+
+	{"verify_budget", string(models.RoleSalarySupervisor), "salary_supervisor", string(models.StatusBudgetChecking),
+		[]string{string(models.TypeTransfer), string(models.TypeSalaryAdjustment), string(models.TypeBoth)}},
+	{"process_salary", string(models.RoleSalarySupervisor), "salary_supervisor", string(models.StatusBudgetChecking),
+		[]string{string(models.TypeSalaryAdjustment), string(models.TypeBoth)}},
+
+	{"register", string(models.RoleHRSpecialist), "completed", string(models.StatusApproved), nil},
+}
+
+func typeInList(appType string, allowed []string) bool {
+	if len(allowed) == 0 {
+		return true
+	}
+	for _, t := range allowed {
+		if t == appType {
+			return true
+		}
+	}
+	return false
+}
+
+func canPerformAction(appType, appStatus, appNode, userRole, action string) bool {
+	for _, rule := range actionWhitelist {
+		if rule.action == action &&
+			rule.role == userRole &&
+			rule.node == appNode &&
+			rule.status == appStatus &&
+			typeInList(appType, rule.forTypes) {
+			return true
+		}
+	}
+	return false
+}
+
+func actionPermissionError(appType, action, userRole, appNode, appStatus string) string {
+	switch action {
+	case "verify_budget":
+		if userRole != string(models.RoleSalarySupervisor) {
+			return "仅薪酬主管可执行预算校验"
+		}
+		return "当前节点/状态不支持预算校验"
+	case "process_salary":
+		if userRole != string(models.RoleSalarySupervisor) {
+			return "仅薪酬主管可执行调薪处理"
+		}
+		_, needSalary := prerequisitesForType(appType)
+		if !needSalary {
+			return "此异动类型（调岗）不涉及调薪，无需执行调薪处理"
+		}
+		return "当前节点/状态不支持调薪处理"
+	case "register":
+		return "仅人事专员可在审核通过后进行异动登记"
+	case "submit", "reject":
+		return "当前节点需由" + getNodeName(appNode) + "处理，您无操作权限"
+	default:
+		return "不支持的操作类型"
+	}
+}
+
 func validatePrerequisites(appType, action string, app *models.TransferApplication) string {
 	needBudget, needSalary := prerequisitesForType(appType)
 
@@ -457,29 +532,13 @@ func ProcessApplication(c echo.Context) error {
 		return utils.ErrorMsg(c, "该申请已驳回，无法继续处理")
 	}
 
-	canProcess := false
-	switch req.Action {
-	case "register":
-		canProcess = uc.Role == string(models.RoleHRSpecialist) &&
-			app.Status == models.StatusApproved && !app.Registered
-	default:
-		switch uc.Role {
-		case string(models.RoleHRSpecialist):
-			canProcess = app.CurrentNode == "hr_specialist" && app.Status == models.StatusPendingReview
-		case string(models.RoleSalarySupervisor):
-			canProcess = app.CurrentNode == "salary_supervisor" && app.Status == models.StatusBudgetChecking
-		case string(models.RoleHRBPLeader):
-			canProcess = app.CurrentNode == "hrbp_leader" && app.Status == models.StatusPendingConfirm
-		}
+	canProcess := canPerformAction(string(app.Type), string(app.Status), app.CurrentNode, uc.Role, req.Action)
+	if req.Action == "register" {
+		canProcess = canProcess && !app.Registered
 	}
 
 	if !canProcess {
-		switch req.Action {
-		case "register":
-			return utils.ErrorMsg(c, "仅人事专员可在审核通过后进行异动登记，且申请须为审核通过状态")
-		default:
-			return utils.ErrorMsg(c, "当前节点需由"+getNodeName(app.CurrentNode)+"处理，您无操作权限")
-		}
+		return utils.ErrorMsg(c, actionPermissionError(string(app.Type), req.Action, uc.Role, app.CurrentNode, string(app.Status)))
 	}
 
 	if req.Action == "submit" || req.Action == "register" {
@@ -679,24 +738,14 @@ func BatchProcess(c echo.Context) error {
 			Registered:      registered == 1,
 		}
 
-		canProcess := false
-		switch req.Action {
-		case "register":
-			canProcess = uc.Role == string(models.RoleHRSpecialist) && status == string(models.StatusApproved) && registered == 0
-		default:
-			switch uc.Role {
-			case string(models.RoleHRSpecialist):
-				canProcess = currentNode == "hr_specialist" && status == string(models.StatusPendingReview)
-			case string(models.RoleSalarySupervisor):
-				canProcess = currentNode == "salary_supervisor" && status == string(models.StatusBudgetChecking) && (req.Action == "submit" || req.Action == "verify_budget" || req.Action == "process_salary")
-			case string(models.RoleHRBPLeader):
-				canProcess = currentNode == "hrbp_leader" && status == string(models.StatusPendingConfirm)
-			}
+		canProcess := canPerformAction(appType, status, currentNode, uc.Role, req.Action)
+		if req.Action == "register" {
+			canProcess = canProcess && registered == 0
 		}
 
 		if !canProcess {
 			failCount++
-			results[id] = "无权限或状态不匹配"
+			results[id] = actionPermissionError(appType, req.Action, uc.Role, currentNode, status)
 			continue
 		}
 

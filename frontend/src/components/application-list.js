@@ -1,5 +1,6 @@
 import { LitElement, html, css } from 'lit';
-import { api, NODE_LABELS, STATUS_LABELS, STATUS_COLORS, TYPE_LABELS, ROLE_LABELS } from '../api.js';
+import { api, NODE_LABELS, STATUS_LABELS, STATUS_COLORS, TYPE_LABELS, ROLE_LABELS,
+  canPerformAction, actionPermissionError, prerequisitesForType } from '../api.js';
 
 export class ApplicationList extends LitElement {
   static properties = {
@@ -134,55 +135,22 @@ export class ApplicationList extends LitElement {
     this.selected = next;
   }
 
-  prerequisitesForType(type) {
-    switch (type) {
-      case 'transfer': return { needBudget: true, needSalary: false };
-      case 'salary_adjustment': return { needBudget: true, needSalary: true };
-      case 'both':
-      default: return { needBudget: true, needSalary: true };
-    }
-  }
-
   canBatchAction(action) {
     if (!this.user || this.selectedCount === 0) return false;
     const role = this.user.role;
     return this.selectedIds.every(id => {
       const app = this.applications.find(a => a.id === id);
       if (!app) return false;
-      switch (action) {
-        case 'submit': {
-          if (role === 'hr_specialist') return app.current_node === 'hr_specialist' && app.status === 'pending_review';
-          if (role === 'salary_supervisor') {
-            if (!(app.current_node === 'salary_supervisor' && app.status === 'budget_checking')) return false;
-            const { needBudget, needSalary } = this.prerequisitesForType(app.type);
-            if (needBudget && !app.budget_verified) return false;
-            if (needSalary && !app.salary_processed) return false;
-            return true;
-          }
-          if (role === 'hrbp_leader') {
-            if (!(app.current_node === 'hrbp_leader' && app.status === 'pending_confirm')) return false;
-            const { needBudget, needSalary } = this.prerequisitesForType(app.type);
-            if (needBudget && !app.budget_verified) return false;
-            if (needSalary && !app.salary_processed) return false;
-            return true;
-          }
-          return false;
-        }
-        case 'register': {
-          if (role !== 'hr_specialist') return false;
-          if (!(app.status === 'approved' && !app.registered)) return false;
-          const { needBudget, needSalary } = this.prerequisitesForType(app.type);
-          if (needBudget && !app.budget_verified) return false;
-          if (needSalary && !app.salary_processed) return false;
-          return true;
-        }
-        case 'verify_budget':
-          return role === 'salary_supervisor' && app.current_node === 'salary_supervisor' && app.status === 'budget_checking' && !app.budget_verified;
-        case 'process_salary':
-          return role === 'salary_supervisor' && app.current_node === 'salary_supervisor' && app.status === 'budget_checking' && !app.salary_processed;
-        default:
-          return false;
+      if (!canPerformAction(app.type, app.status, app.current_node, role, action)) return false;
+      if ((action === 'submit' && ['salary_supervisor', 'hrbp_leader'].includes(app.current_node)) || action === 'register') {
+        const { needBudget, needSalary } = prerequisitesForType(app.type);
+        if (needBudget && !app.budget_verified) return false;
+        if (needSalary && !app.salary_processed) return false;
       }
+      if (action === 'register' && app.registered) return false;
+      if (action === 'verify_budget' && app.budget_verified) return false;
+      if (action === 'process_salary' && app.salary_processed) return false;
+      return true;
     });
   }
 
