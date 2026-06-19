@@ -179,7 +179,7 @@ fn complete_node_and_advance(
         );
     }
     let assignee = find_user_by_role(pool, next_node_role);
-    if !next_node_type.is_empty() {
+    if !next_node_type.is_empty() && next_node_type != "done" {
         upsert_node(
             pool,
             record_id,
@@ -200,6 +200,16 @@ fn complete_node_and_advance(
 }
 
 fn refresh_node_timeout(pool: &State<DbPool>, record_id: &str) {
+    let skip = {
+        let conn = pool.lock();
+        let status: Result<String, _> = conn.query_row(
+            "SELECT overall_status FROM seed_records WHERE id = ?1",
+            rusqlite::params![record_id],
+            |row| row.get::<_, String>(0),
+        );
+        matches!(status, Ok(s) if s == "completed")
+    };
+    if skip { return; }
     let conn = pool.lock();
     let mut stmt = conn
         .prepare("SELECT id, deadline FROM node_tracking WHERE record_id = ?1")
@@ -221,6 +231,16 @@ fn refresh_node_timeout(pool: &State<DbPool>, record_id: &str) {
 }
 
 fn count_timeout_for_record(pool: &State<DbPool>, record_id: &str) -> i64 {
+    let skip = {
+        let conn = pool.lock();
+        let status: Result<String, _> = conn.query_row(
+            "SELECT overall_status FROM seed_records WHERE id = ?1",
+            rusqlite::params![record_id],
+            |row| row.get::<_, String>(0),
+        );
+        matches!(status, Ok(s) if s == "completed")
+    };
+    if skip { return 0; }
     let conn = pool.lock();
     conn.query_row(
         "SELECT COUNT(*) FROM node_tracking WHERE record_id = ?1 AND is_timeout = 1 AND status != 'completed'",
@@ -448,7 +468,7 @@ pub fn list_records(
             .query_row(&cnt_sql, cnt_param_refs.as_slice(), |row| row.get(0))
             .unwrap_or(0);
 
-        let mut timeout_sql = "SELECT COUNT(DISTINCT nt.record_id) FROM node_tracking nt JOIN seed_records sr ON sr.id = nt.record_id WHERE nt.is_timeout = 1 AND nt.status != 'completed'".to_string();
+        let mut timeout_sql = "SELECT COUNT(DISTINCT nt.record_id) FROM node_tracking nt JOIN seed_records sr ON sr.id = nt.record_id WHERE nt.is_timeout = 1 AND nt.status != 'completed' AND sr.overall_status != 'completed'".to_string();
         let mut to_params: Vec<String> = vec![];
         if let Some(s) = &status {
             timeout_sql.push_str(" AND sr.overall_status = ?");

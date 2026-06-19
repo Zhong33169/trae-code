@@ -17,7 +17,7 @@ pub fn overview(pool: &State<DbPool>, _user: AuthUser) -> Json<ApiResponse<Stati
     let processing_count = query_i64(&conn, "SELECT COUNT(*) FROM seed_records WHERE overall_status IN ('processing','approved')", &[]);
     let completed_count = query_i64(&conn, "SELECT COUNT(*) FROM seed_records WHERE overall_status = 'completed'", &[]);
     let rejected_count = query_i64(&conn, "SELECT COUNT(*) FROM seed_records WHERE overall_status = 'correction'", &[]);
-    let timeout_count = query_i64(&conn, "SELECT COUNT(DISTINCT record_id) FROM node_tracking WHERE is_timeout = 1 AND status != 'completed'", &[]);
+    let timeout_count = query_i64(&conn, "SELECT COUNT(DISTINCT nt.record_id) FROM node_tracking nt JOIN seed_records sr ON sr.id = nt.record_id WHERE nt.is_timeout = 1 AND nt.status != 'completed' AND sr.overall_status != 'completed'", &[]);
 
     let status_rows = [
         ("pending", pending_count),
@@ -44,7 +44,7 @@ pub fn overview(pool: &State<DbPool>, _user: AuthUser) -> Json<ApiResponse<Stati
         );
         let tc = query_i64(
             &conn,
-            "SELECT COUNT(*) FROM node_tracking WHERE node_type = ?1 AND is_timeout = 1 AND status != 'completed'",
+            "SELECT COUNT(*) FROM node_tracking nt JOIN seed_records sr ON sr.id = nt.record_id WHERE nt.node_type = ?1 AND nt.is_timeout = 1 AND nt.status != 'completed' AND sr.overall_status != 'completed'",
             &[&n as &dyn rusqlite::ToSql],
         );
         by_node.push(NodeStat {

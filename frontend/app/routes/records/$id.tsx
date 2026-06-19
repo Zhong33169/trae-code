@@ -19,7 +19,8 @@ function RecordDetailPage() {
   if (!data) return <div style={{ padding: 40, color: '#b91c1c' }}>{msg?.text || '加载失败'}</div>
 
   const rec = data.record
-  const hasTimeoutNode = data.nodes.some(n => n.is_timeout && n.status !== 'completed')
+  const isFinalized = rec.overall_status === 'completed'
+  const hasTimeoutNode = isFinalized ? false : data.nodes.some(n => n.is_timeout && n.status !== 'completed')
 
   return (
     <div>
@@ -158,7 +159,8 @@ function RecordPanel({
   const [timeoutRemark, setTimeoutRemark] = useState('')
   const [timeoutEvidence, setTimeoutEvidence] = useState('')
 
-  const hasTimeout = nodes.some(n => n.is_timeout && n.status !== 'completed')
+  const hasTimeout = rec.overall_status === 'completed' ? false : nodes.some(n => n.is_timeout && n.status !== 'completed')
+  const isFinalized = rec.overall_status === 'completed'
 
   const doApprove = async () => {
     const r = await api.approveAudit(id, { evidence_note: evidenceNote || undefined, deadline_hours: pondDeadline })
@@ -232,52 +234,62 @@ function RecordPanel({
         </div>
       </div>
 
-      <div style={{ ...card, marginTop: 16 }}>
-        <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 12, color: '#0f172a' }}>操作动作（按当前岗位可见）</div>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
-          {hasTimeout && (
-            <button onClick={() => setTimeoutOpen(true)} style={{ ...btnPrimary, background: '#b91c1c' }}>
-              ⚠ 登记节点超时原因与处理
-            </button>
-          )}
-
-          {userRole === 'registrar' && (rec.overall_status === 'correction' || rec.overall_status === 'pending') && (
-            <button onClick={() => setEditOpen(true)} style={btnPrimary}>
-              {rec.overall_status === 'correction' ? '补正并重新提交审核' : '修改苗种记录'}
-            </button>
-          )}
-
-          {userRole === 'registrar' && rec.current_node === 'pond_entry' && (
-            <button onClick={() => setPondOpen(true)} style={btnPrimary}>登记苗种入塘</button>
-          )}
-
-          {userRole === 'registrar' && rec.current_node === 'survival_observe' && (
-            <button onClick={() => setSurvOpen(true)} style={btnPrimary}>登记成活观察</button>
-          )}
-
-          {userRole === 'auditor' && rec.current_node === 'audit' && (
-            <>
-              <button onClick={doApprove} style={btnPrimary}>审核通过（进入入塘节点）</button>
-              <button onClick={() => setRejectOpen(true)} style={btnDanger}>审核驳回（退回补正）</button>
-            </>
-          )}
-
-          {userRole === 'reviewer' && rec.current_node === 'archive_review' && (
-            <button onClick={() => setArchiveOpen(true)} style={btnPrimary}>批次归档复核</button>
-          )}
-
-          {!['registrar', 'auditor', 'reviewer'].includes(userRole) && (
-            <span style={{ color: '#64748b', fontSize: 13 }}>当前岗位无待办操作</span>
-          )}
-          {['registrar', 'auditor', 'reviewer'].includes(userRole) &&
-            !hasTimeout &&
-            !((userRole === 'registrar' && (rec.overall_status === 'correction' || rec.overall_status === 'pending' || rec.current_node === 'pond_entry' || rec.current_node === 'survival_observe'))
-              || (userRole === 'auditor' && rec.current_node === 'audit')
-              || (userRole === 'reviewer' && rec.current_node === 'archive_review')) && (
-            <span style={{ color: '#64748b', fontSize: 13 }}>当前记录无待办动作</span>
-          )}
+      {isFinalized ? (
+        <div style={{ ...card, marginTop: 16, background: '#ecfdf5', border: '1px solid #a7f3d0' }}>
+          <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 8, color: '#065f46' }}>✓ 批次已结案归档</div>
+          <div style={{ fontSize: 13, color: '#047857' }}>
+            该苗种记录已完成全部节点流程，状态与节点信息已固定，不再允许变更或登记超时处理。
+            {rec.archive_remark && <div style={{ marginTop: 6, color: '#0f766e' }}>归档复核意见：{rec.archive_remark}</div>}
+          </div>
         </div>
-      </div>
+      ) : (
+        <div style={{ ...card, marginTop: 16 }}>
+          <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 12, color: '#0f172a' }}>操作动作（按当前岗位可见）</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+            {hasTimeout && (
+              <button onClick={() => setTimeoutOpen(true)} style={{ ...btnPrimary, background: '#b91c1c' }}>
+                ⚠ 登记节点超时原因与处理
+              </button>
+            )}
+
+            {userRole === 'registrar' && (rec.overall_status === 'correction' || rec.overall_status === 'pending') && (
+              <button onClick={() => setEditOpen(true)} style={btnPrimary}>
+                {rec.overall_status === 'correction' ? '补正并重新提交审核' : '修改苗种记录'}
+              </button>
+            )}
+
+            {userRole === 'registrar' && rec.current_node === 'pond_entry' && (
+              <button onClick={() => setPondOpen(true)} style={btnPrimary}>登记苗种入塘</button>
+            )}
+
+            {userRole === 'registrar' && rec.current_node === 'survival_observe' && (
+              <button onClick={() => setSurvOpen(true)} style={btnPrimary}>登记成活观察</button>
+            )}
+
+            {userRole === 'auditor' && rec.current_node === 'audit' && (
+              <>
+                <button onClick={doApprove} style={btnPrimary}>审核通过（进入入塘节点）</button>
+                <button onClick={() => setRejectOpen(true)} style={btnDanger}>审核驳回（退回补正）</button>
+              </>
+            )}
+
+            {userRole === 'reviewer' && rec.current_node === 'archive_review' && (
+              <button onClick={() => setArchiveOpen(true)} style={btnPrimary}>批次归档复核</button>
+            )}
+
+            {!['registrar', 'auditor', 'reviewer'].includes(userRole) && (
+              <span style={{ color: '#64748b', fontSize: 13 }}>当前岗位无待办操作</span>
+            )}
+            {['registrar', 'auditor', 'reviewer'].includes(userRole) &&
+              !hasTimeout &&
+              !((userRole === 'registrar' && (rec.overall_status === 'correction' || rec.overall_status === 'pending' || rec.current_node === 'pond_entry' || rec.current_node === 'survival_observe'))
+                || (userRole === 'auditor' && rec.current_node === 'audit')
+                || (userRole === 'reviewer' && rec.current_node === 'archive_review')) && (
+              <span style={{ color: '#64748b', fontSize: 13 }}>当前记录无待办动作</span>
+            )}
+          </div>
+        </div>
+      )}
 
       {editOpen && (
         <Modal title="修改/补正苗种记录" onClose={() => setEditOpen(false)}>
