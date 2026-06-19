@@ -1,0 +1,7 @@
+[default]
+port = 8001
+address = "0.0.0.0"
+log_level = "normal"
+
+[global.databases]
+seed_db = { url = "data/seed_tracking.db" }
