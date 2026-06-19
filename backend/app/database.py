@@ -1,9 +1,10 @@
+import os
 from pathlib import Path
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from litestar.di import Provide
 
-DB_PATH = Path(__file__).resolve().parent.parent / "data.db"
+DB_PATH = Path(os.getenv("DB_PATH", str(Path(__file__).resolve().parent.parent / "data.db")))
 
 DATABASE_URL = f"sqlite+aiosqlite:///{DB_PATH}"
 

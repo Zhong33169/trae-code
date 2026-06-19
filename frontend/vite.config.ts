@@ -6,6 +6,6 @@ import tailwindcss from "@tailwindcss/vite";
 export default defineConfig({
   plugins: [tailwindcss(), reactRouter(), tsconfigPaths()],
   server: {
-    port: 3003,
+    port: Number(process.env.FRONTEND_PORT) || 3003,
   },
 });

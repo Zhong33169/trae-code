@@ -1,4 +1,5 @@
 import json
+import os
 import uuid
 from datetime import datetime
 
@@ -58,7 +59,56 @@ async def _write_operation_record(
     return record
 
 
+async def _run_validation(
+    session: AsyncSession,
+    appeal: Appeal | None,
+    operator: User | None,
+    checks: list[tuple[bool, str]],
+    opinion: str | None = None,
+    write_failed_record: bool = True,
+) -> None:
+    validation_error = None
+    for condition, message in checks:
+        if condition:
+            validation_error = message
+            break
+
+    if validation_error:
+        if write_failed_record and appeal and operator:
+            await _write_operation_record(
+                session=session,
+                appeal_id=appeal.id,
+                operator_id=operator.id,
+                operator_name=operator.name,
+                operator_role=operator.role,
+                action="validation_failed",
+                from_status=appeal.status,
+                to_status=appeal.status,
+                opinion=opinion,
+            )
+            await session.commit()
+
+        status_code = 409 if "版本冲突" in validation_error else 403 if "无权" in validation_error or "角色" in validation_error else 400
+        raise HTTPException(status_code=status_code, detail=validation_error)
+
+
 async def create_appeal(session: AsyncSession, data: AppealCreate) -> Appeal:
+    operator = await _get_user_by_id(session, data.operator_id)
+
+    checks = [
+        (not operator, "操作员不存在"),
+        (operator and operator.role != "registrar", "只有登记员可以创建诉求"),
+        (operator and data.anomaly_type == "missing_evidence" and not data.evidence_urls, "缺少证据类型必须提供证据链接"),
+    ]
+    await _run_validation(
+        session=session,
+        appeal=None,
+        operator=operator,
+        checks=checks,
+        opinion=None,
+        write_failed_record=False,
+    )
+
     now = datetime.utcnow()
     year = now.year
 
@@ -89,16 +139,12 @@ async def create_appeal(session: AsyncSession, data: AppealCreate) -> Appeal:
     )
     session.add(appeal)
 
-    operator = await _get_user_by_id(session, data.operator_id)
-    operator_name = operator.name if operator else ""
-    operator_role = operator.role if operator else ""
-
     await _write_operation_record(
         session=session,
         appeal_id=appeal_id,
         operator_id=data.operator_id,
-        operator_name=operator_name,
-        operator_role=operator_role,
+        operator_name=operator.name,
+        operator_role=operator.role,
         action="submit",
         from_status="",
         to_status="pending_review",
@@ -119,40 +165,22 @@ async def process_appeal(session: AsyncSession, appeal_id: str, data: ProcessReq
     if not operator:
         raise HTTPException(status_code=400, detail="操作员不存在")
 
-    validation_error = None
-
-    if data.operator_id != appeal.current_handler_id:
-        validation_error = "无权处理此诉求"
-
-    if not validation_error and operator.role != appeal.current_handler_role:
-        validation_error = "操作员角色不匹配"
-
-    if not validation_error and appeal.status not in ("pending_review", "pending_recheck"):
-        validation_error = f"当前状态 {appeal.status} 不可处理"
-
-    if not validation_error and data.version != appeal.version:
-        validation_error = "数据版本冲突，请刷新后重试"
-
-    if not validation_error and data.action == "approve" and appeal.anomaly_type == "missing_evidence":
-        evidence_list = json.loads(appeal.evidence_urls) if appeal.evidence_urls else []
-        if not evidence_list:
-            validation_error = "证据不足，无法通过"
-
-    if validation_error:
-        await _write_operation_record(
-            session=session,
-            appeal_id=appeal_id,
-            operator_id=data.operator_id,
-            operator_name=operator.name,
-            operator_role=operator.role,
-            action="validation_failed",
-            from_status=appeal.status,
-            to_status=appeal.status,
-            opinion=data.opinion,
-        )
-        await session.commit()
-        status_code = 409 if "版本冲突" in validation_error else 403 if "无权" in validation_error or "角色" in validation_error else 400
-        raise HTTPException(status_code=status_code, detail=validation_error)
+    evidence_list = json.loads(appeal.evidence_urls) if appeal.evidence_urls else []
+    checks = [
+        (data.operator_id != appeal.current_handler_id, "无权处理此诉求"),
+        (operator.role != appeal.current_handler_role, "操作员角色不匹配"),
+        (appeal.status not in ("pending_review", "pending_recheck"), f"当前状态 {appeal.status} 不可处理"),
+        (data.version != appeal.version, "数据版本冲突，请刷新后重试"),
+        (data.action == "approve" and appeal.anomaly_type == "missing_evidence" and not evidence_list, "证据不足，无法通过"),
+    ]
+    await _run_validation(
+        session=session,
+        appeal=appeal,
+        operator=operator,
+        checks=checks,
+        opinion=data.opinion,
+        write_failed_record=True,
+    )
 
     from_status = appeal.status
     to_status = appeal.status
@@ -217,19 +245,27 @@ async def resubmit_appeal(session: AsyncSession, appeal_id: str, data: ResubmitR
     if not operator:
         raise HTTPException(status_code=400, detail="操作员不存在")
 
-    if appeal.status not in ("returned", "rejected"):
-        raise HTTPException(status_code=400, detail="只有退回或驳回的诉求才能重新提交")
+    existing_urls = json.loads(appeal.evidence_urls) if appeal.evidence_urls else []
+    merged_urls = existing_urls + [u for u in data.evidence_urls if u not in existing_urls]
 
-    if data.operator_id != "u1":
-        raise HTTPException(status_code=403, detail="只有登记员可以重新提交")
-
-    if data.version != appeal.version:
-        raise HTTPException(status_code=409, detail="数据版本冲突，请刷新后重试")
+    checks = [
+        (data.operator_id != appeal.current_handler_id, "无权处理此诉求"),
+        (operator.role != appeal.current_handler_role, "操作员角色不匹配"),
+        (appeal.status not in ("returned", "rejected"), "只有退回或驳回的诉求才能重新提交"),
+        (data.version != appeal.version, "数据版本冲突，请刷新后重试"),
+        (appeal.anomaly_type == "missing_evidence" and not merged_urls, "缺少证据类型必须提供证据链接"),
+    ]
+    await _run_validation(
+        session=session,
+        appeal=appeal,
+        operator=operator,
+        checks=checks,
+        opinion=data.opinion,
+        write_failed_record=True,
+    )
 
     from_status = appeal.status
 
-    existing_urls = json.loads(appeal.evidence_urls) if appeal.evidence_urls else []
-    merged_urls = existing_urls + [u for u in data.evidence_urls if u not in existing_urls]
     appeal.evidence_urls = json.dumps(merged_urls) if merged_urls else None
 
     appeal.status = "pending_review"

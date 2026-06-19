@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useLoaderData, useNavigate, useActionData, Form, useNavigation } from "react-router";
+import { useLoaderData, useNavigate, useActionData, Form, useNavigation, redirect } from "react-router";
 import type { LoaderFunctionArgs, ActionFunctionArgs } from "react-router";
 import { ArrowLeft, ExternalLink } from "lucide-react";
 import { fetchApi } from "~/utils/api";
@@ -58,7 +58,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
         body: JSON.stringify(payload),
       });
     }
-    return { success: true };
+    return redirect(".");
   } catch (err) {
     return { success: false, error: (err as Error).message };
   }
@@ -137,7 +137,7 @@ function InfoCard({ appeal }: { appeal: Appeal }) {
 }
 
 function PrevHandlerInfo({ records, currentUserId }: { records: OperationRecord[]; currentUserId: string }) {
-  const prev = [...records].reverse().find((r) => r.operator_id !== currentUserId);
+  const prev = [...records].reverse().find((r) => r.operator_id !== currentUserId && r.action !== "validation_failed");
   if (!prev) return null;
 
   return (

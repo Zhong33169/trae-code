@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate, useActionData, Form, useNavigation } from "react-router";
+import { useNavigate, useActionData, Form, useNavigation, redirect } from "react-router";
 import type { ActionFunctionArgs } from "react-router";
 import { ArrowLeft } from "lucide-react";
 import { fetchApi } from "~/utils/api";
@@ -25,7 +25,7 @@ export async function action({ request }: ActionFunctionArgs) {
       method: "POST",
       body: JSON.stringify(payload),
     });
-    return { success: true, appealId: appeal.id };
+    return redirect(`/appeals/${appeal.id}`);
   } catch (err) {
     return { success: false, error: (err as Error).message };
   }
@@ -47,11 +47,6 @@ export default function AppealsNew() {
   const isSubmitting = navigation.state === "submitting";
 
   const [evidenceInput, setEvidenceInput] = useState("");
-
-  if (actionData?.success && actionData.appealId) {
-    navigate(`/appeals/${actionData.appealId}`);
-    return null;
-  }
 
   return (
     <div className="p-6 max-w-2xl">

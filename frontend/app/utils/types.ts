@@ -37,8 +37,8 @@ export interface OperationRecord {
   operator_role: Role;
   action: Action;
   opinion: string;
-  from_status: Status;
-  to_status: Status;
+  from_status: Status | "";
+  to_status: Status | "";
   created_at: string;
 }
 
@@ -75,12 +75,13 @@ export interface ResubmitRequest {
   version: number;
 }
 
-export const STATUS_LABELS: Record<Status, string> = {
+export const STATUS_LABELS: Record<Status | "", string> = {
   pending_review: "待审核",
   pending_recheck: "待复核",
   returned: "退回补正",
   rejected: "已驳回",
   archived: "已归档",
+  "": "-",
 };
 
 export const ANOMALY_LABELS: Record<AnomalyType, string> = {

@@ -30,20 +30,25 @@ python init_db.py
 
 ```bash
 cd backend
-uvicorn app.main:app --host 0.0.0.0 --port 8003
+BACKEND_PORT=8003 uvicorn app.main:app --host 0.0.0.0 --port 8003
 ```
 
-如需更换端口，修改 `--port` 参数即可。
+或直接运行：
+
+```bash
+cd backend
+python -m app.main
+```
 
 ### 4. 启动前端
 
 ```bash
 cd frontend
 npm install
-npm run dev
+FRONTEND_PORT=3003 VITE_API_BASE=http://localhost:8003/api npm run dev
 ```
 
-前端默认运行在 `http://localhost:3003`，端口配置在 `frontend/vite.config.ts` 的 `server.port` 字段，可自行修改。
+前端默认运行在 `http://localhost:3003`。
 
 ### 5. 访问系统
 
@@ -109,8 +114,16 @@ npm run dev
 | GET | `/api/stats` | 各状态计数统计 |
 | GET | `/api/users` | 用户列表 |
 
-## 端口配置
+## 端口与环境变量配置
 
-- 前端端口：修改 `frontend/vite.config.ts` 中 `server.port`
-- 后端端口：修改 uvicorn 启动命令 `--port` 参数
-- 前端 API 地址：修改 `frontend/app/utils/api.ts` 中 `API_BASE`
+| 环境变量 | 所在端 | 默认值 | 说明 |
+|----------|--------|--------|------|
+| `FRONTEND_PORT` | 前端 | 3003 | 前端 dev server 端口 |
+| `VITE_API_BASE` | 前端 | `http://localhost:8003/api` | 后端 API 基址 |
+| `BACKEND_PORT` | 后端 | 8003 | 后端服务端口（`python -m app.main` 启动时生效） |
+| `DB_PATH` | 后端 | `./data.db` | SQLite 数据库文件路径 |
+
+前后端均附带 `.env.example` 作为参考，复制为 `.env` 后可直接使用。
+
+- 若通过 `uvicorn` 启动后端，端口由命令行 `--port` 参数决定
+- 若通过 `python -m app.main` 启动后端，端口读取 `BACKEND_PORT` 环境变量
