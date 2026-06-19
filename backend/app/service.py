@@ -34,7 +34,7 @@ async def _get_user_by_id(session: AsyncSession, user_id: str) -> User | None:
 
 async def _write_operation_record(
     session: AsyncSession,
-    appeal_id: str,
+    appeal_id: str | None,
     operator_id: str,
     operator_name: str,
     operator_role: str,
@@ -42,6 +42,8 @@ async def _write_operation_record(
     from_status: str | None,
     to_status: str | None,
     opinion: str | None = None,
+    request_summary: str | None = None,
+    failure_reason: str | None = None,
 ) -> OperationRecord:
     record = OperationRecord(
         id=uuid.uuid4().hex,
@@ -53,6 +55,8 @@ async def _write_operation_record(
         opinion=opinion,
         from_status=from_status,
         to_status=to_status,
+        request_summary=request_summary,
+        failure_reason=failure_reason,
         created_at=datetime.utcnow().isoformat(),
     )
     session.add(record)
@@ -66,6 +70,7 @@ async def _run_validation(
     checks: list[tuple[bool, str]],
     opinion: str | None = None,
     write_failed_record: bool = True,
+    request_summary: str | None = None,
 ) -> None:
     validation_error = None
     for condition, message in checks:
@@ -74,17 +79,19 @@ async def _run_validation(
             break
 
     if validation_error:
-        if write_failed_record and appeal and operator:
+        if write_failed_record and operator and (appeal or appeal is None):
             await _write_operation_record(
                 session=session,
-                appeal_id=appeal.id,
+                appeal_id=appeal.id if appeal else None,
                 operator_id=operator.id,
                 operator_name=operator.name,
                 operator_role=operator.role,
                 action="validation_failed",
-                from_status=appeal.status,
-                to_status=appeal.status,
+                from_status=appeal.status if appeal else "",
+                to_status=appeal.status if appeal else "",
                 opinion=opinion,
+                request_summary=request_summary,
+                failure_reason=validation_error,
             )
             await session.commit()
 
@@ -95,10 +102,12 @@ async def _run_validation(
 async def create_appeal(session: AsyncSession, data: AppealCreate) -> Appeal:
     operator = await _get_user_by_id(session, data.operator_id)
 
+    request_summary = f"访客姓名:{data.visitor_name}, 异常类型:{data.anomaly_type}, 证据数:{len(data.evidence_urls)}"
+
     checks = [
         (not operator, "操作员不存在"),
-        (operator and operator.role != "registrar", "只有登记员可以创建诉求"),
-        (operator and data.anomaly_type == "missing_evidence" and not data.evidence_urls, "缺少证据类型必须提供证据链接"),
+        (operator and operator.role != "registrar", "只有登记员可以发起申诉"),
+        (operator and data.anomaly_type == "missing_evidence" and not data.evidence_urls, "缺证据类型申诉必须提供至少一项证据材料"),
     ]
     await _run_validation(
         session=session,
@@ -106,7 +115,8 @@ async def create_appeal(session: AsyncSession, data: AppealCreate) -> Appeal:
         operator=operator,
         checks=checks,
         opinion=None,
-        write_failed_record=False,
+        write_failed_record=True,
+        request_summary=request_summary,
     )
 
     now = datetime.utcnow()
@@ -148,6 +158,7 @@ async def create_appeal(session: AsyncSession, data: AppealCreate) -> Appeal:
         action="submit",
         from_status="",
         to_status="pending_review",
+        request_summary=request_summary,
     )
 
     await session.commit()
@@ -166,11 +177,12 @@ async def process_appeal(session: AsyncSession, appeal_id: str, data: ProcessReq
         raise HTTPException(status_code=400, detail="操作员不存在")
 
     evidence_list = json.loads(appeal.evidence_urls) if appeal.evidence_urls else []
+    request_summary = f"操作:{data.action}, 意见:{data.opinion[:50]}, 版本:{data.version}"
     checks = [
         (data.operator_id != appeal.current_handler_id, "无权处理此诉求"),
         (operator.role != appeal.current_handler_role, "操作员角色不匹配"),
         (appeal.status not in ("pending_review", "pending_recheck"), f"当前状态 {appeal.status} 不可处理"),
-        (data.version != appeal.version, "数据版本冲突，请刷新后重试"),
+        (data.version != appeal.version, "版本冲突：提交版本与当前版本不一致，请刷新后重试"),
         (data.action == "approve" and appeal.anomaly_type == "missing_evidence" and not evidence_list, "证据不足，无法通过"),
     ]
     await _run_validation(
@@ -180,6 +192,7 @@ async def process_appeal(session: AsyncSession, appeal_id: str, data: ProcessReq
         checks=checks,
         opinion=data.opinion,
         write_failed_record=True,
+        request_summary=request_summary,
     )
 
     from_status = appeal.status
@@ -228,6 +241,7 @@ async def process_appeal(session: AsyncSession, appeal_id: str, data: ProcessReq
         from_status=from_status,
         to_status=to_status,
         opinion=data.opinion,
+        request_summary=request_summary,
     )
 
     await session.commit()
@@ -248,11 +262,12 @@ async def resubmit_appeal(session: AsyncSession, appeal_id: str, data: ResubmitR
     existing_urls = json.loads(appeal.evidence_urls) if appeal.evidence_urls else []
     merged_urls = existing_urls + [u for u in data.evidence_urls if u not in existing_urls]
 
+    request_summary = f"操作:resubmit, 意见:{data.opinion[:50]}, 新增证据数:{len(data.evidence_urls)}"
     checks = [
         (data.operator_id != appeal.current_handler_id, "无权处理此诉求"),
         (operator.role != appeal.current_handler_role, "操作员角色不匹配"),
         (appeal.status not in ("returned", "rejected"), "只有退回或驳回的诉求才能重新提交"),
-        (data.version != appeal.version, "数据版本冲突，请刷新后重试"),
+        (data.version != appeal.version, "版本冲突：提交版本与当前版本不一致，请刷新后重试"),
         (appeal.anomaly_type == "missing_evidence" and not merged_urls, "缺少证据类型必须提供证据链接"),
     ]
     await _run_validation(
@@ -262,6 +277,7 @@ async def resubmit_appeal(session: AsyncSession, appeal_id: str, data: ResubmitR
         checks=checks,
         opinion=data.opinion,
         write_failed_record=True,
+        request_summary=request_summary,
     )
 
     from_status = appeal.status
@@ -284,6 +300,7 @@ async def resubmit_appeal(session: AsyncSession, appeal_id: str, data: ResubmitR
         from_status=from_status,
         to_status="pending_review",
         opinion=data.opinion,
+        request_summary=request_summary,
     )
 
     await session.commit()
@@ -367,6 +384,8 @@ async def get_appeal(session: AsyncSession, appeal_id: str) -> dict:
             opinion=r.opinion,
             from_status=r.from_status,
             to_status=r.to_status,
+            request_summary=r.request_summary,
+            failure_reason=r.failure_reason,
             created_at=r.created_at,
         )
         for r in records

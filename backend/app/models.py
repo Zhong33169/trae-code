@@ -43,7 +43,7 @@ class OperationRecord(Base):
     __tablename__ = "operation_records"
 
     id = Column(Text, primary_key=True)
-    appeal_id = Column(Text, ForeignKey("appeals.id"), nullable=False)
+    appeal_id = Column(Text, ForeignKey("appeals.id"), nullable=True)
     operator_id = Column(Text, ForeignKey("users.id"), nullable=False)
     operator_name = Column(Text, nullable=False)
     operator_role = Column(Text, nullable=False)
@@ -51,4 +51,6 @@ class OperationRecord(Base):
     opinion = Column(Text, nullable=True)
     from_status = Column(Text, nullable=True)
     to_status = Column(Text, nullable=True)
+    request_summary = Column(Text, nullable=True)
+    failure_reason = Column(Text, nullable=True)
     created_at = Column(Text, nullable=False, default=lambda: datetime.utcnow().isoformat())

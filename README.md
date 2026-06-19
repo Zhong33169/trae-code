@@ -102,6 +102,25 @@ FRONTEND_PORT=3003 VITE_API_BASE=http://localhost:8003/api npm run dev
 4. **版本校验**：提交版本必须与当前版本一致（乐观锁）
 5. **证据校验**：缺证据类型申诉，证据为空时不可通过
 
+## 审计记录
+
+所有操作（含失败）均写入 `operation_records` 审计表，确保全程可追溯：
+
+| 字段 | 说明 |
+|------|------|
+| `operator_id` / `operator_name` / `operator_role` | 操作人 ID、姓名、角色 |
+| `action` | 操作类型：submit / approve / reject / return / resubmit / archive / validation_failed |
+| `opinion` | 操作人填写的意见 |
+| `from_status` → `to_status` | 状态流转（失败时保持原状态） |
+| `request_summary` | 请求摘要（如"访客姓名:xxx, 异常类型:xxx, 证据数:x"） |
+| `failure_reason` | 失败原因（仅 `validation_failed` 时有值） |
+| `appeal_id` | 关联申诉 ID（发起失败时为 NULL，仍可通过操作人追溯） |
+
+**审计闭环覆盖场景**：
+- ✅ 发起申诉失败（非登记员、缺证据）→ 写 `validation_failed`，`appeal_id = NULL`
+- ✅ 办理失败（处理人不匹配、版本冲突、证据不足）→ 写 `validation_failed`，保留原状态
+- ✅ 再次提交失败 → 写 `validation_failed`，保留原状态
+
 ## API 接口
 
 | 方法 | 路径 | 说明 |

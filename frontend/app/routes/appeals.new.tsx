@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate, useActionData, Form, useNavigation, redirect } from "react-router";
 import type { ActionFunctionArgs } from "react-router";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, AlertTriangle } from "lucide-react";
 import { fetchApi } from "~/utils/api";
 import type { Appeal, AnomalyType, AppealCreate } from "~/utils/types";
 import { useUser } from "~/utils/store";
@@ -46,7 +46,19 @@ export default function AppealsNew() {
   const { currentUser } = useUser();
   const isSubmitting = navigation.state === "submitting";
 
-  const [evidenceInput, setEvidenceInput] = useState("");
+  const [formData, setFormData] = useState({
+    visitor_name: "",
+    visitor_phone: "",
+    appointment_date: "",
+    anomaly_type: "normal" as AnomalyType,
+    description: "",
+    evidence_urls: "",
+  });
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
+    const { name, value } = e.target;
+    setFormData((prev) => ({ ...prev, [name]: value }));
+  };
 
   return (
     <div className="p-6 max-w-2xl">
@@ -61,8 +73,14 @@ export default function AppealsNew() {
       <h2 className="text-2xl font-serif font-bold text-gray-900 mb-6">发起申诉</h2>
 
       {actionData?.error && (
-        <div className="mb-4 p-3 rounded-lg bg-red-50 text-red-700 text-sm">
-          {actionData.error}
+        <div className="mb-6 p-4 rounded-lg border border-red-300 bg-red-50">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm font-medium text-red-800 mb-1">提交失败</p>
+              <p className="text-sm text-red-700">{actionData.error}</p>
+            </div>
+          </div>
         </div>
       )}
 
@@ -76,6 +94,8 @@ export default function AppealsNew() {
           <input
             type="text"
             name="visitor_name"
+            value={formData.visitor_name}
+            onChange={handleInputChange}
             required
             className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
           />
@@ -88,6 +108,8 @@ export default function AppealsNew() {
           <input
             type="tel"
             name="visitor_phone"
+            value={formData.visitor_phone}
+            onChange={handleInputChange}
             required
             className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
           />
@@ -100,6 +122,8 @@ export default function AppealsNew() {
           <input
             type="date"
             name="appointment_date"
+            value={formData.appointment_date}
+            onChange={handleInputChange}
             required
             className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
           />
@@ -111,6 +135,8 @@ export default function AppealsNew() {
           </label>
           <select
             name="anomaly_type"
+            value={formData.anomaly_type}
+            onChange={handleInputChange}
             required
             className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
           >
@@ -128,6 +154,8 @@ export default function AppealsNew() {
           </label>
           <textarea
             name="description"
+            value={formData.description}
+            onChange={handleInputChange}
             required
             rows={4}
             className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
@@ -141,8 +169,8 @@ export default function AppealsNew() {
           <input
             type="text"
             name="evidence_urls"
-            value={evidenceInput}
-            onChange={(e) => setEvidenceInput(e.target.value)}
+            value={formData.evidence_urls}
+            onChange={handleInputChange}
             placeholder="https://example.com/e1.pdf, https://example.com/e2.png"
             className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
           />

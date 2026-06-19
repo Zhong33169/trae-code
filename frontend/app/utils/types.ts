@@ -40,6 +40,8 @@ export interface OperationRecord {
   from_status: Status | "";
   to_status: Status | "";
   created_at: string;
+  request_summary?: string | null;
+  failure_reason?: string | null;
 }
 
 export interface Stats {

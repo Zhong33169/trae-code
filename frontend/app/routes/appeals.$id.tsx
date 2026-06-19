@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useLoaderData, useNavigate, useActionData, Form, useNavigation, redirect } from "react-router";
 import type { LoaderFunctionArgs, ActionFunctionArgs } from "react-router";
-import { ArrowLeft, ExternalLink } from "lucide-react";
+import { ArrowLeft, ExternalLink, AlertTriangle } from "lucide-react";
 import { fetchApi } from "~/utils/api";
 import type { Appeal, OperationRecord, ProcessRequest, ResubmitRequest, Status, Action, AnomalyType } from "~/utils/types";
 import {
@@ -159,6 +159,12 @@ function PrevHandlerInfo({ records, currentUserId }: { records: OperationRecord[
             <span className="text-amber-900">{prev.opinion}</span>
           </p>
         )}
+        {prev.failure_reason && (
+          <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded">
+            <p className="text-red-700 text-xs font-medium">失败原因:</p>
+            <p className="text-red-600 text-xs mt-1">{prev.failure_reason}</p>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -175,6 +181,7 @@ function Timeline({ records }: { records: OperationRecord[] }) {
       )}
       <div className="relative">
         {sorted.map((record, idx) => {
+          const isValidationFailed = record.action === "validation_failed";
           const dotColor =
             record.action === "approve" || record.action === "archive"
               ? "bg-green-500"
@@ -182,8 +189,8 @@ function Timeline({ records }: { records: OperationRecord[] }) {
               ? "bg-red-500"
               : record.action === "return"
               ? "bg-amber-500"
-              : record.action === "validation_failed"
-              ? "bg-red-400"
+              : isValidationFailed
+              ? "bg-red-500"
               : "bg-blue-500";
 
           return (
@@ -191,10 +198,10 @@ function Timeline({ records }: { records: OperationRecord[] }) {
               <div className="flex flex-col items-center">
                 <div className={`w-3 h-3 rounded-full shrink-0 ${dotColor} ring-2 ring-white`} />
                 {idx < sorted.length - 1 && (
-                  <div className="w-px flex-1 bg-gray-200 mt-1" />
+                  <div className={`w-px flex-1 mt-1 ${isValidationFailed ? "border-l border-dashed border-red-300" : "bg-gray-200"}`} />
                 )}
               </div>
-              <div className="flex-1 -mt-0.5">
+              <div className={`flex-1 -mt-0.5 ${isValidationFailed ? "p-3 border border-dashed border-red-200 rounded-lg bg-red-50/50" : ""}`}>
                 <div className="flex items-center gap-2 mb-1">
                   <span className="text-sm font-medium text-gray-900">
                     {record.operator_name}
@@ -209,15 +216,30 @@ function Timeline({ records }: { records: OperationRecord[] }) {
                       ? "bg-red-100 text-red-700"
                       : record.action === "return"
                       ? "bg-amber-100 text-amber-700"
-                      : record.action === "validation_failed"
-                      ? "bg-red-50 text-red-600"
+                      : isValidationFailed
+                      ? "bg-red-100 text-red-700"
                       : "bg-blue-100 text-blue-700"
                   }`}>
+                    {isValidationFailed && <AlertTriangle className="inline w-3 h-3 mr-1 -mt-0.5" />}
                     {ACTION_LABELS[record.action]}
                   </span>
                 </div>
                 {record.opinion && (
                   <p className="text-sm text-gray-600 mb-1">{record.opinion}</p>
+                )}
+                {isValidationFailed && record.failure_reason && (
+                  <div className="mb-2">
+                    <p className="text-sm font-medium text-red-700 flex items-center gap-1">
+                      <AlertTriangle className="w-4 h-4" />
+                      失败原因
+                    </p>
+                    <p className="text-sm text-red-600 mt-1 ml-5">{record.failure_reason}</p>
+                  </div>
+                )}
+                {!isValidationFailed && record.failure_reason && (
+                  <div className="mb-2">
+                    <p className="text-xs text-red-600">失败原因: {record.failure_reason}</p>
+                  </div>
                 )}
                 <div className="flex items-center gap-2 text-xs text-gray-400">
                   <span>

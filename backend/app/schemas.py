@@ -51,7 +51,7 @@ class AppealResponse:
 @dataclass
 class OperationRecordResponse:
     id: str
-    appeal_id: str
+    appeal_id: Optional[str]
     operator_id: str
     operator_name: str
     operator_role: str
@@ -59,6 +59,8 @@ class OperationRecordResponse:
     opinion: Optional[str]
     from_status: Optional[str]
     to_status: Optional[str]
+    request_summary: Optional[str]
+    failure_reason: Optional[str]
     created_at: str
 
 
