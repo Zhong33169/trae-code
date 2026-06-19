@@ -1,0 +1,7 @@
+<claude-mem-context>
+# Memory Context
+
+# [trae-code-1] recent context, 2026-06-19 10:53am GMT+8
+
+No previous sessions found.
+</claude-mem-context>
