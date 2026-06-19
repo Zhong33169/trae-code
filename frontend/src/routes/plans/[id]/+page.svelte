@@ -194,6 +194,18 @@
 		}
 	}
 
+	function getBatchResultLabel(op) {
+		if (op.endsWith('_failed')) return '❌ 失败';
+		if (op.endsWith('_retry')) return '🔄 需重试';
+		return '✅ 成功';
+	}
+
+	function getBatchResultClass(op) {
+		if (op.endsWith('_failed')) return 'failed';
+		if (op.endsWith('_retry')) return 'retry';
+		return 'success';
+	}
+
 	function goBack() {
 		goto('/dashboard?refresh=1');
 	}
@@ -383,6 +395,11 @@
 										<span class="audit-op" style="color: {operationColors[log.operation] || '#64748b'}">
 											{operationNames[log.operation] || log.operation}
 										</span>
+										{#if log.operation.startsWith('batch_')}
+											<span class={`op-result ${getBatchResultClass(log.operation)}`}>
+												{getBatchResultLabel(log.operation)}
+											</span>
+										{/if}
 										<span class="audit-operator">{log.operator_name}</span>
 									</div>
 									<div class="audit-status">
@@ -1231,5 +1248,28 @@
 		padding: 30px;
 		color: #94a3b8;
 		font-size: 13px;
+	}
+
+	.op-result {
+		font-size: 11px;
+		padding: 2px 8px;
+		border-radius: 10px;
+		font-weight: 500;
+		margin-left: 8px;
+	}
+
+	.op-result.success {
+		background: #d1fae5;
+		color: #059669;
+	}
+
+	.op-result.failed {
+		background: #fee2e2;
+		color: #dc2626;
+	}
+
+	.op-result.retry {
+		background: #fef3c7;
+		color: #d97706;
 	}
 </style>

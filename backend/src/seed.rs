@@ -178,7 +178,7 @@ async fn seed_plans(
         ),
     ];
 
-    for (plan_no, title, client_name, status, version, created_by, created_at, has_evidence) in plans {
+    for (i, (plan_no, title, client_name, status, version, created_by, created_at, has_evidence)) in plans.into_iter().enumerate() {
         let plan_id = Uuid::new_v4().to_string();
 
         let submitted_at = if status != plan_status::DRAFT {
@@ -256,6 +256,84 @@ async fn seed_plans(
         }
 
         seed_operation_logs(pool, &plan_id, created_by, auditor_id, reviewer_id, status).await?;
+
+        // 第1条计划单（缺证据草稿）增加批量提交缺证据审计样例
+        if i == 0 {
+            sqlx::query(
+                r#"
+                INSERT INTO operation_logs (id, plan_id, operator_id, operation, old_status, new_status, remark, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                "#
+            )
+            .bind(Uuid::new_v4().to_string())
+            .bind(&plan_id)
+            .bind(registrar_id)
+            .bind("batch_submit_retry")
+            .bind(Some("draft"))
+            .bind(Some("draft"))
+            .bind(Some("提交前请至少上传一份证据材料"))
+            .bind(Some(created_at + Duration::hours(3)))
+            .execute(pool)
+            .await?;
+
+            // 增加批量审核错状态审计样例
+            sqlx::query(
+                r#"
+                INSERT INTO operation_logs (id, plan_id, operator_id, operation, old_status, new_status, remark, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                "#
+            )
+            .bind(Uuid::new_v4().to_string())
+            .bind(&plan_id)
+            .bind(auditor_id)
+            .bind("batch_approve_failed")
+            .bind(Some("draft"))
+            .bind(Some("draft"))
+            .bind(Some("当前状态 '草稿' 不允许审核通过"))
+            .bind(Some(created_at + Duration::hours(4)))
+            .execute(pool)
+            .await?;
+        }
+
+        // 第5条计划单（pending_audit，v6）增加版本冲突审计样例
+        if i == 4 {
+            sqlx::query(
+                r#"
+                INSERT INTO operation_logs (id, plan_id, operator_id, operation, old_status, new_status, remark, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                "#
+            )
+            .bind(Uuid::new_v4().to_string())
+            .bind(&plan_id)
+            .bind(auditor_id)
+            .bind("batch_approve_retry")
+            .bind(Some("pending_audit"))
+            .bind(Some("pending_audit"))
+            .bind(Some("版本冲突：当前版本为 v6，你基于 v5 操作，请刷新后重试"))
+            .bind(Some(created_at + Duration::hours(5)))
+            .execute(pool)
+            .await?;
+        }
+
+        // 第7条计划单（audit_rejected）增加批量复核错状态审计样例
+        if i == 6 {
+            sqlx::query(
+                r#"
+                INSERT INTO operation_logs (id, plan_id, operator_id, operation, old_status, new_status, remark, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                "#
+            )
+            .bind(Uuid::new_v4().to_string())
+            .bind(&plan_id)
+            .bind(reviewer_id)
+            .bind("batch_review_failed")
+            .bind(Some("audit_rejected"))
+            .bind(Some("audit_rejected"))
+            .bind(Some("当前角色 '广告代理公司复核负责人' 无权限执行批量 'review' 操作"))
+            .bind(Some(created_at + Duration::hours(3)))
+            .execute(pool)
+            .await?;
+        }
     }
 
     Ok(())

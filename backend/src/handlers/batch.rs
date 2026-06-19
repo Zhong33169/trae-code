@@ -19,6 +19,39 @@ fn check_version(plan: &MediaPlan, expected_version: i64) -> AppResult<()> {
     Ok(())
 }
 
+async fn write_audit_log(
+    pool: &sqlx::SqlitePool,
+    plan_id: &str,
+    user_id: &str,
+    operation: &str,
+    old_status: Option<&str>,
+    new_status: Option<&str>,
+    remark: Option<&str>,
+) -> (Option<String>, String) {
+    use uuid::Uuid;
+    let log_id = Uuid::new_v4().to_string();
+    let result = sqlx::query(
+        r#"
+        INSERT INTO operation_logs (id, plan_id, operator_id, operation, old_status, new_status, remark)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        "#
+    )
+    .bind(&log_id)
+    .bind(plan_id)
+    .bind(user_id)
+    .bind(operation)
+    .bind(old_status)
+    .bind(new_status)
+    .bind(remark)
+    .execute(pool)
+    .await;
+
+    match result {
+        Ok(_) => (Some(log_id), "success".to_string()),
+        Err(_) => (None, "failed".to_string()),
+    }
+}
+
 pub async fn batch_review(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -75,6 +108,16 @@ pub async fn batch_review(
             }
             Err(e) => {
                 failed_count += 1;
+                let (audit_log_id, audit_status) = write_audit_log(
+                    &state.pool,
+                    &item.plan_id,
+                    &claims.user_id,
+                    &format!("batch_{}_failed", req.action),
+                    None,
+                    None,
+                    Some(&format!("处理异常：{}", e)),
+                ).await;
+
                 results.push(BatchResultItem {
                     plan_id: item.plan_id.clone(),
                     plan_no: "未知".to_string(),
@@ -82,6 +125,8 @@ pub async fn batch_review(
                     status: "error".to_string(),
                     message: e.to_string(),
                     need_retry: false,
+                    audit_log_id,
+                    audit_status,
                 });
             }
         }
@@ -109,7 +154,7 @@ async fn process_single_plan(
     let plan = match plan_result {
         Ok(p) => p,
         Err(e) => {
-            add_operation_log(
+            let (audit_log_id, audit_status) = write_audit_log(
                 pool,
                 plan_id,
                 &claims.user_id,
@@ -117,7 +162,7 @@ async fn process_single_plan(
                 None,
                 None,
                 Some(&format!("获取计划单失败：{}", e)),
-            ).await.ok();
+            ).await;
 
             return Ok(BatchResultItem {
                 plan_id: plan_id.to_string(),
@@ -126,11 +171,13 @@ async fn process_single_plan(
                 status: "error".to_string(),
                 message: e.to_string(),
                 need_retry: false,
+                audit_log_id,
+                audit_status,
             });
         }
     };
 
-    let op_name = match action {
+    let op_prefix = match action {
         "approve" => "batch_approve",
         "reject" => "batch_reject",
         "review" => "batch_review",
@@ -155,6 +202,17 @@ async fn process_single_plan(
                 "submit" => "提交成功",
                 _ => "操作成功",
             };
+
+            let (audit_log_id, audit_status) = write_audit_log(
+                pool,
+                plan_id,
+                &claims.user_id,
+                &op_prefix,
+                Some(&plan.status),
+                Some(&p.status),
+                Some(msg),
+            ).await;
+
             Ok(BatchResultItem {
                 plan_id: plan_id.to_string(),
                 plan_no: p.plan_no.clone(),
@@ -162,18 +220,20 @@ async fn process_single_plan(
                 status: p.status,
                 message: msg.to_string(),
                 need_retry: false,
+                audit_log_id,
+                audit_status,
             })
         }
         Err(e) => {
             let need_retry = matches!(e, AppError::VersionConflict(_)) || matches!(e, AppError::MissingEvidence(_));
 
             let op_type = if need_retry {
-                format!("{}_retry", op_name)
+                format!("{}_retry", op_prefix)
             } else {
-                format!("{}_failed", op_name)
+                format!("{}_failed", op_prefix)
             };
 
-            add_operation_log(
+            let (audit_log_id, audit_status) = write_audit_log(
                 pool,
                 plan_id,
                 &claims.user_id,
@@ -181,7 +241,7 @@ async fn process_single_plan(
                 Some(&plan.status),
                 Some(&plan.status),
                 Some(&e.to_string()),
-            ).await.ok();
+            ).await;
 
             Ok(BatchResultItem {
                 plan_id: plan_id.to_string(),
@@ -190,6 +250,8 @@ async fn process_single_plan(
                 status: plan.status,
                 message: e.to_string(),
                 need_retry,
+                audit_log_id,
+                audit_status,
             })
         }
     }

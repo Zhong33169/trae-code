@@ -118,6 +118,8 @@ pub struct BatchResultItem {
     pub status: String,
     pub message: String,
     pub need_retry: bool,
+    pub audit_log_id: Option<String>,
+    pub audit_status: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

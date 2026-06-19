@@ -516,7 +516,11 @@
 										<div class="result-message">{item.message}</div>
 										<div class="result-audit">
 											<span class="audit-label">📝 审计记录：</span>
-											<span class="audit-status success">已记录</span>
+											{#if item.audit_status === 'success'}
+												<span class="audit-status success">✅ 已记录 (ID: {item.audit_log_id?.slice(-8) || ''})</span>
+											{:else}
+												<span class="audit-status failed">❌ 记录失败</span>
+											{/if}
 										</div>
 										{#if getSuggestion(item)}
 											<div class="result-suggestion">
@@ -1223,6 +1227,11 @@
 
 	.audit-status.success {
 		color: #10b981;
+		font-weight: 500;
+	}
+
+	.audit-status.failed {
+		color: #dc2626;
 		font-weight: 500;
 	}
 
