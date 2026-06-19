@@ -1,0 +1,16 @@
+@import "tailwindcss";
+
+@theme {
+  --color-indigo-900: #1e3a5f;
+  --color-amber-600: #d97706;
+}
+
+body {
+  font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
