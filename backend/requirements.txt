@@ -1,0 +1,4 @@
+litestar>=2.0
+sqlalchemy>=2.0
+aiosqlite>=0.19
+uvicorn>=0.24
