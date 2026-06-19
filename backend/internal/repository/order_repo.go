@@ -72,22 +72,22 @@ func GetOrders(db *sql.DB, query model.OrderListQuery) ([]model.KnowledgeRevisio
 			o.time_limit_hours, o.deadline,
 			o.revision_before, o.revision_after, o.revision_description, o.processing_opinion,
 			o.version, o.created_at, o.updated_at,
-			COALESCE(al.failure_reason, ''), COALESCE(al.created_at, '')
+			COALESCE(al.failure_type, ''), COALESCE(al.failure_reason, ''), COALESCE(al.created_at, '')
 		FROM knowledge_revision_orders o
 		LEFT JOIN knowledge_items ki ON o.knowledge_item_id = ki.id
 		LEFT JOIN users u1 ON o.creator_id = u1.id
 		LEFT JOIN users u2 ON o.current_handler_id = u2.id
 		LEFT JOIN (
-			SELECT al1.order_id, al1.failure_reason, al1.created_at
-			FROM audit_logs al1
-			INNER JOIN (
-				SELECT order_id, MAX(created_at) AS max_created_at
-				FROM audit_logs
-				WHERE failure_reason IS NOT NULL AND failure_reason != ''
-				GROUP BY order_id
-			) al2 ON al1.order_id = al2.order_id AND al1.created_at = al2.max_created_at
-			WHERE al1.failure_reason IS NOT NULL AND al1.failure_reason != ''
-			GROUP BY al1.order_id
+			SELECT a.order_id, a.failure_type, a.failure_reason, a.created_at
+			FROM audit_logs a
+			WHERE a.failure_reason IS NOT NULL AND a.failure_reason != ''
+			AND a.id = (
+				SELECT id FROM audit_logs b
+				WHERE b.order_id = a.order_id
+				AND b.failure_reason IS NOT NULL AND b.failure_reason != ''
+				ORDER BY b.created_at DESC, b.id DESC
+				LIMIT 1
+			)
 		) al ON o.id = al.order_id
 		%s
 		ORDER BY o.created_at DESC
@@ -111,6 +111,7 @@ func GetOrders(db *sql.DB, query model.OrderListQuery) ([]model.KnowledgeRevisio
 		var overdueReason sql.NullString
 		var overdueAction sql.NullString
 		var processingOpinion sql.NullString
+		var lastFailureType sql.NullString
 		var lastFailureReason sql.NullString
 		var lastFailureAt sql.NullString
 
@@ -122,7 +123,7 @@ func GetOrders(db *sql.DB, query model.OrderListQuery) ([]model.KnowledgeRevisio
 			&o.TimeLimitHours, &o.Deadline,
 			&o.RevisionBefore, &o.RevisionAfter, &o.RevisionDesc, &processingOpinion,
 			&o.Version, &o.CreatedAt, &o.UpdatedAt,
-			&lastFailureReason, &lastFailureAt,
+			&lastFailureType, &lastFailureReason, &lastFailureAt,
 		)
 		if err != nil {
 			return nil, 0, fmt.Errorf("扫描工单数据失败: %w", err)
@@ -146,6 +147,9 @@ func GetOrders(db *sql.DB, query model.OrderListQuery) ([]model.KnowledgeRevisio
 		if processingOpinion.Valid {
 			o.ProcessingOpinion = processingOpinion.String
 		}
+		if lastFailureType.Valid {
+			o.LastFailureType = lastFailureType.String
+		}
 		if lastFailureReason.Valid {
 			o.LastFailureReason = lastFailureReason.String
 		}
@@ -167,6 +171,7 @@ func GetOrderByID(db *sql.DB, id string) (*model.KnowledgeRevisionOrder, error) 
 	var overdueReason sql.NullString
 	var overdueAction sql.NullString
 	var processingOpinion sql.NullString
+	var lastFailureType sql.NullString
 	var lastFailureReason sql.NullString
 	var lastFailureAt sql.NullString
 
@@ -178,22 +183,22 @@ func GetOrderByID(db *sql.DB, id string) (*model.KnowledgeRevisionOrder, error) 
 			o.time_limit_hours, o.deadline,
 			o.revision_before, o.revision_after, o.revision_description, o.processing_opinion,
 			o.version, o.created_at, o.updated_at,
-			COALESCE(al.failure_reason, ''), COALESCE(al.created_at, '')
+			COALESCE(al.failure_type, ''), COALESCE(al.failure_reason, ''), COALESCE(al.created_at, '')
 		FROM knowledge_revision_orders o
 		LEFT JOIN knowledge_items ki ON o.knowledge_item_id = ki.id
 		LEFT JOIN users u1 ON o.creator_id = u1.id
 		LEFT JOIN users u2 ON o.current_handler_id = u2.id
 		LEFT JOIN (
-			SELECT al1.order_id, al1.failure_reason, al1.created_at
-			FROM audit_logs al1
-			INNER JOIN (
-				SELECT order_id, MAX(created_at) AS max_created_at
-				FROM audit_logs
-				WHERE failure_reason IS NOT NULL AND failure_reason != ''
-				GROUP BY order_id
-			) al2 ON al1.order_id = al2.order_id AND al1.created_at = al2.max_created_at
-			WHERE al1.failure_reason IS NOT NULL AND al1.failure_reason != ''
-			GROUP BY al1.order_id
+			SELECT a.order_id, a.failure_type, a.failure_reason, a.created_at
+			FROM audit_logs a
+			WHERE a.failure_reason IS NOT NULL AND a.failure_reason != ''
+			AND a.id = (
+				SELECT id FROM audit_logs b
+				WHERE b.order_id = a.order_id
+				AND b.failure_reason IS NOT NULL AND b.failure_reason != ''
+				ORDER BY b.created_at DESC, b.id DESC
+				LIMIT 1
+			)
 		) al ON o.id = al.order_id
 		WHERE o.id = $1
 	`, id).Scan(
@@ -204,7 +209,7 @@ func GetOrderByID(db *sql.DB, id string) (*model.KnowledgeRevisionOrder, error) 
 		&o.TimeLimitHours, &o.Deadline,
 		&o.RevisionBefore, &o.RevisionAfter, &o.RevisionDesc, &processingOpinion,
 		&o.Version, &o.CreatedAt, &o.UpdatedAt,
-		&lastFailureReason, &lastFailureAt,
+		&lastFailureType, &lastFailureReason, &lastFailureAt,
 	)
 
 	if err == sql.ErrNoRows {
@@ -231,6 +236,9 @@ func GetOrderByID(db *sql.DB, id string) (*model.KnowledgeRevisionOrder, error) 
 	}
 	if processingOpinion.Valid {
 		o.ProcessingOpinion = processingOpinion.String
+	}
+	if lastFailureType.Valid {
+		o.LastFailureType = lastFailureType.String
 	}
 	if lastFailureReason.Valid {
 		o.LastFailureReason = lastFailureReason.String

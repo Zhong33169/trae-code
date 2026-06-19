@@ -12,7 +12,7 @@ import (
 	"github.com/google/uuid"
 )
 
-func CreateFailureAuditLog(db *sql.DB, order *model.KnowledgeRevisionOrder, action string, actorID, actorName, actorRole string, failureReason string) error {
+func CreateFailureAuditLog(db *sql.DB, order *model.KnowledgeRevisionOrder, action string, actorID, actorName, actorRole string, failureType string, failureReason string) error {
 	if order == nil {
 		return nil
 	}
@@ -27,6 +27,7 @@ func CreateFailureAuditLog(db *sql.DB, order *model.KnowledgeRevisionOrder, acti
 		ActorRole:     actorRole,
 		FromStatus:    order.Status,
 		ToStatus:      "",
+		FailureType:   failureType,
 		FailureReason: failureReason,
 		CreatedAt:     now,
 	}
@@ -213,13 +214,13 @@ func AdvanceOrder(db *sql.DB, orderID string, req model.AdvanceRequest, actorID,
 
 	if req.Opinion == "" {
 		err := fmt.Errorf("审批意见不能为空")
-		CreateFailureAuditLog(db, order, "advance", actorID, actorName, actorRole, ClassifyFailure(err).Reason)
+		CreateFailureAuditLog(db, order, "advance", actorID, actorName, actorRole, ClassifyFailure(err).Type, ClassifyFailure(err).Reason)
 		return nil, err
 	}
 
 	if req.Version != order.Version {
 		err := fmt.Errorf("版本冲突：工单版本已变更，当前版本为 %d，请求版本为 %d", order.Version, req.Version)
-		CreateFailureAuditLog(db, order, "advance", actorID, actorName, actorRole, ClassifyFailure(err).Reason)
+		CreateFailureAuditLog(db, order, "advance", actorID, actorName, actorRole, ClassifyFailure(err).Type, ClassifyFailure(err).Reason)
 		return nil, err
 	}
 
@@ -231,19 +232,19 @@ func AdvanceOrder(db *sql.DB, orderID string, req model.AdvanceRequest, actorID,
 		toStatus = "archived"
 	default:
 		err := fmt.Errorf("当前状态 %s 不允许推进操作", order.Status)
-		CreateFailureAuditLog(db, order, "advance", actorID, actorName, actorRole, ClassifyFailure(err).Reason)
+		CreateFailureAuditLog(db, order, "advance", actorID, actorName, actorRole, ClassifyFailure(err).Type, ClassifyFailure(err).Reason)
 		return nil, err
 	}
 
 	if err := ValidateTransition(order.Status, toStatus, actorRole); err != nil {
-		CreateFailureAuditLog(db, order, "advance", actorID, actorName, actorRole, ClassifyFailure(err).Reason)
+		CreateFailureAuditLog(db, order, "advance", actorID, actorName, actorRole, ClassifyFailure(err).Type, ClassifyFailure(err).Reason)
 		return nil, err
 	}
 
 	for _, m := range order.Materials {
 		if !m.IsComplete {
 			err := fmt.Errorf("存在未完成的材料（%s），无法推进", m.Name)
-			CreateFailureAuditLog(db, order, "advance", actorID, actorName, actorRole, ClassifyFailure(err).Reason)
+			CreateFailureAuditLog(db, order, "advance", actorID, actorName, actorRole, ClassifyFailure(err).Type, ClassifyFailure(err).Reason)
 			return nil, err
 		}
 	}
@@ -251,7 +252,7 @@ func AdvanceOrder(db *sql.DB, orderID string, req model.AdvanceRequest, actorID,
 	for _, f := range order.Feedbacks {
 		if !f.IsResolved {
 			err := fmt.Errorf("存在未解决的反馈（%s），无法推进", f.Content)
-			CreateFailureAuditLog(db, order, "advance", actorID, actorName, actorRole, ClassifyFailure(err).Reason)
+			CreateFailureAuditLog(db, order, "advance", actorID, actorName, actorRole, ClassifyFailure(err).Type, ClassifyFailure(err).Reason)
 			return nil, err
 		}
 	}
@@ -259,12 +260,12 @@ func AdvanceOrder(db *sql.DB, orderID string, req model.AdvanceRequest, actorID,
 	if order.IsOverdue {
 		if req.OverdueReason == "" {
 			err := fmt.Errorf("逾期工单必须填写逾期原因")
-			CreateFailureAuditLog(db, order, "advance", actorID, actorName, actorRole, ClassifyFailure(err).Reason)
+			CreateFailureAuditLog(db, order, "advance", actorID, actorName, actorRole, ClassifyFailure(err).Type, ClassifyFailure(err).Reason)
 			return nil, err
 		}
 		if req.OverdueAction == "" {
 			err := fmt.Errorf("逾期工单必须填写逾期处理措施")
-			CreateFailureAuditLog(db, order, "advance", actorID, actorName, actorRole, ClassifyFailure(err).Reason)
+			CreateFailureAuditLog(db, order, "advance", actorID, actorName, actorRole, ClassifyFailure(err).Type, ClassifyFailure(err).Reason)
 			return nil, err
 		}
 	}
@@ -305,7 +306,7 @@ func AdvanceOrder(db *sql.DB, orderID string, req model.AdvanceRequest, actorID,
 	}
 
 	if err := repository.UpdateOrder(db, order); err != nil {
-		CreateFailureAuditLog(db, order, "advance", actorID, actorName, actorRole, ClassifyFailure(err).Reason)
+		CreateFailureAuditLog(db, order, "advance", actorID, actorName, actorRole, ClassifyFailure(err).Type, ClassifyFailure(err).Reason)
 		return nil, err
 	}
 
@@ -352,13 +353,13 @@ func ReturnOrder(db *sql.DB, orderID string, req model.ReturnRequest, actorID, a
 
 	if req.Reason == "" {
 		err := fmt.Errorf("退回原因不能为空")
-		CreateFailureAuditLog(db, order, "return", actorID, actorName, actorRole, ClassifyFailure(err).Reason)
+		CreateFailureAuditLog(db, order, "return", actorID, actorName, actorRole, ClassifyFailure(err).Type, ClassifyFailure(err).Reason)
 		return nil, err
 	}
 
 	if req.Version != order.Version {
 		err := fmt.Errorf("版本冲突：工单版本已变更，当前版本为 %d，请求版本为 %d", order.Version, req.Version)
-		CreateFailureAuditLog(db, order, "return", actorID, actorName, actorRole, ClassifyFailure(err).Reason)
+		CreateFailureAuditLog(db, order, "return", actorID, actorName, actorRole, ClassifyFailure(err).Type, ClassifyFailure(err).Reason)
 		return nil, err
 	}
 
@@ -370,12 +371,12 @@ func ReturnOrder(db *sql.DB, orderID string, req model.ReturnRequest, actorID, a
 		toStatus = "pending_review"
 	default:
 		err := fmt.Errorf("当前状态 %s 不允许退回操作", order.Status)
-		CreateFailureAuditLog(db, order, "return", actorID, actorName, actorRole, ClassifyFailure(err).Reason)
+		CreateFailureAuditLog(db, order, "return", actorID, actorName, actorRole, ClassifyFailure(err).Type, ClassifyFailure(err).Reason)
 		return nil, err
 	}
 
 	if err := ValidateTransition(order.Status, toStatus, actorRole); err != nil {
-		CreateFailureAuditLog(db, order, "return", actorID, actorName, actorRole, ClassifyFailure(err).Reason)
+		CreateFailureAuditLog(db, order, "return", actorID, actorName, actorRole, ClassifyFailure(err).Type, ClassifyFailure(err).Reason)
 		return nil, err
 	}
 
@@ -405,7 +406,7 @@ func ReturnOrder(db *sql.DB, orderID string, req model.ReturnRequest, actorID, a
 	order.UpdatedAt = now
 
 	if err := repository.UpdateOrder(db, order); err != nil {
-		CreateFailureAuditLog(db, order, "return", actorID, actorName, actorRole, ClassifyFailure(err).Reason)
+		CreateFailureAuditLog(db, order, "return", actorID, actorName, actorRole, ClassifyFailure(err).Type, ClassifyFailure(err).Reason)
 		return nil, err
 	}
 
@@ -443,18 +444,18 @@ func CorrectOrder(db *sql.DB, orderID string, req model.CorrectRequest, actorID,
 
 	if req.Version != order.Version {
 		err := fmt.Errorf("版本冲突：工单版本已变更，当前版本为 %d，请求版本为 %d", order.Version, req.Version)
-		CreateFailureAuditLog(db, order, "correct", actorID, actorName, actorRole, ClassifyFailure(err).Reason)
+		CreateFailureAuditLog(db, order, "correct", actorID, actorName, actorRole, ClassifyFailure(err).Type, ClassifyFailure(err).Reason)
 		return nil, err
 	}
 
 	if err := ValidateTransition(order.Status, "pending_review", actorRole); err != nil {
-		CreateFailureAuditLog(db, order, "correct", actorID, actorName, actorRole, ClassifyFailure(err).Reason)
+		CreateFailureAuditLog(db, order, "correct", actorID, actorName, actorRole, ClassifyFailure(err).Type, ClassifyFailure(err).Reason)
 		return nil, err
 	}
 
 	if order.Status != "pending_correction" {
 		err := fmt.Errorf("只有待补正状态的工单才能补正")
-		CreateFailureAuditLog(db, order, "correct", actorID, actorName, actorRole, ClassifyFailure(err).Reason)
+		CreateFailureAuditLog(db, order, "correct", actorID, actorName, actorRole, ClassifyFailure(err).Type, ClassifyFailure(err).Reason)
 		return nil, err
 	}
 
@@ -476,7 +477,7 @@ func CorrectOrder(db *sql.DB, orderID string, req model.CorrectRequest, actorID,
 	order.CurrentHandlerRole = "supervisor"
 
 	if err := repository.UpdateOrder(db, order); err != nil {
-		CreateFailureAuditLog(db, order, "correct", actorID, actorName, actorRole, ClassifyFailure(err).Reason)
+		CreateFailureAuditLog(db, order, "correct", actorID, actorName, actorRole, ClassifyFailure(err).Type, ClassifyFailure(err).Reason)
 		return nil, err
 	}
 

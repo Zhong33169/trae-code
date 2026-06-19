@@ -1,8 +1,11 @@
 package middleware
 
 import (
+	"bytes"
 	"database/sql"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -14,7 +17,7 @@ import (
 	"github.com/google/uuid"
 )
 
-func writeAuthFailureAuditLog(db *sql.DB, orderID, actorID, actorName, actorRole string, failureReason string) {
+func writeAuthFailureAuditLog(db *sql.DB, orderID, actorID, actorName, actorRole string, failureType, failureReason string) {
 	var orderNo string
 	var fromStatus string
 	row := db.QueryRow("SELECT order_no, status FROM knowledge_revision_orders WHERE id = $1", orderID)
@@ -32,6 +35,7 @@ func writeAuthFailureAuditLog(db *sql.DB, orderID, actorID, actorName, actorRole
 		ActorRole:     actorRole,
 		FromStatus:    fromStatus,
 		ToStatus:      "",
+		FailureType:   failureType,
 		FailureReason: failureReason,
 		CreatedAt:     now,
 	}
@@ -55,6 +59,26 @@ func extractOrderID(path string) string {
 	return candidate
 }
 
+func isBatchEndpoint(path string) bool {
+	return strings.HasSuffix(path, "/batch-advance") || strings.HasSuffix(path, "/batch-return")
+}
+
+func peekBatchOrderIDs(c *gin.Context) []string {
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		return nil
+	}
+	c.Request.Body = io.NopCloser(bytes.NewBuffer(body))
+
+	var req struct {
+		OrderIDs []string `json:"order_ids"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		return nil
+	}
+	return req.OrderIDs
+}
+
 func Auth(db *sql.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if strings.HasPrefix(c.Request.URL.Path, "/api/auth/") {
@@ -74,6 +98,12 @@ func Auth(db *sql.DB) gin.HandlerFunc {
 			return
 		}
 
+		batchOrderIDs := []string(nil)
+		isBatch := isBatchEndpoint(c.Request.URL.Path)
+		if isBatch {
+			batchOrderIDs = peekBatchOrderIDs(c)
+		}
+
 		validRoles := map[string]bool{
 			"clerk":      true,
 			"supervisor": true,
@@ -81,17 +111,25 @@ func Auth(db *sql.DB) gin.HandlerFunc {
 		}
 
 		if !validRoles[role] {
-			orderID := extractOrderID(c.Request.URL.Path)
-			if orderID != "" {
-				writeAuthFailureAuditLog(db, orderID, userID, "", role,
-					fmt.Sprintf("无效身份：角色类型 %s 不合法", role))
+			failureType := "unauthorized"
+			failureReason := fmt.Sprintf("无效身份：角色类型 %s 不合法", role)
+			if isBatch {
+				for _, oid := range batchOrderIDs {
+					writeAuthFailureAuditLog(db, oid, userID, "", role, failureType, failureReason)
+				}
+			} else {
+				orderID := extractOrderID(c.Request.URL.Path)
+				if orderID != "" {
+					writeAuthFailureAuditLog(db, orderID, userID, "", role, failureType, failureReason)
+				}
 			}
 			c.JSON(http.StatusUnauthorized, gin.H{
 				"code":    401,
 				"message": "未授权：无效的角色类型",
 				"data": gin.H{
-					"failure_type":   "unauthorized",
-					"failure_reason": fmt.Sprintf("无效身份：角色类型 %s 不合法", role),
+					"failure_type":   failureType,
+					"failure_reason": failureReason,
+					"failed":         buildBatchFailedItems(db, batchOrderIDs, failureType, failureReason),
 				},
 			})
 			c.Abort()
@@ -108,17 +146,25 @@ func Auth(db *sql.DB) gin.HandlerFunc {
 			return
 		}
 		if user == nil {
-			orderID := extractOrderID(c.Request.URL.Path)
-			if orderID != "" {
-				writeAuthFailureAuditLog(db, orderID, userID, "", role,
-					fmt.Sprintf("无效身份：用户 %s 不存在", userID))
+			failureType := "unauthorized"
+			failureReason := fmt.Sprintf("无效身份：用户 %s 不存在", userID)
+			if isBatch {
+				for _, oid := range batchOrderIDs {
+					writeAuthFailureAuditLog(db, oid, userID, "", role, failureType, failureReason)
+				}
+			} else {
+				orderID := extractOrderID(c.Request.URL.Path)
+				if orderID != "" {
+					writeAuthFailureAuditLog(db, orderID, userID, "", role, failureType, failureReason)
+				}
 			}
 			c.JSON(http.StatusUnauthorized, gin.H{
 				"code":    401,
 				"message": "未授权：用户不存在",
 				"data": gin.H{
-					"failure_type":   "unauthorized",
-					"failure_reason": fmt.Sprintf("无效身份：用户 %s 不存在", userID),
+					"failure_type":   failureType,
+					"failure_reason": failureReason,
+					"failed":         buildBatchFailedItems(db, batchOrderIDs, failureType, failureReason),
 				},
 			})
 			c.Abort()
@@ -126,17 +172,25 @@ func Auth(db *sql.DB) gin.HandlerFunc {
 		}
 
 		if user.Role != role {
-			orderID := extractOrderID(c.Request.URL.Path)
-			if orderID != "" {
-				writeAuthFailureAuditLog(db, orderID, userID, user.Name, role,
-					fmt.Sprintf("伪造角色：用户 %s 实际角色为 %s，请求角色为 %s", userID, user.Role, role))
+			failureType := "unauthorized"
+			failureReason := fmt.Sprintf("伪造角色：用户 %s 实际角色为 %s，请求角色为 %s", userID, user.Role, role)
+			if isBatch {
+				for _, oid := range batchOrderIDs {
+					writeAuthFailureAuditLog(db, oid, userID, user.Name, role, failureType, failureReason)
+				}
+			} else {
+				orderID := extractOrderID(c.Request.URL.Path)
+				if orderID != "" {
+					writeAuthFailureAuditLog(db, orderID, userID, user.Name, role, failureType, failureReason)
+				}
 			}
 			c.JSON(http.StatusForbidden, gin.H{
 				"code":    403,
 				"message": "未授权：角色与用户不匹配，拒绝伪造角色",
 				"data": gin.H{
-					"failure_type":   "unauthorized",
-					"failure_reason": fmt.Sprintf("伪造角色：用户 %s 实际角色为 %s，请求角色为 %s", userID, user.Role, role),
+					"failure_type":   failureType,
+					"failure_reason": failureReason,
+					"failed":         buildBatchFailedItems(db, batchOrderIDs, failureType, failureReason),
 				},
 			})
 			c.Abort()
@@ -148,4 +202,26 @@ func Auth(db *sql.DB) gin.HandlerFunc {
 		c.Set("userName", user.Name)
 		c.Next()
 	}
+}
+
+func buildBatchFailedItems(db *sql.DB, orderIDs []string, failureType, failureReason string) []model.BatchFailureItem {
+	if len(orderIDs) == 0 {
+		return nil
+	}
+	items := make([]model.BatchFailureItem, 0, len(orderIDs))
+	for _, oid := range orderIDs {
+		item := model.BatchFailureItem{
+			OrderID:       oid,
+			FailureType:   failureType,
+			FailureReason: failureReason,
+		}
+		var orderNo string
+		if err := db.QueryRow("SELECT order_no FROM knowledge_revision_orders WHERE id = $1", oid).Scan(&orderNo); err == nil {
+			item.OrderNo = orderNo
+		} else {
+			item.OrderNo = oid
+		}
+		items = append(items, item)
+	}
+	return items
 }

@@ -75,6 +75,7 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     to_status TEXT DEFAULT '',
     opinion TEXT DEFAULT '',
     reason TEXT DEFAULT '',
+    failure_type TEXT DEFAULT '',
     failure_reason TEXT DEFAULT '',
     created_at TEXT NOT NULL,
     FOREIGN KEY (order_id) REFERENCES knowledge_revision_orders(id) ON DELETE CASCADE
@@ -143,8 +144,8 @@ INSERT OR IGNORE INTO knowledge_feedbacks (id, order_id, content, is_resolved, r
 INSERT OR IGNORE INTO knowledge_feedbacks (id, order_id, content, is_resolved, resolved_at) VALUES ('fb2', 'ord1', '建议增加方言区域的话术变体', 1, '2026-06-02 15:00:00');
 
 -- Audit log for ord1
-INSERT OR IGNORE INTO audit_logs (id, order_id, order_no, action, actor_id, actor_name, actor_role, from_status, to_status, opinion, reason, failure_reason, created_at)
-VALUES ('al1', 'ord1', 'KSX-20260601001', 'create', 'u1', '张登记', 'clerk', '', 'pending_review', '', '', '', '2026-06-01 09:00:00');
+INSERT OR IGNORE INTO audit_logs (id, order_id, order_no, action, actor_id, actor_name, actor_role, from_status, to_status, opinion, reason, failure_type, failure_reason, created_at)
+VALUES ('al1', 'ord1', 'KSX-20260601001', 'create', 'u1', '张登记', 'clerk', '', 'pending_review', '', '', '', '', '2026-06-01 09:00:00');
 
 
 -- 2. KSX-20260601002: 正常流程-待复核 (pending_final_review, not overdue)
@@ -169,10 +170,10 @@ INSERT OR IGNORE INTO materials (id, order_id, name, file_type, is_complete, upl
 
 INSERT OR IGNORE INTO knowledge_feedbacks (id, order_id, content, is_resolved, resolved_at) VALUES ('fb3', 'ord2', '需要明确跨境商品的退换货规则', 1, '2026-06-03 09:00:00');
 
-INSERT OR IGNORE INTO audit_logs (id, order_id, order_no, action, actor_id, actor_name, actor_role, from_status, to_status, opinion, reason, failure_reason, created_at)
-VALUES ('al2', 'ord2', 'KSX-20260601002', 'create', 'u1', '张登记', 'clerk', '', 'pending_review', '', '', '', '2026-06-01 10:00:00');
-INSERT OR IGNORE INTO audit_logs (id, order_id, order_no, action, actor_id, actor_name, actor_role, from_status, to_status, opinion, reason, failure_reason, created_at)
-VALUES ('al3', 'ord2', 'KSX-20260601002', 'advance', 'u2', '李审核', 'supervisor', 'pending_review', 'pending_final_review', '修订内容完整，同意提交复核', '', '', '2026-06-05 11:00:00');
+INSERT OR IGNORE INTO audit_logs (id, order_id, order_no, action, actor_id, actor_name, actor_role, from_status, to_status, opinion, reason, failure_type, failure_reason, created_at)
+VALUES ('al2', 'ord2', 'KSX-20260601002', 'create', 'u1', '张登记', 'clerk', '', 'pending_review', '', '', '', '', '2026-06-01 10:00:00');
+INSERT OR IGNORE INTO audit_logs (id, order_id, order_no, action, actor_id, actor_name, actor_role, from_status, to_status, opinion, reason, failure_type, failure_reason, created_at)
+VALUES ('al3', 'ord2', 'KSX-20260601002', 'advance', 'u2', '李审核', 'supervisor', 'pending_review', 'pending_final_review', '修订内容完整，同意提交复核', '', '', '', '2026-06-05 11:00:00');
 
 
 -- 3. KSX-20260601003: 已归档 (archived)
@@ -200,12 +201,12 @@ INSERT OR IGNORE INTO knowledge_feedbacks (id, order_id, content, is_resolved, r
 INSERT OR IGNORE INTO knowledge_feedbacks (id, order_id, content, is_resolved, resolved_at) VALUES ('fb5', 'ord3', '建议增加升级后处理时限要求', 1, '2026-05-22 11:00:00');
 
 -- Audit logs for ord3 - full flow: create -> advance -> advance
-INSERT OR IGNORE INTO audit_logs (id, order_id, order_no, action, actor_id, actor_name, actor_role, from_status, to_status, opinion, reason, failure_reason, created_at)
-VALUES ('al4', 'ord3', 'KSX-20260601003', 'create', 'u1', '张登记', 'clerk', '', 'pending_review', '', '', '', '2026-05-20 09:00:00');
-INSERT OR IGNORE INTO audit_logs (id, order_id, order_no, action, actor_id, actor_name, actor_role, from_status, to_status, opinion, reason, failure_reason, created_at)
-VALUES ('al5', 'ord3', 'KSX-20260601003', 'advance', 'u2', '李审核', 'supervisor', 'pending_review', 'pending_final_review', '修订内容完整，流程清晰，同意提交复核', '', '', '2026-05-24 14:00:00');
-INSERT OR IGNORE INTO audit_logs (id, order_id, order_no, action, actor_id, actor_name, actor_role, from_status, to_status, opinion, reason, failure_reason, created_at)
-VALUES ('al6', 'ord3', 'KSX-20260601003', 'advance', 'u3', '王复核', 'reviewer', 'pending_final_review', 'archived', '修订内容规范完整，同意归档', '', '', '2026-05-28 16:00:00');
+INSERT OR IGNORE INTO audit_logs (id, order_id, order_no, action, actor_id, actor_name, actor_role, from_status, to_status, opinion, reason, failure_type, failure_reason, created_at)
+VALUES ('al4', 'ord3', 'KSX-20260601003', 'create', 'u1', '张登记', 'clerk', '', 'pending_review', '', '', '', '', '2026-05-20 09:00:00');
+INSERT OR IGNORE INTO audit_logs (id, order_id, order_no, action, actor_id, actor_name, actor_role, from_status, to_status, opinion, reason, failure_type, failure_reason, created_at)
+VALUES ('al5', 'ord3', 'KSX-20260601003', 'advance', 'u2', '李审核', 'supervisor', 'pending_review', 'pending_final_review', '修订内容完整，流程清晰，同意提交复核', '', '', '', '2026-05-24 14:00:00');
+INSERT OR IGNORE INTO audit_logs (id, order_id, order_no, action, actor_id, actor_name, actor_role, from_status, to_status, opinion, reason, failure_type, failure_reason, created_at)
+VALUES ('al6', 'ord3', 'KSX-20260601003', 'advance', 'u3', '王复核', 'reviewer', 'pending_final_review', 'archived', '修订内容规范完整，同意归档', '', '', '', '2026-05-28 16:00:00');
 
 
 -- 4. KSX-20260601004: 待补正 (pending_correction, returned by supervisor, materials incomplete)
@@ -232,10 +233,10 @@ INSERT OR IGNORE INTO materials (id, order_id, name, file_type, is_complete, upl
 -- Feedbacks for ord4 (unresolved)
 INSERT OR IGNORE INTO knowledge_feedbacks (id, order_id, content, is_resolved, resolved_at) VALUES ('fb6', 'ord4', '需补充灾备切换的具体操作步骤', 0, NULL);
 
-INSERT OR IGNORE INTO audit_logs (id, order_id, order_no, action, actor_id, actor_name, actor_role, from_status, to_status, opinion, reason, failure_reason, created_at)
-VALUES ('al7', 'ord4', 'KSX-20260601004', 'create', 'u1', '张登记', 'clerk', '', 'pending_review', '', '', '', '2026-06-02 08:00:00');
-INSERT OR IGNORE INTO audit_logs (id, order_id, order_no, action, actor_id, actor_name, actor_role, from_status, to_status, opinion, reason, failure_reason, created_at)
-VALUES ('al8', 'ord4', 'KSX-20260601004', 'return', 'u2', '李审核', 'supervisor', 'pending_review', 'pending_correction', '', '流程图不完整，需补充灾备切换步骤', '', '2026-06-08 10:00:00');
+INSERT OR IGNORE INTO audit_logs (id, order_id, order_no, action, actor_id, actor_name, actor_role, from_status, to_status, opinion, reason, failure_type, failure_reason, created_at)
+VALUES ('al7', 'ord4', 'KSX-20260601004', 'create', 'u1', '张登记', 'clerk', '', 'pending_review', '', '', '', '', '2026-06-02 08:00:00');
+INSERT OR IGNORE INTO audit_logs (id, order_id, order_no, action, actor_id, actor_name, actor_role, from_status, to_status, opinion, reason, failure_type, failure_reason, created_at)
+VALUES ('al8', 'ord4', 'KSX-20260601004', 'return', 'u2', '李审核', 'supervisor', 'pending_review', 'pending_correction', '', '流程图不完整，需补充灾备切换步骤', '', '', '2026-06-08 10:00:00');
 
 
 -- 5. KSX-20260601005: 逾期-待审核 (pending_review, is_overdue=true, overdue_days=5)
@@ -261,8 +262,8 @@ INSERT OR IGNORE INTO materials (id, order_id, name, file_type, is_complete, upl
 INSERT OR IGNORE INTO knowledge_feedbacks (id, order_id, content, is_resolved, resolved_at) VALUES ('fb7', 'ord5', '回访时限建议为3个工作日内', 1, '2026-06-11 10:00:00');
 INSERT OR IGNORE INTO knowledge_feedbacks (id, order_id, content, is_resolved, resolved_at) VALUES ('fb8', 'ord5', '需增加回访不满意时的二次处理流程', 1, '2026-06-11 14:00:00');
 
-INSERT OR IGNORE INTO audit_logs (id, order_id, order_no, action, actor_id, actor_name, actor_role, from_status, to_status, opinion, reason, failure_reason, created_at)
-VALUES ('al9', 'ord5', 'KSX-20260601005', 'create', 'u1', '张登记', 'clerk', '', 'pending_review', '', '', '', '2026-06-10 09:00:00');
+INSERT OR IGNORE INTO audit_logs (id, order_id, order_no, action, actor_id, actor_name, actor_role, from_status, to_status, opinion, reason, failure_type, failure_reason, created_at)
+VALUES ('al9', 'ord5', 'KSX-20260601005', 'create', 'u1', '张登记', 'clerk', '', 'pending_review', '', '', '', '', '2026-06-10 09:00:00');
 
 
 -- 6. KSX-20260601006: 逾期-待复核 (pending_final_review, is_overdue=true, overdue_days=3)
@@ -287,10 +288,10 @@ INSERT OR IGNORE INTO materials (id, order_id, name, file_type, is_complete, upl
 
 INSERT OR IGNORE INTO knowledge_feedbacks (id, order_id, content, is_resolved, resolved_at) VALUES ('fb9', 'ord6', 'VIP等级划分需要与最新的会员体系对齐', 1, '2026-06-10 10:00:00');
 
-INSERT OR IGNORE INTO audit_logs (id, order_id, order_no, action, actor_id, actor_name, actor_role, from_status, to_status, opinion, reason, failure_reason, created_at)
-VALUES ('al10', 'ord6', 'KSX-20260601006', 'create', 'u1', '张登记', 'clerk', '', 'pending_review', '', '', '', '2026-06-08 09:00:00');
-INSERT OR IGNORE INTO audit_logs (id, order_id, order_no, action, actor_id, actor_name, actor_role, from_status, to_status, opinion, reason, failure_reason, created_at)
-VALUES ('al11', 'ord6', 'KSX-20260601006', 'advance', 'u2', '李审核', 'supervisor', 'pending_review', 'pending_final_review', '内容完善，同意提交复核', '', '', '2026-06-12 11:00:00');
+INSERT OR IGNORE INTO audit_logs (id, order_id, order_no, action, actor_id, actor_name, actor_role, from_status, to_status, opinion, reason, failure_type, failure_reason, created_at)
+VALUES ('al10', 'ord6', 'KSX-20260601006', 'create', 'u1', '张登记', 'clerk', '', 'pending_review', '', '', '', '', '2026-06-08 09:00:00');
+INSERT OR IGNORE INTO audit_logs (id, order_id, order_no, action, actor_id, actor_name, actor_role, from_status, to_status, opinion, reason, failure_type, failure_reason, created_at)
+VALUES ('al11', 'ord6', 'KSX-20260601006', 'advance', 'u2', '李审核', 'supervisor', 'pending_review', 'pending_final_review', '内容完善，同意提交复核', '', '', '', '2026-06-12 11:00:00');
 
 
 -- 7. KSX-20260601007: 材料不全-待审核 (pending_review, has incomplete material, unresolved feedback)
@@ -318,8 +319,8 @@ INSERT OR IGNORE INTO materials (id, order_id, name, file_type, is_complete, upl
 INSERT OR IGNORE INTO knowledge_feedbacks (id, order_id, content, is_resolved, resolved_at) VALUES ('fb10', 'ord7', '智能客服话术需要覆盖多轮对话场景', 0, NULL);
 INSERT OR IGNORE INTO knowledge_feedbacks (id, order_id, content, is_resolved, resolved_at) VALUES ('fb11', 'ord7', '需增加转人工客服的触发条件说明', 0, NULL);
 
-INSERT OR IGNORE INTO audit_logs (id, order_id, order_no, action, actor_id, actor_name, actor_role, from_status, to_status, opinion, reason, failure_reason, created_at)
-VALUES ('al12', 'ord7', 'KSX-20260601007', 'create', 'u1', '张登记', 'clerk', '', 'pending_review', '', '', '', '2026-06-10 10:00:00');
+INSERT OR IGNORE INTO audit_logs (id, order_id, order_no, action, actor_id, actor_name, actor_role, from_status, to_status, opinion, reason, failure_type, failure_reason, created_at)
+VALUES ('al12', 'ord7', 'KSX-20260601007', 'create', 'u1', '张登记', 'clerk', '', 'pending_review', '', '', '', '', '2026-06-10 10:00:00');
 
 
 -- 8. KSX-20260601008: 正常流程-待审核2 (another clerk's order)
@@ -344,8 +345,8 @@ INSERT OR IGNORE INTO materials (id, order_id, name, file_type, is_complete, upl
 
 INSERT OR IGNORE INTO knowledge_feedbacks (id, order_id, content, is_resolved, resolved_at) VALUES ('fb12', 'ord8', '建议增加融合套餐推荐话术', 1, '2026-06-13 10:00:00');
 
-INSERT OR IGNORE INTO audit_logs (id, order_id, order_no, action, actor_id, actor_name, actor_role, from_status, to_status, opinion, reason, failure_reason, created_at)
-VALUES ('al13', 'ord8', 'KSX-20260601008', 'create', 'u1', '张登记', 'clerk', '', 'pending_review', '', '', '', '2026-06-12 14:00:00');
+INSERT OR IGNORE INTO audit_logs (id, order_id, order_no, action, actor_id, actor_name, actor_role, from_status, to_status, opinion, reason, failure_type, failure_reason, created_at)
+VALUES ('al13', 'ord8', 'KSX-20260601008', 'create', 'u1', '张登记', 'clerk', '', 'pending_review', '', '', '', '', '2026-06-12 14:00:00');
 
 
 -- =============================================
@@ -353,25 +354,47 @@ VALUES ('al13', 'ord8', 'KSX-20260601008', 'create', 'u1', '张登记', 'clerk',
 -- =============================================
 
 -- ord1: 伪造角色失败 - clerk冒充supervisor尝试推进
-INSERT OR IGNORE INTO audit_logs (id, order_id, order_no, action, actor_id, actor_name, actor_role, from_status, to_status, opinion, reason, failure_reason, created_at)
-VALUES ('al_fail1', 'ord1', 'KSX-20260601001', 'auth_failed', 'u1', '张登记', 'supervisor', 'pending_review', '', '', '', '伪造角色：用户 u1 实际角色为 clerk，请求角色为 supervisor', '2026-06-15 09:00:00');
+INSERT OR IGNORE INTO audit_logs (id, order_id, order_no, action, actor_id, actor_name, actor_role, from_status, to_status, opinion, reason, failure_type, failure_reason, created_at)
+VALUES ('al_fail1', 'ord1', 'KSX-20260601001', 'auth_failed', 'u1', '张登记', 'supervisor', 'pending_review', '', '', '', 'unauthorized', '伪造角色：用户 u1 实际角色为 clerk，请求角色为 supervisor', '2026-06-15 09:00:00');
 
 -- ord1: 业务越权失败 - clerk尝试推进
-INSERT OR IGNORE INTO audit_logs (id, order_id, order_no, action, actor_id, actor_name, actor_role, from_status, to_status, opinion, reason, failure_reason, created_at)
-VALUES ('al_fail2', 'ord1', 'KSX-20260601001', 'advance_failed', 'u1', '张登记', 'clerk', 'pending_review', '', '', '', '越权操作：角色 clerk 无权执行从 pending_review 到 pending_final_review 的状态转换，需要角色 supervisor', '2026-06-15 09:05:00');
+INSERT OR IGNORE INTO audit_logs (id, order_id, order_no, action, actor_id, actor_name, actor_role, from_status, to_status, opinion, reason, failure_type, failure_reason, created_at)
+VALUES ('al_fail2', 'ord1', 'KSX-20260601001', 'advance_failed', 'u1', '张登记', 'clerk', 'pending_review', '', '', '', 'unauthorized', '越权操作：角色 clerk 无权执行从 pending_review 到 pending_final_review 的状态转换，需要角色 supervisor', '2026-06-15 09:05:00');
 
 -- ord5: 逾期工单顺序错误 - clerk尝试推进（已逾期但仍越权操作）
-INSERT OR IGNORE INTO audit_logs (id, order_id, order_no, action, actor_id, actor_name, actor_role, from_status, to_status, opinion, reason, failure_reason, created_at)
-VALUES ('al_fail3', 'ord5', 'KSX-20260601005', 'advance_failed', 'u1', '张登记', 'clerk', 'pending_review', '', '', '', '越权操作：角色 clerk 无权执行从 pending_review 到 pending_final_review 的状态转换，需要角色 supervisor', '2026-06-15 10:00:00');
+INSERT OR IGNORE INTO audit_logs (id, order_id, order_no, action, actor_id, actor_name, actor_role, from_status, to_status, opinion, reason, failure_type, failure_reason, created_at)
+VALUES ('al_fail3', 'ord5', 'KSX-20260601005', 'advance_failed', 'u1', '张登记', 'clerk', 'pending_review', '', '', '', 'unauthorized', '越权操作：角色 clerk 无权执行从 pending_review 到 pending_final_review 的状态转换，需要角色 supervisor', '2026-06-15 10:00:00');
 
 -- ord7: 证据缺失失败 - 材料不全
-INSERT OR IGNORE INTO audit_logs (id, order_id, order_no, action, actor_id, actor_name, actor_role, from_status, to_status, opinion, reason, failure_reason, created_at)
-VALUES ('al_fail4', 'ord7', 'KSX-20260601007', 'advance_failed', 'u2', '李审核', 'supervisor', 'pending_review', '', '', '', '证据缺失：存在未完成的材料（智能客服话术模板.docx），无法推进', '2026-06-15 11:00:00');
+INSERT OR IGNORE INTO audit_logs (id, order_id, order_no, action, actor_id, actor_name, actor_role, from_status, to_status, opinion, reason, failure_type, failure_reason, created_at)
+VALUES ('al_fail4', 'ord7', 'KSX-20260601007', 'advance_failed', 'u2', '李审核', 'supervisor', 'pending_review', '', '', '', 'evidence', '证据缺失：存在未完成的材料（智能客服话术模板.docx），无法推进', '2026-06-15 11:00:00');
 
 -- ord7: 证据缺失失败 - 反馈未解决
-INSERT OR IGNORE INTO audit_logs (id, order_id, order_no, action, actor_id, actor_name, actor_role, from_status, to_status, opinion, reason, failure_reason, created_at)
-VALUES ('al_fail5', 'ord7', 'KSX-20260601007', 'advance_failed', 'u2', '李审核', 'supervisor', 'pending_review', '', '', '', '证据缺失：存在未解决的反馈（智能客服话术需要覆盖多轮对话场景），无法推进', '2026-06-15 11:30:00');
+INSERT OR IGNORE INTO audit_logs (id, order_id, order_no, action, actor_id, actor_name, actor_role, from_status, to_status, opinion, reason, failure_type, failure_reason, created_at)
+VALUES ('al_fail5', 'ord7', 'KSX-20260601007', 'advance_failed', 'u2', '李审核', 'supervisor', 'pending_review', '', '', '', 'evidence', '证据缺失：存在未解决的反馈（智能客服话术需要覆盖多轮对话场景），无法推进', '2026-06-15 11:30:00');
 
 -- ord8: 版本冲突失败
-INSERT OR IGNORE INTO audit_logs (id, order_id, order_no, action, actor_id, actor_name, actor_role, from_status, to_status, opinion, reason, failure_reason, created_at)
-VALUES ('al_fail6', 'ord8', 'KSX-20260601008', 'advance_failed', 'u2', '李审核', 'supervisor', 'pending_review', '', '', '', '版本冲突：版本冲突：工单版本已变更，当前版本为 1，请求版本为 99', '2026-06-15 14:00:00');
+INSERT OR IGNORE INTO audit_logs (id, order_id, order_no, action, actor_id, actor_name, actor_role, from_status, to_status, opinion, reason, failure_type, failure_reason, created_at)
+VALUES ('al_fail6', 'ord8', 'KSX-20260601008', 'advance_failed', 'u2', '李审核', 'supervisor', 'pending_review', '', '', '', 'version', '版本冲突：工单版本已变更，当前版本为 1，请求版本为 99', '2026-06-15 14:00:00');
+
+-- =============================================
+-- Batch Demo Failure Audit Logs (批量场景失败样例)
+-- =============================================
+
+-- 批量伪造角色：u1 冒充 supervisor 批量推进 ord1, ord2, ord3（审计每条）
+INSERT OR IGNORE INTO audit_logs (id, order_id, order_no, action, actor_id, actor_name, actor_role, from_status, to_status, opinion, reason, failure_type, failure_reason, created_at)
+VALUES ('al_batch_fail1', 'ord1', 'KSX-20260601001', 'auth_failed', 'u1', '张登记', 'supervisor', 'pending_review', '', '', '', 'unauthorized', '伪造角色：用户 u1 实际角色为 clerk，请求角色为 supervisor（批量推进）', '2026-06-15 15:00:00');
+INSERT OR IGNORE INTO audit_logs (id, order_id, order_no, action, actor_id, actor_name, actor_role, from_status, to_status, opinion, reason, failure_type, failure_reason, created_at)
+VALUES ('al_batch_fail2', 'ord2', 'KSX-20260601002', 'auth_failed', 'u1', '张登记', 'supervisor', 'pending_final_review', '', '', '', 'unauthorized', '伪造角色：用户 u1 实际角色为 clerk，请求角色为 supervisor（批量推进）', '2026-06-15 15:00:00');
+INSERT OR IGNORE INTO audit_logs (id, order_id, order_no, action, actor_id, actor_name, actor_role, from_status, to_status, opinion, reason, failure_type, failure_reason, created_at)
+VALUES ('al_batch_fail3', 'ord3', 'KSX-20260601003', 'auth_failed', 'u1', '张登记', 'supervisor', 'pending_correction', '', '', '', 'unauthorized', '伪造角色：用户 u1 实际角色为 clerk，请求角色为 supervisor（批量推进）', '2026-06-15 15:00:00');
+
+-- 批量无效身份：不存在用户 fake_user 批量退回 ord4, ord5（审计每条）
+INSERT OR IGNORE INTO audit_logs (id, order_id, order_no, action, actor_id, actor_name, actor_role, from_status, to_status, opinion, reason, failure_type, failure_reason, created_at)
+VALUES ('al_batch_fail4', 'ord4', 'KSX-20260601004', 'auth_failed', 'fake_user', '', 'reviewer', 'pending_final_review', '', '', '', 'unauthorized', '无效身份：用户 fake_user 不存在（批量退回）', '2026-06-15 15:10:00');
+INSERT OR IGNORE INTO audit_logs (id, order_id, order_no, action, actor_id, actor_name, actor_role, from_status, to_status, opinion, reason, failure_type, failure_reason, created_at)
+VALUES ('al_batch_fail5', 'ord5', 'KSX-20260601005', 'auth_failed', 'fake_user', '', 'reviewer', 'pending_review', '', '', '', 'unauthorized', '无效身份：用户 fake_user 不存在（批量退回）', '2026-06-15 15:10:00');
+
+-- 批量版本冲突：版本不匹配 ord8 批量推进失败
+INSERT OR IGNORE INTO audit_logs (id, order_id, order_no, action, actor_id, actor_name, actor_role, from_status, to_status, opinion, reason, failure_type, failure_reason, created_at)
+VALUES ('al_batch_fail6', 'ord8', 'KSX-20260601008', 'advance_failed', 'u2', '李审核', 'supervisor', 'pending_review', '', '', '', 'version', '版本冲突：工单版本已变更，当前版本为 1，请求版本为 5（批量推进）', '2026-06-15 15:20:00');

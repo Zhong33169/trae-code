@@ -13,12 +13,12 @@ func CreateAuditLog(db *sql.DB, log *model.AuditLog) error {
 		INSERT INTO audit_logs (
 			id, order_id, order_no, action,
 			actor_id, actor_name, actor_role,
-			from_status, to_status, opinion, reason, failure_reason, created_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+			from_status, to_status, opinion, reason, failure_type, failure_reason, created_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 	`,
 		log.ID, log.OrderID, log.OrderNo, log.Action,
 		log.ActorID, log.ActorName, log.ActorRole,
-		log.FromStatus, log.ToStatus, log.Opinion, log.Reason, log.FailureReason, log.CreatedAt,
+		log.FromStatus, log.ToStatus, log.Opinion, log.Reason, log.FailureType, log.FailureReason, log.CreatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("创建审计日志失败: %w", err)
@@ -83,7 +83,7 @@ func GetAuditLogs(db *sql.DB, orderID, actorID, action, startDate, endDate strin
 	querySQL := fmt.Sprintf(`
 		SELECT id, order_id, order_no, action,
 			actor_id, actor_name, actor_role,
-			from_status, to_status, opinion, reason, failure_reason, created_at
+			from_status, to_status, opinion, reason, failure_type, failure_reason, created_at
 		FROM audit_logs
 		%s
 		ORDER BY created_at DESC
@@ -103,12 +103,13 @@ func GetAuditLogs(db *sql.DB, orderID, actorID, action, startDate, endDate strin
 		var l model.AuditLog
 		var opinion sql.NullString
 		var reason sql.NullString
+		var failureType sql.NullString
 		var failureReason sql.NullString
 
 		err := rows.Scan(
 			&l.ID, &l.OrderID, &l.OrderNo, &l.Action,
 			&l.ActorID, &l.ActorName, &l.ActorRole,
-			&l.FromStatus, &l.ToStatus, &opinion, &reason, &failureReason, &l.CreatedAt,
+			&l.FromStatus, &l.ToStatus, &opinion, &reason, &failureType, &failureReason, &l.CreatedAt,
 		)
 		if err != nil {
 			return nil, 0, fmt.Errorf("扫描审计日志数据失败: %w", err)
@@ -118,6 +119,9 @@ func GetAuditLogs(db *sql.DB, orderID, actorID, action, startDate, endDate strin
 		}
 		if reason.Valid {
 			l.Reason = reason.String
+		}
+		if failureType.Valid {
+			l.FailureType = failureType.String
 		}
 		if failureReason.Valid {
 			l.FailureReason = failureReason.String
@@ -132,7 +136,7 @@ func GetAuditLogsByOrderID(db *sql.DB, orderID string) ([]model.AuditLog, error)
 	rows, err := db.Query(`
 		SELECT id, order_id, order_no, action,
 			actor_id, actor_name, actor_role,
-			from_status, to_status, opinion, reason, failure_reason, created_at
+			from_status, to_status, opinion, reason, failure_type, failure_reason, created_at
 		FROM audit_logs
 		WHERE order_id = $1
 		ORDER BY created_at ASC
@@ -147,12 +151,13 @@ func GetAuditLogsByOrderID(db *sql.DB, orderID string) ([]model.AuditLog, error)
 		var l model.AuditLog
 		var opinion sql.NullString
 		var reason sql.NullString
+		var failureType sql.NullString
 		var failureReason sql.NullString
 
 		err := rows.Scan(
 			&l.ID, &l.OrderID, &l.OrderNo, &l.Action,
 			&l.ActorID, &l.ActorName, &l.ActorRole,
-			&l.FromStatus, &l.ToStatus, &opinion, &reason, &failureReason, &l.CreatedAt,
+			&l.FromStatus, &l.ToStatus, &opinion, &reason, &failureType, &failureReason, &l.CreatedAt,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("扫描审计日志数据失败: %w", err)
@@ -162,6 +167,9 @@ func GetAuditLogsByOrderID(db *sql.DB, orderID string) ([]model.AuditLog, error)
 		}
 		if reason.Valid {
 			l.Reason = reason.String
+		}
+		if failureType.Valid {
+			l.FailureType = failureType.String
 		}
 		if failureReason.Valid {
 			l.FailureReason = failureReason.String

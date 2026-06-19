@@ -39,6 +39,7 @@ type KnowledgeRevisionOrder struct {
 	Version            int                 `json:"version" db:"version"`
 	CreatedAt          string              `json:"created_at" db:"created_at"`
 	UpdatedAt          string              `json:"updated_at" db:"updated_at"`
+	LastFailureType    string              `json:"last_failure_type" db:"last_failure_type"`
 	LastFailureReason  string              `json:"last_failure_reason" db:"last_failure_reason"`
 	LastFailureAt      string              `json:"last_failure_at" db:"last_failure_at"`
 	Materials          []Material          `json:"materials"`
@@ -74,6 +75,7 @@ type AuditLog struct {
 	ToStatus      string `json:"to_status" db:"to_status"`
 	Opinion       string `json:"opinion" db:"opinion"`
 	Reason        string `json:"reason" db:"reason"`
+	FailureType   string `json:"failure_type" db:"failure_type"`
 	FailureReason string `json:"failure_reason" db:"failure_reason"`
 	CreatedAt     string `json:"created_at" db:"created_at"`
 }

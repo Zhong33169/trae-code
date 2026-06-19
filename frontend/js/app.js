@@ -76,18 +76,36 @@ function classifyFailureReason(reason) {
     if (reason.startsWith('版本冲突：')) {
         return { type: 'version', label: '版本冲突', text: reason.replace('版本冲突：', '') };
     }
+    if (reason.startsWith('伪造角色：') || reason.startsWith('无效身份：')) {
+        return { type: 'unauthorized', label: '身份失败', text: reason };
+    }
     return { type: 'other', label: '失败', text: reason };
 }
 
-function renderFailureTypeTag(reason) {
-    const { type, label } = classifyFailureReason(reason);
+const FAILURE_TYPE_LABEL = {
+    unauthorized: '越权',
+    sequence: '顺序错误',
+    evidence: '证据缺失',
+    version: '版本冲突',
+    other: '失败'
+};
+
+function renderFailureTypeTag(reasonOrType, fromBackend) {
+    let type;
+    if (fromBackend) {
+        type = reasonOrType;
+    } else {
+        type = classifyFailureReason(reasonOrType).type;
+    }
     if (!type) return '';
+    const label = FAILURE_TYPE_LABEL[type] || '失败';
     return `<span class="failure-type-tag ${type}">${label}</span>`;
 }
 
 function renderFailureBadge(order) {
     if (!order.last_failure_reason) return '';
-    const { type, label } = classifyFailureReason(order.last_failure_reason);
+    const type = order.last_failure_type || classifyFailureReason(order.last_failure_reason).type;
+    const label = FAILURE_TYPE_LABEL[type] || classifyFailureReason(order.last_failure_reason).label || '失败';
     return `<span class="failure-badge" title="${order.last_failure_reason}">⚠ ${label} · ${formatDateTime(order.last_failure_at)}</span>`;
 }
 
@@ -769,8 +787,8 @@ async function renderDetailPage(orderId) {
         const failureWarning = order.last_failure_reason ? `
             <div class="failure-warning-card">
                 <h4>⚠️ 最近操作失败</h4>
-                ${renderFailureTypeTag(order.last_failure_reason)}
-                <p>${escapeHtml(classifyFailureReason(order.last_failure_reason).text)}</p>
+                ${renderFailureTypeTag(order.last_failure_type || order.last_failure_reason, !!order.last_failure_type)}
+                <p>${escapeHtml(order.last_failure_reason)}</p>
                 <div class="failure-time">失败时间：${formatDateTime(order.last_failure_at)}</div>
             </div>
         ` : '';
@@ -896,7 +914,7 @@ async function renderDetailPage(orderId) {
                             <div class="timeline-time">${formatDateTime(log.created_at)}</div>
                             <div class="timeline-action">
                                 ${isFailed ? '⚠️ ' : ''}${formatAction(log.action)}
-                                ${isFailed ? renderFailureTypeTag(log.failure_reason) : ''}
+                                ${isFailed ? renderFailureTypeTag(log.failure_type || log.failure_reason, !!log.failure_type) : ''}
                             </div>
                             <div class="timeline-actor">${escapeHtml(log.actor_name || log.actor_id || '-')} (${formatRole(log.actor_role || '')})</div>
                             ${log.opinion ? `<div class="timeline-detail">意见：${escapeHtml(log.opinion)}</div>` : ''}
@@ -1468,7 +1486,7 @@ async function fetchAndRenderAuditLogs() {
             const rowClass = isFailed ? 'style="background:#fff5f5;"' : '';
             const actionBadgeClass = isFailed ? 'status-badge failed' : `status-badge ${log.action === 'return' ? 'pending_correction' : log.action === 'advance' || log.action === 'overdue_process' ? 'pending_final_review' : log.action === 'create' ? 'pending_review' : 'archived'}`;
             const failureContent = isFailed 
-                ? `${renderFailureTypeTag(log.failure_reason)}<span style="color:var(--danger);">${escapeHtml(classifyFailureReason(log.failure_reason).text)}</span>`
+                ? `${renderFailureTypeTag(log.failure_type || log.failure_reason, !!log.failure_type)}<span style="color:var(--danger);">${escapeHtml(log.failure_reason)}</span>`
                 : '-';
             return `
             <tr ${rowClass}>
