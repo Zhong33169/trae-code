@@ -7,8 +7,11 @@ async function request(path, options = {}) {
     ...options,
   });
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(err.detail || err.message || '请求失败');
+    const err = await res.json().catch(() => ({ error: res.statusText }));
+    const error = new Error(err.error || err.message || '请求失败');
+    error.details = err;
+    error.status = res.status;
+    throw error;
   }
   return res.json();
 }

@@ -215,30 +215,39 @@ func SeedData(db *sql.DB) {
 		CreatedAt   string
 	}{
 		{orderIDs[0], "refund", "initiate", "create", "clerk", "张三(登记员)", "创建售后工单", "已创建", "2024-06-01 09:00:00"},
+		{orderIDs[0], "refund", "initiate", "update_evidence", "clerk", "张三(登记员)", "上传订单截图", "更新证据材料", "2024-06-01 09:05:00"},
+		{orderIDs[0], "refund", "initiate", "validation_failed", "clerk", "张三(登记员)", "", "缺少必要证据: 退款申请", "2024-06-01 09:10:00"},
 
 		{orderIDs[1], "refund", "initiate", "initiate", "clerk", "张三(登记员)", "提交退款申请，金额较大需审核", "已提交审核", "2024-06-01 10:00:00"},
+		{orderIDs[1], "refund", "initiate", "validation_failed", "supervisor", "李四(审核主管)", "", "角色不匹配", "2024-06-01 10:10:00"},
 		{orderIDs[1], "refund", "process", "process", "supervisor", "李四(审核主管)", "审核通过，金额与订单一致，建议复核", "审核通过", "2024-06-01 10:30:00"},
 		{orderIDs[1], "refund", "review", "review_archive", "reviewer", "王五(复核负责人)", "复核中，等待确认", "待复核", "2024-06-01 11:00:00"},
 
 		{orderIDs[2], "refund", "initiate", "initiate", "clerk", "张三(登记员)", "提交退款申请", "已提交审核", "2024-06-01 11:00:00"},
 		{orderIDs[2], "refund", "process", "review_archive", "supervisor", "李四(审核主管)", "审核通过，进入仓库阶段", "进入仓库阶段", "2024-06-01 11:30:00"},
+		{orderIDs[2], "warehouse", "initiate", "validation_failed", "clerk", "张三(登记员)", "", "缺少必要证据: 退货物流单、退款申请", "2024-06-01 11:45:00"},
 
 		{orderIDs[3], "refund", "initiate", "initiate", "clerk", "张三(登记员)", "提交退款申请", "已提交审核", "2024-06-01 12:00:00"},
-		{orderIDs[3], "refund", "process", "return", "supervisor", "李四(审核主管)", "证据不完整，退回补充", "已退回", "2024-06-01 12:30:00"},
+		{orderIDs[3], "refund", "process", "return", "supervisor", "李四(审核主管)", "证据不完整，退回补充退款申请单", "已退回", "2024-06-01 12:30:00"},
+		{orderIDs[3], "refund", "initiate", "validation_failed", "clerk", "张三(登记员)", "", "缺少必要证据: 退款申请", "2024-06-01 12:40:00"},
 
 		{orderIDs[4], "refund", "initiate", "initiate", "clerk", "张三(登记员)", "高风险订单，提交审核", "已提交审核", "2024-06-01 13:00:00"},
 		{orderIDs[4], "refund", "process", "process", "supervisor", "李四(审核主管)", "审核通过，进入仓库阶段", "审核通过", "2024-06-01 13:30:00"},
 		{orderIDs[4], "warehouse", "process", "process", "supervisor", "李四(审核主管)", "仓库确认收货，进入跟进阶段", "进入跟进阶段", "2024-06-01 14:00:00"},
+		{orderIDs[4], "followup", "process", "validation_failed", "supervisor", "李四(审核主管)", "", "版本冲突", "2024-06-01 14:10:00"},
 
 		{orderIDs[5], "refund", "initiate", "initiate", "clerk", "张三(登记员)", "提交退款申请", "已提交审核", "2024-06-01 14:00:00"},
 		{orderIDs[5], "refund", "process", "process", "supervisor", "李四(审核主管)", "审核通过", "审核通过", "2024-06-01 14:30:00"},
 		{orderIDs[5], "warehouse", "process", "review_archive", "reviewer", "王五(复核负责人)", "仓库阶段复核完成", "复核通过", "2024-06-01 15:00:00"},
 
 		{orderIDs[6], "refund", "initiate", "initiate", "clerk", "张三(登记员)", "提交退款申请", "已提交审核", "2024-06-01 15:00:00"},
+		{orderIDs[6], "refund", "initiate", "process", "reviewer", "王五(复核负责人)", "越权操作，状态被强行推进", "状态异常", "2024-06-01 15:15:00"},
 		{orderIDs[6], "refund", "review", "review_archive", "reviewer", "王五(复核负责人)", "状态异常，证据不完整但已到复核阶段", "冲突状态", "2024-06-01 15:30:00"},
+		{orderIDs[6], "refund", "review", "validation_failed", "reviewer", "王五(复核负责人)", "", "缺少必要证据: 退款申请", "2024-06-01 15:35:00"},
 
 		{orderIDs[7], "refund", "initiate", "initiate", "clerk", "张三(登记员)", "大额退款申请，需高级审核", "已提交审核", "2024-06-01 16:00:00"},
-		{orderIDs[7], "refund", "process", "process", "supervisor", "李四(审核主管)", "审核进行中，缺少身份验证和大额审批单", "审核中", "2024-06-01 16:30:00"},
+		{orderIDs[7], "refund", "process", "validation_failed", "supervisor", "李四(审核主管)", "", "缺少必要证据: 身份验证、大额审批单", "2024-06-01 16:15:00"},
+		{orderIDs[7], "refund", "process", "process", "supervisor", "李四(审核主管)", "审核进行中，缺少身份验证和大额审批单，暂挂起", "审核中", "2024-06-01 16:30:00"},
 	}
 
 	for _, r := range records {
@@ -261,6 +270,8 @@ func SeedData(db *sql.DB) {
 		OperatorRole string
 		CreatedAt    string
 	}{
+		{orderIDs[2], "medium", "low", "仓库核实阶段，客户确认退货，风险降级", "王五(复核负责人)", "reviewer", "2024-06-01 11:20:00"},
+		{orderIDs[2], "low", "medium", "逾期未处理，风险恢复为中等级别", "李四(审核主管)", "supervisor", "2024-06-09 09:00:00"},
 		{orderIDs[4], "medium", "high", "订单金额较大且客户历史退款频率高，升级风险等级", "李四(审核主管)", "supervisor", "2024-06-01 13:15:00"},
 		{orderIDs[7], "medium", "high", "Vision Pro大额退款，升级为高风险", "李四(审核主管)", "supervisor", "2024-06-01 16:15:00"},
 	}

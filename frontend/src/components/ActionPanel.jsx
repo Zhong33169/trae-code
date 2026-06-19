@@ -1,8 +1,8 @@
 import { h } from 'preact';
-import { useState } from 'preact/hooks';
+import { useState, useEffect, useMemo } from 'preact/hooks';
 import { submitAction, updateEvidence } from '../api/client';
 
-const EVIDENCE_OPTIONS = [
+const ALL_EVIDENCE = [
   '订单截图',
   '退款申请',
   '支付凭证',
@@ -22,9 +22,22 @@ function parseJSON(val) {
 
 export default function ActionPanel({ order, currentUser, onAction }) {
   const [opinion, setOpinion] = useState('');
-  const [selectedEvidence, setSelectedEvidence] = useState([]);
+  const [checkedEvidence, setCheckedEvidence] = useState([]);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+
+  const requiredEvidence = useMemo(
+    () => parseJSON(order?.required_evidence),
+    [order?.required_evidence]
+  );
+  const providedEvidence = useMemo(
+    () => parseJSON(order?.evidence_provided),
+    [order?.evidence_provided]
+  );
+
+  useEffect(() => {
+    setCheckedEvidence(providedEvidence);
+  }, [order?.id]);
 
   if (!currentUser || !order) return null;
 
@@ -40,8 +53,14 @@ export default function ActionPanel({ order, currentUser, onAction }) {
     return <div style="color:#999;font-size:13px;">当前角色无可用操作</div>;
   }
 
+  const showEvidencePanel = canInitiate || canCorrect;
+
+  const evidenceOptions = requiredEvidence.length > 0
+    ? [...new Set([...requiredEvidence, ...ALL_EVIDENCE])]
+    : ALL_EVIDENCE;
+
   const toggleEvidence = (ev) => {
-    setSelectedEvidence((prev) =>
+    setCheckedEvidence((prev) =>
       prev.includes(ev) ? prev.filter((e) => e !== ev) : [...prev, ev]
     );
   };
@@ -54,13 +73,16 @@ export default function ActionPanel({ order, currentUser, onAction }) {
     setError('');
     setSubmitting(true);
     try {
-      if (canCorrect && selectedEvidence.length > 0) {
-        const existing = parseJSON(order.evidence_provided);
-        const merged = [...new Set([...existing, ...selectedEvidence])];
-        await updateEvidence(order.id, {
-          evidence: merged,
-          handler_id: currentUser.id,
-        });
+      if (showEvidencePanel) {
+        const finalEvidence = checkedEvidence.length > 0 ? checkedEvidence : providedEvidence;
+        const evidenceChanged = finalEvidence.length !== providedEvidence.length ||
+          finalEvidence.some((e, i) => e !== providedEvidence[i]);
+        if (evidenceChanged || finalEvidence.length > 0) {
+          await updateEvidence(order.id, {
+            evidence: finalEvidence,
+            handler_id: currentUser.id,
+          });
+        }
       }
       await submitAction(order.id, {
         action,
@@ -69,10 +91,14 @@ export default function ActionPanel({ order, currentUser, onAction }) {
         version: order.version,
       });
       setOpinion('');
-      setSelectedEvidence([]);
       onAction();
     } catch (e) {
-      setError(e.message || '操作失败');
+      const msg = e.message || '操作失败';
+      if (e.details && e.details.missing && e.details.missing.length) {
+        setError(`${msg}（缺失：${e.details.missing.join('、')}）`);
+      } else {
+        setError(msg);
+      }
     } finally {
       setSubmitting(false);
     }
@@ -89,25 +115,36 @@ export default function ActionPanel({ order, currentUser, onAction }) {
         />
       </div>
 
-      {canCorrect && (
+      {showEvidencePanel && (
         <div class="form-group">
-          <label>补充证据</label>
+          <label>
+            必填证据
+            <span style="color:#999;font-weight:normal;font-size:12px;margin-left:6px;">
+              （打勾表示已提供；未打勾的必填项会触发校验失败）
+            </span>
+          </label>
           <div class="checkbox-group">
-            {EVIDENCE_OPTIONS.map((ev) => (
-              <label key={ev}>
-                <input
-                  type="checkbox"
-                  checked={selectedEvidence.includes(ev)}
-                  onChange={() => toggleEvidence(ev)}
-                />
-                {ev}
-              </label>
-            ))}
+            {evidenceOptions.map((ev) => {
+              const isRequired = requiredEvidence.includes(ev);
+              return (
+                <label key={ev} style={isRequired ? { fontWeight: 600 } : {}}>
+                  <input
+                    type="checkbox"
+                    checked={checkedEvidence.includes(ev)}
+                    onChange={() => toggleEvidence(ev)}
+                  />
+                  {ev}
+                  {isRequired && <span style="color:#ff4d4f;margin-left:2px;">*</span>}
+                </label>
+              );
+            })}
           </div>
         </div>
       )}
 
-      {error && <div style="color:#ff4d4f;font-size:12px;margin-bottom:12px;">{error}</div>}
+      {error && (
+        <div style="color:#ff4d4f;font-size:12px;margin-bottom:12px;">{error}</div>
+      )}
 
       <div class="action-buttons">
         {canInitiate && (

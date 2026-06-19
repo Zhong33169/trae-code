@@ -28,13 +28,10 @@ func main() {
 
 	e := echo.New()
 
-	frontendPort := os.Getenv("FRONTEND_PORT")
-	if frontendPort == "" {
-		frontendPort = "3004"
-	}
-
 	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
-		AllowOrigins: []string{"http://localhost:" + frontendPort},
+		AllowOriginFunc: func(origin string) (bool, error) {
+			return true, nil
+		},
 		AllowMethods: []string{echo.GET, echo.POST, echo.PUT, echo.DELETE, echo.OPTIONS},
 		AllowHeaders: []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept},
 	}))

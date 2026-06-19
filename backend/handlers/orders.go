@@ -184,15 +184,16 @@ func CreateOrder(db *sql.DB) echo.HandlerFunc {
 		}
 
 		now := time.Now()
-		orderNo := fmt.Sprintf("AS%s%03d", now.Format("20060102"), 1)
+		datePrefix := fmt.Sprintf("AS%s", now.Format("20060102"))
+		orderNo := fmt.Sprintf("%s%03d", datePrefix, 1)
 
-		var maxSuffix sql.NullInt64
+		var maxSuffix int
 		err := db.QueryRow(
-			"SELECT MAX(CAST(SUBSTR(order_no, -3) AS INTEGER)) FROM after_sale_orders WHERE order_no LIKE ?",
-			now.Format("20060102")+"%",
+			"SELECT COALESCE(MAX(CAST(SUBSTR(order_no, 11) AS INTEGER)), 0) FROM after_sale_orders WHERE order_no LIKE ?",
+			datePrefix+"%",
 		).Scan(&maxSuffix)
-		if err == nil && maxSuffix.Valid {
-			orderNo = fmt.Sprintf("AS%s%03d", now.Format("20060102"), maxSuffix.Int64+1)
+		if err == nil && maxSuffix >= 0 {
+			orderNo = fmt.Sprintf("%s%03d", datePrefix, maxSuffix+1)
 		}
 
 		reqJSON, _ := json.Marshal(req.RequiredEvidence)
@@ -346,33 +347,23 @@ func ActionOrder(db *sql.DB) echo.HandlerFunc {
 		var evidenceProvided []string
 		json.Unmarshal([]byte(order.EvidenceProvided), &evidenceProvided)
 
-		if (req.Action == "initiate" || req.Action == "correct") && len(requiredEvidence) > 0 {
+		if len(requiredEvidence) > 0 {
 			providedSet := make(map[string]bool)
 			for _, e := range evidenceProvided {
 				providedSet[e] = true
 			}
-			missing := false
+			missing := []string{}
 			for _, req := range requiredEvidence {
 				if !providedSet[req] {
-					missing = true
-					break
+					missing = append(missing, req)
 				}
 			}
-			if missing {
-				writeValidationRecord(db, &order, "validation_failed", "缺少必要证据")
-				return c.JSON(http.StatusBadRequest, map[string]string{"error": "缺少必要证据"})
-			}
-		}
-
-		if req.Action == "process" || req.Action == "review_archive" {
-			providedSet := make(map[string]bool)
-			for _, e := range evidenceProvided {
-				providedSet[e] = true
-			}
-			for _, re := range requiredEvidence {
-				if !providedSet[re] {
-					break
-				}
+			if len(missing) > 0 {
+				writeValidationRecord(db, &order, "validation_failed", fmt.Sprintf("缺少必要证据: %s", strings.Join(missing, "、")))
+				return c.JSON(http.StatusBadRequest, map[string]interface{}{
+					"error":   "缺少必要证据",
+					"missing": missing,
+				})
 			}
 		}
 
