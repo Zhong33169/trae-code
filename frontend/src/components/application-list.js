@@ -134,6 +134,15 @@ export class ApplicationList extends LitElement {
     this.selected = next;
   }
 
+  prerequisitesForType(type) {
+    switch (type) {
+      case 'transfer': return { needBudget: true, needSalary: false };
+      case 'salary_adjustment': return { needBudget: true, needSalary: true };
+      case 'both':
+      default: return { needBudget: true, needSalary: true };
+    }
+  }
+
   canBatchAction(action) {
     if (!this.user || this.selectedCount === 0) return false;
     const role = this.user.role;
@@ -141,13 +150,32 @@ export class ApplicationList extends LitElement {
       const app = this.applications.find(a => a.id === id);
       if (!app) return false;
       switch (action) {
-        case 'submit':
+        case 'submit': {
           if (role === 'hr_specialist') return app.current_node === 'hr_specialist' && app.status === 'pending_review';
-          if (role === 'salary_supervisor') return app.current_node === 'salary_supervisor' && app.status === 'budget_checking';
-          if (role === 'hrbp_leader') return app.current_node === 'hrbp_leader' && app.status === 'pending_confirm';
+          if (role === 'salary_supervisor') {
+            if (!(app.current_node === 'salary_supervisor' && app.status === 'budget_checking')) return false;
+            const { needBudget, needSalary } = this.prerequisitesForType(app.type);
+            if (needBudget && !app.budget_verified) return false;
+            if (needSalary && !app.salary_processed) return false;
+            return true;
+          }
+          if (role === 'hrbp_leader') {
+            if (!(app.current_node === 'hrbp_leader' && app.status === 'pending_confirm')) return false;
+            const { needBudget, needSalary } = this.prerequisitesForType(app.type);
+            if (needBudget && !app.budget_verified) return false;
+            if (needSalary && !app.salary_processed) return false;
+            return true;
+          }
           return false;
-        case 'register':
-          return role === 'hr_specialist' && app.status === 'approved' && !app.registered;
+        }
+        case 'register': {
+          if (role !== 'hr_specialist') return false;
+          if (!(app.status === 'approved' && !app.registered)) return false;
+          const { needBudget, needSalary } = this.prerequisitesForType(app.type);
+          if (needBudget && !app.budget_verified) return false;
+          if (needSalary && !app.salary_processed) return false;
+          return true;
+        }
         case 'verify_budget':
           return role === 'salary_supervisor' && app.current_node === 'salary_supervisor' && app.status === 'budget_checking' && !app.budget_verified;
         case 'process_salary':
@@ -282,10 +310,13 @@ export class ApplicationList extends LitElement {
       actions.push({ value: 'submit', label: '审核通过' });
     }
 
+    const ruleTip = this.getBatchRuleTip();
+
     return html`
       <div class="modal-mask" @click=${e => { if (e.target === e.currentTarget) this.showBatch = false; }}>
         <div class="modal">
           <h3>批量操作 (${this.selectedCount} 项)</h3>
+          ${ruleTip ? html`<div style="background:#fffbe6; border:1px solid #ffe58f; border-radius:4px; padding:8px 12px; font-size:12px; color:#d48806; margin-bottom:12px;">${ruleTip}</div>` : ''}
           <div class="field">
             <label>操作类型</label>
             <select .value=${this._batchAction} @change=${e => this._batchAction = e.target.value}>
@@ -297,8 +328,8 @@ export class ApplicationList extends LitElement {
             <textarea .value=${this._batchRemark || ''} @input=${e => this._batchRemark = e.target.value} placeholder="选填"></textarea>
           </div>
           <div class="field">
-            <label>超时原因（如有）</label>
-            <textarea .value=${this._batchTimeout || ''} @input=${e => this._batchTimeout = e.target.value} placeholder="选填，存在超时节点时请填写"></textarea>
+            <label>异常原因 / 补正动作</label>
+            <textarea .value=${this._batchTimeout || ''} @input=${e => this._batchTimeout = e.target.value} placeholder="选填；若存在超时节点、或推进原因需说明，请填写异常原因与补正动作，将记录到审计轨迹"></textarea>
           </div>
           <div class="modal-actions">
             <button class="btn btn-default" @click=${() => this.showBatch = false}>取消</button>
@@ -307,6 +338,18 @@ export class ApplicationList extends LitElement {
         </div>
       </div>
     `;
+  }
+
+  getBatchRuleTip() {
+    const role = this.user?.role;
+    const action = this._batchAction;
+    if (action === 'submit' && ['salary_supervisor', 'hrbp_leader'].includes(role)) {
+      return '前置规则：调岗类需先完成预算校验；调薪/调岗调薪类需同时完成预算校验 + 调薪处理；否则对应项将在结果中标记为失败。';
+    }
+    if (action === 'register' && role === 'hr_specialist') {
+      return '前置规则：异动登记前需按异动类型完成对应模块（预算校验/调薪处理），否则对应项将标记为失败。';
+    }
+    return '';
   }
 
   formatDate(str) {

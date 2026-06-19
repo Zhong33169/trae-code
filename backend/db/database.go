@@ -25,8 +25,8 @@ func InitDB(dbPath string) error {
 		return fmt.Errorf("打开数据库失败: %w", err)
 	}
 
-	DB.SetMaxOpenConns(3)
-	DB.SetMaxIdleConns(2)
+	DB.SetMaxOpenConns(20)
+	DB.SetMaxIdleConns(5)
 	DB.SetConnMaxLifetime(time.Hour)
 
 	if err = runMigrations(); err != nil {

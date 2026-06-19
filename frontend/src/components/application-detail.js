@@ -92,6 +92,74 @@ export class ApplicationDetail extends LitElement {
     this.processData = { remark: '', timeout_reason: '' };
   }
 
+  prerequisitesForType(type) {
+    switch (type) {
+      case 'transfer': return { needBudget: true, needSalary: false };
+      case 'salary_adjustment': return { needBudget: true, needSalary: true };
+      case 'both':
+      default: return { needBudget: true, needSalary: true };
+    }
+  }
+
+  getSubmitBlockReason(app) {
+    if (!app) return '';
+    if (!['salary_supervisor', 'hrbp_leader'].includes(app.current_node)) return '';
+    const { needBudget, needSalary } = this.prerequisitesForType(app.type);
+    if (needBudget && !app.budget_verified) return '此异动类型需要先完成【预算校验】';
+    if (needSalary && !app.salary_processed) return '此异动类型需要先完成【调薪处理】';
+    return '';
+  }
+
+  getRegisterBlockReason(app) {
+    if (!app) return '';
+    const { needBudget, needSalary } = this.prerequisitesForType(app.type);
+    if (needBudget && !app.budget_verified) return '异动类型要求【预算校验】未完成';
+    if (needSalary && !app.salary_processed) return '异动类型要求【调薪处理】未完成';
+    return '';
+  }
+
+  canRegister() {
+    if (!this.app || !this.user) return false;
+    return this.user.role === 'hr_specialist' &&
+      this.app.status === 'approved' &&
+      !this.app.registered &&
+      !this.getRegisterBlockReason(this.app);
+  }
+
+  canSubmitAtCurrentNode() {
+    if (!this.app || !this.user) return false;
+    if (['synced', 'rejected'].includes(this.app.status)) return false;
+    if (this.getSubmitBlockReason(this.app)) return false;
+    switch (this.user.role) {
+      case 'hr_specialist':
+        return this.app.current_node === 'hr_specialist' && this.app.status === 'pending_review';
+      case 'salary_supervisor':
+        return this.app.current_node === 'salary_supervisor' && this.app.status === 'budget_checking';
+      case 'hrbp_leader':
+        return this.app.current_node === 'hrbp_leader' && this.app.status === 'pending_confirm';
+      default:
+        return false;
+    }
+  }
+
+  canDoBudgetOrSalary() {
+    if (!this.app || !this.user) return false;
+    if (this.user.role !== 'salary_supervisor') return false;
+    if (this.app.current_node !== 'salary_supervisor' || this.app.status !== 'budget_checking') return false;
+    const { needBudget, needSalary } = this.prerequisitesForType(this.app.type);
+    return needBudget || needSalary;
+  }
+
+  canVerifyBudget() {
+    if (!this.canDoBudgetOrSalary()) return false;
+    return this.prerequisitesForType(this.app.type).needBudget;
+  }
+
+  canProcessSalary() {
+    if (!this.canDoBudgetOrSalary()) return false;
+    return this.prerequisitesForType(this.app.type).needSalary;
+  }
+
   connectedCallback() {
     super.connectedCallback();
     this.loadData();
@@ -112,35 +180,6 @@ export class ApplicationDetail extends LitElement {
     } finally {
       this.loading = false;
     }
-  }
-
-  canRegister() {
-    if (!this.app || !this.user) return false;
-    return this.user.role === 'hr_specialist' &&
-      this.app.status === 'approved' &&
-      !this.app.registered;
-  }
-
-  canSubmitAtCurrentNode() {
-    if (!this.app || !this.user) return false;
-    if (['synced', 'rejected'].includes(this.app.status)) return false;
-    switch (this.user.role) {
-      case 'hr_specialist':
-        return this.app.current_node === 'hr_specialist' && this.app.status === 'pending_review';
-      case 'salary_supervisor':
-        return this.app.current_node === 'salary_supervisor' && this.app.status === 'budget_checking';
-      case 'hrbp_leader':
-        return this.app.current_node === 'hrbp_leader' && this.app.status === 'pending_confirm';
-      default:
-        return false;
-    }
-  }
-
-  canDoBudgetOrSalary() {
-    if (!this.app || !this.user) return false;
-    return this.user.role === 'salary_supervisor' &&
-      this.app.current_node === 'salary_supervisor' &&
-      this.app.status === 'budget_checking';
   }
 
   hasAnyAction() {
@@ -175,6 +214,12 @@ export class ApplicationDetail extends LitElement {
     const app = this.app;
     const showTransfer = app.type !== 'salary_adjustment';
     const showSalary = app.type !== 'transfer';
+    const { needBudget, needSalary } = this.prerequisitesForType(app.type);
+
+    const submitBlockReason = this.getSubmitBlockReason(app);
+    const registerBlockReason = this.getRegisterBlockReason(app);
+    const submitDisabled = !!submitBlockReason || !this.canSubmitAtCurrentNode();
+    const registerDisabled = !!registerBlockReason;
 
     return html`
       <div class="back" @click=${() => this.dispatchEvent(new CustomEvent('back'))}>← 返回列表</div>
@@ -186,9 +231,11 @@ export class ApplicationDetail extends LitElement {
         </div>
       ` : ''}
 
-      ${this.canRegister() ? html`
-        <div style="background:#fffbe6; border:1px solid #ffe58f; border-radius:4px; padding:10px 16px; margin-bottom:12px; font-size:13px; color:#d48806;">
-          📋 此申请已审核通过，请您进行异动登记以完成闭环。预算校验：${app.budget_verified ? '✅ 已完成' : '❌ 未完成'} · 调薪处理：${app.salary_processed ? '✅ 已完成' : '❌ 未完成'}
+      ${app.status === 'approved' && this.user?.role === 'hr_specialist' && !app.registered ? html`
+        <div style="background:${registerDisabled ? '#fff1f0' : '#fffbe6'}; border:1px solid ${registerDisabled ? '#ffa39e' : '#ffe58f'}; border-radius:4px; padding:10px 16px; margin-bottom:12px; font-size:13px; color:${registerDisabled ? '#cf1322' : '#d48806'};">
+          ${registerDisabled ? html`⚠️ ${registerBlockReason}，暂不可进行异动登记` : html`📋 此申请已审核通过，请您进行异动登记以完成闭环`}
+          ${needBudget ? html`· 预算校验：${app.budget_verified ? '✅ 已完成' : '❌ 未完成'}` : ''}
+          ${needSalary ? html` · 调薪处理：${app.salary_processed ? '✅ 已完成' : '❌ 未完成'}` : ''}
         </div>
       ` : ''}
 
@@ -197,7 +244,7 @@ export class ApplicationDetail extends LitElement {
           <div class="app-title">${app.application_no}
             <span class="status-tag" style="background:${STATUS_COLORS[app.status] || '#888'}">${STATUS_LABELS[app.status] || app.status}</span>
             ${app.is_timeout ? html`<span class="timeout-badge">已超时</span>` : ''}
-            ${this.canRegister() ? html`<span class="pending-register-hint">待登记</span>` : ''}
+            ${app.status === 'approved' && !app.registered ? html`<span class="pending-register-hint">待登记</span>` : ''}
             ${app.current_node && app.current_node !== 'completed' && !['synced', 'rejected'].includes(app.status) ? html`
               <span class="node-hint">当前处理：${NODE_LABELS[app.current_node]}</span>
             ` : ''}
@@ -211,22 +258,24 @@ export class ApplicationDetail extends LitElement {
           </div>
         </div>
         <div class="actions-bar">
-          ${this.canDoBudgetOrSalary() ? html`
-            <button class="btn btn-default" ?disabled=${app.budget_verified} @click=${() => this.openDialog('verify_budget')}>
+          ${this.canVerifyBudget() ? html`
+            <button class="btn btn-default" ?disabled=${app.budget_verified} @click=${() => this.openDialog('verify_budget')} title=${app.budget_verified ? '已完成预算校验' : '点击执行预算校验'}>
               ${app.budget_verified ? '预算已校验 ✓' : '预算校验'}
             </button>
-            <button class="btn btn-default" ?disabled=${app.salary_processed} @click=${() => this.openDialog('process_salary')}>
+          ` : ''}
+          ${this.canProcessSalary() ? html`
+            <button class="btn btn-default" ?disabled=${app.salary_processed} @click=${() => this.openDialog('process_salary')} title=${app.salary_processed ? '已完成调薪处理' : '点击执行调薪处理'}>
               ${app.salary_processed ? '调薪已处理 ✓' : '调薪处理'}
             </button>
           ` : ''}
-          ${this.canRegister() ? html`
-            <button class="btn btn-success" @click=${() => this.openDialog('register')}>
-              异动登记
+          ${this.user?.role === 'hr_specialist' && app.status === 'approved' && !app.registered ? html`
+            <button class="btn btn-success" ?disabled=${registerDisabled} @click=${() => this.openDialog('register')} title=${registerBlockReason || '点击完成异动登记'}>
+              ${registerBlockReason || '异动登记'}
             </button>
           ` : ''}
-          ${this.canSubmitAtCurrentNode() ? html`
-            <button class="btn btn-primary" @click=${() => this.openDialog('submit')}>
-              ${app.current_node === 'hr_specialist' ? '提交审核' : app.current_node === 'salary_supervisor' ? '提交确认' : '审核通过'}
+          ${(this.canSubmitAtCurrentNode() || submitBlockReason) ? html`
+            <button class="btn btn-primary" ?disabled=${submitDisabled} @click=${() => this.openDialog('submit')} title=${submitBlockReason || ''}>
+              ${submitBlockReason ? submitBlockReason : (app.current_node === 'hr_specialist' ? '提交审核' : app.current_node === 'salary_supervisor' ? '提交确认' : '审核通过')}
             </button>
             <button class="btn btn-danger" @click=${() => this.openDialog('reject')}>驳回</button>
           ` : ''}
@@ -246,7 +295,7 @@ export class ApplicationDetail extends LitElement {
         <div class="card">
           <h3>基础信息</h3>
           <div class="info-row"><span class="info-label">员工</span><span class="info-value">${app.employee?.name || '-'} (${app.employee?.employee_no || '-'})</span></div>
-          <div class="info-row"><span class="info-label">异动类型</span><span class="info-value">${TYPE_LABELS[app.type] || app.type}</span></div>
+          <div class="info-row"><span class="info-label">异动类型</span><span class="info-value">${TYPE_LABELS[app.type] || app.type}${app.type === 'transfer' ? '（仅调岗，无需处理调薪）' : app.type === 'salary_adjustment' ? '（仅调薪，需同时完成预算与调薪）' : '（调岗+调薪，需全部完成）'}</span></div>
           <div class="info-row"><span class="info-label">原部门/岗位</span><span class="info-value">${app.employee?.department || '-'} / ${app.employee?.position || '-'}</span></div>
           <div class="info-row"><span class="info-label">当前薪资</span><span class="info-value">${app.employee?.current_salary || 0} 元</span></div>
           <div class="divider"></div>
@@ -273,8 +322,8 @@ export class ApplicationDetail extends LitElement {
           <div class="info-row"><span class="info-label">关联模块</span>
             <span class="info-value">
               <span class="linked-status">
-                <span class="linked-tag ${app.budget_verified ? 'done' : 'pending'}">预算校验：${app.budget_verified ? '已完成' : '待处理'}</span>
-                <span class="linked-tag ${app.salary_processed ? 'done' : 'pending'}">调薪处理：${app.salary_processed ? '已完成' : '待处理'}</span>
+                ${needBudget ? html`<span class="linked-tag ${app.budget_verified ? 'done' : 'pending'}">预算校验：${app.budget_verified ? '已完成' : '待处理'}</span>` : ''}
+                ${needSalary ? html`<span class="linked-tag ${app.salary_processed ? 'done' : 'pending'}">调薪处理：${app.salary_processed ? '已完成' : '待处理'}</span>` : ''}
                 <span class="linked-tag ${app.registered ? 'done' : 'pending'}">异动登记：${app.registered ? '已完成' : '待处理'}</span>
               </span>
             </span>

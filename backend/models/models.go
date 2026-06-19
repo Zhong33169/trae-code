@@ -145,7 +145,8 @@ type Statistics struct {
 }
 
 type BatchOperationRequest struct {
-	IDs    []int64 `json:"ids"`
-	Action string  `json:"action"`
-	Remark string  `json:"remark"`
+	IDs           []int64 `json:"ids"`
+	Action        string  `json:"action"`
+	Remark        string  `json:"remark"`
+	TimeoutReason string  `json:"timeout_reason"`
 }

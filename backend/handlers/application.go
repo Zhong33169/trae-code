@@ -64,6 +64,43 @@ func getStatusName(status string) string {
 	}
 }
 
+func prerequisitesForType(appType string) (needBudget bool, needSalary bool) {
+	switch models.ApplicationType(appType) {
+	case models.TypeTransfer:
+		return true, false
+	case models.TypeSalaryAdjustment:
+		return true, true
+	case models.TypeBoth:
+		return true, true
+	default:
+		return true, true
+	}
+}
+
+func validatePrerequisites(appType, action string, app *models.TransferApplication) string {
+	needBudget, needSalary := prerequisitesForType(appType)
+
+	switch action {
+	case "submit":
+		if app.CurrentNode == "salary_supervisor" || app.CurrentNode == "hrbp_leader" {
+			if needBudget && !app.BudgetVerified {
+				return "此异动类型需要先完成【预算校验】，方可提交确认"
+			}
+			if needSalary && !app.SalaryProcessed {
+				return "此异动类型需要先完成【调薪处理】，方可提交确认"
+			}
+		}
+	case "register":
+		if needBudget && !app.BudgetVerified {
+			return "异动类型要求【预算校验】未完成，暂不可进行异动登记"
+		}
+		if needSalary && !app.SalaryProcessed {
+			return "异动类型要求【调薪处理】未完成，暂不可进行异动登记"
+		}
+	}
+	return ""
+}
+
 func txAddOperationLog(tx *sql.Tx, userID int64, userName, userRole, action, targetType string, targetID int64, detail string) error {
 	_, err := tx.Exec(
 		"INSERT INTO operation_logs (user_id, user_name, user_role, action, target_type, target_id, detail) VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -87,13 +124,14 @@ func scanApplication(row interface {
 	var budgetV, salaryP, registered, isTimeout int
 	var deadline sql.NullTime
 	var updatedBy sql.NullInt64
+	var timeoutReason sql.NullString
 
 	err := row.Scan(
 		&app.ID, &app.ApplicationNo, &app.EmployeeID, &app.Type,
 		&app.FromDepartment, &app.ToDepartment, &app.FromPosition, &app.ToPosition,
 		&app.FromSalary, &app.ToSalary, &app.Reason, &app.Status, &app.CurrentNode,
 		&budgetV, &salaryP, &registered, &app.CreatedBy, &updatedBy,
-		&app.CreatedAt, &app.UpdatedAt, &deadline, &isTimeout, &app.TimeoutReason,
+		&app.CreatedAt, &app.UpdatedAt, &deadline, &isTimeout, &timeoutReason,
 	)
 	if err != nil {
 		return nil, err
@@ -103,6 +141,9 @@ func scanApplication(row interface {
 	app.SalaryProcessed = salaryP == 1
 	app.Registered = registered == 1
 	app.IsTimeout = isTimeout == 1
+	if timeoutReason.Valid {
+		app.TimeoutReason = timeoutReason.String
+	}
 	if updatedBy.Valid {
 		v := updatedBy.Int64
 		app.UpdatedBy = &v
@@ -182,25 +223,28 @@ func enrichTrails(app *models.TransferApplication) {
 }
 
 func txRecalcApplicationStatus(tx *sql.Tx, appID int64) error {
-	var app models.TransferApplication
+	var appType string
+	var status string
+	var currentNode string
 	var budgetV, salaryP, registered int
 	err := tx.QueryRow(
-		"SELECT status, current_node, budget_verified, salary_processed, registered FROM transfer_applications WHERE id = ?",
+		"SELECT type, status, current_node, budget_verified, salary_processed, registered FROM transfer_applications WHERE id = ?",
 		appID,
-	).Scan(&app.Status, &app.CurrentNode, &budgetV, &salaryP, &registered)
+	).Scan(&appType, &status, &currentNode, &budgetV, &salaryP, &registered)
 	if err != nil {
 		return err
 	}
 
-	app.BudgetVerified = budgetV == 1
-	app.SalaryProcessed = salaryP == 1
-	app.Registered = registered == 1
-
-	if app.Status == models.StatusRejected || app.Status == models.StatusSynced {
+	if status == string(models.StatusRejected) || status == string(models.StatusSynced) {
 		return nil
 	}
 
-	if app.Registered && app.SalaryProcessed && app.BudgetVerified && app.Status == models.StatusApproved {
+	needBudget, needSalary := prerequisitesForType(appType)
+	moduleOK := registered == 1 &&
+		(!needBudget || budgetV == 1) &&
+		(!needSalary || salaryP == 1)
+
+	if moduleOK && status == string(models.StatusApproved) {
 		_, err = tx.Exec(
 			"UPDATE transfer_applications SET status = ?, current_node = ?, updated_at = ? WHERE id = ?",
 			models.StatusSynced, "completed", time.Now(), appID,
@@ -385,9 +429,9 @@ func ProcessApplication(c echo.Context) error {
 	var isTimeout int
 	var budgetV, salaryP, registered int
 	err = tx.QueryRow(
-		"SELECT id, status, current_node, node_deadline, is_timeout, budget_verified, salary_processed, registered FROM transfer_applications WHERE id = ?",
+		"SELECT id, type, status, current_node, node_deadline, is_timeout, budget_verified, salary_processed, registered FROM transfer_applications WHERE id = ?",
 		id,
-	).Scan(&app.ID, &app.Status, &app.CurrentNode, &deadline, &isTimeout, &budgetV, &salaryP, &registered)
+	).Scan(&app.ID, &app.Type, &app.Status, &app.CurrentNode, &deadline, &isTimeout, &budgetV, &salaryP, &registered)
 	if err == sql.ErrNoRows {
 		return utils.ErrorMsg(c, "异动申请不存在")
 	}
@@ -435,6 +479,12 @@ func ProcessApplication(c echo.Context) error {
 			return utils.ErrorMsg(c, "仅人事专员可在审核通过后进行异动登记，且申请须为审核通过状态")
 		default:
 			return utils.ErrorMsg(c, "当前节点需由"+getNodeName(app.CurrentNode)+"处理，您无操作权限")
+		}
+	}
+
+	if req.Action == "submit" || req.Action == "register" {
+		if msg := validatePrerequisites(string(app.Type), req.Action, &app); msg != "" {
+			return utils.ErrorMsg(c, msg)
 		}
 	}
 
@@ -612,13 +662,21 @@ func BatchProcess(c echo.Context) error {
 	results := make(map[int64]string)
 
 	for _, id := range req.IDs {
-		var currentNode, status string
-		var budgetV, salaryP, registered int
-		err := db.DB.QueryRow("SELECT current_node, status, budget_verified, salary_processed, registered FROM transfer_applications WHERE id = ?", id).Scan(&currentNode, &status, &budgetV, &salaryP, &registered)
+		var appType, currentNode, status string
+		var budgetV, salaryP, registered, isTimeout int
+		err := db.DB.QueryRow("SELECT type, current_node, status, budget_verified, salary_processed, registered, is_timeout FROM transfer_applications WHERE id = ?", id).Scan(&appType, &currentNode, &status, &budgetV, &salaryP, &registered, &isTimeout)
 		if err != nil {
 			failCount++
 			results[id] = "申请不存在"
 			continue
+		}
+
+		tempApp := &models.TransferApplication{
+			CurrentNode:     currentNode,
+			Status:          models.ApplicationStatus(status),
+			BudgetVerified:  budgetV == 1,
+			SalaryProcessed: salaryP == 1,
+			Registered:      registered == 1,
 		}
 
 		canProcess := false
@@ -642,14 +700,26 @@ func BatchProcess(c echo.Context) error {
 			continue
 		}
 
+		if req.Action == "submit" || req.Action == "register" {
+			if msg := validatePrerequisites(appType, req.Action, tempApp); msg != "" {
+				failCount++
+				results[id] = msg
+				continue
+			}
+		}
+
+		timeoutFlag := isTimeout == 1 || req.TimeoutReason != ""
+		timeoutReason := req.TimeoutReason
+		if timeoutFlag && timeoutReason == "" {
+			timeoutReason = "批量处理时存在超时节点"
+		}
+
 		tx, txErr := db.DB.Begin()
 		if txErr != nil {
 			failCount++
 			results[id] = "事务开启失败"
 			continue
 		}
-
-		committed := false
 
 		if req.Action == "submit" || req.Action == "reject" {
 			var nextStatus, nextNode string
@@ -680,7 +750,7 @@ func BatchProcess(c echo.Context) error {
 				continue
 			}
 			trailAction := map[string]string{"submit": "批量提交", "reject": "批量驳回"}[req.Action]
-			if err = txAddProcessingTrail(tx, id, currentNode, &uc.UserID, uc.RealName, trailAction, req.Remark, getStatusName(nextStatus), false, ""); err != nil {
+			if err = txAddProcessingTrail(tx, id, currentNode, &uc.UserID, uc.RealName, trailAction, req.Remark, getStatusName(nextStatus), timeoutFlag, timeoutReason); err != nil {
 				tx.Rollback()
 				failCount++
 				results[id] = "记录轨迹失败"
@@ -693,6 +763,12 @@ func BatchProcess(c echo.Context) error {
 				continue
 			}
 		} else if req.Action == "verify_budget" {
+			if budgetV == 1 {
+				tx.Rollback()
+				failCount++
+				results[id] = "预算已校验，请勿重复操作"
+				continue
+			}
 			_, err = tx.Exec("UPDATE transfer_applications SET budget_verified = 1, updated_at = ?, updated_by = ? WHERE id = ?", time.Now(), uc.UserID, id)
 			if err != nil {
 				tx.Rollback()
@@ -700,7 +776,7 @@ func BatchProcess(c echo.Context) error {
 				results[id] = "预算校验失败"
 				continue
 			}
-			if err = txAddProcessingTrail(tx, id, "salary_supervisor", &uc.UserID, uc.RealName, "批量预算校验", req.Remark, "预算已校验", false, ""); err != nil {
+			if err = txAddProcessingTrail(tx, id, "salary_supervisor", &uc.UserID, uc.RealName, "批量预算校验", req.Remark, "预算已校验", timeoutFlag, timeoutReason); err != nil {
 				tx.Rollback()
 				failCount++
 				results[id] = "记录轨迹失败"
@@ -713,6 +789,12 @@ func BatchProcess(c echo.Context) error {
 				continue
 			}
 		} else if req.Action == "process_salary" {
+			if salaryP == 1 {
+				tx.Rollback()
+				failCount++
+				results[id] = "调薪已处理，请勿重复操作"
+				continue
+			}
 			_, err = tx.Exec("UPDATE transfer_applications SET salary_processed = 1, updated_at = ?, updated_by = ? WHERE id = ?", time.Now(), uc.UserID, id)
 			if err != nil {
 				tx.Rollback()
@@ -720,7 +802,7 @@ func BatchProcess(c echo.Context) error {
 				results[id] = "调薪处理失败"
 				continue
 			}
-			if err = txAddProcessingTrail(tx, id, "salary_supervisor", &uc.UserID, uc.RealName, "批量调薪处理", req.Remark, "调薪已处理", false, ""); err != nil {
+			if err = txAddProcessingTrail(tx, id, "salary_supervisor", &uc.UserID, uc.RealName, "批量调薪处理", req.Remark, "调薪已处理", timeoutFlag, timeoutReason); err != nil {
 				tx.Rollback()
 				failCount++
 				results[id] = "记录轨迹失败"
@@ -733,6 +815,12 @@ func BatchProcess(c echo.Context) error {
 				continue
 			}
 		} else if req.Action == "register" {
+			if registered == 1 {
+				tx.Rollback()
+				failCount++
+				results[id] = "异动已登记，请勿重复操作"
+				continue
+			}
 			_, err = tx.Exec("UPDATE transfer_applications SET registered = 1, updated_at = ?, updated_by = ? WHERE id = ?", time.Now(), uc.UserID, id)
 			if err != nil {
 				tx.Rollback()
@@ -740,7 +828,7 @@ func BatchProcess(c echo.Context) error {
 				results[id] = "异动登记失败"
 				continue
 			}
-			if err = txAddProcessingTrail(tx, id, "hr_specialist", &uc.UserID, uc.RealName, "批量异动登记", req.Remark, "已登记", false, ""); err != nil {
+			if err = txAddProcessingTrail(tx, id, "hr_specialist", &uc.UserID, uc.RealName, "批量异动登记", req.Remark, "已登记", timeoutFlag, timeoutReason); err != nil {
 				tx.Rollback()
 				failCount++
 				results[id] = "记录轨迹失败"
@@ -759,7 +847,7 @@ func BatchProcess(c echo.Context) error {
 			continue
 		}
 
-		if err = txAddOperationLog(tx, uc.UserID, uc.RealName, uc.Role, "batch_"+req.Action, "transfer_application", id, "批量操作: "+req.Action); err != nil {
+		if err = txAddOperationLog(tx, uc.UserID, uc.RealName, uc.Role, "batch_"+req.Action, "transfer_application", id, "批量操作: "+req.Action+" | "+req.Remark); err != nil {
 			tx.Rollback()
 			failCount++
 			results[id] = "记录日志失败"
@@ -771,8 +859,6 @@ func BatchProcess(c echo.Context) error {
 			results[id] = "提交事务失败"
 			continue
 		}
-		committed = true
-		_ = committed
 
 		successCount++
 		results[id] = "处理成功"
