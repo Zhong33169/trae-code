@@ -167,12 +167,38 @@ pub struct PlanListQuery {
     pub page_size: Option<u32>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct OperationLog {
+    pub id: String,
+    pub plan_id: String,
+    pub operator_id: String,
+    pub operation: String,
+    pub old_status: Option<String>,
+    pub new_status: Option<String>,
+    pub remark: Option<String>,
+    pub created_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OperationLogWithOperator {
+    pub id: String,
+    pub plan_id: String,
+    pub operator_id: String,
+    pub operator_name: String,
+    pub operation: String,
+    pub old_status: Option<String>,
+    pub new_status: Option<String>,
+    pub remark: Option<String>,
+    pub created_at: Option<DateTime<Utc>>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlanDetailResponse {
     pub plan: MediaPlan,
     pub schedules: Vec<MediaSchedule>,
     pub budgets: Vec<Budget>,
     pub evidences: Vec<Evidence>,
+    pub operation_logs: Vec<OperationLogWithOperator>,
     pub created_by_name: String,
 }
 

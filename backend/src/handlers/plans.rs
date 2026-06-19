@@ -141,6 +141,13 @@ pub async fn get_plan(
     .fetch_all(&state.pool)
     .await?;
 
+    let logs = sqlx::query_as::<_, OperationLog>(
+        "SELECT * FROM operation_logs WHERE plan_id = ? ORDER BY created_at DESC"
+    )
+    .bind(&id)
+    .fetch_all(&state.pool)
+    .await?;
+
     let creator: Option<User> = sqlx::query_as::<_, User>(
         "SELECT id, username, password_hash, real_name, role, created_at, updated_at FROM users WHERE id = ?"
     )
@@ -150,11 +157,37 @@ pub async fn get_plan(
 
     let created_by_name = creator.map(|u| u.real_name).unwrap_or_else(|| "未知".to_string());
 
+    let operation_logs = {
+        let mut result = Vec::new();
+        for log in logs {
+            let operator: Option<User> = sqlx::query_as::<_, User>(
+                "SELECT id, username, password_hash, real_name, role, created_at, updated_at FROM users WHERE id = ?"
+            )
+            .bind(&log.operator_id)
+            .fetch_optional(&state.pool)
+            .await?;
+            let operator_name = operator.map(|u| u.real_name).unwrap_or_else(|| "未知".to_string());
+            result.push(OperationLogWithOperator {
+                id: log.id,
+                plan_id: log.plan_id,
+                operator_id: log.operator_id,
+                operator_name,
+                operation: log.operation,
+                old_status: log.old_status,
+                new_status: log.new_status,
+                remark: log.remark,
+                created_at: log.created_at,
+            });
+        }
+        result
+    };
+
     Ok(Json(PlanDetailResponse {
         plan,
         schedules,
         budgets,
         evidences,
+        operation_logs,
         created_by_name,
     }))
 }

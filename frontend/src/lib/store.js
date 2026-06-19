@@ -76,3 +76,51 @@ export const evidenceTypeNames = {
 	media_quote: '媒体报价单',
 	creative_mockup: '创意稿'
 };
+
+export const operationNames = {
+	create: '创建草稿',
+	update: '更新计划',
+	submit: '提交审核',
+	approve: '审核通过',
+	reject: '审核驳回',
+	send_to_review: '送复核',
+	review: '复核通过',
+	review_reject: '复核驳回',
+	archive: '归档',
+	batch_submit: '批量提交',
+	batch_approve: '批量审核通过',
+	batch_reject: '批量审核驳回',
+	batch_review: '批量复核通过',
+	batch_submit_failed: '批量提交失败',
+	batch_approve_failed: '批量审核失败',
+	batch_reject_failed: '批量驳回失败',
+	batch_review_failed: '批量复核失败',
+	batch_submit_retry: '批量提交需重试',
+	batch_approve_retry: '批量审核需重试',
+	batch_reject_retry: '批量驳回需重试',
+	batch_review_retry: '批量复核需重试'
+};
+
+export const operationColors = {
+	create: '#94a3b8',
+	update: '#64748b',
+	submit: '#f59e0b',
+	approve: '#10b981',
+	reject: '#ef4444',
+	send_to_review: '#8b5cf6',
+	review: '#059669',
+	review_reject: '#dc2626',
+	archive: '#64748b',
+	batch_submit: '#f59e0b',
+	batch_approve: '#10b981',
+	batch_reject: '#ef4444',
+	batch_review: '#059669',
+	batch_submit_failed: '#dc2626',
+	batch_approve_failed: '#dc2626',
+	batch_reject_failed: '#dc2626',
+	batch_review_failed: '#dc2626',
+	batch_submit_retry: '#f59e0b',
+	batch_approve_retry: '#f59e0b',
+	batch_reject_retry: '#f59e0b',
+	batch_review_retry: '#f59e0b'
+};

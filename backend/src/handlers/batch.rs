@@ -104,106 +104,94 @@ async fn process_single_plan(
     action: &str,
     remark: Option<&str>,
 ) -> AppResult<BatchResultItem> {
-    let plan = get_plan_by_id(pool, plan_id).await?;
+    let plan_result = get_plan_by_id(pool, plan_id).await;
 
-    match action {
-        "approve" => {
-            let result = do_approve(pool, claims, &plan, client_version, remark).await;
-            match result {
-                Ok(p) => Ok(BatchResultItem {
-                    plan_id: plan_id.to_string(),
-                    plan_no: p.plan_no.clone(),
-                    success: true,
-                    status: p.status,
-                    message: "审核通过".to_string(),
-                    need_retry: false,
-                }),
-                Err(e) => {
-                    let need_retry = matches!(e, AppError::VersionConflict(_));
-                    Ok(BatchResultItem {
-                        plan_id: plan_id.to_string(),
-                        plan_no: plan.plan_no.clone(),
-                        success: false,
-                        status: plan.status,
-                        message: e.to_string(),
-                        need_retry,
-                    })
-                }
-            }
+    let plan = match plan_result {
+        Ok(p) => p,
+        Err(e) => {
+            add_operation_log(
+                pool,
+                plan_id,
+                &claims.user_id,
+                &format!("batch_{}_failed", action),
+                None,
+                None,
+                Some(&format!("获取计划单失败：{}", e)),
+            ).await.ok();
+
+            return Ok(BatchResultItem {
+                plan_id: plan_id.to_string(),
+                plan_no: "未知".to_string(),
+                success: false,
+                status: "error".to_string(),
+                message: e.to_string(),
+                need_retry: false,
+            });
         }
-        "reject" => {
-            let result = do_reject(pool, claims, &plan, client_version, remark.unwrap_or("批量驳回")).await;
-            match result {
-                Ok(p) => Ok(BatchResultItem {
-                    plan_id: plan_id.to_string(),
-                    plan_no: p.plan_no.clone(),
-                    success: true,
-                    status: p.status,
-                    message: "审核驳回".to_string(),
-                    need_retry: false,
-                }),
-                Err(e) => {
-                    let need_retry = matches!(e, AppError::VersionConflict(_));
-                    Ok(BatchResultItem {
-                        plan_id: plan_id.to_string(),
-                        plan_no: plan.plan_no.clone(),
-                        success: false,
-                        status: plan.status,
-                        message: e.to_string(),
-                        need_retry,
-                    })
-                }
-            }
+    };
+
+    let op_name = match action {
+        "approve" => "batch_approve",
+        "reject" => "batch_reject",
+        "review" => "batch_review",
+        "submit" => "batch_submit",
+        _ => action,
+    };
+
+    let result = match action {
+        "approve" => do_approve(pool, claims, &plan, client_version, remark).await,
+        "reject" => do_reject(pool, claims, &plan, client_version, remark.unwrap_or("批量驳回")).await,
+        "review" => do_review(pool, claims, &plan, client_version, remark).await,
+        "submit" => do_submit(pool, claims, &plan, client_version).await,
+        _ => return Err(AppError::Validation(format!("未知操作: {}", action))),
+    };
+
+    match result {
+        Ok(p) => {
+            let msg = match action {
+                "approve" => "审核通过",
+                "reject" => "审核驳回",
+                "review" => "复核通过",
+                "submit" => "提交成功",
+                _ => "操作成功",
+            };
+            Ok(BatchResultItem {
+                plan_id: plan_id.to_string(),
+                plan_no: p.plan_no.clone(),
+                success: true,
+                status: p.status,
+                message: msg.to_string(),
+                need_retry: false,
+            })
         }
-        "review" => {
-            let result = do_review(pool, claims, &plan, client_version, remark).await;
-            match result {
-                Ok(p) => Ok(BatchResultItem {
-                    plan_id: plan_id.to_string(),
-                    plan_no: p.plan_no.clone(),
-                    success: true,
-                    status: p.status,
-                    message: "复核通过".to_string(),
-                    need_retry: false,
-                }),
-                Err(e) => {
-                    let need_retry = matches!(e, AppError::VersionConflict(_));
-                    Ok(BatchResultItem {
-                        plan_id: plan_id.to_string(),
-                        plan_no: plan.plan_no.clone(),
-                        success: false,
-                        status: plan.status,
-                        message: e.to_string(),
-                        need_retry,
-                    })
-                }
-            }
+        Err(e) => {
+            let need_retry = matches!(e, AppError::VersionConflict(_)) || matches!(e, AppError::MissingEvidence(_));
+
+            let op_type = if need_retry {
+                format!("{}_retry", op_name)
+            } else {
+                format!("{}_failed", op_name)
+            };
+
+            add_operation_log(
+                pool,
+                plan_id,
+                &claims.user_id,
+                &op_type,
+                Some(&plan.status),
+                Some(&plan.status),
+                Some(&e.to_string()),
+            ).await.ok();
+
+            Ok(BatchResultItem {
+                plan_id: plan_id.to_string(),
+                plan_no: plan.plan_no.clone(),
+                success: false,
+                status: plan.status,
+                message: e.to_string(),
+                need_retry,
+            })
         }
-        "submit" => {
-            let result = do_submit(pool, claims, &plan, client_version).await;
-            match result {
-                Ok(p) => Ok(BatchResultItem {
-                    plan_id: plan_id.to_string(),
-                    plan_no: p.plan_no.clone(),
-                    success: true,
-                    status: p.status,
-                    message: "提交成功".to_string(),
-                    need_retry: false,
-                }),
-                Err(e) => {
-                    let need_retry = matches!(e, AppError::VersionConflict(_)) || matches!(e, AppError::MissingEvidence(_));
-                    Ok(BatchResultItem {
-                        plan_id: plan_id.to_string(),
-                        plan_no: plan.plan_no.clone(),
-                        success: false,
-                        status: plan.status,
-                        message: e.to_string(),
-                        need_retry,
-                    })
-                }
-            }
-        }
-        _ => Err(AppError::Validation(format!("未知操作: {}", action))),
     }
 }
 

@@ -82,6 +82,27 @@
 		loadPlanDetail(plan.id);
 	}
 
+	function getSuggestion(item) {
+		if (item.success) return null;
+		const msg = item.message || '';
+		if (msg.includes('版本冲突') || msg.includes('版本')) {
+			return '该计划单已被他人修改，请刷新列表获取最新版本后重试';
+		}
+		if (msg.includes('证据') || msg.includes('材料')) {
+			return '请进入详情页补充证据材料后重新提交';
+		}
+		if (msg.includes('状态') || msg.includes('不允许')) {
+			return '该计划单当前状态不支持此操作，请确认状态后再试';
+		}
+		if (msg.includes('角色') || msg.includes('权限')) {
+			return '当前角色无权限执行此操作，请切换到对应角色账号';
+		}
+		if (item.need_retry) {
+			return '请修正问题后重试该操作';
+		}
+		return '请检查计划单状态或联系系统管理员';
+	}
+
 	function toggleSelect(id) {
 		const newSet = new Set(selectedIds);
 		if (newSet.has(id)) {
@@ -493,6 +514,16 @@
 											<span class="result-status">{statusNames[item.status] || item.status}</span>
 										</div>
 										<div class="result-message">{item.message}</div>
+										<div class="result-audit">
+											<span class="audit-label">📝 审计记录：</span>
+											<span class="audit-status success">已记录</span>
+										</div>
+										{#if getSuggestion(item)}
+											<div class="result-suggestion">
+												<span class="suggestion-label">💡 处理建议：</span>
+												<span class="suggestion-text">{getSuggestion(item)}</span>
+											</div>
+										{/if}
 									</div>
 								{/each}
 							</div>
@@ -1178,5 +1209,34 @@
 		font-size: 12px;
 		color: #475569;
 		padding-left: 24px;
+	}
+
+	.result-audit {
+		font-size: 11px;
+		color: #64748b;
+		padding-left: 24px;
+		margin-top: 4px;
+		display: flex;
+		align-items: center;
+		gap: 4px;
+	}
+
+	.audit-status.success {
+		color: #10b981;
+		font-weight: 500;
+	}
+
+	.result-suggestion {
+		font-size: 11px;
+		color: #d97706;
+		padding-left: 24px;
+		margin-top: 2px;
+		display: flex;
+		align-items: flex-start;
+		gap: 4px;
+	}
+
+	.suggestion-text {
+		flex: 1;
 	}
 </style>

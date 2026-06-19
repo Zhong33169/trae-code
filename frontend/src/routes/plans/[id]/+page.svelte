@@ -3,7 +3,7 @@
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import { api } from '$lib/api';
-	import { auth, statusNames, statusColors, evidenceTypeNames, roleNames } from '$lib/store';
+	import { auth, statusNames, statusColors, evidenceTypeNames, roleNames, operationNames, operationColors } from '$lib/store';
 
 	let planId = $page.params.id ?? '';
 	let planDetail = null;
@@ -364,6 +364,47 @@
 							{/each}
 						</div>
 					{/if}
+				</div>
+
+				<div class="info-card">
+					<div class="card-header">
+						<h2>📋 办理记录</h2>
+						<span class="count-badge">{planDetail.operation_logs.length} 条</span>
+					</div>
+					<div class="audit-timeline">
+						{#each planDetail.operation_logs as log (log.id)}
+							<div class="audit-item">
+								<div
+									class="audit-dot"
+									style="background: {operationColors[log.operation] || '#94a3b8'}"
+								></div>
+								<div class="audit-content">
+									<div class="audit-header">
+										<span class="audit-op" style="color: {operationColors[log.operation] || '#64748b'}">
+											{operationNames[log.operation] || log.operation}
+										</span>
+										<span class="audit-operator">{log.operator_name}</span>
+									</div>
+									<div class="audit-status">
+										{#if log.old_status && log.new_status && log.old_status !== log.new_status}
+											<span class="status-old">{statusNames[log.old_status] || log.old_status}</span>
+											<span class="status-arrow">→</span>
+											<span class="status-new">{statusNames[log.new_status] || log.new_status}</span>
+										{/if}
+										{#if log.old_status && log.new_status && log.old_status === log.new_status}
+											<span class="status-same">状态未变更</span>
+										{/if}
+									</div>
+									{#if log.remark}
+										<div class="audit-remark">{log.remark}</div>
+									{/if}
+									<div class="audit-time">{formatDate(log.created_at)}</div>
+								</div>
+							</div>
+						{:else}
+							<div class="empty-log">暂无办理记录</div>
+						{/each}
+					</div>
 				</div>
 			</div>
 
@@ -1089,5 +1130,106 @@
 	.btn:disabled {
 		opacity: 0.6;
 		cursor: not-allowed;
+	}
+
+	.audit-timeline {
+		display: flex;
+		flex-direction: column;
+		gap: 16px;
+	}
+
+	.audit-item {
+		display: flex;
+		gap: 12px;
+		position: relative;
+	}
+
+	.audit-item:not(:last-child)::after {
+		content: '';
+		position: absolute;
+		left: 6px;
+		top: 20px;
+		bottom: -8px;
+		width: 2px;
+		background: #e2e8f0;
+	}
+
+	.audit-dot {
+		width: 14px;
+		height: 14px;
+		border-radius: 50%;
+		flex-shrink: 0;
+		margin-top: 3px;
+		box-shadow: 0 0 0 3px white, 0 0 0 4px #e2e8f0;
+	}
+
+	.audit-content {
+		flex: 1;
+		min-width: 0;
+	}
+
+	.audit-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		margin-bottom: 4px;
+	}
+
+	.audit-op {
+		font-size: 14px;
+		font-weight: 600;
+	}
+
+	.audit-operator {
+		font-size: 12px;
+		color: #64748b;
+	}
+
+	.audit-status {
+		font-size: 12px;
+		color: #64748b;
+		margin-bottom: 4px;
+		display: flex;
+		align-items: center;
+		gap: 6px;
+	}
+
+	.status-old {
+		color: #94a3b8;
+	}
+
+	.status-arrow {
+		color: #cbd5e1;
+	}
+
+	.status-new {
+		color: #10b981;
+		font-weight: 500;
+	}
+
+	.status-same {
+		color: #f59e0b;
+	}
+
+	.audit-remark {
+		font-size: 12px;
+		color: #475569;
+		background: #f8fafc;
+		padding: 6px 10px;
+		border-radius: 6px;
+		margin-bottom: 4px;
+		line-height: 1.5;
+	}
+
+	.audit-time {
+		font-size: 11px;
+		color: #94a3b8;
+	}
+
+	.empty-log {
+		text-align: center;
+		padding: 30px;
+		color: #94a3b8;
+		font-size: 13px;
 	}
 </style>
