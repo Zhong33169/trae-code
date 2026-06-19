@@ -105,7 +105,15 @@ func (oc *OrderController) AdvanceOrder(c *gin.Context) {
 
 	order, err := service.AdvanceOrder(oc.DB, id, req, actorID.(string), actorName, role.(string))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, model.APIResponse{Code: 400, Message: err.Error()})
+		fc := service.ClassifyFailure(err)
+		c.JSON(http.StatusBadRequest, model.APIResponse{
+			Code:    400,
+			Message: err.Error(),
+			Data: gin.H{
+				"failure_type":   fc.Type,
+				"failure_reason": fc.Reason,
+			},
+		})
 		return
 	}
 
@@ -129,7 +137,15 @@ func (oc *OrderController) ReturnOrder(c *gin.Context) {
 
 	order, err := service.ReturnOrder(oc.DB, id, req, actorID.(string), actorName, role.(string))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, model.APIResponse{Code: 400, Message: err.Error()})
+		fc := service.ClassifyFailure(err)
+		c.JSON(http.StatusBadRequest, model.APIResponse{
+			Code:    400,
+			Message: err.Error(),
+			Data: gin.H{
+				"failure_type":   fc.Type,
+				"failure_reason": fc.Reason,
+			},
+		})
 		return
 	}
 
@@ -153,7 +169,15 @@ func (oc *OrderController) CorrectOrder(c *gin.Context) {
 
 	order, err := service.CorrectOrder(oc.DB, id, req, actorID.(string), actorName, role.(string))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, model.APIResponse{Code: 400, Message: err.Error()})
+		fc := service.ClassifyFailure(err)
+		c.JSON(http.StatusBadRequest, model.APIResponse{
+			Code:    400,
+			Message: err.Error(),
+			Data: gin.H{
+				"failure_type":   fc.Type,
+				"failure_reason": fc.Reason,
+			},
+		})
 		return
 	}
 

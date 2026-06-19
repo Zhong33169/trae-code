@@ -301,11 +301,7 @@ async function handleAdvanceSubmit(orderId, version, isOverdue) {
         refreshCurrentPage();
     } catch (e) {
         closeModal();
-        if (e.message.includes('版本冲突') || e.message.includes('version')) {
-            showToast('版本冲突，请刷新页面后重试', 'error');
-        } else {
-            showToast(`操作失败：${e.message}`, 'error');
-        }
+        showFailureToast(e);
     }
 }
 
@@ -322,11 +318,26 @@ async function handleReturnSubmit(orderId, version) {
         refreshCurrentPage();
     } catch (e) {
         closeModal();
-        if (e.message.includes('版本冲突') || e.message.includes('version')) {
-            showToast('版本冲突，请刷新页面后重试', 'error');
-        } else {
-            showToast(`退回失败：${e.message}`, 'error');
-        }
+        showFailureToast(e);
+    }
+}
+
+function showFailureToast(e) {
+    const typeLabel = {
+        unauthorized: '越权操作',
+        sequence: '顺序错误',
+        evidence: '证据缺失',
+        version: '版本冲突',
+        other: '操作失败'
+    };
+    const ft = e.failureType || '';
+    const label = typeLabel[ft] || '操作失败';
+    if (ft === 'version') {
+        showToast(`${label}：请刷新页面后重试`, 'error');
+    } else if (ft === 'unauthorized') {
+        showToast(`${label}：${e.message}`, 'error');
+    } else {
+        showToast(`${label}：${e.message}`, 'error');
     }
 }
 
@@ -350,13 +361,14 @@ function showBatchResultModal(title, succeeded, failed) {
         <div>
             <h4 style="color:var(--danger);margin-bottom:8px;">失败 (${failed.length})</h4>
             ${failed.map(f => {
-                const [orderNo, ...reasonParts] = f.split(': ');
-                const reason = reasonParts.join(': ');
+                const fType = f.failure_type || 'other';
+                const fReason = f.failure_reason || '';
                 return `
                 <div class="batch-result-item failed">
                     <span class="result-icon">✗</span>
-                    <span class="order-no">${orderNo}</span>
-                    <span>${renderFailureTypeTag(reason)} ${escapeHtml(reason)}</span>
+                    <span class="order-no">${f.order_no || f.order_id || '-'}</span>
+                    <span class="failure-type-tag ${fType}">${({unauthorized:'越权',sequence:'顺序错误',evidence:'证据缺失',version:'版本冲突',other:'失败'})[fType] || '失败'}</span>
+                    <span>${escapeHtml(fReason)}</span>
                 </div>
             `}).join('')}
         </div>
@@ -976,11 +988,8 @@ async function handleDetailAdvance(orderId, version, isOverdue) {
         showToast('操作成功', 'success');
         renderDetailPage(orderId);
     } catch (e) {
-        if (e.message.includes('版本冲突') || e.message.includes('version')) {
-            showToast('版本冲突，数据已被其他人修改，请刷新页面后重试', 'error');
-        } else {
-            showToast(`操作失败：${e.message}`, 'error');
-        }
+        showFailureToast(e);
+        renderDetailPage(orderId);
     }
 }
 
@@ -1321,11 +1330,7 @@ async function handleCorrectSubmit(orderId, version) {
         showToast('补正提交成功', 'success');
         navigateTo('#detail/' + orderId);
     } catch (e) {
-        if (e.message.includes('版本冲突') || e.message.includes('version')) {
-            showToast('版本冲突，数据已被其他人修改，请刷新页面后重试', 'error');
-        } else {
-            showToast(`补正失败：${e.message}`, 'error');
-        }
+        showFailureToast(e);
     }
 }
 

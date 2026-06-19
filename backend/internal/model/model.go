@@ -143,9 +143,18 @@ type APIResponse struct {
 }
 
 type ErrorResponse struct {
-	Code    int    `json:"code"`
-	Message string `json:"message"`
-	Detail  string `json:"detail"`
+	Code          int    `json:"code"`
+	Message       string `json:"message"`
+	Detail        string `json:"detail"`
+	FailureType   string `json:"failure_type,omitempty"`
+	FailureReason string `json:"failure_reason,omitempty"`
+}
+
+type BatchFailureItem struct {
+	OrderID       string `json:"order_id"`
+	OrderNo       string `json:"order_no"`
+	FailureType   string `json:"failure_type"`
+	FailureReason string `json:"failure_reason"`
 }
 
 type StatsResponse struct {

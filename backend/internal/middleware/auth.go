@@ -29,8 +29,31 @@ func Auth(db *sql.DB) gin.HandlerFunc {
 			return
 		}
 
+		validRoles := map[string]bool{
+			"clerk":      true,
+			"supervisor": true,
+			"reviewer":   true,
+		}
+
+		if !validRoles[role] {
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"code":    401,
+				"message": "未授权：无效的角色类型",
+			})
+			c.Abort()
+			return
+		}
+
 		user, err := repository.GetUserByID(db, userID)
 		if err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"code":    401,
+				"message": "未授权：用户查询失败",
+			})
+			c.Abort()
+			return
+		}
+		if user == nil {
 			c.JSON(http.StatusUnauthorized, gin.H{
 				"code":    401,
 				"message": "未授权：用户不存在",
@@ -43,21 +66,6 @@ func Auth(db *sql.DB) gin.HandlerFunc {
 			c.JSON(http.StatusForbidden, gin.H{
 				"code":    403,
 				"message": "未授权：角色与用户不匹配，拒绝伪造角色",
-			})
-			c.Abort()
-			return
-		}
-
-		validRoles := map[string]bool{
-			"clerk":      true,
-			"supervisor": true,
-			"reviewer":   true,
-		}
-
-		if !validRoles[role] {
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"code":    401,
-				"message": "未授权：无效的角色类型",
 			})
 			c.Abort()
 			return

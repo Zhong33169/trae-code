@@ -33,7 +33,12 @@ async function apiCall(method, path, body) {
     const resp = await fetch(`${API_BASE}${path}`, opts);
     const data = await resp.json();
     if (data.code !== 0 && data.code !== 201) {
-        throw new Error(data.message || '请求失败');
+        const err = new Error(data.message || '请求失败');
+        err.code = data.code;
+        err.failureType = (data.data && data.data.failure_type) || '';
+        err.failureReason = (data.data && data.data.failure_reason) || '';
+        err.responseData = data.data;
+        throw err;
     }
     return data;
 }
