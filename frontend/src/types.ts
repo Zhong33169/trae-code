@@ -126,6 +126,15 @@ export interface ProcessComment {
   created_at: string;
 }
 
+export interface StatQueue {
+  key: string;
+  label: string;
+  count: number;
+  statuses: HarvestStatus[];
+  queue: Role;
+  color: string;
+}
+
 export interface Statistics {
   total: number;
   pending_correction: number;
@@ -133,4 +142,5 @@ export interface Statistics {
   pending_review: number;
   archived: number;
   draft: number;
+  queues: StatQueue[];
 }

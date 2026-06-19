@@ -88,7 +88,7 @@ export const userApi = {
 };
 
 export const harvestApi = {
-  findAll: (params?: { status?: string; keyword?: string }): Promise<HarvestRecord[]> =>
+  findAll: (params?: { status?: string | string[]; keyword?: string }): Promise<HarvestRecord[]> =>
     api.get('/harvest', { params }),
   statistics: (): Promise<Statistics> => api.get('/harvest/statistics'),
   findById: (id: string): Promise<HarvestRecord> => api.get(`/harvest/${id}`),

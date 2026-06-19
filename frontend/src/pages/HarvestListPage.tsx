@@ -48,18 +48,36 @@ const HarvestListPage: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
-  const [statusFilter, setStatusFilter] = useState<string>(searchParams.get('status') || '');
+  const [statusFilter, setStatusFilter] = useState<string[]>(searchParams.getAll('status'));
   const [keyword, setKeyword] = useState<string>(searchParams.get('keyword') || '');
 
   useEffect(() => {
     if (user) loadRecords();
   }, [user, statusFilter, keyword]);
 
+  useEffect(() => {
+    if (statusFilter.length === 1) {
+      if (statusFilter.includes(HarvestStatus.DRAFT) || statusFilter.includes(HarvestStatus.PENDING_CORRECTION)) {
+        setBatchAction('SUBMIT');
+      } else if (statusFilter.includes(HarvestStatus.SUBMITTED)) {
+        setBatchAction('VERIFY_PASS');
+      } else if (statusFilter.includes(HarvestStatus.VERIFIED) || statusFilter.includes(HarvestStatus.PENDING_REVIEW)) {
+        setBatchAction('REVIEW_PASS');
+      }
+    } else if (statusFilter.length > 1) {
+      if (statusFilter.includes(HarvestStatus.VERIFIED) || statusFilter.includes(HarvestStatus.PENDING_REVIEW)) {
+        setBatchAction('REVIEW_PASS');
+      } else if (statusFilter.includes(HarvestStatus.SUBMITTED)) {
+        setBatchAction('VERIFY_PASS');
+      }
+    }
+  }, [statusFilter]);
+
   const loadRecords = async () => {
     setLoading(true);
     try {
       const params: any = {};
-      if (statusFilter) params.status = statusFilter;
+      if (statusFilter.length > 0) params.status = statusFilter;
       if (keyword) params.keyword = keyword;
       const data = (await harvestApi.findAll(params)) as HarvestRecord[];
       setRecords(data);
@@ -72,12 +90,18 @@ const HarvestListPage: React.FC = () => {
 
   const handleSearch = (value: string) => {
     setKeyword(value);
-    setSearchParams({ status: statusFilter, keyword: value });
+    const newParams = new URLSearchParams();
+    statusFilter.forEach((s) => newParams.append('status', s));
+    if (value) newParams.set('keyword', value);
+    setSearchParams(newParams);
   };
 
-  const handleStatusChange = (value: string) => {
-    setStatusFilter(value);
-    setSearchParams({ status: value, keyword });
+  const handleStatusChange = (value: string[]) => {
+    setStatusFilter(value || []);
+    const newParams = new URLSearchParams();
+    (value || []).forEach((s) => newParams.append('status', s));
+    if (keyword) newParams.set('keyword', keyword);
+    setSearchParams(newParams);
   };
 
   const handleBatchProcess = async () => {
@@ -278,12 +302,14 @@ const HarvestListPage: React.FC = () => {
         </Col>
         <Col span={6}>
           <Select
-            placeholder="筛选状态"
+            placeholder="筛选状态（可多选）"
             allowClear
+            mode="multiple"
+            maxTagCount="responsive"
             style={{ width: '100%' }}
             size="large"
             onChange={handleStatusChange}
-            value={statusFilter || undefined}
+            value={statusFilter}
           >
             {Object.entries(StatusLabelMap).map(([key, label]) => (
               <Option key={key} value={key}>

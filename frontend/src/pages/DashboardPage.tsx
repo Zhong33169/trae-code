@@ -49,8 +49,10 @@ const DashboardPage: React.FC = () => {
     if (user) loadData();
   }, [user]);
 
-  const handleStatClick = (statusFilter: string) => {
-    navigate(`/harvest?status=${statusFilter}`);
+  const handleStatClick = (statuses: HarvestStatus[]) => {
+    const params = new URLSearchParams();
+    statuses.forEach((s) => params.append('status', s));
+    navigate(`/harvest?${params.toString()}`);
   };
 
   const roleLabel = user?.role === Role.FIELD_ADMIN
@@ -59,38 +61,22 @@ const DashboardPage: React.FC = () => {
     ? '农技员'
     : '合作社主任';
 
-  const statCards = stats
-    ? [
-        {
-          title: '待补正',
-          value: stats.pending_correction,
-          icon: <WarningOutlined style={{ color: '#faad14' }} />,
-          color: '#faad14',
-          onClick: () => handleStatClick(HarvestStatus.PENDING_CORRECTION),
-        },
-        {
-          title: '待核验',
-          value: stats.pending_verification,
-          icon: <ClockCircleOutlined style={{ color: '#1890ff' }} />,
-          color: '#1890ff',
-          onClick: () => handleStatClick(HarvestStatus.SUBMITTED),
-        },
-        {
-          title: '待复核',
-          value: stats.pending_review,
-          icon: <FileTextOutlined style={{ color: '#722ed1' }} />,
-          color: '#722ed1',
-          onClick: () => handleStatClick(HarvestStatus.VERIFIED),
-        },
-        {
-          title: '已归档',
-          value: stats.archived,
-          icon: <CheckCircleOutlined style={{ color: '#52c41a' }} />,
-          color: '#52c41a',
-          onClick: () => handleStatClick(HarvestStatus.ARCHIVED),
-        },
-      ]
-    : [];
+  const statCards = (stats?.queues || [])
+    .filter((q) => q.key !== 'draft')
+    .map((q) => ({
+      title: q.label,
+      value: q.count,
+      icon:
+        q.key === 'pending_correction'
+          ? <WarningOutlined style={{ color: q.color }} />
+          : q.key === 'pending_verification'
+          ? <ClockCircleOutlined style={{ color: q.color }} />
+          : q.key === 'pending_review'
+          ? <FileTextOutlined style={{ color: q.color }} />
+          : <CheckCircleOutlined style={{ color: q.color }} />,
+      color: q.color,
+      onClick: () => handleStatClick(q.statuses),
+    }));
 
   const columns = [
     {

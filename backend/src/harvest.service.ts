@@ -9,6 +9,7 @@ import {
   ScanRecord,
   AuditLog,
   ProcessComment,
+  Statistics,
 } from './types';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -70,7 +71,7 @@ export class HarvestService {
     return `${prefix}${seq}`;
   }
 
-  findAll(userId: string, userRole: Role, filters?: { status?: string; keyword?: string }): HarvestRecord[] {
+  findAll(userId: string, userRole: Role, filters?: { status?: string | string[]; keyword?: string }): HarvestRecord[] {
     let sql = 'SELECT * FROM harvest_records WHERE 1=1';
     const params: any[] = [];
 
@@ -83,8 +84,11 @@ export class HarvestService {
     }
 
     if (filters?.status) {
-      sql += ' AND status = ?';
-      params.push(filters.status);
+      const statuses = Array.isArray(filters.status) ? filters.status : [filters.status];
+      if (statuses.length > 0) {
+        sql += ` AND status IN (${statuses.map(() => '?').join(', ')})`;
+        params.push(...statuses);
+      }
     }
 
     if (filters?.keyword) {
@@ -119,7 +123,7 @@ export class HarvestService {
       .all(harvestId) as ProcessComment[];
   }
 
-  getStatistics(userId: string, userRole: Role) {
+  getStatistics(userId: string, userRole: Role): Statistics {
     let baseSql = 'SELECT status, COUNT(*) as cnt FROM harvest_records WHERE 1=1';
     const params: any[] = [];
 
@@ -131,13 +135,14 @@ export class HarvestService {
     const sql = `${baseSql} GROUP BY status`;
     const rows = this.db.prepare(sql).all(...params) as { status: string; cnt: number }[];
 
-    const result = {
+    const result: Statistics = {
       total: 0,
       pending_correction: 0,
       pending_verification: 0,
       pending_review: 0,
       archived: 0,
       draft: 0,
+      queues: [],
     };
 
     for (const row of rows) {
@@ -149,6 +154,49 @@ export class HarvestService {
       if (row.status === HarvestStatus.ARCHIVED) result.archived = row.cnt;
       if (row.status === HarvestStatus.DRAFT) result.draft = row.cnt;
     }
+
+    result.queues = [
+      {
+        key: 'pending_correction',
+        label: '待补正',
+        count: result.pending_correction,
+        statuses: [HarvestStatus.PENDING_CORRECTION],
+        queue: Role.FIELD_ADMIN,
+        color: '#faad14',
+      },
+      {
+        key: 'pending_verification',
+        label: '待核验',
+        count: result.pending_verification,
+        statuses: [HarvestStatus.SUBMITTED],
+        queue: Role.TECHNICIAN,
+        color: '#1890ff',
+      },
+      {
+        key: 'pending_review',
+        label: '待复核',
+        count: result.pending_review,
+        statuses: [HarvestStatus.VERIFIED, HarvestStatus.PENDING_REVIEW],
+        queue: Role.COOP_DIRECTOR,
+        color: '#722ed1',
+      },
+      {
+        key: 'archived',
+        label: '已归档',
+        count: result.archived,
+        statuses: [HarvestStatus.ARCHIVED],
+        queue: Role.COOP_DIRECTOR,
+        color: '#52c41a',
+      },
+      {
+        key: 'draft',
+        label: '草稿',
+        count: result.draft,
+        statuses: [HarvestStatus.DRAFT],
+        queue: Role.FIELD_ADMIN,
+        color: '#8c8c8c',
+      },
+    ];
 
     return result;
   }

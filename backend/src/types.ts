@@ -119,3 +119,22 @@ export interface ProcessComment {
   action_type: string;
   created_at: string;
 }
+
+export interface StatQueue {
+  key: string;
+  label: string;
+  count: number;
+  statuses: HarvestStatus[];
+  queue: Role;
+  color: string;
+}
+
+export interface Statistics {
+  total: number;
+  pending_correction: number;
+  pending_verification: number;
+  pending_review: number;
+  archived: number;
+  draft: number;
+  queues: StatQueue[];
+}
