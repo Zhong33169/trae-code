@@ -74,6 +74,11 @@ function initSchema() {
       from_status TEXT NOT NULL,
       to_status TEXT NOT NULL,
       version INTEGER NOT NULL,
+      expected_version INTEGER,
+      current_version INTEGER,
+      success INTEGER NOT NULL DEFAULT 1,
+      failure_reason TEXT,
+      failure_code TEXT,
       acted_at TEXT NOT NULL DEFAULT (datetime('now')),
       FOREIGN KEY (form_id) REFERENCES adjustment_forms(id),
       FOREIGN KEY (actor_id) REFERENCES users(id)

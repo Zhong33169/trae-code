@@ -97,6 +97,51 @@ function validateTransition(role, action, currentStatus, currentVersion, form, o
   return { valid: true, toStatus: transition.to };
 }
 
+function recordActionAudit(db, options) {
+  const {
+    formId,
+    action,
+    userId,
+    userRole,
+    comment,
+    fromStatus,
+    toStatus,
+    version,
+    expectedVersion,
+    currentVersion,
+    success,
+    failureReason,
+    failureCode,
+  } = options;
+
+  const actionId = `ACT-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+
+  db.prepare(`
+    INSERT INTO form_actions (
+      id, form_id, action, actor_id, actor_role, comment,
+      from_status, to_status, version, expected_version, current_version,
+      success, failure_reason, failure_code
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    actionId,
+    formId,
+    action,
+    userId,
+    userRole,
+    comment || null,
+    fromStatus,
+    toStatus || fromStatus,
+    version,
+    expectedVersion,
+    currentVersion,
+    success ? 1 : 0,
+    failureReason || null,
+    failureCode || null
+  );
+
+  return actionId;
+}
+
 app.post("/api/login", async (c) => {
   const body = await c.req.json();
   const { userId, password } = body;
@@ -212,46 +257,113 @@ app.post("/api/forms/:id/action", async (c) => {
     return c.json({ error: "缺少操作类型(action)", code: "missing_action" }, 400);
   }
 
+  if (expectedVersion === undefined || expectedVersion === null || expectedVersion === "") {
+    return c.json(
+      {
+        error: "缺少版本号(expectedVersion)，请刷新页面后重试",
+        code: "missing_version",
+      },
+      400
+    );
+  }
+
+  const expected = Number(expectedVersion);
+  if (!Number.isInteger(expected) || expected < 1) {
+    return c.json(
+      {
+        error: `版本号格式错误：expectedVersion="${expectedVersion}" 不是有效的正整数`,
+        code: "invalid_version",
+        expectedVersion: expectedVersion,
+      },
+      400
+    );
+  }
+
   const db = getDb();
   const form = db.prepare("SELECT * FROM adjustment_forms WHERE id = ?").get(formId);
   if (!form) {
     return c.json({ error: "预算调整单不存在", code: "not_found" }, 404);
   }
 
-  if (expectedVersion !== undefined && expectedVersion !== null) {
-    const expected = Number(expectedVersion);
-    if (!Number.isNaN(expected) && expected !== form.version) {
-      return c.json(
-        {
-          error: `版本冲突：你看到的是 v${expected}，当前版本已是 v${form.version}，请刷新后重试`,
-          code: "version_conflict",
-          expectedVersion: expected,
-          currentVersion: form.version,
-        },
-        409
-      );
-    }
+  if (expected !== form.version) {
+    recordActionAudit(db, {
+      formId,
+      action,
+      userId,
+      userRole,
+      comment,
+      fromStatus: form.status,
+      toStatus: form.status,
+      version: form.version,
+      expectedVersion: expected,
+      currentVersion: form.version,
+      success: false,
+      failureReason: `版本冲突：你看到的是 v${expected}，当前版本已是 v${form.version}`,
+      failureCode: "version_conflict",
+    });
+
+    return c.json(
+      {
+        error: `版本冲突：你看到的是 v${expected}，当前版本已是 v${form.version}，请刷新后重试`,
+        code: "version_conflict",
+        expectedVersion: expected,
+        currentVersion: form.version,
+      },
+      409
+    );
   }
 
   const validation = validateTransition(userRole, action, form.status, form.version, form);
   if (!validation.valid) {
+    recordActionAudit(db, {
+      formId,
+      action,
+      userId,
+      userRole,
+      comment,
+      fromStatus: form.status,
+      toStatus: form.status,
+      version: form.version,
+      expectedVersion: expected,
+      currentVersion: form.version,
+      success: false,
+      failureReason: validation.reason,
+      failureCode: validation.code,
+    });
+
     const statusCode = validation.code === "missing_evidence" ? 422 : 403;
-    return c.json({ error: validation.reason, code: validation.code, ...validation }, statusCode);
+    return c.json(
+      {
+        error: validation.reason,
+        code: validation.code,
+        expectedVersion: expected,
+        currentVersion: form.version,
+        missingEvidence: validation.missingEvidence,
+      },
+      statusCode
+    );
   }
 
   const newStatus = validation.toStatus;
   const newVersion = form.version + 1;
 
-  const actionId = `ACT-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
-
   const tx = db.transaction(() => {
     db.prepare("UPDATE adjustment_forms SET status = ?, version = ?, updated_at = datetime('now') WHERE id = ?")
       .run(newStatus, newVersion, formId);
 
-    db.prepare(`
-      INSERT INTO form_actions (id, form_id, action, actor_id, actor_role, comment, from_status, to_status, version)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(actionId, formId, action, userId, userRole, comment || null, form.status, newStatus, newVersion);
+    recordActionAudit(db, {
+      formId,
+      action,
+      userId,
+      userRole,
+      comment,
+      fromStatus: form.status,
+      toStatus: newStatus,
+      version: newVersion,
+      expectedVersion: expected,
+      currentVersion: form.version,
+      success: true,
+    });
   });
 
   tx();
@@ -380,40 +492,125 @@ app.post("/api/forms/batch-action", async (c) => {
     return c.json({ error: "缺少表单ID列表或操作类型", code: "missing_params" }, 400);
   }
 
+  if (!expectedVersions || typeof expectedVersions !== "object") {
+    return c.json(
+      {
+        error: "缺少版本映射(expectedVersions)，请刷新页面后重试",
+        code: "missing_version",
+      },
+      400
+    );
+  }
+
+  const invalidVersions = [];
+  const missingVersions = [];
+  formIds.forEach((id) => {
+    const v = expectedVersions[id];
+    if (v === undefined || v === null || v === "") {
+      missingVersions.push(id);
+    } else {
+      const num = Number(v);
+      if (!Number.isInteger(num) || num < 1) {
+        invalidVersions.push(`${id}="${v}"`);
+      }
+    }
+  });
+
+  if (missingVersions.length > 0) {
+    return c.json(
+      {
+        error: `以下表单缺少版本号：${missingVersions.join("、")}，请刷新页面后重试`,
+        code: "missing_version",
+        missingFormIds: missingVersions,
+      },
+      400
+    );
+  }
+
+  if (invalidVersions.length > 0) {
+    return c.json(
+      {
+        error: `以下表单版本号格式错误：${invalidVersions.join("、")}，不是有效的正整数`,
+        code: "invalid_version",
+        invalidVersions: invalidVersions,
+      },
+      400
+    );
+  }
+
   const db = getDb();
   const results = [];
 
   for (let i = 0; i < formIds.length; i++) {
     const formId = formIds[i];
+    const expected = Number(expectedVersions[formId]);
+
     const form = db.prepare("SELECT * FROM adjustment_forms WHERE id = ?").get(formId);
 
     if (!form) {
-      results.push({ formId, success: false, error: "预算调整单不存在", code: "not_found" });
+      results.push({
+        formId,
+        success: false,
+        error: "预算调整单不存在",
+        code: "not_found",
+        expectedVersion: expected,
+      });
       continue;
     }
 
-    if (expectedVersions && expectedVersions[formId] !== undefined) {
-      const expected = Number(expectedVersions[formId]);
-      if (!Number.isNaN(expected) && expected !== form.version) {
-        results.push({
-          formId,
-          success: false,
-          error: `版本冲突：你看到的是 v${expected}，当前版本已是 v${form.version}`,
-          code: "version_conflict",
-          expectedVersion: expected,
-          currentVersion: form.version,
-        });
-        continue;
-      }
+    if (expected !== form.version) {
+      recordActionAudit(db, {
+        formId,
+        action,
+        userId,
+        userRole,
+        comment,
+        fromStatus: form.status,
+        toStatus: form.status,
+        version: form.version,
+        expectedVersion: expected,
+        currentVersion: form.version,
+        success: false,
+        failureReason: `版本冲突：你看到的是 v${expected}，当前版本已是 v${form.version}`,
+        failureCode: "version_conflict",
+      });
+
+      results.push({
+        formId,
+        success: false,
+        error: `版本冲突：你看到的是 v${expected}，当前版本已是 v${form.version}`,
+        code: "version_conflict",
+        expectedVersion: expected,
+        currentVersion: form.version,
+      });
+      continue;
     }
 
     const validation = validateTransition(userRole, action, form.status, form.version, form);
     if (!validation.valid) {
+      recordActionAudit(db, {
+        formId,
+        action,
+        userId,
+        userRole,
+        comment,
+        fromStatus: form.status,
+        toStatus: form.status,
+        version: form.version,
+        expectedVersion: expected,
+        currentVersion: form.version,
+        success: false,
+        failureReason: validation.reason,
+        failureCode: validation.code,
+      });
+
       results.push({
         formId,
         success: false,
         error: validation.reason,
         code: validation.code,
+        expectedVersion: expected,
+        currentVersion: form.version,
         missingEvidence: validation.missingEvidence,
       });
       continue;
@@ -421,15 +618,24 @@ app.post("/api/forms/batch-action", async (c) => {
 
     const newStatus = validation.toStatus;
     const newVersion = form.version + 1;
-    const actionId = `ACT-${Date.now()}-${Math.random().toString(36).substr(2, 5)}-${i}`;
 
     const tx = db.transaction(() => {
       db.prepare("UPDATE adjustment_forms SET status = ?, version = ?, updated_at = datetime('now') WHERE id = ?")
         .run(newStatus, newVersion, formId);
-      db.prepare(`
-        INSERT INTO form_actions (id, form_id, action, actor_id, actor_role, comment, from_status, to_status, version)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(actionId, formId, action, userId, userRole, comment || null, form.status, newStatus, newVersion);
+
+      recordActionAudit(db, {
+        formId,
+        action,
+        userId,
+        userRole,
+        comment,
+        fromStatus: form.status,
+        toStatus: newStatus,
+        version: newVersion,
+        expectedVersion: expected,
+        currentVersion: form.version,
+        success: true,
+      });
     });
     tx();
 
@@ -440,6 +646,7 @@ app.post("/api/forms/batch-action", async (c) => {
       toStatus: newStatus,
       version: newVersion,
       previousVersion: form.version,
+      expectedVersion: expected,
     });
   }
 

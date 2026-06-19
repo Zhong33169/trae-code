@@ -92,6 +92,11 @@ interface Action {
   from_status: string;
   to_status: string;
   version: number;
+  expected_version?: number;
+  current_version?: number;
+  success?: number;
+  failure_reason?: string | null;
+  failure_code?: string | null;
   acted_at: string;
   actor_name?: string;
 }
@@ -232,6 +237,14 @@ export default function App() {
         msg = `版本冲突：你当前看到的是 v${e.detail.expectedVersion}，服务器已更新到 v${e.detail.currentVersion}，请刷新后重试`;
       } else if (e.code === "missing_evidence") {
         msg = `证据不足，缺少：${e.detail.missingEvidence?.join("、")}，请补充后再操作`;
+      } else if (e.code === "missing_version") {
+        msg = `缺少版本号：${e.message}，请刷新页面后重试`;
+      } else if (e.code === "invalid_version") {
+        msg = `版本号格式错误：${e.message}，请刷新页面后重试`;
+      } else if (e.code === "wrong_role" || e.code === "wrong_role_action") {
+        msg = `角色无权：${e.message}`;
+      } else if (e.code === "wrong_status") {
+        msg = `状态不符：${e.message}`;
       }
       setError(msg);
     }
@@ -326,22 +339,37 @@ export default function App() {
             detail = `(状态不符)`;
           } else if (f.code === "wrong_role" || f.code === "wrong_role_action") {
             detail = `(角色无权)`;
+          } else if (f.code === "missing_version") {
+            detail = `(缺版本号)`;
+          } else if (f.code === "invalid_version") {
+            detail = `(版本格式错误)`;
+          } else if (f.code === "not_found") {
+            detail = `(表单不存在)`;
           }
           return `${f.formId}: ${f.error} ${detail}`;
         });
         setError(
-          `批量操作完成：成功${result.successCount}条，失败${result.failCount}条\n${errorLines.join("\n")}`
+          `批量操作完成：成功${result.successCount}条，失败${result.failCount}条\n${errorLines.join("\n")}\n\n失败项已保留选中，请修正后重试`
         );
+
+        const failedIds = new Set(failed.map((f: any) => f.formId));
+        setSelectedIds(failedIds);
       } else {
         setSuccess(result.message || `批量操作成功：${result.results.length}条`);
+        setSelectedIds(new Set());
       }
-      setSelectedIds(new Set());
       setActionComment("");
       await loadForms();
       await loadStats();
       setTimeout(() => setSuccess(""), 3000);
     } catch (e: any) {
-      setError(e.message);
+      let msg = e.message;
+      if (e.code === "missing_version") {
+        msg = `缺少版本号：${e.message}，请刷新页面后重试`;
+      } else if (e.code === "invalid_version") {
+        msg = `版本号格式错误：${e.message}，请刷新页面后重试`;
+      }
+      setError(msg);
     }
   };
 
@@ -718,26 +746,78 @@ export default function App() {
 
               <h3 style={styles.sectionTitle}>操作记录</h3>
               <div style={styles.timeline}>
-                {selectedForm.actions.map((act) => (
-                  <div key={act.id} style={styles.timelineItem}>
-                    <div style={styles.timelineDot} />
-                    <div style={styles.timelineContent}>
-                      <div style={styles.timelineHeader}>
-                        <span style={styles.timelineActor}>
-                          {act.actor_name}（{ROLE_MAP[act.actor_role]}）
-                        </span>
-                        <span style={styles.timelineAction}>{act.action}</span>
-                        <span style={styles.timelineStatus}>
-                          {STATUS_MAP[act.from_status]} → {STATUS_MAP[act.to_status]}
-                        </span>
+                {selectedForm.actions.map((act) => {
+                  const isFailed = act.success === 0;
+                  const actionLabelMap: Record<string, string> = {
+                    submit: "提交审核",
+                    review_approve: "审核通过",
+                    review_reject: "审核驳回",
+                    review_return: "审核退回",
+                    archive: "归档",
+                    supplement: "补录",
+                    correct: "补正",
+                  };
+                  return (
+                    <div
+                      key={act.id}
+                      style={{
+                        ...styles.timelineItem,
+                        opacity: isFailed ? 0.85 : 1,
+                      }}
+                    >
+                      <div
+                        style={{
+                          ...styles.timelineDot,
+                          backgroundColor: isFailed ? "#e74c3c" : styles.timelineDot.backgroundColor,
+                        }}
+                      />
+                      <div style={styles.timelineContent}>
+                        <div style={styles.timelineHeader}>
+                          <span style={styles.timelineActor}>
+                            {act.actor_name}（{ROLE_MAP[act.actor_role]}）
+                          </span>
+                          <span
+                            style={{
+                              ...styles.timelineAction,
+                              color: isFailed ? "#e74c3c" : styles.timelineAction.color,
+                              fontWeight: 600,
+                            }}
+                          >
+                            {isFailed ? "❌ 失败: " : "✅ "}
+                            {actionLabelMap[act.action] || act.action}
+                          </span>
+                          <span style={styles.timelineStatus}>
+                            {STATUS_MAP[act.from_status]} → {STATUS_MAP[act.to_status]}
+                          </span>
+                        </div>
+                        {act.comment && (
+                          <div style={styles.timelineComment}>{act.comment}</div>
+                        )}
+                        {isFailed && act.failure_reason && (
+                          <div
+                            style={{
+                              ...styles.timelineComment,
+                              color: "#e74c3c",
+                              fontWeight: 500,
+                            }}
+                          >
+                            失败原因: {act.failure_reason}
+                            {act.failure_code && ` [${act.failure_code}]`}
+                          </div>
+                        )}
+                        <div style={styles.timelineTime}>
+                          {act.acted_at} (v{act.version})
+                          {act.expected_version !== undefined &&
+                            act.current_version !== undefined && (
+                              <span style={{ marginLeft: 12, color: "#888" }}>
+                                请求版本: v{act.expected_version}，当前版本: v{act.current_version}
+                              </span>
+                            )}
+                        </div>
                       </div>
-                      {act.comment && (
-                        <div style={styles.timelineComment}>{act.comment}</div>
-                      )}
-                      <div style={styles.timelineTime}>{act.acted_at} (v{act.version})</div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
 
