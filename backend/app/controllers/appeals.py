@@ -15,6 +15,16 @@ class AppealsController(Controller):
     path = "/api/appeals"
     dependencies = {"session": get_session}
 
+    @get("/failures")
+    async def list_failed_records(
+        self,
+        session: AsyncSession,
+        operator_id: Optional[str] = Parameter(query="operator_id", default=None, required=False),
+        failure_scope: Optional[str] = Parameter(query="failure_scope", default=None, required=False),
+        limit: int = Parameter(query="limit", default=20, required=False),
+    ) -> list:
+        return await service.get_failed_records(session, operator_id, failure_scope, limit)
+
     @get()
     async def list_appeals(
         self,

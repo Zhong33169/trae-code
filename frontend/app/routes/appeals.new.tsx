@@ -2,8 +2,8 @@ import { useState, useEffect } from "react";
 import { useNavigate, useActionData, Form, useNavigation, redirect } from "react-router";
 import type { ActionFunctionArgs } from "react-router";
 import { ArrowLeft, AlertTriangle } from "lucide-react";
-import { fetchApi } from "~/utils/api";
-import type { Appeal, AnomalyType, AppealCreate } from "~/utils/types";
+import { fetchApi, fetchFailedRecords } from "~/utils/api";
+import type { Appeal, AnomalyType, AppealCreate, OperationRecord } from "~/utils/types";
 import { useUser } from "~/utils/store";
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -54,6 +54,18 @@ export default function AppealsNew() {
     description: "",
     evidence_urls: "",
   });
+  const [failedRecords, setFailedRecords] = useState<OperationRecord[]>([]);
+  const [loadingFailures, setLoadingFailures] = useState(false);
+
+  useEffect(() => {
+    if (currentUser.id) {
+      setLoadingFailures(true);
+      fetchFailedRecords({ operator_id: currentUser.id, failure_scope: "no_appeal", limit: 10 })
+        .then(setFailedRecords)
+        .catch(() => setFailedRecords([]))
+        .finally(() => setLoadingFailures(false));
+    }
+  }, [currentUser.id]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
@@ -194,6 +206,39 @@ export default function AppealsNew() {
           </button>
         </div>
       </Form>
+
+      <div className="mt-8">
+        <h3 className="text-lg font-serif font-bold text-gray-900 mb-4">最近发起失败记录</h3>
+        {loadingFailures ? (
+          <p className="text-sm text-gray-400">加载中...</p>
+        ) : failedRecords.length === 0 ? (
+          <p className="text-sm text-gray-400">暂无失败记录</p>
+        ) : (
+          <div className="space-y-3">
+            {failedRecords.map((record) => (
+              <div key={record.id} className="p-4 border border-red-200 rounded-lg bg-red-50/50">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-xs text-gray-500">
+                    {new Date(record.created_at).toLocaleString("zh-CN")}
+                  </span>
+                  {record.original_version != null && (
+                    <span className="px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 text-xs font-medium">
+                      原版本: v{record.original_version}
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-start gap-2 mb-2">
+                  <AlertTriangle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
+                  <p className="text-sm font-medium text-red-700">{record.failure_reason || "未知失败原因"}</p>
+                </div>
+                {record.request_summary && (
+                  <p className="text-xs text-gray-500 ml-6">{record.request_summary}</p>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

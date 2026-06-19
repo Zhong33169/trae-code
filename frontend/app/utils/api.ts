@@ -1,3 +1,5 @@
+import type { OperationRecord } from "~/utils/types";
+
 const API_BASE = (import.meta as any).env?.VITE_API_BASE || "http://localhost:8003/api";
 
 export async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
@@ -10,4 +12,9 @@ export async function fetchApi<T>(path: string, options?: RequestInit): Promise<
     throw new Error(err.detail || "请求失败");
   }
   return res.json();
+}
+
+export async function fetchFailedRecords(params?: { operator_id?: string; failure_scope?: string; limit?: number }): Promise<OperationRecord[]> {
+  const qs = params ? "?" + new URLSearchParams(params as Record<string, string>).toString() : "";
+  return fetchApi<OperationRecord[]>(`/appeals/failures${qs}`);
 }

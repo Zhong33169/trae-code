@@ -53,4 +53,5 @@ class OperationRecord(Base):
     to_status = Column(Text, nullable=True)
     request_summary = Column(Text, nullable=True)
     failure_reason = Column(Text, nullable=True)
+    original_version = Column(Integer, nullable=True)
     created_at = Column(Text, nullable=False, default=lambda: datetime.utcnow().isoformat())

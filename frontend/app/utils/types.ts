@@ -42,6 +42,7 @@ export interface OperationRecord {
   created_at: string;
   request_summary?: string | null;
   failure_reason?: string | null;
+  original_version?: number | null;
 }
 
 export interface Stats {

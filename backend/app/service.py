@@ -44,6 +44,7 @@ async def _write_operation_record(
     opinion: str | None = None,
     request_summary: str | None = None,
     failure_reason: str | None = None,
+    original_version: int | None = None,
 ) -> OperationRecord:
     record = OperationRecord(
         id=uuid.uuid4().hex,
@@ -57,6 +58,7 @@ async def _write_operation_record(
         to_status=to_status,
         request_summary=request_summary,
         failure_reason=failure_reason,
+        original_version=original_version,
         created_at=datetime.utcnow().isoformat(),
     )
     session.add(record)
@@ -71,6 +73,7 @@ async def _run_validation(
     opinion: str | None = None,
     write_failed_record: bool = True,
     request_summary: str | None = None,
+    original_version: int | None = None,
 ) -> None:
     validation_error = None
     for condition, message in checks:
@@ -92,6 +95,7 @@ async def _run_validation(
                 opinion=opinion,
                 request_summary=request_summary,
                 failure_reason=validation_error,
+                original_version=original_version,
             )
             await session.commit()
 
@@ -117,6 +121,7 @@ async def create_appeal(session: AsyncSession, data: AppealCreate) -> Appeal:
         opinion=None,
         write_failed_record=True,
         request_summary=request_summary,
+        original_version=0,
     )
 
     now = datetime.utcnow()
@@ -159,6 +164,7 @@ async def create_appeal(session: AsyncSession, data: AppealCreate) -> Appeal:
         from_status="",
         to_status="pending_review",
         request_summary=request_summary,
+        original_version=0,
     )
 
     await session.commit()
@@ -193,6 +199,7 @@ async def process_appeal(session: AsyncSession, appeal_id: str, data: ProcessReq
         opinion=data.opinion,
         write_failed_record=True,
         request_summary=request_summary,
+        original_version=appeal.version,
     )
 
     from_status = appeal.status
@@ -242,6 +249,7 @@ async def process_appeal(session: AsyncSession, appeal_id: str, data: ProcessReq
         to_status=to_status,
         opinion=data.opinion,
         request_summary=request_summary,
+        original_version=appeal.version - 1,
     )
 
     await session.commit()
@@ -278,6 +286,7 @@ async def resubmit_appeal(session: AsyncSession, appeal_id: str, data: ResubmitR
         opinion=data.opinion,
         write_failed_record=True,
         request_summary=request_summary,
+        original_version=appeal.version,
     )
 
     from_status = appeal.status
@@ -301,6 +310,7 @@ async def resubmit_appeal(session: AsyncSession, appeal_id: str, data: ResubmitR
         to_status="pending_review",
         opinion=data.opinion,
         request_summary=request_summary,
+        original_version=appeal.version - 1,
     )
 
     await session.commit()
@@ -386,6 +396,7 @@ async def get_appeal(session: AsyncSession, appeal_id: str) -> dict:
             to_status=r.to_status,
             request_summary=r.request_summary,
             failure_reason=r.failure_reason,
+            original_version=r.original_version,
             created_at=r.created_at,
         )
         for r in records
@@ -415,3 +426,40 @@ async def get_stats(session: AsyncSession) -> StatsResponse:
 async def get_users(session: AsyncSession) -> list[User]:
     result = await session.execute(select(User))
     return list(result.scalars().all())
+
+
+async def get_failed_records(
+    session: AsyncSession,
+    operator_id: str | None = None,
+    scope: str | None = None,
+    limit: int = 20,
+) -> list:
+    query = select(OperationRecord).where(OperationRecord.action == "validation_failed")
+    if operator_id:
+        query = query.where(OperationRecord.operator_id == operator_id)
+    if scope == "no_appeal":
+        query = query.where(OperationRecord.appeal_id.is_(None))
+    elif scope == "has_appeal":
+        query = query.where(OperationRecord.appeal_id.isnot(None))
+    query = query.order_by(OperationRecord.created_at.desc()).limit(limit)
+    result = await session.execute(query)
+    records = result.scalars().all()
+
+    return [
+        OperationRecordResponse(
+            id=r.id,
+            appeal_id=r.appeal_id,
+            operator_id=r.operator_id,
+            operator_name=r.operator_name,
+            operator_role=r.operator_role,
+            action=r.action,
+            opinion=r.opinion,
+            from_status=r.from_status,
+            to_status=r.to_status,
+            request_summary=r.request_summary,
+            failure_reason=r.failure_reason,
+            original_version=r.original_version,
+            created_at=r.created_at,
+        )
+        for r in records
+    ]

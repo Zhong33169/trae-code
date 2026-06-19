@@ -149,9 +149,14 @@ function PrevHandlerInfo({ records, currentUserId }: { records: OperationRecord[
           <span className="font-medium text-amber-900">{prev.operator_name}</span>
           <span className="text-amber-600 ml-2">({ROLE_LABELS[prev.operator_role]})</span>
         </p>
-        <p>
+        <p className="flex items-center gap-2">
           <span className="text-amber-600">操作:</span>{" "}
           <span className="font-medium text-amber-900">{ACTION_LABELS[prev.action]}</span>
+          {prev.original_version != null && (
+            <span className="px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 text-xs font-medium">
+              原版本: v{prev.original_version}
+            </span>
+          )}
         </p>
         {prev.opinion && (
           <p>
@@ -159,9 +164,15 @@ function PrevHandlerInfo({ records, currentUserId }: { records: OperationRecord[
             <span className="text-amber-900">{prev.opinion}</span>
           </p>
         )}
+        {prev.request_summary && (
+          <p className="text-xs text-gray-500">{prev.request_summary}</p>
+        )}
         {prev.failure_reason && (
           <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded">
-            <p className="text-red-700 text-xs font-medium">失败原因:</p>
+            <p className="text-red-700 text-xs font-medium flex items-center gap-1">
+              <AlertTriangle className="w-3 h-3" />
+              失败原因
+            </p>
             <p className="text-red-600 text-xs mt-1">{prev.failure_reason}</p>
           </div>
         )}
@@ -202,7 +213,7 @@ function Timeline({ records }: { records: OperationRecord[] }) {
                 )}
               </div>
               <div className={`flex-1 -mt-0.5 ${isValidationFailed ? "p-3 border border-dashed border-red-200 rounded-lg bg-red-50/50" : ""}`}>
-                <div className="flex items-center gap-2 mb-1">
+                <div className="flex items-center gap-2 mb-1 flex-wrap">
                   <span className="text-sm font-medium text-gray-900">
                     {record.operator_name}
                   </span>
@@ -220,14 +231,22 @@ function Timeline({ records }: { records: OperationRecord[] }) {
                       ? "bg-red-100 text-red-700"
                       : "bg-blue-100 text-blue-700"
                   }`}>
-                    {isValidationFailed && <AlertTriangle className="inline w-3 h-3 mr-1 -mt-0.5" />}
+                    {(isValidationFailed || record.failure_reason) && <AlertTriangle className="inline w-3 h-3 mr-1 -mt-0.5" />}
                     {ACTION_LABELS[record.action]}
                   </span>
+                  {record.original_version != null && (
+                    <span className="px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 text-xs font-medium">
+                      原版本: v{record.original_version}
+                    </span>
+                  )}
                 </div>
                 {record.opinion && (
                   <p className="text-sm text-gray-600 mb-1">{record.opinion}</p>
                 )}
-                {isValidationFailed && record.failure_reason && (
+                {record.request_summary && (
+                  <p className="text-xs text-gray-400 mb-1">{record.request_summary}</p>
+                )}
+                {record.failure_reason && (
                   <div className="mb-2">
                     <p className="text-sm font-medium text-red-700 flex items-center gap-1">
                       <AlertTriangle className="w-4 h-4" />
@@ -236,13 +255,8 @@ function Timeline({ records }: { records: OperationRecord[] }) {
                     <p className="text-sm text-red-600 mt-1 ml-5">{record.failure_reason}</p>
                   </div>
                 )}
-                {!isValidationFailed && record.failure_reason && (
-                  <div className="mb-2">
-                    <p className="text-xs text-red-600">失败原因: {record.failure_reason}</p>
-                  </div>
-                )}
                 <div className="flex items-center gap-2 text-xs text-gray-400">
-                  <span>
+                  <span className="font-medium">
                     {STATUS_LABELS[record.from_status]} → {STATUS_LABELS[record.to_status]}
                   </span>
                   <span>
