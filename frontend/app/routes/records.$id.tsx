@@ -1,4 +1,4 @@
-import { useLoaderData, useNavigate } from "@remix-run/react";
+import { useLoaderData, useNavigate, useOutletContext } from "@remix-run/react";
 import { useEffect, useState } from "react";
 import { fetchRecord, submitRecord, reviewRecord, approveRecord, returnRecord, uploadAttachment, updateAttachment } from "../api";
 
@@ -26,6 +26,10 @@ const ROLE_LABELS: Record<string, string> = {
 export default function RecordDetail() {
   const initialData = useLoaderData<typeof loader>();
   const navigate = useNavigate();
+  const outletCtx = useOutletContext<{ currentUser?: any }>();
+  const currentUser = outletCtx?.currentUser;
+  const currentRole = currentUser?.role || "breeder";
+
   const [record, setRecord] = useState(initialData);
   const [error, setError] = useState("");
   const [showReview, setShowReview] = useState(false);
@@ -34,9 +38,6 @@ export default function RecordDetail() {
   const [returnForm, setReturnForm] = useState({ return_reason: "", audit_note: "", rejection_reason: "", reject_attachment_ids: [] as number[] });
   const [showUpload, setShowUpload] = useState(false);
   const [uploadForm, setUploadForm] = useState({ file_name: "", attachment_type: "supplementary", label: "" });
-
-  const currentUser = typeof window !== "undefined" ? JSON.parse(localStorage.getItem("currentUser") || "null") : null;
-  const currentRole = currentUser?.role || "breeder";
 
   const refresh = () => fetchRecord(record.id).then(setRecord);
 
@@ -114,7 +115,15 @@ export default function RecordDetail() {
   const canSubmit = record.status === "draft" && currentRole === "breeder";
   const canReview = record.status === "submitted" && currentRole === "vet_supervisor";
   const canApprove = record.status === "under_review" && currentRole === "farm_manager";
-  const canReturn = ["submitted", "under_review"].includes(record.status) && ["vet_supervisor", "farm_manager"].includes(currentRole);
+  const canReturnByVet = record.status === "submitted" && currentRole === "vet_supervisor";
+  const canReturnByMgr = record.status === "under_review" && currentRole === "farm_manager";
+  const canReturn = canReturnByVet || canReturnByMgr;
+
+  const canUploadAttachment = currentRole === "breeder" && ["draft", "returned"].includes(record.status);
+  const canResubmitAttachment = currentRole === "breeder" && ["draft", "returned"].includes(record.status);
+  const canRejectAttachment = ["vet_supervisor", "farm_manager"].includes(currentRole) && canReturn;
+
+  const canCreateRecord = currentRole === "breeder";
 
   return (
     <div>
@@ -225,7 +234,14 @@ export default function RecordDetail() {
                 ⚠️ 缺少 {record.missing_required.length} 个必传附件
               </span>
             )}
-            <button className="btn btn-sm btn-default" onClick={() => setShowUpload(true)}>+ 上传附件</button>
+            {canUploadAttachment && (
+              <button className="btn btn-sm btn-default" onClick={() => setShowUpload(true)}>+ 上传附件</button>
+            )}
+            {!canUploadAttachment && (
+              <span style={{ color: "#999", fontSize: 12 }}>
+                {ROLE_LABELS[currentRole]}在{STATUS_LABELS[record.status]}状态下不可上传附件
+              </span>
+            )}
           </div>
         </div>
         <div className="attachment-list">
@@ -249,10 +265,10 @@ export default function RecordDetail() {
                 </div>
               </div>
               <div>
-                {att.attachment_type === "rejected" && (
+                {att.attachment_type === "rejected" && canResubmitAttachment && (
                   <button className="btn btn-sm btn-warning" onClick={() => handleResubmitAttachment(att.id)}>补传</button>
                 )}
-                {!att.file_path && att.attachment_type === "required" && (
+                {!att.file_path && att.attachment_type === "required" && canResubmitAttachment && (
                   <button className="btn btn-sm btn-primary" onClick={() => handleResubmitAttachment(att.id)}>上传</button>
                 )}
               </div>
@@ -262,15 +278,33 @@ export default function RecordDetail() {
 
         <hr className="section-divider" />
 
-        <div style={{ marginBottom: 12 }}><strong>操作</strong>（当前角色: {ROLE_LABELS[currentRole] || currentRole}）</div>
+        <div style={{ marginBottom: 12 }}>
+          <strong>操作</strong>
+          <span style={{ marginLeft: 8, fontSize: 13, color: currentUser ? `var(--role-color-${currentRole}, #666)` : "#666" }}>
+            （当前: {currentUser?.display_name || "-"} / {ROLE_LABELS[currentRole]}）
+          </span>
+        </div>
+
+        {!currentUser && (
+          <div style={{ padding: 12, background: "#fff7e6", border: "1px solid #ffd591", borderRadius: 8, marginBottom: 12, fontSize: 13, color: "#d46b08" }}>
+            ⚠️ 未检测到用户角色，请先在页面右上角选择角色
+          </div>
+        )}
+
         <div className="action-group">
           {canSubmit && <button className="btn btn-primary" onClick={handleSubmit}>📝 提交（饲养员）</button>}
           {canReview && <button className="btn btn-warning" onClick={() => setShowReview(true)}>🔍 审核（兽医主管）</button>}
           {canApprove && <button className="btn btn-primary" onClick={handleApprove}>✅ 批准（场长）</button>}
-          {canReturn && <button className="btn btn-danger" onClick={() => setShowReturn(true)}>↩️ 退回</button>}
+          {canReturnByVet && <button className="btn btn-danger" onClick={() => setShowReturn(true)}>↩️ 退回（兽医主管）</button>}
+          {canReturnByMgr && <button className="btn btn-danger" onClick={() => setShowReturn(true)}>↩️ 退回（场长）</button>}
           {!canSubmit && !canReview && !canApprove && !canReturn && (
             <span style={{ color: "#999", fontSize: 13 }}>
-              当前角色 {ROLE_LABELS[currentRole] || currentRole} 在 {STATUS_LABELS[record.status]} 状态下无可用操作
+              当前角色「{ROLE_LABELS[currentRole]}」在「{STATUS_LABELS[record.status]}」状态下无可用操作
+              {record.status === "returned" && currentRole === "breeder" && "，请先补传被驳回附件后重新提交"}
+              {record.status === "draft" && currentRole !== "breeder" && "，草稿需由饲养员提交"}
+              {record.status === "submitted" && currentRole === "breeder" && "，需等待兽医主管审核"}
+              {record.status === "under_review" && currentRole === "vet_supervisor" && "，需等待场长批准"}
+              {record.status === "approved" && "，该记录已完成审批"}
             </span>
           )}
         </div>
@@ -359,20 +393,22 @@ export default function RecordDetail() {
       {showReturn && (
         <div className="modal-overlay" onClick={() => setShowReturn(false)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
-            <div className="modal-title">↩️ 退回免疫记录</div>
+            <div className="modal-title">↩️ 退回免疫记录（{ROLE_LABELS[currentRole]}）</div>
             <div className="form-group">
               <label className="form-label">退回原因 *</label>
               <textarea className="form-textarea" value={returnForm.return_reason} onChange={e => setReturnForm({...returnForm, return_reason: e.target.value})} placeholder="请说明退回原因..." />
             </div>
-            <div className="form-group">
-              <label className="form-label">驳回附件（可选）</label>
-              {record.attachments?.filter((a: any) => a.file_path).map((att: any) => (
-                <label key={att.id} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-                  <input type="checkbox" checked={returnForm.reject_attachment_ids.includes(att.id)} onChange={() => toggleRejectAttachment(att.id)} />
-                  {att.label} ({att.file_name})
-                </label>
-              ))}
-            </div>
+            {canRejectAttachment && (
+              <div className="form-group">
+                <label className="form-label">驳回附件（可选）</label>
+                {record.attachments?.filter((a: any) => a.file_path && a.attachment_type !== "rejected").map((att: any) => (
+                  <label key={att.id} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                    <input type="checkbox" checked={returnForm.reject_attachment_ids.includes(att.id)} onChange={() => toggleRejectAttachment(att.id)} />
+                    {att.label} ({att.file_name})
+                  </label>
+                ))}
+              </div>
+            )}
             {returnForm.reject_attachment_ids.length > 0 && (
               <div className="form-group">
                 <label className="form-label">附件驳回原因</label>
@@ -394,7 +430,7 @@ export default function RecordDetail() {
       {showUpload && (
         <div className="modal-overlay" onClick={() => setShowUpload(false)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
-            <div className="modal-title">📎 上传附件</div>
+            <div className="modal-title">📎 上传附件（饲养员）</div>
             <div className="form-group">
               <label className="form-label">附件类型</label>
               <select className="form-select" value={uploadForm.attachment_type} onChange={e => setUploadForm({...uploadForm, attachment_type: e.target.value})}>

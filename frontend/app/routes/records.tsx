@@ -1,5 +1,5 @@
 import type { MetaFunction } from "@remix-run/node";
-import { useNavigate } from "@remix-run/react";
+import { useNavigate, useOutletContext } from "@remix-run/react";
 import { useEffect, useState } from "react";
 import { fetchRecords, fetchPlans, fetchUsers, batchProcess } from "../api";
 
@@ -14,8 +14,22 @@ const RESULT_LABELS: Record<string, string> = {
   normal: "正常", adverse_reaction: "不良反应", ineffective: "无效", incomplete: "未完成",
 };
 
+const ROLE_LABELS: Record<string, string> = {
+  breeder: "饲养员", vet_supervisor: "兽医主管", farm_manager: "场长",
+};
+
+const BATCH_OPTIONS_BY_ROLE: Record<string, { value: string; label: string }[]> = {
+  breeder: [{ value: "submit", label: "批量提交" }],
+  vet_supervisor: [{ value: "review", label: "批量审核" }, { value: "return", label: "批量退回" }],
+  farm_manager: [{ value: "approve", label: "批量批准" }, { value: "return", label: "批量退回" }],
+};
+
 export default function Records() {
   const navigate = useNavigate();
+  const outletCtx = useOutletContext<{ currentUser?: any }>();
+  const currentUser = outletCtx?.currentUser;
+  const currentRole = currentUser?.role || "breeder";
+
   const [records, setRecords] = useState<any[]>([]);
   const [plans, setPlans] = useState<any[]>([]);
   const [statusFilter, setStatusFilter] = useState("");
@@ -25,7 +39,8 @@ export default function Records() {
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [batchResult, setBatchResult] = useState<any>(null);
   const [showBatch, setShowBatch] = useState(false);
-  const [batchAction, setBatchAction] = useState("approve");
+  const batchOptions = BATCH_OPTIONS_BY_ROLE[currentRole] || [];
+  const [batchAction, setBatchAction] = useState(batchOptions[0]?.value || "submit");
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState({ record_code: "", plan_id: "", animal_id: "", animal_tag: "", species: "", deadline_at: "" });
 
@@ -81,7 +96,7 @@ export default function Records() {
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
         <h2 style={{ fontSize: 20 }}>💉 接种登记</h2>
-        <button className="btn btn-primary" onClick={() => setShowCreate(true)}>+ 新建记录</button>
+        {currentRole === "breeder" && <button className="btn btn-primary" onClick={() => setShowCreate(true)}>+ 新建记录</button>}
       </div>
 
       <div className="filter-bar">
@@ -103,15 +118,12 @@ export default function Records() {
         </select>
       </div>
 
-      {selected.size > 0 && (
+      {selected.size > 0 && batchOptions.length > 0 && (
         <div className="card" style={{ marginBottom: 16, background: "#f6ffed", borderColor: "#b7eb8f" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <span>已选择 {selected.size} 条记录</span>
+            <span>已选择 {selected.size} 条记录（{ROLE_LABELS[currentRole]}）</span>
             <select value={batchAction} onChange={e => setBatchAction(e.target.value)}>
-              <option value="submit">批量提交</option>
-              <option value="review">批量审核</option>
-              <option value="approve">批量批准</option>
-              <option value="return">批量退回</option>
+              {batchOptions.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
             </select>
             <button className="btn btn-primary" onClick={handleBatch}>执行</button>
             <button className="btn btn-default" onClick={() => setSelected(new Set())}>取消选择</button>
@@ -143,6 +155,7 @@ export default function Records() {
                   <button className="link-btn" onClick={() => navigate(`/records/${r.id}`)}>{r.record_code}</button>
                   {r.is_overdue && <span className="overdue-badge">超时</span>}
                   {r.missing_required?.length > 0 && <span className="missing-badge">缺材料</span>}
+                  {r.latest_failure && <span className="status-tag" style={{ background: "#fff1f0", color: "#cf1322", marginLeft: 4, fontSize: 11 }} title={`${r.latest_failure.reason}\n建议: ${r.latest_failure.suggestion}`}>⚠️ 失败</span>}
                 </td>
                 <td>{r.animal_id}</td>
                 <td>{r.plan_name}</td>

@@ -1,4 +1,4 @@
-import { useLoaderData, useNavigate } from "@remix-run/react";
+import { useLoaderData, useNavigate, useOutletContext } from "@remix-run/react";
 import { useEffect, useState } from "react";
 import { fetchRecheck, processRecheck, resolveRecheck } from "../api";
 
@@ -21,15 +21,16 @@ const ABNORMAL_LABELS: Record<string, string> = {
 export default function RecheckDetail() {
   const initialData = useLoaderData<typeof loader>();
   const navigate = useNavigate();
+  const outletCtx = useOutletContext<{ currentUser?: any }>();
+  const currentUser = outletCtx?.currentUser;
+  const currentRole = currentUser?.role || "breeder";
+
   const [recheck, setRecheck] = useState(initialData);
   const [error, setError] = useState("");
   const [showRecheck, setShowRecheck] = useState(false);
   const [showResolve, setShowResolve] = useState(false);
   const [recheckForm, setRecheckForm] = useState({ recheck_result: "" });
   const [resolveForm, setResolveForm] = useState({ resolution: "" });
-
-  const currentUser = typeof window !== "undefined" ? JSON.parse(localStorage.getItem("currentUser") || "null") : null;
-  const currentRole = currentUser?.role || "breeder";
 
   const refresh = () => fetchRecheck(recheck.id).then(setRecheck);
 
@@ -95,6 +96,10 @@ export default function RecheckDetail() {
             <span className="detail-value">{recheck.description}</span>
           </div>
           <div className="detail-item">
+            <span className="detail-label">创建人</span>
+            <span className="detail-value">{recheck.creator_name}</span>
+          </div>
+          <div className="detail-item">
             <span className="detail-label">复查人</span>
             <span className="detail-value">{recheck.rechecker_name || "待复查"}</span>
           </div>
@@ -117,13 +122,28 @@ export default function RecheckDetail() {
 
         <hr className="section-divider" />
 
-        <div style={{ marginBottom: 12 }}><strong>操作</strong>（当前角色: {ROLE_LABELS[currentRole] || currentRole}）</div>
+        <div style={{ marginBottom: 12 }}>
+          <strong>操作</strong>
+          <span style={{ marginLeft: 8, fontSize: 13, color: "#666" }}>
+            （当前: {currentUser?.display_name || "-"} / {ROLE_LABELS[currentRole]}）
+          </span>
+        </div>
+
+        {!currentUser && (
+          <div style={{ padding: 12, background: "#fff7e6", border: "1px solid #ffd591", borderRadius: 8, marginBottom: 12, fontSize: 13, color: "#d46b08" }}>
+            ⚠️ 未检测到用户角色，请先在页面右上角选择角色
+          </div>
+        )}
+
         <div className="action-group">
           {canRecheck && <button className="btn btn-warning" onClick={() => setShowRecheck(true)}>🔍 执行复查（兽医主管）</button>}
           {canResolve && <button className="btn btn-primary" onClick={() => setShowResolve(true)}>✅ 解决复查（场长）</button>}
           {!canRecheck && !canResolve && (
             <span style={{ color: "#999", fontSize: 13 }}>
-              当前角色 {ROLE_LABELS[currentRole] || currentRole} 在 {RECHECK_STATUS_LABELS[recheck.status]} 状态下无可用操作
+              当前角色「{ROLE_LABELS[currentRole]}」在「{RECHECK_STATUS_LABELS[recheck.status]}」状态下无可用操作
+              {recheck.status === "pending" && currentRole !== "vet_supervisor" && "，待复查需由兽医主管处理"}
+              {recheck.status === "rechecked" && currentRole !== "farm_manager" && "，已复查需由场长解决"}
+              {recheck.status === "resolved" && "，该复查已解决"}
             </span>
           )}
         </div>

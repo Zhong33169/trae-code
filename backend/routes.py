@@ -1,6 +1,6 @@
 from flask import Blueprint, request, jsonify
 from models import db, User, ImmunizationPlan, VaccinationRecord, Attachment, AbnormalRecheck, AuditLog, RoleEnum, RecordStatus, AttachmentType, RecheckStatus
-from datetime import datetime
+from datetime import datetime, timedelta
 from functools import wraps
 
 api = Blueprint("api", __name__, url_prefix="/api")
@@ -122,7 +122,18 @@ def list_records():
     if is_overdue == "true":
         query = query.filter(VaccinationRecord.deadline_at < datetime.utcnow(), VaccinationRecord.status != RecordStatus.approved)
     records = query.order_by(VaccinationRecord.created_at.desc()).all()
-    return jsonify([r.to_dict() for r in records])
+    result = []
+    for r in records:
+        d = r.to_dict()
+        latest_fail = AuditLog.query.filter_by(record_id=r.id).filter(AuditLog.failure_reason.isnot(None)).order_by(AuditLog.created_at.desc()).first()
+        d["latest_failure"] = {
+            "reason": latest_fail.failure_reason,
+            "suggestion": latest_fail.next_step_suggestion,
+            "actor_name": latest_fail.actor.display_name if latest_fail and latest_fail.actor else None,
+            "created_at": latest_fail.created_at.isoformat() if latest_fail else None,
+        } if latest_fail else None
+        result.append(d)
+    return jsonify(result)
 
 
 @api.route("/vaccination-records/<int:record_id>", methods=["GET"])
@@ -173,14 +184,15 @@ def create_record():
 def submit_record(record_id):
     user = get_current_user()
     record = VaccinationRecord.query.get_or_404(record_id)
-    if record.status != RecordStatus.draft:
-        log_audit(record_id=record_id, action="submit_record_failed", actor=user, detail=f"提交免疫记录 {record.record_code} 失败", failure_reason=f"当前状态为 {record.status.value}，只有草稿状态可以提交", next_step_suggestion="请先将记录设为草稿状态")
-        return jsonify({"error": f"当前状态为 {record.status.value}，只有草稿状态可以提交"}), 400
+    if record.status not in [RecordStatus.draft, RecordStatus.returned]:
+        log_audit(record_id=record_id, action="submit_record_failed", actor=user, detail=f"提交免疫记录 {record.record_code} 失败", failure_reason=f"当前状态为 {record.status.value}，只有草稿或退回状态可以提交", next_step_suggestion="请先将记录设为草稿或退回状态")
+        return jsonify({"error": f"当前状态为 {record.status.value}，只有草稿或退回状态可以提交"}), 400
     missing = [a.label for a in record.attachments if a.attachment_type == AttachmentType.required and not a.file_path]
     if missing:
         log_audit(record_id=record_id, action="submit_record_failed", actor=user, detail=f"提交免疫记录 {record.record_code} 失败，缺少必传附件", failure_reason=f"缺少必传附件: {', '.join(missing)}", next_step_suggestion="请上传所有必传附件后重新提交")
         return jsonify({"error": f"缺少必传附件: {', '.join(missing)}", "missing_attachments": missing}), 400
     record.status = RecordStatus.submitted
+    record.return_reason = None
     db.session.commit()
     log_audit(record_id=record_id, action="submit_record", actor=user, detail=f"饲养员 {user.display_name} 提交免疫记录 {record.record_code}")
     return jsonify(record.to_dict())
@@ -237,9 +249,12 @@ def approve_record(record_id):
 def return_record(record_id):
     user = get_current_user()
     record = VaccinationRecord.query.get_or_404(record_id)
-    if record.status not in [RecordStatus.submitted, RecordStatus.under_review]:
-        log_audit(record_id=record_id, action="return_record_failed", actor=user, detail=f"退回免疫记录 {record.record_code} 失败", failure_reason=f"当前状态为 {record.status.value}，只有已提交或审核中状态可以退回", next_step_suggestion="请确认记录状态正确")
-        return jsonify({"error": f"当前状态为 {record.status.value}，只有已提交或审核中状态可以退回"}), 400
+    if user.role == RoleEnum.vet_supervisor and record.status != RecordStatus.submitted:
+        log_audit(record_id=record_id, action="return_record_failed", actor=user, detail=f"退回免疫记录 {record.record_code} 失败", failure_reason=f"兽医主管只能退回已提交状态，当前状态为 {record.status.value}", next_step_suggestion="请确认记录已由饲养员提交")
+        return jsonify({"error": f"兽医主管只能退回已提交状态，当前状态为 {record.status.value}"}), 400
+    if user.role == RoleEnum.farm_manager and record.status != RecordStatus.under_review:
+        log_audit(record_id=record_id, action="return_record_failed", actor=user, detail=f"退回免疫记录 {record.record_code} 失败", failure_reason=f"场长只能退回审核中状态，当前状态为 {record.status.value}", next_step_suggestion="请确认记录已由兽医主管审核")
+        return jsonify({"error": f"场长只能退回审核中状态，当前状态为 {record.status.value}"}), 400
     data = request.json or {}
     record.status = RecordStatus.returned
     record.return_reason = data.get("return_reason", "")
@@ -259,7 +274,13 @@ def return_record(record_id):
 @api.route("/vaccination-records/<int:record_id>/attachments", methods=["POST"])
 def upload_attachment(record_id):
     user = get_current_user()
+    if not user or user.role != RoleEnum.breeder:
+        log_audit(record_id=record_id, action="upload_attachment_failed", actor=user, detail=f"上传附件失败，权限不足", failure_reason=f"只有饲养员可以上传附件，当前角色: {user.role.value if user else 'unknown'}", next_step_suggestion="请切换为饲养员角色")
+        return jsonify({"error": f"只有饲养员可以上传附件，当前角色: {user.role.value if user else 'unknown'}"}), 403
     record = VaccinationRecord.query.get_or_404(record_id)
+    if record.status not in [RecordStatus.draft, RecordStatus.returned]:
+        log_audit(record_id=record_id, action="upload_attachment_failed", actor=user, detail=f"上传附件到免疫记录 {record.record_code} 失败", failure_reason=f"当前状态为 {record.status.value}，只有草稿或退回状态可以上传附件", next_step_suggestion="请在草稿或退回状态下上传附件")
+        return jsonify({"error": f"当前状态为 {record.status.value}，只有草稿或退回状态可以上传附件"}), 400
     data = request.json
     att_type = AttachmentType(data.get("attachment_type", "supplementary"))
     att = Attachment(
@@ -283,8 +304,15 @@ def update_attachment(record_id, att_id):
     att = Attachment.query.get_or_404(att_id)
     if att.record_id != record_id:
         return jsonify({"error": "附件不属于该记录"}), 400
+    record = VaccinationRecord.query.get_or_404(record_id)
     data = request.json
     if "file_path" in data:
+        if not user or user.role != RoleEnum.breeder:
+            log_audit(record_id=record_id, action="update_attachment_failed", actor=user, detail=f"补传附件失败", failure_reason=f"只有饲养员可以补传附件，当前角色: {user.role.value if user else 'unknown'}", next_step_suggestion="请切换为饲养员角色")
+            return jsonify({"error": f"只有饲养员可以补传附件，当前角色: {user.role.value if user else 'unknown'}"}), 403
+        if record.status not in [RecordStatus.draft, RecordStatus.returned]:
+            log_audit(record_id=record_id, action="update_attachment_failed", actor=user, detail=f"补传附件到免疫记录 {record.record_code} 失败", failure_reason=f"当前状态为 {record.status.value}，只有草稿或退回状态可以补传", next_step_suggestion="请在草稿或退回状态下补传附件")
+            return jsonify({"error": f"当前状态为 {record.status.value}，只有草稿或退回状态可以补传附件"}), 400
         att.file_path = data["file_path"]
         att.uploaded_by = user.id
         att.uploaded_at = datetime.utcnow()
@@ -292,9 +320,14 @@ def update_attachment(record_id, att_id):
             att.attachment_type = AttachmentType.supplementary
             att.rejection_reason = None
             att.rejected_at = None
-    if "attachment_type" in data:
-        att.attachment_type = AttachmentType(data["attachment_type"])
+    if "attachment_type" in data and data["attachment_type"] == "rejected":
+        if not user or user.role not in [RoleEnum.vet_supervisor, RoleEnum.farm_manager]:
+            log_audit(record_id=record_id, action="reject_attachment_failed", actor=user, detail=f"驳回附件失败", failure_reason=f"只有兽医主管或场长可以驳回附件，当前角色: {user.role.value if user else 'unknown'}", next_step_suggestion="请切换为兽医主管或场长角色")
+            return jsonify({"error": f"只有兽医主管或场长可以驳回附件，当前角色: {user.role.value if user else 'unknown'}"}), 403
+        att.attachment_type = AttachmentType.rejected
     if "rejection_reason" in data:
+        if not user or user.role not in [RoleEnum.vet_supervisor, RoleEnum.farm_manager]:
+            return jsonify({"error": f"只有兽医主管或场长可以设置驳回原因"}), 403
         att.rejection_reason = data["rejection_reason"]
         att.rejected_at = datetime.utcnow()
     db.session.commit()
@@ -358,6 +391,14 @@ def resolve_recheck(recheck_id):
     return jsonify(recheck.to_dict())
 
 
+BATCH_ROLE_MAP = {
+    "submit": [RoleEnum.breeder],
+    "review": [RoleEnum.vet_supervisor],
+    "approve": [RoleEnum.farm_manager],
+    "return": [RoleEnum.vet_supervisor, RoleEnum.farm_manager],
+}
+
+
 @api.route("/batch/process", methods=["POST"])
 def batch_process():
     user = get_current_user()
@@ -365,6 +406,15 @@ def batch_process():
     action = data.get("action")
     record_ids = data.get("record_ids", [])
     extra = data.get("extra", {})
+
+    if action not in BATCH_ROLE_MAP:
+        return jsonify({"error": f"不支持的操作: {action}"}), 400
+
+    allowed_roles = BATCH_ROLE_MAP[action]
+    if not user or user.role not in allowed_roles:
+        role_names = "、".join([r.value for r in allowed_roles])
+        log_audit(action=f"batch_{action}_role_denied", actor=user, detail=f"批量{action}被拒绝", failure_reason=f"角色 {user.role.value if user else 'unknown'} 无权执行批量{action}，需要: {role_names}", next_step_suggestion=f"请切换为{role_names}角色")
+        return jsonify({"error": f"角色 {user.role.value if user else 'unknown'} 无权执行批量{action}，需要: {role_names}"}), 403
 
     results = []
     for rid in record_ids:
@@ -386,9 +436,9 @@ def batch_process():
 
         try:
             if action == "submit":
-                if record.status != RecordStatus.draft:
-                    reason = f"当前状态为 {record.status.value}，只有草稿状态可以提交"
-                    next_step = "请先将记录设为草稿状态"
+                if record.status not in [RecordStatus.draft, RecordStatus.returned]:
+                    reason = f"当前状态为 {record.status.value}，只有草稿或退回状态可以提交"
+                    next_step = "请确认记录状态为草稿或退回"
                 else:
                     missing = [a.label for a in record.attachments if a.attachment_type == AttachmentType.required and not a.file_path]
                     if missing:
@@ -396,6 +446,7 @@ def batch_process():
                         next_step = "请上传所有必传附件后重新提交"
                     else:
                         record.status = RecordStatus.submitted
+                        record.return_reason = None
                         success = True
             elif action == "review":
                 if record.status != RecordStatus.submitted:
@@ -419,16 +470,16 @@ def batch_process():
                     record.audit_note = extra.get("audit_note", record.audit_note)
                     success = True
             elif action == "return":
-                if record.status not in [RecordStatus.submitted, RecordStatus.under_review]:
-                    reason = f"当前状态为 {record.status.value}，只有已提交或审核中状态可以退回"
-                    next_step = "请确认记录状态正确"
+                if user.role == RoleEnum.vet_supervisor and record.status != RecordStatus.submitted:
+                    reason = f"兽医主管只能退回已提交状态，当前状态为 {record.status.value}"
+                    next_step = "请确认记录已由饲养员提交"
+                elif user.role == RoleEnum.farm_manager and record.status != RecordStatus.under_review:
+                    reason = f"场长只能退回审核中状态，当前状态为 {record.status.value}"
+                    next_step = "请确认记录已由兽医主管审核"
                 else:
                     record.status = RecordStatus.returned
                     record.return_reason = extra.get("return_reason", "")
                     success = True
-            else:
-                reason = f"不支持的操作: {action}"
-                next_step = "请使用 submit/review/approve/return 操作"
         except Exception as e:
             reason = str(e)
             next_step = "请联系管理员"
@@ -502,6 +553,3 @@ def dashboard_stats():
         "pending_rechecks": pending_rechecks,
         "missing_attachments": missing_attachments,
     })
-
-
-from datetime import timedelta

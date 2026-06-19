@@ -41,8 +41,11 @@ export default function App() {
 
   const switchUser = (id: string) => {
     localStorage.setItem("currentUserId", id);
+    const u = users.find((u: any) => u.id === Number(id));
+    if (u) {
+      localStorage.setItem("currentUser", JSON.stringify(u));
+    }
     setCurrentUserId(id);
-    window.location.reload();
   };
 
   return (
