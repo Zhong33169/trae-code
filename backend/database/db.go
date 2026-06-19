@@ -219,6 +219,7 @@ func SeedData(db *sql.DB) {
 		{orderIDs[0], "refund", "initiate", "evidence_update_failed", "clerk", "张三(登记员)", "", "缺少必填证据: 退款申请", "2024-06-01 09:08:00"},
 		{orderIDs[0], "refund", "initiate", "validation_failed", "clerk", "张三(登记员)", "", "缺少必要证据: 退款申请", "2024-06-01 09:10:00"},
 
+		{orderIDs[1], "refund", "initiate", "update_evidence", "clerk", "张三(登记员)", "上传订单截图、退款申请、支付凭证", "更新证据材料: 订单截图、退款申请、支付凭证", "2024-06-01 09:50:00"},
 		{orderIDs[1], "refund", "initiate", "initiate", "clerk", "张三(登记员)", "提交退款申请，金额较大需审核", "已提交审核", "2024-06-01 10:00:00"},
 		{orderIDs[1], "refund", "initiate", "evidence_update_failed", "supervisor", "李四(审核主管)", "", "越权变更证据: 角色 supervisor 不允许操作", "2024-06-01 10:05:00"},
 		{orderIDs[1], "refund", "initiate", "validation_failed", "supervisor", "李四(审核主管)", "", "角色不匹配", "2024-06-01 10:10:00"},
@@ -235,6 +236,8 @@ func SeedData(db *sql.DB) {
 		{orderIDs[3], "refund", "process", "return", "supervisor", "李四(审核主管)", "证据不完整，退回补充退款申请单", "已退回", "2024-06-01 12:30:00"},
 		{orderIDs[3], "refund", "initiate", "evidence_update_failed", "clerk", "张三(登记员)", "", "版本冲突: 当前版本 2, 提交版本 1", "2024-06-01 12:35:00"},
 		{orderIDs[3], "refund", "initiate", "validation_failed", "clerk", "张三(登记员)", "", "缺少必要证据: 退款申请", "2024-06-01 12:40:00"},
+		{orderIDs[3], "refund", "initiate", "update_evidence", "clerk", "张三(登记员)", "", "更新证据材料: 订单截图、退款申请", "2024-06-01 12:45:00"},
+		{orderIDs[3], "refund", "initiate", "correct", "clerk", "张三(登记员)", "补齐退款申请单，重新提交", "已修正并重新提交", "2024-06-01 12:50:00"},
 
 		{orderIDs[4], "refund", "initiate", "initiate", "clerk", "张三(登记员)", "高风险订单，提交审核", "已提交审核", "2024-06-01 13:00:00"},
 		{orderIDs[4], "refund", "process", "process", "supervisor", "李四(审核主管)", "审核通过，进入仓库阶段", "审核通过", "2024-06-01 13:30:00"},
@@ -250,8 +253,14 @@ func SeedData(db *sql.DB) {
 		{orderIDs[6], "refund", "review", "review_archive", "reviewer", "王五(复核负责人)", "状态异常，证据不完整但已到复核阶段", "冲突状态", "2024-06-01 15:30:00"},
 		{orderIDs[6], "refund", "review", "validation_failed", "reviewer", "王五(复核负责人)", "", "缺少必要证据: 退款申请", "2024-06-01 15:35:00"},
 
+		{orderIDs[7], "refund", "initiate", "create", "clerk", "张三(登记员)", "创建大额退款工单", "已创建", "2024-06-01 15:40:00"},
+		{orderIDs[7], "refund", "initiate", "evidence_update_failed", "clerk", "张三(登记员)", "", "证据未覆盖必填项: 身份验证、大额审批单", "2024-06-01 15:45:00"},
+		{orderIDs[7], "refund", "initiate", "evidence_update_failed", "reviewer", "王五(复核负责人)", "", "越权变更证据: 角色 reviewer 不允许操作", "2024-06-01 15:48:00"},
+		{orderIDs[7], "refund", "initiate", "update_evidence", "clerk", "张三(登记员)", "", "更新证据材料: 订单截图、退款申请、支付凭证、身份验证、大额审批单", "2024-06-01 15:55:00"},
 		{orderIDs[7], "refund", "initiate", "initiate", "clerk", "张三(登记员)", "大额退款申请，需高级审核", "已提交审核", "2024-06-01 16:00:00"},
+		{orderIDs[7], "refund", "process", "evidence_update_failed", "clerk", "张三(登记员)", "", "状态 pending_process 不允许维护证据", "2024-06-01 16:10:00"},
 		{orderIDs[7], "refund", "process", "validation_failed", "supervisor", "李四(审核主管)", "", "缺少必要证据: 身份验证、大额审批单", "2024-06-01 16:15:00"},
+		{orderIDs[7], "refund", "process", "validation_failed", "supervisor", "李四(审核主管)", "", "版本冲突", "2024-06-01 16:20:00"},
 		{orderIDs[7], "refund", "process", "process", "supervisor", "李四(审核主管)", "审核进行中，缺少身份验证和大额审批单，暂挂起", "审核中", "2024-06-01 16:30:00"},
 	}
 

@@ -53,6 +53,20 @@ func writeValidationRecord(db *sql.DB, order *models.AfterSaleOrder, action, res
 	)
 }
 
+func writeValidationRecordWithUser(db *sql.DB, order *models.AfterSaleOrder, user *models.User, action, result string) (models.ProcessingRecord, error) {
+	var record models.ProcessingRecord
+	now := time.Now()
+	err := db.QueryRow(
+		`INSERT INTO processing_records (order_id, stage, step, action, handler_role, handler_name, opinion, result, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id, order_id, stage, step, action, handler_role, handler_name, opinion, result, created_at`,
+		order.Id, order.CurrentStage, order.CurrentStep, action, user.Role, user.DisplayName, "", result, now,
+	).Scan(
+		&record.Id, &record.OrderId, &record.Stage, &record.Step,
+		&record.Action, &record.HandlerRole, &record.HandlerName,
+		&record.Opinion, &record.Result, &record.CreatedAt,
+	)
+	return record, err
+}
+
 func GetOrders(db *sql.DB) echo.HandlerFunc {
 	return func(c echo.Context) error {
 		query := "SELECT id, order_no, customer_name, product_name, order_amount, refund_amount, risk_level, current_stage, current_step, status, handler_role, handler_name, required_evidence, evidence_provided, version, deadline, created_at, updated_at FROM after_sale_orders WHERE 1=1"
@@ -270,8 +284,15 @@ func ActionOrder(db *sql.DB) echo.HandlerFunc {
 		}
 
 		if user.Role != order.HandlerRole {
-			writeValidationRecord(db, &order, "validation_failed", "角色不匹配")
-			return c.JSON(http.StatusForbidden, map[string]string{"error": "角色不匹配"})
+			record, recErr := writeValidationRecordWithUser(db, &order, &user, "validation_failed", "角色不匹配")
+			if recErr != nil {
+				return c.JSON(http.StatusInternalServerError, map[string]string{"error": recErr.Error()})
+			}
+			return c.JSON(http.StatusForbidden, map[string]interface{}{
+				"error":  "角色不匹配",
+				"order":  order,
+				"record": record,
+			})
 		}
 
 		allowed := false
@@ -333,13 +354,27 @@ func ActionOrder(db *sql.DB) echo.HandlerFunc {
 		}
 
 		if !allowed {
-			writeValidationRecord(db, &order, "validation_failed", "操作不被允许")
-			return c.JSON(http.StatusBadRequest, map[string]string{"error": "操作不被允许"})
+			record, recErr := writeValidationRecordWithUser(db, &order, &user, "validation_failed", "操作不被允许")
+			if recErr != nil {
+				return c.JSON(http.StatusInternalServerError, map[string]string{"error": recErr.Error()})
+			}
+			return c.JSON(http.StatusBadRequest, map[string]interface{}{
+				"error":  "操作不被允许",
+				"order":  order,
+				"record": record,
+			})
 		}
 
 		if req.Version != order.Version {
-			writeValidationRecord(db, &order, "validation_failed", "版本冲突")
-			return c.JSON(http.StatusConflict, map[string]string{"error": "版本冲突"})
+			record, recErr := writeValidationRecordWithUser(db, &order, &user, "validation_failed", "版本冲突")
+			if recErr != nil {
+				return c.JSON(http.StatusInternalServerError, map[string]string{"error": recErr.Error()})
+			}
+			return c.JSON(http.StatusConflict, map[string]interface{}{
+				"error":  "版本冲突",
+				"order":  order,
+				"record": record,
+			})
 		}
 
 		var requiredEvidence []string
@@ -359,10 +394,15 @@ func ActionOrder(db *sql.DB) echo.HandlerFunc {
 				}
 			}
 			if len(missing) > 0 {
-				writeValidationRecord(db, &order, "validation_failed", fmt.Sprintf("缺少必要证据: %s", strings.Join(missing, "、")))
+				record, recErr := writeValidationRecordWithUser(db, &order, &user, "validation_failed", fmt.Sprintf("缺少必要证据: %s", strings.Join(missing, "、")))
+				if recErr != nil {
+					return c.JSON(http.StatusInternalServerError, map[string]string{"error": recErr.Error()})
+				}
 				return c.JSON(http.StatusBadRequest, map[string]interface{}{
 					"error":   "缺少必要证据",
 					"missing": missing,
+					"order":   order,
+					"record":  record,
 				})
 			}
 		}

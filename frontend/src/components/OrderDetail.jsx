@@ -50,7 +50,13 @@ export default function OrderDetail({ id, currentUser }) {
   const updateFromResponse = useCallback((data) => {
     if (!data) return;
     if (data.order) setOrder(data.order);
-    if (data.record) {
+    if (data.records && data.records.length) {
+      setRecords((prev) => {
+        const existingIds = new Set(prev.map((r) => r.id));
+        const newRecords = data.records.filter((r) => r.id && !existingIds.has(r.id));
+        return [...prev, ...newRecords];
+      });
+    } else if (data.record) {
       setRecords((prev) => {
         const exists = prev.some((r) => r.id === data.record.id);
         if (exists) return prev;

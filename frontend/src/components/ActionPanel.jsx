@@ -26,6 +26,20 @@ function triggerGlobalRefresh() {
   } catch (e) {}
 }
 
+function mergeResponseData(prev, next) {
+  if (!prev) return next;
+  if (!next) return prev;
+  return {
+    order: next.order || prev.order,
+    record: next.record || prev.record,
+    records: [
+      ...(prev.records || (prev.record ? [prev.record] : [])),
+      ...(next.records || (next.record ? [next.record] : [])),
+    ].filter(Boolean),
+    missing: next.missing || prev.missing,
+  };
+}
+
 export default function ActionPanel({ order, currentUser, onAction }) {
   const [opinion, setOpinion] = useState('');
   const [checkedEvidence, setCheckedEvidence] = useState([]);
@@ -77,7 +91,7 @@ export default function ActionPanel({ order, currentUser, onAction }) {
   };
 
   const extractErrorData = (e) => {
-    if (e && e.details && e.details.order) {
+    if (e && e.details && (e.details.order || e.details.record)) {
       return {
         order: e.details.order,
         record: e.details.record,
@@ -95,7 +109,9 @@ export default function ActionPanel({ order, currentUser, onAction }) {
     setError('');
     setSubmitting(true);
 
-    let lastData = null;
+    let finalData = null;
+    let currentOrder = order;
+    let evidenceError = null;
 
     try {
       if (showEvidencePanel) {
@@ -104,34 +120,53 @@ export default function ActionPanel({ order, currentUser, onAction }) {
           finalEvidence.some((e, i) => e !== providedEvidence[i]);
         const hasEvidence = finalEvidence.length > 0;
         if (evidenceChanged || hasEvidence) {
-          const eviData = await updateEvidence(order.id, {
-            evidence: finalEvidence,
-            handler_id: currentUser.id,
-            version: order.version,
-          });
-          lastData = eviData;
+          try {
+            const eviData = await updateEvidence(order.id, {
+              evidence: finalEvidence,
+              handler_id: currentUser.id,
+              version: currentOrder.version,
+            });
+            finalData = mergeResponseData(finalData, eviData);
+            if (eviData.order) currentOrder = eviData.order;
+          } catch (eviErr) {
+            evidenceError = eviErr;
+            const errData = extractErrorData(eviErr);
+            if (errData) {
+              finalData = mergeResponseData(finalData, errData);
+              if (errData.order) currentOrder = errData.order;
+            }
+            throw eviErr;
+          }
         }
       }
-      const actionData = await submitAction(order.id, {
-        action,
-        opinion: opinion.trim(),
-        handler_id: currentUser.id,
-        version: order.version,
-      });
-      lastData = actionData;
-      setOpinion('');
+
+      try {
+        const actionData = await submitAction(order.id, {
+          action,
+          opinion: opinion.trim(),
+          handler_id: currentUser.id,
+          version: currentOrder.version,
+        });
+        finalData = mergeResponseData(finalData, actionData);
+        setOpinion('');
+      } catch (actionErr) {
+        const errData = extractErrorData(actionErr);
+        if (errData) {
+          finalData = mergeResponseData(finalData, errData);
+        }
+        throw actionErr;
+      }
     } catch (e) {
       const msg = e.message || '操作失败';
-      if (e.details && e.details.missing && e.details.missing.length) {
-        setError(`${msg}（缺失：${e.details.missing.join('、')}）`);
+      const missingList = e.details?.missing || finalData?.missing;
+      if (missingList && missingList.length) {
+        setError(`${msg}（缺失：${missingList.join('、')}）`);
       } else {
         setError(msg);
       }
-      const errData = extractErrorData(e);
-      if (errData) lastData = errData;
     } finally {
       setSubmitting(false);
-      finalizeWithData(lastData);
+      finalizeWithData(finalData);
     }
   };
 
