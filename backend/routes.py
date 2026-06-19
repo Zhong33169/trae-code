@@ -282,7 +282,11 @@ def upload_attachment(record_id):
         log_audit(record_id=record_id, action="upload_attachment_failed", actor=user, detail=f"上传附件到免疫记录 {record.record_code} 失败", failure_reason=f"当前状态为 {record.status.value}，只有草稿或退回状态可以上传附件", next_step_suggestion="请在草稿或退回状态下上传附件")
         return jsonify({"error": f"当前状态为 {record.status.value}，只有草稿或退回状态可以上传附件"}), 400
     data = request.json
-    att_type = AttachmentType(data.get("attachment_type", "supplementary"))
+    raw_att_type = data.get("attachment_type", "supplementary")
+    if raw_att_type == AttachmentType.rejected.value:
+        log_audit(record_id=record_id, action="upload_attachment_failed", actor=user, detail=f"上传附件到免疫记录 {record.record_code} 失败（伪造附件类型）", failure_reason=f"上传接口不能直接创建rejected类型附件，请使用退回流程", next_step_suggestion="请通过退回流程设置附件驳回，或选择required/supplementary类型")
+        return jsonify({"error": "上传接口不能直接创建rejected类型附件，请使用退回流程"}), 400
+    att_type = AttachmentType(raw_att_type)
     att = Attachment(
         record_id=record.id,
         file_name=data.get("file_name", "uploaded_file"),

@@ -41,6 +41,13 @@ export default function Records() {
   const [showBatch, setShowBatch] = useState(false);
   const batchOptions = BATCH_OPTIONS_BY_ROLE[currentRole] || [];
   const [batchAction, setBatchAction] = useState(batchOptions[0]?.value || "submit");
+  useEffect(() => {
+    const allowed = BATCH_OPTIONS_BY_ROLE[currentRole] || [];
+    const cur = batchOptions.find(o => o.value === batchAction);
+    if (!cur) {
+      setBatchAction(allowed[0]?.value || "submit");
+    }
+  }, [currentRole]);
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState({ record_code: "", plan_id: "", animal_id: "", animal_tag: "", species: "", deadline_at: "" });
 

@@ -112,7 +112,7 @@ export default function RecordDetail() {
     setReturnForm({ ...returnForm, reject_attachment_ids: ids });
   };
 
-  const canSubmit = record.status === "draft" && currentRole === "breeder";
+  const canSubmit = ["draft", "returned"].includes(record.status) && currentRole === "breeder";
   const canReview = record.status === "submitted" && currentRole === "vet_supervisor";
   const canApprove = record.status === "under_review" && currentRole === "farm_manager";
   const canReturnByVet = record.status === "submitted" && currentRole === "vet_supervisor";
@@ -292,7 +292,7 @@ export default function RecordDetail() {
         )}
 
         <div className="action-group">
-          {canSubmit && <button className="btn btn-primary" onClick={handleSubmit}>📝 提交（饲养员）</button>}
+          {canSubmit && <button className="btn btn-primary" onClick={handleSubmit}>📝 {record.status === "returned" ? "重新提交（饲养员）" : "提交（饲养员）"}</button>}
           {canReview && <button className="btn btn-warning" onClick={() => setShowReview(true)}>🔍 审核（兽医主管）</button>}
           {canApprove && <button className="btn btn-primary" onClick={handleApprove}>✅ 批准（场长）</button>}
           {canReturnByVet && <button className="btn btn-danger" onClick={() => setShowReturn(true)}>↩️ 退回（兽医主管）</button>}
