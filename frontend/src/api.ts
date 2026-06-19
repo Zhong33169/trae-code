@@ -1,5 +1,5 @@
-import axios, { AxiosInstance } from 'axios';
-import { HarvestRecord, User, ScanRecord, AuditLog, Comment, Statistics } from './types';
+import axios from 'axios';
+import { HarvestRecord, User, ScanRecord, AuditLog, Statistics } from './types';
 
 const API_BASE = '/api';
 
@@ -67,8 +67,13 @@ export interface ScanVerifyDto {
   version?: number;
 }
 
+export interface BatchProcessItem {
+  id: string;
+  version: number;
+}
+
 export interface BatchProcessDto {
-  ids: string[];
+  records: BatchProcessItem[];
   action: 'SUBMIT' | 'VERIFY_PASS' | 'REVIEW_PASS';
   comment: string;
 }
@@ -89,7 +94,7 @@ export const harvestApi = {
   findById: (id: string): Promise<HarvestRecord> => api.get(`/harvest/${id}`),
   getScans: (id: string): Promise<ScanRecord[]> => api.get(`/harvest/${id}/scans`),
   getAudits: (id: string): Promise<AuditLog[]> => api.get(`/harvest/${id}/audits`),
-  getComments: (id: string): Promise<Comment[]> => api.get(`/harvest/${id}/comments`),
+  getComments: (id: string): Promise<any[]> => api.get(`/harvest/${id}/comments`),
   create: (data: CreateHarvestDto): Promise<HarvestRecord> => api.post('/harvest', data),
   update: (id: string, data: Partial<CreateHarvestDto> & { version?: number }): Promise<HarvestRecord> =>
     api.put(`/harvest/${id}`, data),
@@ -99,6 +104,6 @@ export const harvestApi = {
     api.post(`/harvest/${id}/scan`, data),
   process: (id: string, data: ProcessDto): Promise<HarvestRecord> =>
     api.post(`/harvest/${id}/process`, data),
-  batch: (data: BatchProcessDto): Promise<{ success: number; failed: number; details: any[] }> =>
+  batch: (data: BatchProcessDto): Promise<{ total: number; success: number; failed: number; details: any[] }> =>
     api.post('/harvest/batch', data),
 };

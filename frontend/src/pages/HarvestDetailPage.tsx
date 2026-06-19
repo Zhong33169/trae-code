@@ -112,7 +112,7 @@ const HarvestDetailPage: React.FC = () => {
   const canVerifyPass = () => {
     if (!record || !user) return false;
     return (
-      (record.status === HarvestStatus.SUBMITTED || record.status === HarvestStatus.PENDING_CORRECTION) &&
+      record.status === HarvestStatus.SUBMITTED &&
       user.role === Role.TECHNICIAN
     );
   };

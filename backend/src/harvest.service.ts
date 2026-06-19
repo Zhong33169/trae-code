@@ -45,8 +45,13 @@ export interface ScanVerifyDto {
   version?: number;
 }
 
+export interface BatchProcessItem {
+  id: string;
+  version: number;
+}
+
 export interface BatchProcessDto {
-  ids: string[];
+  records: BatchProcessItem[];
   action: 'SUBMIT' | 'VERIFY_PASS' | 'REVIEW_PASS';
   comment: string;
 }
@@ -379,10 +384,6 @@ export class HarvestService {
         roles: [Role.TECHNICIAN],
         actions: ['PASS', 'REJECT'],
       },
-      [HarvestStatus.PENDING_CORRECTION]: {
-        roles: [Role.TECHNICIAN],
-        actions: ['PASS', 'REJECT'],
-      },
       [HarvestStatus.VERIFIED]: {
         roles: [Role.COOP_DIRECTOR],
         actions: ['REVIEW_PASS', 'REVIEW_REJECT'],
@@ -472,65 +473,71 @@ export class HarvestService {
   }
 
   batchProcess(userId: string, userRole: Role, dto: BatchProcessDto) {
-    if (dto.ids.length === 0) {
+    if (dto.records.length === 0) {
       throw new BadRequestException('请选择要处理的记录');
     }
 
     const results: { id: string; success: boolean; message: string }[] = [];
 
-    for (const id of dto.ids) {
+    for (const item of dto.records) {
       try {
-        const record = this.findById(id);
+        const record = this.findById(item.id);
         if (!record) {
-          results.push({ id, success: false, message: '记录不存在' });
+          results.push({ id: item.id, success: false, message: '记录不存在' });
+          continue;
+        }
+
+        if (item.version !== record.version) {
+          results.push({ id: item.id, success: false, message: '记录版本已过期，请刷新后重试' });
           continue;
         }
 
         if (dto.action === 'SUBMIT') {
           if (userRole !== Role.FIELD_ADMIN || record.created_by !== userId) {
-            results.push({ id, success: false, message: '无权限提交' });
+            results.push({ id: item.id, success: false, message: '无权限提交' });
             continue;
           }
           if (record.status !== HarvestStatus.DRAFT && record.status !== HarvestStatus.PENDING_CORRECTION) {
-            results.push({ id, success: false, message: '状态不支持提交' });
+            results.push({ id: item.id, success: false, message: '状态不支持提交' });
             continue;
           }
-          this.submitForVerification(id, userId, { comment: dto.comment });
-          results.push({ id, success: true, message: '提交成功' });
+          this.submitForVerification(item.id, userId, { comment: dto.comment, version: item.version });
+          results.push({ id: item.id, success: true, message: '提交成功' });
         } else if (dto.action === 'VERIFY_PASS') {
           if (userRole !== Role.TECHNICIAN) {
-            results.push({ id, success: false, message: '无权限核验' });
+            results.push({ id: item.id, success: false, message: '无权限核验' });
             continue;
           }
-          if (record.status !== HarvestStatus.SUBMITTED && record.status !== HarvestStatus.PENDING_CORRECTION) {
-            results.push({ id, success: false, message: '状态不支持核验' });
+          if (record.status !== HarvestStatus.SUBMITTED) {
+            results.push({ id: item.id, success: false, message: '状态不支持核验，待补正记录请先让管理员完善材料' });
             continue;
           }
-          this.processRecord(id, userId, userRole, { action: 'PASS', comment: dto.comment });
-          results.push({ id, success: true, message: '核验通过' });
+          this.processRecord(item.id, userId, userRole, { action: 'PASS', comment: dto.comment, version: item.version });
+          results.push({ id: item.id, success: true, message: '核验通过' });
         } else if (dto.action === 'REVIEW_PASS') {
           if (userRole !== Role.COOP_DIRECTOR) {
-            results.push({ id, success: false, message: '无权限复核' });
+            results.push({ id: item.id, success: false, message: '无权限复核' });
             continue;
           }
           if (record.status !== HarvestStatus.VERIFIED && record.status !== HarvestStatus.PENDING_REVIEW) {
-            results.push({ id, success: false, message: '状态不支持复核' });
+            results.push({ id: item.id, success: false, message: '状态不支持复核' });
             continue;
           }
-          this.processRecord(id, userId, userRole, {
+          this.processRecord(item.id, userId, userRole, {
             action: 'REVIEW_PASS',
             comment: dto.comment,
             actual_weight: record.estimated_weight,
+            version: item.version,
           });
-          results.push({ id, success: true, message: '复核通过' });
+          results.push({ id: item.id, success: true, message: '复核通过' });
         }
       } catch (e: any) {
-        results.push({ id, success: false, message: e.message });
+        results.push({ id: item.id, success: false, message: e.message });
       }
     }
 
     return {
-      total: dto.ids.length,
+      total: dto.records.length,
       success: results.filter((r) => r.success).length,
       failed: results.filter((r) => !r.success).length,
       details: results,

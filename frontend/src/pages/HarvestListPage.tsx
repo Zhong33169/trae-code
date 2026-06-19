@@ -11,6 +11,7 @@ import {
   Modal,
   Form,
   message,
+  Card,
 } from 'antd';
 import {
   PlusOutlined,
@@ -20,7 +21,7 @@ import {
   CheckCircleOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { harvestApi, BatchProcessDto } from '../api';
+import { harvestApi, BatchProcessDto, BatchProcessItem } from '../api';
 import {
   HarvestRecord,
   HarvestStatus,
@@ -40,6 +41,7 @@ const HarvestListPage: React.FC = () => {
   const [records, setRecords] = useState<HarvestRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
+  const [selectedRecords, setSelectedRecords] = useState<HarvestRecord[]>([]);
   const [batchModalVisible, setBatchModalVisible] = useState(false);
   const [batchAction, setBatchAction] = useState<'SUBMIT' | 'VERIFY_PASS' | 'REVIEW_PASS'>('SUBMIT');
   const [form] = Form.useForm();
@@ -81,8 +83,12 @@ const HarvestListPage: React.FC = () => {
   const handleBatchProcess = async () => {
     try {
       const values = await form.validateFields();
+      const recordsWithVersion: BatchProcessItem[] = selectedRecords.map((r) => ({
+        id: r.id,
+        version: r.version,
+      }));
       const dto: BatchProcessDto = {
-        ids: selectedRowKeys as string[],
+        records: recordsWithVersion,
         action: batchAction,
         comment: values.comment,
       };
@@ -97,6 +103,7 @@ const HarvestListPage: React.FC = () => {
       }
       setBatchModalVisible(false);
       setSelectedRowKeys([]);
+      setSelectedRecords([]);
       form.resetFields();
       loadRecords();
     } catch (e: any) {
@@ -216,15 +223,17 @@ const HarvestListPage: React.FC = () => {
 
   const rowSelection = {
     selectedRowKeys,
-    onChange: setSelectedRowKeys,
+    onChange: (keys: React.Key[], selectedRows: HarvestRecord[]) => {
+      setSelectedRowKeys(keys);
+      setSelectedRecords(selectedRows);
+    },
     getCheckboxProps: (record: HarvestRecord) => ({
       disabled:
         (batchAction === 'SUBMIT' &&
           record.status !== HarvestStatus.DRAFT &&
           record.status !== HarvestStatus.PENDING_CORRECTION) ||
         (batchAction === 'VERIFY_PASS' &&
-          record.status !== HarvestStatus.SUBMITTED &&
-          record.status !== HarvestStatus.PENDING_CORRECTION) ||
+          record.status !== HarvestStatus.SUBMITTED) ||
         (batchAction === 'REVIEW_PASS' &&
           record.status !== HarvestStatus.VERIFIED &&
           record.status !== HarvestStatus.PENDING_REVIEW) ||
