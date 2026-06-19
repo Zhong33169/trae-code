@@ -38,7 +38,7 @@
               <td class="px-4 py-3 text-sm text-green-600">{{ batch.success_count }}</td>
               <td class="px-4 py-3 text-sm text-red-600">{{ batch.failure_count }}</td>
               <td class="px-4 py-3 text-sm text-orange-600">{{ batch.conflict_count }}</td>
-              <td class="px-4 py-3 text-sm text-gray-600">{{ batch.imported_by }}</td>
+              <td class="px-4 py-3 text-sm text-gray-600">{{ batch.imported_by_name || batch.imported_by }}</td>
               <td class="px-4 py-3 text-sm text-gray-500">{{ batch.imported_at }}</td>
               <td class="px-4 py-3 text-sm">
                 <button @click="viewDetail(batch.id)" class="text-blue-600 hover:underline">

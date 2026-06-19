@@ -135,15 +135,25 @@ fastify.get('/api/tickets/:id', async (request, reply) => {
   const auditor = ticket.auditor_id ? db.prepare('SELECT name FROM users WHERE id = ?').get(ticket.auditor_id) : null;
   const reviewer = ticket.reviewer_id ? db.prepare('SELECT name FROM users WHERE id = ?').get(ticket.reviewer_id) : null;
   
+  let importBatchLabel = null;
+  if (ticket.import_batch_id) {
+    const batch = db.prepare('SELECT batch_no, source FROM import_batches WHERE id = ?').get(ticket.import_batch_id);
+    if (batch) {
+      const sourceLabels = { offline_excel: '离线Excel台账', offline_manual: '手工录入', third_party: '第三方系统' };
+      importBatchLabel = `${batch.batch_no} (${sourceLabels[batch.source] || batch.source})`;
+    }
+  }
+
   return {
     data: {
       ...ticket,
       status_label: STATUS_MAP[ticket.status]?.label || ticket.status,
       status_color: STATUS_MAP[ticket.status]?.color || 'gray',
-      stage_label: STAGE_MAP[t.stage]?.label || ticket.stage,
+      stage_label: STAGE_MAP[ticket.stage]?.label || ticket.stage,
       creator_name: creator?.name || '未知',
       auditor_name: auditor?.name || null,
       reviewer_name: reviewer?.name || null,
+      import_batch_label: importBatchLabel,
       attachments,
       audit_logs: auditLogs.map(l => ({
         ...l,
@@ -151,6 +161,59 @@ fastify.get('/api/tickets/:id', async (request, reply) => {
       })),
     },
   };
+});
+
+fastify.post('/api/tickets/:id/attachments', async (request, reply) => {
+  const user = getUserFromHeader(request);
+  if (!user) {
+    return reply.status(401).send({ error: '未登录' });
+  }
+
+  const ticket = db.prepare('SELECT * FROM requirement_tickets WHERE id = ?').get(request.params.id);
+  if (!ticket) {
+    return reply.status(404).send({ error: '需求单不存在' });
+  }
+
+  const { file_name, file_size } = request.body;
+  if (!file_name) {
+    return reply.status(400).send({ error: '文件名不能为空' });
+  }
+
+  const id = uuidv4();
+  const now = dayjs().format('YYYY-MM-DD HH:mm:ss');
+
+  db.prepare(`
+    INSERT INTO ticket_attachments (id, ticket_id, file_name, file_size, uploaded_by, uploaded_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(id, ticket.id, file_name, file_size || 0, user.id, now);
+
+  addAuditLog(ticket.id, '新增附件', 'attachment_add', user, `新增附件：${file_name}`);
+
+  const attachment = db.prepare('SELECT * FROM ticket_attachments WHERE id = ?').get(id);
+  return { data: attachment };
+});
+
+fastify.delete('/api/tickets/:id/attachments/:attachmentId', async (request, reply) => {
+  const user = getUserFromHeader(request);
+  if (!user) {
+    return reply.status(401).send({ error: '未登录' });
+  }
+
+  const ticket = db.prepare('SELECT * FROM requirement_tickets WHERE id = ?').get(request.params.id);
+  if (!ticket) {
+    return reply.status(404).send({ error: '需求单不存在' });
+  }
+
+  const attachment = db.prepare('SELECT * FROM ticket_attachments WHERE id = ? AND ticket_id = ?').get(request.params.attachmentId, ticket.id);
+  if (!attachment) {
+    return reply.status(404).send({ error: '附件不存在' });
+  }
+
+  db.prepare('DELETE FROM ticket_attachments WHERE id = ?').run(attachment.id);
+
+  addAuditLog(ticket.id, '删除附件', 'attachment_delete', user, `删除附件：${attachment.file_name}`);
+
+  return { data: { success: true } };
 });
 
 fastify.post('/api/tickets', async (request, reply) => {
@@ -208,7 +271,20 @@ fastify.put('/api/tickets/:id', async (request, reply) => {
     return reply.status(404).send({ error: '需求单不存在' });
   }
   
-  const { title, description, priority, customer_name, customer_contact, product_version, deadline, result, audit_remark } = request.body;
+  const editableStatusesByRole = {
+    registrar: ['draft', 'returned', 'material_missing'],
+    auditor: ['pending_audit', 'in_review', 'review_passed', 'review_rejected', 'pending_release', 'released', 'overdue'],
+    reviewer: ['pending_review'],
+  };
+  const allowed = editableStatusesByRole[user.role] || [];
+  if (!allowed.includes(ticket.status) && ticket.status !== 'archived') {
+    if (user.role === 'reviewer' && ticket.status === 'archived') {
+      // reviewer can view but not edit archived
+    }
+    return reply.status(403).send({ error: `当前角色(${ROLE_MAP[user.role]?.label})不可编辑此状态的需求单` });
+  }
+  
+  const { title, description, priority, customer_name, customer_contact, product_version, deadline, result, audit_remark, reject_reason } = request.body;
   
   const now = dayjs().format('YYYY-MM-DD HH:mm:ss');
   
@@ -216,20 +292,31 @@ fastify.put('/api/tickets/:id', async (request, reply) => {
     UPDATE requirement_tickets SET
       title = ?, description = ?, priority = ?,
       customer_name = ?, customer_contact = ?, product_version = ?,
-      deadline = ?, result = ?, audit_remark = ?, updated_at = ?
+      deadline = ?, result = ?, audit_remark = ?, reject_reason = ?, updated_at = ?
     WHERE id = ?
   `);
+  
+  const newResult = result !== undefined ? result : ticket.result;
+  const newAuditRemark = audit_remark !== undefined ? audit_remark : ticket.audit_remark;
+  const newRejectReason = reject_reason !== undefined ? reject_reason : ticket.reject_reason;
   
   stmt.run(
     title || ticket.title, description || ticket.description,
     priority || ticket.priority, customer_name || ticket.customer_name,
     customer_contact || ticket.customer_contact, product_version || ticket.product_version,
-    deadline || ticket.deadline, result !== undefined ? result : ticket.result,
-    audit_remark !== undefined ? audit_remark : ticket.audit_remark,
+    deadline || ticket.deadline, newResult, newAuditRemark, newRejectReason,
     now, ticket.id
   );
   
-  addAuditLog(ticket.id, '编辑需求单', 'edit', user, '编辑需求单信息');
+  const changeParts = [];
+  if (result !== undefined && result !== ticket.result) changeParts.push('处理结果');
+  if (reject_reason !== undefined && reject_reason !== ticket.reject_reason) changeParts.push('退回原因');
+  if (audit_remark !== undefined && audit_remark !== ticket.audit_remark) changeParts.push('审计备注');
+  if (title && title !== ticket.title) changeParts.push('标题');
+  if (description && description !== ticket.description) changeParts.push('描述');
+  
+  const detailStr = changeParts.length > 0 ? `编辑了：${changeParts.join('、')}` : '编辑需求单信息';
+  addAuditLog(ticket.id, '编辑需求单', 'edit', user, detailStr);
   
   const updatedTicket = db.prepare('SELECT * FROM requirement_tickets WHERE id = ?').get(ticket.id);
   
@@ -599,7 +686,11 @@ fastify.get('/api/audit-logs', async (request, reply) => {
 
 fastify.get('/api/import-batches', async (request, reply) => {
   const batches = db.prepare('SELECT * FROM import_batches ORDER BY imported_at DESC').all();
-  return { data: batches };
+  const batchesWithNames = batches.map(b => {
+    const importer = db.prepare('SELECT name FROM users WHERE id = ?').get(b.imported_by);
+    return { ...b, imported_by_name: importer?.name || '未知' };
+  });
+  return { data: batchesWithNames };
 });
 
 fastify.get('/api/import-batches/:id', async (request, reply) => {
@@ -608,9 +699,10 @@ fastify.get('/api/import-batches/:id', async (request, reply) => {
     return reply.status(404).send({ error: '批次不存在' });
   }
   
+  const importer = db.prepare('SELECT name FROM users WHERE id = ?').get(batch.imported_by);
   const records = db.prepare('SELECT * FROM import_records WHERE batch_id = ?').all(batch.id);
   
-  return { data: { ...batch, records } };
+  return { data: { ...batch, imported_by_name: importer?.name || '未知', records } };
 });
 
 fastify.post('/api/import-batches', async (request, reply) => {
