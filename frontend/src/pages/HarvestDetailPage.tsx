@@ -18,7 +18,6 @@ import {
   Row,
   Col,
   Statistic,
-  Popconfirm,
 } from 'antd';
 import {
   ArrowLeftOutlined,
@@ -36,13 +35,13 @@ import {
   StatusLabelMap,
   StatusColorMap,
   Role,
-  User,
   ScanRecord,
   ScanResultLabelMap,
   ScanResultColorMap,
   AuditLog,
   ProcessComment,
 } from '../types';
+import { useAuth } from '../context/AuthContext';
 import dayjs from 'dayjs';
 
 const { TextArea } = Input;
@@ -51,6 +50,7 @@ const { TabPane } = Tabs;
 
 const HarvestDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
+  const { user } = useAuth();
   const navigate = useNavigate();
   const [record, setRecord] = useState<HarvestRecord | null>(null);
   const [scanRecords, setScanRecords] = useState<ScanRecord[]>([]);
@@ -66,14 +66,9 @@ const HarvestDetailPage: React.FC = () => {
   const [form] = Form.useForm();
   const [scanForm] = Form.useForm();
 
-  const [currentUser] = useState<User>(() => {
-    const saved = localStorage.getItem('userInfo');
-    return saved ? JSON.parse(saved) : null;
-  });
-
   useEffect(() => {
-    if (id) loadDetail();
-  }, [id]);
+    if (id && user) loadDetail();
+  }, [id, user]);
 
   const loadDetail = async () => {
     if (!id) return;
@@ -97,46 +92,46 @@ const HarvestDetailPage: React.FC = () => {
   };
 
   const canEdit = () => {
-    if (!record || !currentUser) return false;
+    if (!record || !user) return false;
     return (
       (record.status === HarvestStatus.DRAFT || record.status === HarvestStatus.PENDING_CORRECTION) &&
-      record.created_by === currentUser.id
+      record.created_by === user.id
     );
   };
 
   const canSubmit = () => {
-    if (!record || !currentUser) return false;
+    if (!record || !user) return false;
     return (
       (record.status === HarvestStatus.DRAFT || record.status === HarvestStatus.PENDING_CORRECTION) &&
-      record.created_by === currentUser.id &&
+      record.created_by === user.id &&
       record.materials &&
       record.materials.trim().length > 0
     );
   };
 
   const canVerifyPass = () => {
-    if (!record || !currentUser) return false;
+    if (!record || !user) return false;
     return (
       (record.status === HarvestStatus.SUBMITTED || record.status === HarvestStatus.PENDING_CORRECTION) &&
-      currentUser.role === Role.TECHNICIAN
+      user.role === Role.TECHNICIAN
     );
   };
 
   const canVerifyReject = () => canVerifyPass();
 
   const canReviewPass = () => {
-    if (!record || !currentUser) return false;
+    if (!record || !user) return false;
     return (
       (record.status === HarvestStatus.VERIFIED || record.status === HarvestStatus.PENDING_REVIEW) &&
-      currentUser.role === Role.COOP_DIRECTOR
+      user.role === Role.COOP_DIRECTOR
     );
   };
 
   const canReviewReject = () => canReviewPass();
 
   const canScan = () => {
-    if (!record || !currentUser) return false;
-    return record.status === HarvestStatus.SUBMITTED && currentUser.role === Role.TECHNICIAN;
+    if (!record || !user) return false;
+    return record.status === HarvestStatus.SUBMITTED && user.role === Role.TECHNICIAN;
   };
 
   const openActionModal = (action: string, title: string) => {
@@ -145,7 +140,7 @@ const HarvestDetailPage: React.FC = () => {
   };
 
   const handleActionSubmit = async () => {
-    if (!id) return;
+    if (!id || !record) return;
     try {
       const values = await form.validateFields();
 
@@ -153,6 +148,7 @@ const HarvestDetailPage: React.FC = () => {
         const dto: SubmitVerifyDto = {
           comment: values.comment,
           deadline: values.deadline ? values.deadline.format('YYYY-MM-DD') : undefined,
+          version: record.version,
         };
         await harvestApi.submit(id, dto);
         message.success('提交成功');
@@ -162,6 +158,7 @@ const HarvestDetailPage: React.FC = () => {
           comment: values.comment,
           actual_weight: values.actual_weight,
           deadline: values.deadline ? values.deadline.format('YYYY-MM-DD') : undefined,
+          version: record.version,
         };
         await harvestApi.process(id, dto);
         message.success('处理成功');
@@ -182,6 +179,7 @@ const HarvestDetailPage: React.FC = () => {
         scan_code: values.scan_code,
         credential: values.credential,
         remark: values.remark,
+        version: record.version,
       };
       const result = await harvestApi.scan(id, dto);
       message.info(result.message);
@@ -190,6 +188,15 @@ const HarvestDetailPage: React.FC = () => {
       loadDetail();
     } catch (e: any) {
       message.error(e.response?.data?.message || '扫码失败');
+    }
+  };
+
+  const parseMaterials = (materials?: string) => {
+    if (!materials) return [];
+    try {
+      return JSON.parse(materials);
+    } catch {
+      return [];
     }
   };
 
@@ -230,7 +237,17 @@ const HarvestDetailPage: React.FC = () => {
   ];
 
   if (!record) {
-    return <Card loading={loading}>记录不存在</Card>;
+    return (
+      <div>
+        <div className="header-bar">
+          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/harvest')}>
+            返回列表
+          </Button>
+          <h2>采收记录详情</h2>
+        </div>
+        <Card loading={loading}>记录不存在或加载中</Card>
+      </div>
+    );
   }
 
   return (
@@ -255,7 +272,7 @@ const HarvestDetailPage: React.FC = () => {
             <Button
               type="primary"
               icon={<EditOutlined />}
-              onClick={() => navigate(`/harvest/${record.id}/edit`)}
+              onClick={() => navigate(`/harvest/edit/${record.id}`)}
             >
               编辑
             </Button>
@@ -333,8 +350,7 @@ const HarvestDetailPage: React.FC = () => {
                   : '合作社主任'
               }
               valueStyle={{
-                color:
-                  record.current_queue === currentUser?.role ? '#52c41a' : '#faad14',
+                color: record.current_queue === user?.role ? '#52c41a' : '#faad14',
               }}
             />
           </Card>
@@ -392,28 +408,34 @@ const HarvestDetailPage: React.FC = () => {
 
           <Card className="detail-section" style={{ marginTop: 16 }}>
             <div className="detail-section-title">材料附件</div>
-            {record.materials ? (
-              <div>
-                {JSON.parse(record.materials).map((m: any, i: number) => (
+            {parseMaterials(record.materials).length > 0 ? (
+              <Space wrap>
+                {parseMaterials(record.materials).map((m: any, i: number) => (
                   <Tag key={i} color="blue">
                     {m.name}
                   </Tag>
                 ))}
-              </div>
+              </Space>
             ) : (
-              <div style={{ color: '#999' }}>暂无材料</div>
+              <div style={{ color: '#999' }}>暂无材料（提交核验前必须上传）</div>
             )}
           </Card>
         </TabPane>
 
         <TabPane tab="扫码记录" key="2">
           <Card>
-            <Table
-              rowKey="id"
-              columns={scanColumns}
-              dataSource={scanRecords}
-              pagination={false}
-            />
+            {scanRecords.length === 0 ? (
+              <div style={{ color: '#999', textAlign: 'center', padding: '40px 0' }}>
+                暂无扫码记录
+              </div>
+            ) : (
+              <Table
+                rowKey="id"
+                columns={scanColumns}
+                dataSource={scanRecords}
+                pagination={false}
+              />
+            )}
           </Card>
         </TabPane>
 

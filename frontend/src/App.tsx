@@ -1,43 +1,54 @@
-import React, { useEffect, useState } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import React from 'react';
+import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { Spin } from 'antd';
+import { AuthProvider, useAuth } from './context/AuthContext';
 import MainLayout from './layouts/MainLayout';
 import LoginPage from './pages/LoginPage';
 
-const App: React.FC = () => {
-  const [loading, setLoading] = useState(true);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+const ProtectedRoute: React.FC<{ children: React.ReactElement }> = ({ children }) => {
+  const { isAuthenticated, loading } = useAuth();
+  const navigate = useNavigate();
 
-  useEffect(() => {
-    const userId = localStorage.getItem('userId');
-    setIsAuthenticated(!!userId);
-    setLoading(false);
-  }, []);
+  React.useEffect(() => {
+    if (!loading && !isAuthenticated) {
+      navigate('/login', { replace: true });
+    }
+  }, [loading, isAuthenticated, navigate]);
 
   if (loading) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
-        <Spin size="large" />
+        <Spin size="large" tip="加载中..." />
       </div>
     );
   }
 
+  return isAuthenticated ? children : null;
+};
+
+const AppRoutes: React.FC = () => {
   return (
-    <BrowserRouter>
-      <Routes>
-        <Route path="/login" element={<LoginPage />} />
-        <Route
-          path="/*"
-          element={
-            isAuthenticated ? (
-              <MainLayout />
-            ) : (
-              <Navigate to="/login" replace />
-            )
-          }
-        />
-      </Routes>
-    </BrowserRouter>
+    <Routes>
+      <Route path="/login" element={<LoginPage />} />
+      <Route
+        path="/*"
+        element={
+          <ProtectedRoute>
+            <MainLayout />
+          </ProtectedRoute>
+        }
+      />
+    </Routes>
+  );
+};
+
+const App: React.FC = () => {
+  return (
+    <AuthProvider>
+      <BrowserRouter>
+        <AppRoutes />
+      </BrowserRouter>
+    </AuthProvider>
   );
 };
 

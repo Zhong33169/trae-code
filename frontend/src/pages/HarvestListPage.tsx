@@ -11,8 +11,6 @@ import {
   Modal,
   Form,
   message,
-  Checkbox,
-  Popconfirm,
 } from 'antd';
 import {
   PlusOutlined,
@@ -29,8 +27,8 @@ import {
   StatusLabelMap,
   StatusColorMap,
   Role,
-  User,
 } from '../types';
+import { useAuth } from '../context/AuthContext';
 import dayjs from 'dayjs';
 
 const { Search } = Input;
@@ -38,6 +36,7 @@ const { Option } = Select;
 const { TextArea } = Input;
 
 const HarvestListPage: React.FC = () => {
+  const { user } = useAuth();
   const [records, setRecords] = useState<HarvestRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
@@ -50,14 +49,9 @@ const HarvestListPage: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState<string>(searchParams.get('status') || '');
   const [keyword, setKeyword] = useState<string>(searchParams.get('keyword') || '');
 
-  const [currentUser] = useState<User>(() => {
-    const saved = localStorage.getItem('userInfo');
-    return saved ? JSON.parse(saved) : null;
-  });
-
   useEffect(() => {
-    loadRecords();
-  }, [statusFilter, keyword]);
+    if (user) loadRecords();
+  }, [user, statusFilter, keyword]);
 
   const loadRecords = async () => {
     setLoading(true);
@@ -112,13 +106,13 @@ const HarvestListPage: React.FC = () => {
 
   const getActionOptions = () => {
     const options: { label: string; value: 'SUBMIT' | 'VERIFY_PASS' | 'REVIEW_PASS' }[] = [];
-    if (currentUser?.role === Role.FIELD_ADMIN) {
+    if (user?.role === Role.FIELD_ADMIN) {
       options.push({ label: '批量提交核验', value: 'SUBMIT' });
     }
-    if (currentUser?.role === Role.TECHNICIAN) {
+    if (user?.role === Role.TECHNICIAN) {
       options.push({ label: '批量核验通过', value: 'VERIFY_PASS' });
     }
-    if (currentUser?.role === Role.COOP_DIRECTOR) {
+    if (user?.role === Role.COOP_DIRECTOR) {
       options.push({ label: '批量复核通过', value: 'REVIEW_PASS' });
     }
     return options;
@@ -200,12 +194,12 @@ const HarvestListPage: React.FC = () => {
             详情
           </Button>
           {(record.status === HarvestStatus.DRAFT || record.status === HarvestStatus.PENDING_CORRECTION) &&
-            record.created_by === currentUser?.id && (
-              <Button type="link" size="small" onClick={() => navigate(`/harvest/${record.id}/edit`)}>
+            record.created_by === user?.id && (
+              <Button type="link" size="small" onClick={() => navigate(`/harvest/edit/${record.id}`)}>
                 编辑
               </Button>
             )}
-          {record.status === HarvestStatus.SUBMITTED && currentUser?.role === Role.TECHNICIAN && (
+          {record.status === HarvestStatus.SUBMITTED && user?.role === Role.TECHNICIAN && (
             <Button
               type="link"
               size="small"
@@ -234,7 +228,7 @@ const HarvestListPage: React.FC = () => {
         (batchAction === 'REVIEW_PASS' &&
           record.status !== HarvestStatus.VERIFIED &&
           record.status !== HarvestStatus.PENDING_REVIEW) ||
-        (batchAction === 'SUBMIT' && record.created_by !== currentUser?.id),
+        (batchAction === 'SUBMIT' && record.created_by !== user?.id),
     }),
   };
 
@@ -243,7 +237,7 @@ const HarvestListPage: React.FC = () => {
       <div className="header-bar">
         <h2>采收记录列表</h2>
         <Space>
-          {currentUser?.role === Role.FIELD_ADMIN && (
+          {user?.role === Role.FIELD_ADMIN && (
             <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate('/harvest/create')}>
               新增采收记录
             </Button>

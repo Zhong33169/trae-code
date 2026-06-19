@@ -1,5 +1,6 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
+import { AllExceptionsFilter } from './exception.filter';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -13,6 +14,8 @@ async function bootstrap() {
     allowedHeaders: ['Content-Type', 'X-User-Id', 'X-Requested-With', 'Accept'],
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
   });
+
+  app.useGlobalFilters(new AllExceptionsFilter());
 
   await app.listen(port);
   console.log(`Backend server is running on http://localhost:${port}`);

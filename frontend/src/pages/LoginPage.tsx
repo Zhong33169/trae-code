@@ -2,13 +2,14 @@ import React, { useState } from 'react';
 import { Form, Input, Button, Select, message, Card } from 'antd';
 import { UserOutlined, LockOutlined, TeamOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
-import { authApi } from '../api';
+import { useAuth } from '../context/AuthContext';
 import { User, RoleLabelMap, Role } from '../types';
 
 const LoginPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [form] = Form.useForm();
   const navigate = useNavigate();
+  const { login } = useAuth();
 
   const demoAccounts = [
     { username: 'admin1', name: '张三（田间管理员）', role: Role.FIELD_ADMIN },
@@ -19,9 +20,7 @@ const LoginPage: React.FC = () => {
   const handleLogin = async (values: { username: string; password: string }) => {
     setLoading(true);
     try {
-      const user = (await authApi.login(values)) as User;
-      localStorage.setItem('userId', user.id);
-      localStorage.setItem('userInfo', JSON.stringify(user));
+      const user = await login(values.username, values.password);
       message.success(`欢迎回来，${user.name}`);
       navigate('/');
     } catch (e: any) {

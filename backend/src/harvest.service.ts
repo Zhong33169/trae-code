@@ -27,6 +27,7 @@ export interface CreateHarvestDto {
 export interface SubmitVerifyDto {
   comment?: string;
   deadline?: string;
+  version?: number;
 }
 
 export interface ProcessDto {
@@ -34,12 +35,14 @@ export interface ProcessDto {
   comment: string;
   actual_weight?: number;
   deadline?: string;
+  version?: number;
 }
 
 export interface ScanVerifyDto {
   scan_code: string;
   credential: string;
   remark?: string;
+  version?: number;
 }
 
 export interface BatchProcessDto {
@@ -182,12 +185,15 @@ export class HarvestService {
     return this.findById(id)!;
   }
 
-  update(id: string, userId: string, dto: Partial<CreateHarvestDto>): HarvestRecord {
+  update(id: string, userId: string, dto: Partial<CreateHarvestDto> & { version?: number }): HarvestRecord {
     const record = this.findById(id);
     if (!record) throw new BadRequestException('记录不存在');
     if (record.created_by !== userId) throw new ForbiddenException('无权限修改');
     if (record.status !== HarvestStatus.DRAFT && record.status !== HarvestStatus.PENDING_CORRECTION) {
       throw new BadRequestException('当前状态不可修改');
+    }
+    if (dto.version !== undefined && dto.version !== record.version) {
+      throw new ConflictException('记录已被修改，请刷新后重试');
     }
 
     this.db
@@ -234,6 +240,9 @@ export class HarvestService {
     if (record.created_by !== userId) throw new ForbiddenException('无权限提交');
     if (record.status !== HarvestStatus.DRAFT && record.status !== HarvestStatus.PENDING_CORRECTION) {
       throw new BadRequestException('当前状态不可提交');
+    }
+    if (dto.version !== undefined && dto.version !== record.version) {
+      throw new ConflictException('记录已被修改，请刷新后重试');
     }
 
     if (!record.materials || record.materials.trim().length === 0) {
@@ -285,6 +294,9 @@ export class HarvestService {
       this.saveScanRecord(id, dto.scan_code, userId, ScanResult.INVALID_CODE, dto.credential, dto.remark);
       return { result: ScanResult.INVALID_CODE, message: '无效的采收记录编号' };
     }
+    if (dto.version !== undefined && dto.version !== record.version) {
+      return { result: ScanResult.STATUS_ERROR, message: '记录已被修改，请刷新后重试' };
+    }
 
     if (userRole !== Role.TECHNICIAN) {
       this.saveScanRecord(id, dto.scan_code, userId, ScanResult.OPERATOR_MISMATCH, dto.credential, dto.remark);
@@ -302,8 +314,12 @@ export class HarvestService {
     }
 
     const existingScan = this.db
-      .prepare("SELECT * FROM scan_records WHERE harvest_record_id = ? AND result = 'SUCCESS'")
-      .get(id);
+      .prepare(
+        `SELECT * FROM scan_records 
+         WHERE harvest_record_id = ? AND result = 'SUCCESS' AND scanned_at > ?
+         ORDER BY scanned_at DESC LIMIT 1`
+      )
+      .get(id, record.updated_at);
     if (existingScan) {
       this.saveScanRecord(id, dto.scan_code, userId, ScanResult.DUPLICATE_SCAN, dto.credential, dto.remark);
       return { result: ScanResult.DUPLICATE_SCAN, message: '该记录已完成扫码核验，请勿重复操作' };
@@ -316,7 +332,7 @@ export class HarvestService {
     const tx = this.db.transaction(() => {
       this.saveScanRecord(id, dto.scan_code, userId, ScanResult.SUCCESS, dto.credential, dto.remark);
 
-      this.db
+      const updateResult = this.db
         .prepare(
           `UPDATE harvest_records SET
             status = ?,
@@ -331,6 +347,10 @@ export class HarvestService {
           id,
           record.version
         );
+
+      if (updateResult.changes === 0) {
+        throw new ConflictException('记录已被修改，请刷新后重试');
+      }
 
       this.logAudit(
         id,
@@ -350,6 +370,9 @@ export class HarvestService {
   processRecord(id: string, userId: string, userRole: Role, dto: ProcessDto): HarvestRecord {
     const record = this.findById(id);
     if (!record) throw new BadRequestException('记录不存在');
+    if (dto.version !== undefined && dto.version !== record.version) {
+      throw new ConflictException('记录已被修改，请刷新后重试');
+    }
 
     const validTransitions: Record<string, { roles: Role[]; actions: string[] }> = {
       [HarvestStatus.SUBMITTED]: {
@@ -570,50 +593,204 @@ export class HarvestService {
     return row?.name || '未知用户';
   }
 
-  initDemoData(userId: string) {
+  initDemoData(adminId: string) {
     const count = this.db.prepare('SELECT COUNT(*) as cnt FROM harvest_records').get() as { cnt: number };
     if (count.cnt > 0) return;
 
-    const demoRecords: CreateHarvestDto[] = [
+    const techRow = this.db.prepare("SELECT id FROM users WHERE role = 'TECHNICIAN' LIMIT 1").get() as { id: string } | undefined;
+    const directorRow = this.db.prepare("SELECT id FROM users WHERE role = 'COOP_DIRECTOR' LIMIT 1").get() as { id: string } | undefined;
+    const techId = techRow?.id || adminId;
+    const directorId = directorRow?.id || adminId;
+
+    const adminName = this.getUserName(adminId);
+    const techName = this.getUserName(techId);
+    const directorName = this.getUserName(directorId);
+
+    const scenarios: Array<{
+      dto: CreateHarvestDto;
+      finalStatus: HarvestStatus;
+      version: number;
+    }> = [
       {
-        batch_no: 'B202501001',
-        crop_type: '蔬菜',
-        crop_name: '西红柿',
-        harvest_date: '2025-06-15',
-        harvest_area: 5.5,
-        estimated_weight: 2500,
-        field_location: 'A区3号棚',
-        planter: '李种植户',
-        materials: '[{"type":"photo","name":"采收现场照片","url":"demo/photo1.jpg"}]',
+        dto: {
+          batch_no: 'B202501001',
+          crop_type: '蔬菜',
+          crop_name: '西红柿',
+          harvest_date: '2025-06-15',
+          harvest_area: 5.5,
+          estimated_weight: 2500,
+          field_location: 'A区3号棚',
+          planter: '李种植户',
+          materials: '[{"type":"photo","name":"采收现场照片1","url":"demo/tomato_1.jpg"},{"type":"photo","name":"过磅单","url":"demo/tomato_weight.pdf"}]',
+        },
+        finalStatus: HarvestStatus.DRAFT,
+        version: 1,
       },
       {
-        batch_no: 'B202501002',
-        crop_type: '蔬菜',
-        crop_name: '黄瓜',
-        harvest_date: '2025-06-16',
-        harvest_area: 3.2,
-        estimated_weight: 1800,
-        field_location: 'B区1号棚',
-        planter: '王种植户',
-        materials: '[{"type":"photo","name":"采收现场照片","url":"demo/photo2.jpg"}]',
+        dto: {
+          batch_no: 'B202501002',
+          crop_type: '蔬菜',
+          crop_name: '黄瓜',
+          harvest_date: '2025-06-16',
+          harvest_area: 3.2,
+          estimated_weight: 1800,
+          field_location: 'B区1号棚',
+          planter: '王种植户',
+          materials: '[{"type":"photo","name":"采收现场照片","url":"demo/cucumber_1.jpg"}]',
+        },
+        finalStatus: HarvestStatus.SUBMITTED,
+        version: 2,
       },
       {
-        batch_no: 'B202501003',
-        crop_type: '水果',
-        crop_name: '草莓',
-        harvest_date: '2025-06-17',
-        harvest_area: 2.0,
-        estimated_weight: 500,
-        field_location: 'C区2号棚',
-        planter: '张种植户',
-        materials: '',
+        dto: {
+          batch_no: 'B202501003',
+          crop_type: '水果',
+          crop_name: '草莓',
+          harvest_date: '2025-06-17',
+          harvest_area: 2.0,
+          estimated_weight: 500,
+          field_location: 'C区2号棚',
+          planter: '张种植户',
+          materials: '',
+        },
+        finalStatus: HarvestStatus.DRAFT,
+        version: 1,
+      },
+      {
+        dto: {
+          batch_no: 'B202501004',
+          crop_type: '蔬菜',
+          crop_name: '生菜',
+          harvest_date: '2025-06-14',
+          harvest_area: 4.0,
+          estimated_weight: 1200,
+          field_location: 'A区1号棚',
+          planter: '赵种植户',
+          materials: '[{"type":"photo","name":"不合格现场照片","url":"demo/lettuce_bad.jpg"}]',
+        },
+        finalStatus: HarvestStatus.PENDING_CORRECTION,
+        version: 3,
+      },
+      {
+        dto: {
+          batch_no: 'B202501005',
+          crop_type: '粮食',
+          crop_name: '小麦',
+          harvest_date: '2025-06-12',
+          harvest_area: 12.0,
+          estimated_weight: 6000,
+          field_location: 'D区大田',
+          planter: '孙种植户',
+          materials: '[{"type":"photo","name":"采收照片","url":"demo/wheat_1.jpg"},{"type":"photo","name":"扫码凭证","url":"demo/wheat_scan.jpg"}]',
+        },
+        finalStatus: HarvestStatus.VERIFIED,
+        version: 3,
+      },
+      {
+        dto: {
+          batch_no: 'B202501006',
+          crop_type: '蔬菜',
+          crop_name: '茄子',
+          harvest_date: '2025-06-10',
+          harvest_area: 2.8,
+          estimated_weight: 900,
+          field_location: 'B区3号棚',
+          planter: '周种植户',
+          materials: '[{"type":"photo","name":"采收照片","url":"demo/eggplant_1.jpg"}]',
+        },
+        finalStatus: HarvestStatus.PENDING_REVIEW,
+        version: 4,
+      },
+      {
+        dto: {
+          batch_no: 'B202501007',
+          crop_type: '水果',
+          crop_name: '西瓜',
+          harvest_date: '2025-06-08',
+          harvest_area: 8.0,
+          estimated_weight: 4500,
+          field_location: 'E区5号棚',
+          planter: '吴种植户',
+          materials: '[{"type":"photo","name":"采收照片","url":"demo/watermelon_1.jpg"},{"type":"photo","name":"过磅单","url":"demo/watermelon_weight.pdf"}]',
+        },
+        finalStatus: HarvestStatus.ARCHIVED,
+        version: 5,
       },
     ];
 
-    for (let i = 0; i < demoRecords.length; i++) {
-      const record = this.create(userId, demoRecords[i]);
-      if (i === 1) {
-        this.submitForVerification(record.id, userId, { comment: '申请核验', deadline: '2025-06-20' });
+    for (let i = 0; i < scenarios.length; i++) {
+      const s = scenarios[i];
+      const record = this.create(adminId, s.dto);
+
+      if (s.finalStatus === HarvestStatus.DRAFT) continue;
+
+      this.submitForVerification(record.id, adminId, {
+        comment: s.finalStatus === HarvestStatus.PENDING_CORRECTION ? '提交核验（后续会被驳回）' : '申请核验',
+        deadline: '2025-06-25',
+      });
+
+      if (s.finalStatus === HarvestStatus.SUBMITTED) continue;
+
+      if (s.finalStatus === HarvestStatus.PENDING_CORRECTION) {
+        this.processRecord(record.id, techId, Role.TECHNICIAN, {
+          action: 'REJECT',
+          comment: '生菜叶片有虫眼，不符合采收标准，请补正后重新提交',
+          deadline: '2025-06-22',
+        });
+        continue;
+      }
+
+      if (s.finalStatus === HarvestStatus.PENDING_REVIEW) {
+        this.processRecord(record.id, techId, Role.TECHNICIAN, {
+          action: 'PASS',
+          comment: '现场核验合格，材料齐全，提交复核',
+        });
+        continue;
+      }
+
+      if (s.finalStatus === HarvestStatus.VERIFIED || s.finalStatus === HarvestStatus.ARCHIVED) {
+        const scanId = uuidv4();
+        this.db
+          .prepare(
+            `INSERT INTO scan_records (id, harvest_record_id, scan_code, scanned_by, result, credential, remark)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`
+          )
+          .run(
+            scanId,
+            record.id,
+            record.record_no,
+            techId,
+            'SUCCESS',
+            `现场核验凭证_${s.dto.crop_name}.jpg`,
+            '现场检查合格'
+          );
+
+        const verifiedRecord = this.findById(record.id)!;
+        this.db
+          .prepare(
+            `UPDATE harvest_records SET status = ?, current_queue = ?, updated_at = CURRENT_TIMESTAMP, version = ? WHERE id = ?`
+          )
+          .run(HarvestStatus.VERIFIED, StatusQueueMap[HarvestStatus.VERIFIED], verifiedRecord.version + 1, record.id);
+
+        this.logAudit(
+          record.id,
+          techId,
+          techName,
+          '扫码核验通过',
+          HarvestStatus.SUBMITTED,
+          HarvestStatus.VERIFIED,
+          `扫码时间: 2025-06-${12 + i} 09:3${i}:00, 凭证: 现场核验凭证_${s.dto.crop_name}.jpg`
+        );
+
+        if (s.finalStatus === HarvestStatus.VERIFIED) continue;
+      }
+
+      if (s.finalStatus === HarvestStatus.ARCHIVED) {
+        this.processRecord(record.id, directorId, Role.COOP_DIRECTOR, {
+          action: 'REVIEW_PASS',
+          comment: '复核通过，重量相符，准予归档',
+          actual_weight: s.dto.estimated_weight * 0.98,
+        });
       }
     }
   }

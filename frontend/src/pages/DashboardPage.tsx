@@ -16,25 +16,17 @@ import {
   HarvestStatus,
   StatusLabelMap,
   StatusColorMap,
-  User,
   Role,
 } from '../types';
+import { useAuth } from '../context/AuthContext';
 import dayjs from 'dayjs';
 
 const DashboardPage: React.FC = () => {
+  const { user } = useAuth();
   const [stats, setStats] = useState<Statistics | null>(null);
   const [recentRecords, setRecentRecords] = useState<HarvestRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
-
-  const [currentUser] = useState<User>(() => {
-    const saved = localStorage.getItem('userInfo');
-    return saved ? JSON.parse(saved) : null;
-  });
-
-  useEffect(() => {
-    loadData();
-  }, []);
 
   const loadData = async () => {
     setLoading(true);
@@ -53,9 +45,19 @@ const DashboardPage: React.FC = () => {
     }
   };
 
+  useEffect(() => {
+    if (user) loadData();
+  }, [user]);
+
   const handleStatClick = (statusFilter: string) => {
     navigate(`/harvest?status=${statusFilter}`);
   };
+
+  const roleLabel = user?.role === Role.FIELD_ADMIN
+    ? '田间管理员'
+    : user?.role === Role.TECHNICIAN
+    ? '农技员'
+    : '合作社主任';
 
   const statCards = stats
     ? [
@@ -147,9 +149,7 @@ const DashboardPage: React.FC = () => {
   return (
     <div>
       <div className="header-bar">
-        <h2>
-          工作台 - {currentUser?.name}（{currentUser?.role === Role.FIELD_ADMIN ? '田间管理员' : currentUser?.role === Role.TECHNICIAN ? '农技员' : '合作社主任'}）
-        </h2>
+        <h2>工作台 - {user?.name}（{roleLabel}）</h2>
         <Button type="primary" onClick={loadData} loading={loading}>
           刷新数据
         </Button>

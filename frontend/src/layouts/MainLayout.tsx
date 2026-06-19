@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Layout, Menu, Button, Dropdown, Avatar, Space, Tag, message, Select } from 'antd';
+import { Layout, Menu, Dropdown, Avatar, Space, Tag, Select, Button } from 'antd';
 import {
   DashboardOutlined,
   UnorderedListOutlined,
@@ -7,9 +7,11 @@ import {
   LogoutOutlined,
   UserOutlined,
   SwitcherOutlined,
+  ReloadOutlined,
 } from '@ant-design/icons';
 import { Routes, Route, useNavigate, useLocation } from 'react-router-dom';
-import { User, RoleLabelMap, Role } from '../types';
+import { RoleLabelMap, Role, User } from '../types';
+import { useAuth } from '../context/AuthContext';
 import { userApi } from '../api';
 import DashboardPage from '../pages/DashboardPage';
 import HarvestListPage from '../pages/HarvestListPage';
@@ -20,18 +22,15 @@ import ScanPage from '../pages/ScanPage';
 const { Header, Sider, Content } = Layout;
 
 const MainLayout: React.FC = () => {
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const { user, logout, switchUser, refreshUser } = useAuth();
   const [allUsers, setAllUsers] = useState<User[]>([]);
   const [collapsed, setCollapsed] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
 
   useEffect(() => {
-    const userInfo = localStorage.getItem('userInfo');
-    if (userInfo) {
-      setCurrentUser(JSON.parse(userInfo));
-    }
     loadUsers();
+    refreshUser();
   }, []);
 
   const loadUsers = async () => {
@@ -43,21 +42,10 @@ const MainLayout: React.FC = () => {
     }
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem('userId');
-    localStorage.removeItem('userInfo');
-    message.success('已退出登录');
-    navigate('/login');
-  };
-
   const handleSwitchUser = (userId: string) => {
-    const user = allUsers.find((u) => u.id === userId);
-    if (user) {
-      localStorage.setItem('userId', user.id);
-      localStorage.setItem('userInfo', JSON.stringify(user));
-      setCurrentUser(user);
-      message.success(`已切换到 ${user.name}（${RoleLabelMap[user.role]}）`);
-      window.location.reload();
+    const targetUser = allUsers.find((u) => u.id === userId);
+    if (targetUser) {
+      switchUser(targetUser);
     }
   };
 
@@ -72,16 +60,24 @@ const MainLayout: React.FC = () => {
       icon: <UnorderedListOutlined />,
       label: '采收记录',
     },
-    {
-      key: '/harvest/create',
-      icon: <PlusOutlined />,
-      label: '新增采收记录',
-    },
-    {
-      key: '/scan',
-      icon: <SwitcherOutlined />,
-      label: '扫码核验',
-    },
+    ...(user?.role === Role.FIELD_ADMIN
+      ? [
+          {
+            key: '/harvest/create',
+            icon: <PlusOutlined />,
+            label: '新增采收记录',
+          },
+        ]
+      : []),
+    ...(user?.role === Role.TECHNICIAN
+      ? [
+          {
+            key: '/scan',
+            icon: <SwitcherOutlined />,
+            label: '扫码核验',
+          },
+        ]
+      : []),
   ];
 
   const userMenuItems = [
@@ -89,22 +85,38 @@ const MainLayout: React.FC = () => {
       key: 'logout',
       icon: <LogoutOutlined />,
       label: '退出登录',
-      onClick: handleLogout,
+      onClick: logout,
     },
   ];
 
-  if (!currentUser) return null;
+  const selectedKey = location.pathname.startsWith('/harvest/create')
+    ? '/harvest/create'
+    : location.pathname.startsWith('/harvest/')
+    ? '/harvest'
+    : location.pathname;
+
+  if (!user) return null;
 
   return (
     <Layout className="app-container">
       <Sider collapsible collapsed={collapsed} onCollapse={setCollapsed} theme="dark">
-        <div style={{ height: 64, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: 'bold', fontSize: collapsed ? 12 : 16 }}>
+        <div
+          style={{
+            height: 64,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: 'white',
+            fontWeight: 'bold',
+            fontSize: collapsed ? 12 : 16,
+          }}
+        >
           采收管理
         </div>
         <Menu
           theme="dark"
           mode="inline"
-          selectedKeys={[location.pathname]}
+          selectedKeys={[selectedKey]}
           items={menuItems}
           onClick={({ key }) => navigate(key)}
         />
@@ -123,7 +135,7 @@ const MainLayout: React.FC = () => {
           <div style={{ display: 'flex', alignItems: 'center' }}>
             <h3 style={{ margin: 0 }}>采收记录管理系统</h3>
             <Tag color="blue" style={{ marginLeft: 16 }}>
-              {RoleLabelMap[currentUser.role]}
+              {RoleLabelMap[user.role]}
             </Tag>
           </div>
           <Space>
@@ -131,7 +143,7 @@ const MainLayout: React.FC = () => {
               <span style={{ marginRight: 8, color: '#666' }}>切换角色：</span>
               <Select
                 style={{ width: 200 }}
-                value={currentUser.id}
+                value={user.id}
                 onChange={handleSwitchUser}
                 options={allUsers.map((u) => ({
                   value: u.id,
@@ -142,7 +154,7 @@ const MainLayout: React.FC = () => {
             <Dropdown menu={{ items: userMenuItems }}>
               <Space style={{ cursor: 'pointer' }}>
                 <Avatar icon={<UserOutlined />} />
-                <span>{currentUser.name}</span>
+                <span>{user.name}</span>
               </Space>
             </Dropdown>
           </Space>
@@ -152,6 +164,7 @@ const MainLayout: React.FC = () => {
             <Route path="/" element={<DashboardPage />} />
             <Route path="/harvest" element={<HarvestListPage />} />
             <Route path="/harvest/create" element={<HarvestCreatePage />} />
+            <Route path="/harvest/edit/:id" element={<HarvestCreatePage />} />
             <Route path="/harvest/:id" element={<HarvestDetailPage />} />
             <Route path="/scan" element={<ScanPage />} />
           </Routes>

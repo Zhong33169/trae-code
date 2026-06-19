@@ -15,7 +15,8 @@ import {
 import { ArrowLeftOutlined, SaveOutlined, CheckOutlined } from '@ant-design/icons';
 import { useNavigate, useParams } from 'react-router-dom';
 import { harvestApi, CreateHarvestDto, SubmitVerifyDto } from '../api';
-import { HarvestRecord, HarvestStatus, Role, User } from '../types';
+import { HarvestRecord, HarvestStatus, Role } from '../types';
+import { useAuth } from '../context/AuthContext';
 import dayjs from 'dayjs';
 
 const { TextArea } = Input;
@@ -23,36 +24,60 @@ const { Option } = Select;
 
 const HarvestCreatePage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
+  const { user } = useAuth();
   const navigate = useNavigate();
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [isEdit, setIsEdit] = useState(false);
   const [record, setRecord] = useState<HarvestRecord | null>(null);
 
-  const [currentUser] = useState<User>(() => {
-    const saved = localStorage.getItem('userInfo');
-    return saved ? JSON.parse(saved) : null;
-  });
-
   useEffect(() => {
     if (id) {
       setIsEdit(true);
       loadRecord();
     }
-  }, [id]);
+  }, [id, user]);
 
   const loadRecord = async () => {
     if (!id) return;
     try {
       const data = (await harvestApi.findById(id)) as HarvestRecord;
       setRecord(data);
+      let materialsStr = '';
+      if (data.materials) {
+        try {
+          const parsed = JSON.parse(data.materials);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            materialsStr = parsed.map((m: any) => m.url || m.name).join('\n');
+          }
+        } catch {
+          materialsStr = data.materials;
+        }
+      }
       form.setFieldsValue({
         ...data,
         harvest_date: data.harvest_date ? dayjs(data.harvest_date) : null,
+        materials: materialsStr,
       });
     } catch (e: any) {
       message.error('加载记录失败');
     }
+  };
+
+  const parseMaterials = (raw?: string) => {
+    if (!raw || !raw.trim()) return '';
+    const lines = raw
+      .split('\n')
+      .map((l) => l.trim())
+      .filter(Boolean);
+    if (lines.length === 0) return '';
+    return JSON.stringify(
+      lines.map((url, i) => ({
+        type: 'photo',
+        name: `采收凭证${i + 1}`,
+        url,
+      }))
+    );
   };
 
   const handleSave = async (submitAfter: boolean) => {
@@ -69,23 +94,22 @@ const HarvestCreatePage: React.FC = () => {
         estimated_weight: values.estimated_weight,
         field_location: values.field_location,
         planter: values.planter,
-        materials: values.materials
-          ? JSON.stringify([{ type: 'photo', name: '采收凭证', url: values.materials }])
-          : '',
+        materials: parseMaterials(values.materials),
       };
 
       let savedRecord: HarvestRecord;
       if (isEdit && id) {
-        savedRecord = (await harvestApi.update(id, currentUser!.id, dto)) as HarvestRecord;
+        if (record) dto.version = record.version;
+        savedRecord = (await harvestApi.update(id, dto)) as HarvestRecord;
         message.success('保存成功');
       } else {
-        savedRecord = (await harvestApi.create(currentUser!.id, dto)) as HarvestRecord;
+        savedRecord = (await harvestApi.create(dto)) as HarvestRecord;
         message.success('创建成功');
       }
 
       if (submitAfter) {
-        const submitDto: SubmitVerifyDto = { comment: '提交核验' };
-        await harvestApi.submit(savedRecord.id, currentUser!.id, submitDto);
+        const submitDto: SubmitVerifyDto = { comment: '提交核验', version: savedRecord.version };
+        await harvestApi.submit(savedRecord.id, submitDto);
         message.success('提交核验成功');
       }
 
@@ -97,7 +121,7 @@ const HarvestCreatePage: React.FC = () => {
     }
   };
 
-  if (currentUser?.role !== Role.FIELD_ADMIN) {
+  if (user?.role !== Role.FIELD_ADMIN) {
     return (
       <Card>
         <div style={{ textAlign: 'center', padding: '40px 0', color: '#999' }}>
@@ -115,6 +139,11 @@ const HarvestCreatePage: React.FC = () => {
             返回列表
           </Button>
           <h2>{isEdit ? '编辑采收记录' : '新增采收记录'}</h2>
+          {record && (
+            <Space>
+              <span style={{ color: '#999' }}>版本号：{record.version}</span>
+            </Space>
+          )}
         </Space>
       </div>
 
@@ -211,11 +240,23 @@ const HarvestCreatePage: React.FC = () => {
 
           <Form.Item
             name="materials"
-            label="采收凭证材料"
-            help="提交核验前必须上传，可填写照片链接或描述"
+            label="采收凭证材料（每行一个链接）"
+            help="提交核验前必须上传，可填写照片链接或描述，每行一个"
           >
-            <TextArea rows={3} placeholder="请输入凭证链接或描述，提交核验时必填" />
+            <TextArea
+              rows={4}
+              placeholder={'demo/photo1.jpg\ndemo/photo2.jpg'}
+            />
           </Form.Item>
+
+          {isEdit && record && (
+            <Form.Item>
+              <Space>
+                <span style={{ color: '#999' }}>当前状态：</span>
+                <span>{record.status === HarvestStatus.DRAFT ? '草稿' : record.status === HarvestStatus.PENDING_CORRECTION ? '待补正' : record.status}</span>
+              </Space>
+            </Form.Item>
+          )}
 
           <Form.Item style={{ marginTop: 24, textAlign: 'right' }}>
             <Space>

@@ -28,16 +28,17 @@ import {
   StatusLabelMap,
   StatusColorMap,
   Role,
-  User,
   ScanResult,
   ScanResultLabelMap,
   ScanResultColorMap,
 } from '../types';
+import { useAuth } from '../context/AuthContext';
 import dayjs from 'dayjs';
 
 const { TextArea } = Input;
 
 const ScanPage: React.FC = () => {
+  const { user } = useAuth();
   const [form] = Form.useForm();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -48,23 +49,19 @@ const ScanPage: React.FC = () => {
     message: string;
   } | null>(null);
 
-  const [currentUser] = useState<User>(() => {
-    const saved = localStorage.getItem('userInfo');
-    return saved ? JSON.parse(saved) : null;
-  });
-
   useEffect(() => {
     const recordId = searchParams.get('recordId');
-    if (recordId) {
+    if (recordId && user) {
       loadRecord(recordId);
     }
-  }, [searchParams]);
+  }, [searchParams, user]);
 
   const loadRecord = async (recordId: string) => {
     try {
       const data = (await harvestApi.findById(recordId)) as HarvestRecord;
       setRecord(data);
       form.setFieldsValue({ scan_code: data.record_no });
+      setScanResult(null);
     } catch (e: any) {
       message.error('加载记录失败');
     }
@@ -99,6 +96,7 @@ const ScanPage: React.FC = () => {
         scan_code: values.scan_code,
         credential: values.credential,
         remark: values.remark,
+        version: record.version,
       };
 
       const result = (await harvestApi.scan(record.id, dto)) as {
@@ -123,9 +121,10 @@ const ScanPage: React.FC = () => {
     setRecord(null);
     setScanResult(null);
     form.resetFields();
+    navigate('/scan');
   };
 
-  if (currentUser?.role !== Role.TECHNICIAN) {
+  if (user?.role !== Role.TECHNICIAN) {
     return (
       <Card>
         <Result
@@ -169,11 +168,9 @@ const ScanPage: React.FC = () => {
                   placeholder="扫描二维码或输入记录编号，如 HS202506190001"
                   size="large"
                   suffix={
-                    <Button
-                      type="text"
-                      icon={<SearchOutlined />}
-                      onClick={handleQueryRecord}
-                    />
+                    <Button type="text" icon={<SearchOutlined />} onClick={handleQueryRecord}>
+                      查询
+                    </Button>
                   }
                 />
               </Form.Item>
@@ -185,9 +182,7 @@ const ScanPage: React.FC = () => {
                   title="采收记录信息"
                 >
                   <Descriptions column={1} size="small">
-                    <Descriptions.Item label="记录编号">
-                      {record.record_no}
-                    </Descriptions.Item>
+                    <Descriptions.Item label="记录编号">{record.record_no}</Descriptions.Item>
                     <Descriptions.Item label="作物">{record.crop_name}</Descriptions.Item>
                     <Descriptions.Item label="批次号">{record.batch_no}</Descriptions.Item>
                     <Descriptions.Item label="采收日期">{record.harvest_date}</Descriptions.Item>
@@ -197,6 +192,7 @@ const ScanPage: React.FC = () => {
                         {StatusLabelMap[record.status]}
                       </Tag>
                     </Descriptions.Item>
+                    <Descriptions.Item label="版本号">{record.version}</Descriptions.Item>
                   </Descriptions>
                 </Card>
               )}
@@ -236,8 +232,7 @@ const ScanPage: React.FC = () => {
             <Card
               style={{
                 marginBottom: 16,
-                borderColor:
-                  scanResult.result === ScanResult.SUCCESS ? '#52c41a' : '#ff4d4f',
+                borderColor: scanResult.result === ScanResult.SUCCESS ? '#52c41a' : '#ff4d4f',
               }}
             >
               {scanResult.result === ScanResult.SUCCESS ? (
@@ -274,8 +269,7 @@ const ScanPage: React.FC = () => {
                       title="核验结果"
                       value={ScanResultLabelMap[scanResult.result]}
                       valueStyle={{
-                        color:
-                          scanResult.result === ScanResult.SUCCESS ? '#52c41a' : '#ff4d4f',
+                        color: scanResult.result === ScanResult.SUCCESS ? '#52c41a' : '#ff4d4f',
                         fontSize: 14,
                       }}
                     />

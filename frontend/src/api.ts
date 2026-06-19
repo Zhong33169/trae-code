@@ -1,4 +1,5 @@
-import axios from 'axios';
+import axios, { AxiosInstance } from 'axios';
+import { HarvestRecord, User, ScanRecord, AuditLog, Comment, Statistics } from './types';
 
 const API_BASE = '/api';
 
@@ -42,11 +43,13 @@ export interface CreateHarvestDto {
   field_location: string;
   planter: string;
   materials?: string;
+  version?: number;
 }
 
 export interface SubmitVerifyDto {
   comment?: string;
   deadline?: string;
+  version?: number;
 }
 
 export interface ProcessDto {
@@ -54,12 +57,14 @@ export interface ProcessDto {
   comment: string;
   actual_weight?: number;
   deadline?: string;
+  version?: number;
 }
 
 export interface ScanVerifyDto {
   scan_code: string;
   credential: string;
   remark?: string;
+  version?: number;
 }
 
 export interface BatchProcessDto {
@@ -69,32 +74,31 @@ export interface BatchProcessDto {
 }
 
 export const authApi = {
-  login: (data: LoginDto) => api.post('/auth/login', data),
-  me: () => api.get('/auth/me'),
+  login: (data: LoginDto): Promise<User> => api.post('/auth/login', data),
+  me: (): Promise<User> => api.get('/auth/me'),
 };
 
 export const userApi = {
-  findAll: () => api.get('/users'),
+  findAll: (): Promise<User[]> => api.get('/users'),
 };
 
 export const harvestApi = {
-  findAll: (params?: { status?: string; keyword?: string }) =>
+  findAll: (params?: { status?: string; keyword?: string }): Promise<HarvestRecord[]> =>
     api.get('/harvest', { params }),
-  statistics: () => api.get('/harvest/statistics'),
-  findById: (id: string) => api.get(`/harvest/${id}`),
-  getScans: (id: string) => api.get(`/harvest/${id}/scans`),
-  getAudits: (id: string) => api.get(`/harvest/${id}/audits`),
-  getComments: (id: string) => api.get(`/harvest/${id}/comments`),
-  create: (data: CreateHarvestDto) => api.post('/harvest', data),
-  update: (id: string, data: Partial<CreateHarvestDto>) =>
+  statistics: (): Promise<Statistics> => api.get('/harvest/statistics'),
+  findById: (id: string): Promise<HarvestRecord> => api.get(`/harvest/${id}`),
+  getScans: (id: string): Promise<ScanRecord[]> => api.get(`/harvest/${id}/scans`),
+  getAudits: (id: string): Promise<AuditLog[]> => api.get(`/harvest/${id}/audits`),
+  getComments: (id: string): Promise<Comment[]> => api.get(`/harvest/${id}/comments`),
+  create: (data: CreateHarvestDto): Promise<HarvestRecord> => api.post('/harvest', data),
+  update: (id: string, data: Partial<CreateHarvestDto> & { version?: number }): Promise<HarvestRecord> =>
     api.put(`/harvest/${id}`, data),
-  submit: (id: string, data: SubmitVerifyDto) =>
+  submit: (id: string, data: SubmitVerifyDto): Promise<HarvestRecord> =>
     api.post(`/harvest/${id}/submit`, data),
-  scan: (id: string, data: ScanVerifyDto) =>
+  scan: (id: string, data: ScanVerifyDto): Promise<{ result: string; message: string; passed: boolean }> =>
     api.post(`/harvest/${id}/scan`, data),
-  process: (id: string, data: ProcessDto) =>
+  process: (id: string, data: ProcessDto): Promise<HarvestRecord> =>
     api.post(`/harvest/${id}/process`, data),
-  batch: (data: BatchProcessDto) => api.post('/harvest/batch', data),
+  batch: (data: BatchProcessDto): Promise<{ success: number; failed: number; details: any[] }> =>
+    api.post('/harvest/batch', data),
 };
-
-export default api;
