@@ -605,9 +605,7 @@ const canEdit = computed(() => {
 });
 
 const canManageAttachments = computed(() => {
-  if (!ticket.value || !currentUser.value) return false;
-  if (ticket.value.status === 'archived') return false;
-  return true;
+  return canEdit.value;
 });
 
 const isCurrentStage = (stage: string) => {

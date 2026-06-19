@@ -163,6 +163,16 @@ fastify.get('/api/tickets/:id', async (request, reply) => {
   };
 });
 
+function checkEditPermission(user, ticket) {
+  const editableStatusesByRole = {
+    registrar: ['draft', 'returned', 'material_missing'],
+    auditor: ['pending_audit', 'in_review', 'review_passed', 'review_rejected', 'pending_release', 'released', 'overdue'],
+    reviewer: ['pending_review'],
+  };
+  const allowed = editableStatusesByRole[user.role] || [];
+  return allowed.includes(ticket.status);
+}
+
 fastify.post('/api/tickets/:id/attachments', async (request, reply) => {
   const user = getUserFromHeader(request);
   if (!user) {
@@ -172,6 +182,10 @@ fastify.post('/api/tickets/:id/attachments', async (request, reply) => {
   const ticket = db.prepare('SELECT * FROM requirement_tickets WHERE id = ?').get(request.params.id);
   if (!ticket) {
     return reply.status(404).send({ error: '需求单不存在' });
+  }
+
+  if (!checkEditPermission(user, ticket)) {
+    return reply.status(403).send({ error: `当前角色(${ROLE_MAP[user.role]?.label || user.role})不可在当前状态下操作此需求单的附件` });
   }
 
   const { file_name, file_size } = request.body;
@@ -202,6 +216,10 @@ fastify.delete('/api/tickets/:id/attachments/:attachmentId', async (request, rep
   const ticket = db.prepare('SELECT * FROM requirement_tickets WHERE id = ?').get(request.params.id);
   if (!ticket) {
     return reply.status(404).send({ error: '需求单不存在' });
+  }
+
+  if (!checkEditPermission(user, ticket)) {
+    return reply.status(403).send({ error: `当前角色(${ROLE_MAP[user.role]?.label || user.role})不可在当前状态下操作此需求单的附件` });
   }
 
   const attachment = db.prepare('SELECT * FROM ticket_attachments WHERE id = ? AND ticket_id = ?').get(request.params.attachmentId, ticket.id);
@@ -271,16 +289,7 @@ fastify.put('/api/tickets/:id', async (request, reply) => {
     return reply.status(404).send({ error: '需求单不存在' });
   }
   
-  const editableStatusesByRole = {
-    registrar: ['draft', 'returned', 'material_missing'],
-    auditor: ['pending_audit', 'in_review', 'review_passed', 'review_rejected', 'pending_release', 'released', 'overdue'],
-    reviewer: ['pending_review'],
-  };
-  const allowed = editableStatusesByRole[user.role] || [];
-  if (!allowed.includes(ticket.status) && ticket.status !== 'archived') {
-    if (user.role === 'reviewer' && ticket.status === 'archived') {
-      // reviewer can view but not edit archived
-    }
+  if (!checkEditPermission(user, ticket)) {
     return reply.status(403).send({ error: `当前角色(${ROLE_MAP[user.role]?.label})不可编辑此状态的需求单` });
   }
   
@@ -627,7 +636,10 @@ fastify.post('/api/tickets/:id/archive', async (request, reply) => {
   db.prepare(`UPDATE requirement_tickets SET status = ?, audit_remark = ?, updated_at = ?, reviewer_id = ?, review_time = ? WHERE id = ?`)
     .run('archived', audit_remark || '', now, user.id, now, ticket.id);
   
-  addAuditLog(ticket.id, '复核归档', 'archive', user, 'SaaS客户成功团队复核通过，归档');
+  const auditDetail = audit_remark
+    ? `SaaS客户成功团队复核通过，归档。审计备注：${audit_remark}`
+    : 'SaaS客户成功团队复核通过，归档';
+  addAuditLog(ticket.id, '复核归档', 'archive', user, auditDetail);
   
   const updatedTicket = db.prepare('SELECT * FROM requirement_tickets WHERE id = ?').get(ticket.id);
   
@@ -735,6 +747,15 @@ fastify.post('/api/import-batches', async (request, reply) => {
   `);
   
   const transaction = db.transaction((ticketsData) => {
+    db.prepare(`
+      INSERT INTO import_batches (
+        id, batch_no, source, total_count, success_count, failure_count,
+        conflict_count, imported_by, imported_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      batchId, batchNo, source, tickets.length, 0, 0, 0, user.id, now
+    );
+
     for (const ticketData of ticketsData) {
       const sourceTicketNo = ticketData.ticket_no || ticketData.source_ticket_no;
       
@@ -750,19 +771,25 @@ fastify.post('/api/import-batches', async (request, reply) => {
       const existingTicket = db.prepare('SELECT * FROM requirement_tickets WHERE ticket_no = ?').get(sourceTicketNo);
       
       if (existingTicket) {
-        if (existingTicket.status !== 'draft' && existingTicket.source === 'online') {
-          conflictCount++;
-          const diffDetail = `线上状态：${STATUS_MAP[existingTicket.status]?.label || existingTicket.status}，线下状态：草稿`;
-          insertRecord.run(
-            uuidv4(), batchId, existingTicket.id, sourceTicketNo,
-            'conflict', '状态冲突，未覆盖', diffDetail
-          );
-          addAuditLog(
-            existingTicket.id, '离线导入冲突', 'import_conflict', user,
-            `导入批次 ${batchNo} 与线上状态冲突，未覆盖`, 1, diffDetail
-          );
-          continue;
+        let conflictReason = '';
+        let diffDetail = '';
+        if (existingTicket.source === source) {
+          conflictReason = '同来源重复导入';
+          diffDetail = `已有同来源(${existingTicket.source})单据，状态：${STATUS_MAP[existingTicket.status]?.label || existingTicket.status}`;
+        } else {
+          conflictReason = '线上状态冲突，未覆盖';
+          diffDetail = `线上状态：${STATUS_MAP[existingTicket.status]?.label || existingTicket.status}，来源：${existingTicket.source}；线下状态：草稿，来源：${source}`;
         }
+        conflictCount++;
+        insertRecord.run(
+          uuidv4(), batchId, existingTicket.id, sourceTicketNo,
+          'conflict', conflictReason, diffDetail
+        );
+        addAuditLog(
+          existingTicket.id, '离线导入冲突', 'import_conflict', user,
+          `导入批次 ${batchNo} ${conflictReason}`, 1, diffDetail
+        );
+        continue;
       }
       
       try {
@@ -797,19 +824,13 @@ fastify.post('/api/import-batches', async (request, reply) => {
         );
       }
     }
+
+    db.prepare(`
+      UPDATE import_batches SET success_count = ?, failure_count = ?, conflict_count = ? WHERE id = ?
+    `).run(successCount, failureCount, conflictCount, batchId);
   });
   
   transaction(tickets);
-  
-  db.prepare(`
-    INSERT INTO import_batches (
-      id, batch_no, source, total_count, success_count, failure_count,
-      conflict_count, imported_by, imported_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    batchId, batchNo, source, tickets.length, successCount,
-    failureCount, conflictCount, user.id, now
-  );
   
   const batch = db.prepare('SELECT * FROM import_batches WHERE id = ?').get(batchId);
   const records = db.prepare('SELECT * FROM import_records WHERE batch_id = ?').all(batchId);
