@@ -713,6 +713,21 @@ app.post("/api/forms/batch-action", async (c) => {
           failureCode: "missing_version",
         };
       }
+      recordActionAudit(db, {
+        formId,
+        action,
+        userId,
+        userRole,
+        comment,
+        fromStatus: "unknown",
+        toStatus: "unknown",
+        version: 0,
+        expectedVersion: expectedVersions[formId],
+        currentVersion: null,
+        success: false,
+        failureReason: "批量操作因其他表单参数错误已取消",
+        failureCode: "batch_cancelled",
+      });
       return {
         formId,
         success: false,
@@ -776,6 +791,21 @@ app.post("/api/forms/batch-action", async (c) => {
           failureCode: "invalid_version",
         };
       }
+      recordActionAudit(db, {
+        formId,
+        action,
+        userId,
+        userRole,
+        comment,
+        fromStatus: "unknown",
+        toStatus: "unknown",
+        version: 0,
+        expectedVersion: expectedVersions[formId],
+        currentVersion: null,
+        success: false,
+        failureReason: "批量操作因其他表单参数错误已取消",
+        failureCode: "batch_cancelled",
+      });
       return {
         formId,
         success: false,

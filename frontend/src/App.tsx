@@ -217,6 +217,13 @@ export default function App() {
     setHoveredForm(form);
   };
 
+  const formatVersion = (v: any): string => {
+    if (v === undefined || v === null || v === "") return "缺失";
+    const num = Number(v);
+    if (Number.isNaN(num) || !Number.isInteger(num)) return String(v);
+    return `v${num}`;
+  };
+
   const handleAction = async (action: string) => {
     if (!selectedForm) return;
     try {
@@ -234,16 +241,13 @@ export default function App() {
     } catch (e: any) {
       let msg = e.message;
       const detail = e.detail || {};
-      const hasVersionInfo =
-        detail.expectedVersion !== undefined && detail.currentVersion !== undefined;
+      const hasVersionInfo = detail.expectedVersion !== undefined;
       const versionSuffix = hasVersionInfo
-        ? ` (请求版本: v${detail.expectedVersion}，当前版本: ${
-            detail.currentVersion !== null ? `v${detail.currentVersion}` : "未知"
-          })`
+        ? ` (请求版本: ${formatVersion(detail.expectedVersion)}，当前版本: ${formatVersion(detail.currentVersion)})`
         : "";
 
       if (e.code === "version_conflict") {
-        msg = `版本冲突：你当前看到的是 v${detail.expectedVersion}，服务器已更新到 v${detail.currentVersion}，请刷新后重试`;
+        msg = `版本冲突：你当前看到的是 ${formatVersion(detail.expectedVersion)}，服务器已更新到 ${formatVersion(detail.currentVersion)}，请刷新后重试`;
       } else if (e.code === "missing_evidence") {
         msg = `证据不足，缺少：${
           detail.missingEvidence?.join("、")
@@ -262,6 +266,9 @@ export default function App() {
         msg = `${e.message}${versionSuffix}`;
       }
       setError(msg);
+      await handleSelectForm(selectedForm.id);
+      await loadForms();
+      await loadStats();
     }
   };
 
@@ -346,18 +353,13 @@ export default function App() {
       if (failed.length > 0) {
         const errorLines = failed.map((f: any) => {
           let detail = "";
-          const hasVersionInfo =
-            f.expectedVersion !== undefined && f.currentVersion !== undefined;
-          const versionInfo = hasVersionInfo
-            ? ` (请求: v${f.expectedVersion}，当前: ${
-                f.currentVersion !== null ? `v${f.currentVersion}` : "未知"
-              })`
-            : f.expectedVersion !== undefined
-            ? ` (请求: v${f.expectedVersion})`
-            : "";
+          const versionInfo =
+            f.expectedVersion !== undefined
+              ? ` (请求: ${formatVersion(f.expectedVersion)}，当前: ${formatVersion(f.currentVersion)})`
+              : "";
 
           if (f.code === "version_conflict") {
-            detail = `(版本冲突: v${f.expectedVersion} → v${f.currentVersion})`;
+            detail = `(版本冲突: ${formatVersion(f.expectedVersion)} → ${formatVersion(f.currentVersion)})`;
           } else if (f.code === "missing_evidence") {
             detail = `(缺证据: ${f.missingEvidence?.join("、")})`;
           } else if (f.code === "wrong_status") {
@@ -379,25 +381,25 @@ export default function App() {
           `批量操作完成：成功${result.successCount}条，失败${result.failCount}条\n${errorLines.join("\n")}\n\n失败项已保留选中，请修正后重试`
         );
 
-        const failedIds = new Set(failed.map((f: any) => f.formId));
+        const failedIds = new Set<string>(failed.map((f: any) => f.formId));
         setSelectedIds(failedIds);
       } else {
         setSuccess(result.message || `批量操作成功：${result.results.length}条`);
         setSelectedIds(new Set());
       }
       setActionComment("");
+      if (selectedForm) {
+        await handleSelectForm(selectedForm.id);
+      }
       await loadForms();
       await loadStats();
       setTimeout(() => setSuccess(""), 3000);
     } catch (e: any) {
       let msg = e.message;
       const detail = e.detail || {};
-      const hasVersionInfo =
-        detail.expectedVersion !== undefined && detail.currentVersion !== undefined;
+      const hasVersionInfo = detail.expectedVersion !== undefined;
       const versionSuffix = hasVersionInfo
-        ? ` (请求版本: v${detail.expectedVersion}，当前版本: ${
-            detail.currentVersion !== null ? `v${detail.currentVersion}` : "未知"
-          })`
+        ? ` (请求版本: ${formatVersion(detail.expectedVersion)}，当前版本: ${formatVersion(detail.currentVersion)})`
         : "";
 
       if (e.code === "missing_version") {
@@ -410,6 +412,11 @@ export default function App() {
         msg = `${e.message}${versionSuffix}`;
       }
       setError(msg);
+      if (selectedForm) {
+        await handleSelectForm(selectedForm.id);
+      }
+      await loadForms();
+      await loadStats();
     }
   };
 
@@ -847,12 +854,11 @@ export default function App() {
                         )}
                         <div style={styles.timelineTime}>
                           {act.acted_at} (v{act.version})
-                          {act.expected_version !== undefined &&
-                            act.current_version !== undefined && (
-                              <span style={{ marginLeft: 12, color: "#888" }}>
-                                请求版本: v{act.expected_version}，当前版本: v{act.current_version}
-                              </span>
-                            )}
+                          {act.expected_version !== undefined && (
+                            <span style={{ marginLeft: 12, color: "#888" }}>
+                              请求版本: {formatVersion(act.expected_version)}，当前版本: {formatVersion(act.current_version)}
+                            </span>
+                          )}
                         </div>
                       </div>
                     </div>
