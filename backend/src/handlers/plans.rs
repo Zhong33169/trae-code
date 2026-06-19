@@ -224,8 +224,9 @@ pub async fn update_plan(
     }
 
     let new_version = plan.version + 1;
+    let old_status = plan.status.clone();
 
-    sqlx::query(
+    let result = sqlx::query(
         r#"
         UPDATE media_plans
         SET title = COALESCE(?, title),
@@ -233,7 +234,7 @@ pub async fn update_plan(
             remark = COALESCE(?, remark),
             version = ?,
             updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
+        WHERE id = ? AND version = ?
         "#
     )
     .bind(req.title.as_deref())
@@ -241,8 +242,17 @@ pub async fn update_plan(
     .bind(req.remark.as_deref())
     .bind(new_version)
     .bind(&id)
+    .bind(plan.version)
     .execute(&state.pool)
     .await?;
+
+    if result.rows_affected() == 0 {
+        let latest = get_plan_by_id(&state.pool, &id).await?;
+        return Err(AppError::VersionConflict(format!(
+            "版本冲突：当前版本为 v{}，请刷新后重试",
+            latest.version
+        )));
+    }
 
     let plan = get_plan_by_id(&state.pool, &id).await?;
 
@@ -251,7 +261,7 @@ pub async fn update_plan(
         &id,
         &claims.user_id,
         "update",
-        Some(&plan.status),
+        Some(&old_status),
         Some(&plan.status),
         Some("更新媒介计划单"),
     ).await?;
@@ -263,11 +273,13 @@ pub async fn submit_plan(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<String>,
+    Json(req): Json<SubmitRequest>,
 ) -> AppResult<Json<MediaPlan>> {
     let claims = get_claims(&headers, &state).await?;
     require_role(&claims, &[roles::REGISTRAR])?;
 
     let plan = get_plan_by_id(&state.pool, &id).await?;
+    check_version(&plan, req.version)?;
 
     if plan.created_by != claims.user_id {
         return Err(AppError::Forbidden("只能提交自己创建的计划单".to_string()));
@@ -290,7 +302,7 @@ pub async fn submit_plan(
     let new_version = plan.version + 1;
     let old_status = plan.status.clone();
 
-    sqlx::query(
+    let result = sqlx::query(
         r#"
         UPDATE media_plans
         SET status = 'pending_audit',
@@ -298,13 +310,22 @@ pub async fn submit_plan(
             submitted_at = CURRENT_TIMESTAMP,
             updated_at = CURRENT_TIMESTAMP,
             reject_reason = NULL
-        WHERE id = ?
+        WHERE id = ? AND version = ?
         "#
     )
     .bind(new_version)
     .bind(&id)
+    .bind(plan.version)
     .execute(&state.pool)
     .await?;
+
+    if result.rows_affected() == 0 {
+        let latest = get_plan_by_id(&state.pool, &id).await?;
+        return Err(AppError::VersionConflict(format!(
+            "版本冲突：当前版本为 v{}，请刷新后重试",
+            latest.version
+        )));
+    }
 
     let plan = get_plan_by_id(&state.pool, &id).await?;
 
@@ -343,20 +364,29 @@ pub async fn approve_plan(
     let new_version = plan.version + 1;
     let old_status = plan.status.clone();
 
-    sqlx::query(
+    let result = sqlx::query(
         r#"
         UPDATE media_plans
         SET status = 'audit_approved',
             version = ?,
             approved_at = CURRENT_TIMESTAMP,
             updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
+        WHERE id = ? AND version = ?
         "#
     )
     .bind(new_version)
     .bind(&id)
+    .bind(plan.version)
     .execute(&state.pool)
     .await?;
+
+    if result.rows_affected() == 0 {
+        let latest = get_plan_by_id(&state.pool, &id).await?;
+        return Err(AppError::VersionConflict(format!(
+            "版本冲突：当前版本为 v{}，请刷新后重试",
+            latest.version
+        )));
+    }
 
     let plan = get_plan_by_id(&state.pool, &id).await?;
 
@@ -422,21 +452,30 @@ pub async fn reject_plan(
     let new_version = plan.version + 1;
     let old_status = plan.status.clone();
 
-    sqlx::query(
+    let result = sqlx::query(
         r#"
         UPDATE media_plans
         SET status = 'audit_rejected',
             version = ?,
             updated_at = CURRENT_TIMESTAMP,
             reject_reason = ?
-        WHERE id = ?
+        WHERE id = ? AND version = ?
         "#
     )
     .bind(new_version)
     .bind(&req.reason)
     .bind(&id)
+    .bind(plan.version)
     .execute(&state.pool)
     .await?;
+
+    if result.rows_affected() == 0 {
+        let latest = get_plan_by_id(&state.pool, &id).await?;
+        return Err(AppError::VersionConflict(format!(
+            "版本冲突：当前版本为 v{}，请刷新后重试",
+            latest.version
+        )));
+    }
 
     let plan = get_plan_by_id(&state.pool, &id).await?;
 
@@ -475,20 +514,29 @@ pub async fn review_plan(
     let new_version = plan.version + 1;
     let old_status = plan.status.clone();
 
-    sqlx::query(
+    let result = sqlx::query(
         r#"
         UPDATE media_plans
         SET status = 'review_approved',
             version = ?,
             reviewed_at = CURRENT_TIMESTAMP,
             updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
+        WHERE id = ? AND version = ?
         "#
     )
     .bind(new_version)
     .bind(&id)
+    .bind(plan.version)
     .execute(&state.pool)
     .await?;
+
+    if result.rows_affected() == 0 {
+        let latest = get_plan_by_id(&state.pool, &id).await?;
+        return Err(AppError::VersionConflict(format!(
+            "版本冲突：当前版本为 v{}，请刷新后重试",
+            latest.version
+        )));
+    }
 
     let plan = get_plan_by_id(&state.pool, &id).await?;
 
@@ -509,11 +557,13 @@ pub async fn archive_plan(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<String>,
+    Json(req): Json<ArchiveRequest>,
 ) -> AppResult<Json<MediaPlan>> {
     let claims = get_claims(&headers, &state).await?;
     require_role(&claims, &[roles::REVIEWER])?;
 
     let plan = get_plan_by_id(&state.pool, &id).await?;
+    check_version(&plan, req.version)?;
 
     if plan.status != plan_status::REVIEW_APPROVED {
         return Err(AppError::InvalidStatus(format!(
@@ -525,20 +575,29 @@ pub async fn archive_plan(
     let new_version = plan.version + 1;
     let old_status = plan.status.clone();
 
-    sqlx::query(
+    let result = sqlx::query(
         r#"
         UPDATE media_plans
         SET status = 'archived',
             version = ?,
             archived_at = CURRENT_TIMESTAMP,
             updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
+        WHERE id = ? AND version = ?
         "#
     )
     .bind(new_version)
     .bind(&id)
+    .bind(plan.version)
     .execute(&state.pool)
     .await?;
+
+    if result.rows_affected() == 0 {
+        let latest = get_plan_by_id(&state.pool, &id).await?;
+        return Err(AppError::VersionConflict(format!(
+            "版本冲突：当前版本为 v{}，请刷新后重试",
+            latest.version
+        )));
+    }
 
     let plan = get_plan_by_id(&state.pool, &id).await?;
 

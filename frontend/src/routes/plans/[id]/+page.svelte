@@ -5,7 +5,7 @@
 	import { api } from '$lib/api';
 	import { auth, statusNames, statusColors, evidenceTypeNames, roleNames } from '$lib/store';
 
-	let planId = '';
+	let planId = $page.params.id ?? '';
 	let planDetail = null;
 	let loading = true;
 	let error = '';
@@ -16,11 +16,12 @@
 	let remarkText = '';
 	let currentAction = '';
 
-	$: {
-		if (page && page.params && page.params.id) {
-			planId = page.params.id;
+	$effect(() => {
+		planId = $page.params.id ?? '';
+		if (planId && $auth.token) {
+			loadDetail();
 		}
-	}
+	});
 
 	async function loadDetail() {
 		loading = true;
@@ -75,7 +76,7 @@
 		actionLoading = true;
 		error = '';
 		try {
-			await api.submitPlan(planId);
+			await api.submitPlan(planId, planDetail.plan.version);
 			await loadDetail();
 		} catch (e) {
 			error = e.message;
@@ -167,7 +168,7 @@
 		actionLoading = true;
 		error = '';
 		try {
-			await api.archivePlan(planId);
+			await api.archivePlan(planId, planDetail.plan.version);
 			await loadDetail();
 		} catch (e) {
 			error = e.message;
@@ -194,7 +195,7 @@
 	}
 
 	function goBack() {
-		goto('/dashboard');
+		goto('/dashboard?refresh=1');
 	}
 
 	function getTotalBudget() {
@@ -202,13 +203,9 @@
 		return planDetail.budgets.reduce((sum, b) => sum + b.amount, 0);
 	}
 
-	onMount(async () => {
+	onMount(() => {
 		if (!$auth.token) {
 			goto('/');
-			return;
-		}
-		if (planId) {
-			await loadDetail();
 		}
 	});
 </script>

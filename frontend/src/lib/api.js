@@ -69,9 +69,10 @@ export const api = {
 			body: JSON.stringify(data)
 		}),
 
-	submitPlan: (id) =>
+	submitPlan: (id, version) =>
 		request(`/plans/${id}/submit`, {
-			method: 'POST'
+			method: 'POST',
+			body: JSON.stringify({ version })
 		}),
 
 	approvePlan: (id, data) =>
@@ -92,9 +93,10 @@ export const api = {
 			body: JSON.stringify(data)
 		}),
 
-	archivePlan: (id) =>
+	archivePlan: (id, version) =>
 		request(`/plans/${id}/archive`, {
-			method: 'POST'
+			method: 'POST',
+			body: JSON.stringify({ version })
 		}),
 
 	batchReview: (data) =>

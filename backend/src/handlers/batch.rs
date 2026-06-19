@@ -9,6 +9,16 @@ use crate::middleware::{get_plan_by_id, add_operation_log, check_evidences_compl
 use crate::models::*;
 use crate::state::AppState;
 
+fn check_version(plan: &MediaPlan, expected_version: i64) -> AppResult<()> {
+    if plan.version != expected_version {
+        return Err(AppError::VersionConflict(format!(
+            "版本冲突：当前版本为 v{}，你基于 v{} 操作，请刷新后重试",
+            plan.version, expected_version
+        )));
+    }
+    Ok(())
+}
+
 pub async fn batch_review(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -42,30 +52,31 @@ pub async fn batch_review(
         )));
     }
 
-    for plan_id in &req.plan_ids {
+    for item in &req.items {
         let result = process_single_plan(
             &state.pool,
             &claims,
-            plan_id,
+            &item.plan_id,
+            item.version,
             &req.action,
             req.remark.as_deref(),
         ).await;
 
         match result {
-            Ok(item) => {
-                if item.success {
+            Ok(batch_item) => {
+                if batch_item.success {
                     success_count += 1;
-                } else if item.need_retry {
+                } else if batch_item.need_retry {
                     retry_count += 1;
                 } else {
                     failed_count += 1;
                 }
-                results.push(item);
+                results.push(batch_item);
             }
             Err(e) => {
                 failed_count += 1;
                 results.push(BatchResultItem {
-                    plan_id: plan_id.clone(),
+                    plan_id: item.plan_id.clone(),
                     plan_no: "未知".to_string(),
                     success: false,
                     status: "error".to_string(),
@@ -89,6 +100,7 @@ async fn process_single_plan(
     pool: &sqlx::SqlitePool,
     claims: &Claims,
     plan_id: &str,
+    client_version: i64,
     action: &str,
     remark: Option<&str>,
 ) -> AppResult<BatchResultItem> {
@@ -96,7 +108,7 @@ async fn process_single_plan(
 
     match action {
         "approve" => {
-            let result = do_approve(pool, claims, &plan, remark).await;
+            let result = do_approve(pool, claims, &plan, client_version, remark).await;
             match result {
                 Ok(p) => Ok(BatchResultItem {
                     plan_id: plan_id.to_string(),
@@ -120,7 +132,7 @@ async fn process_single_plan(
             }
         }
         "reject" => {
-            let result = do_reject(pool, claims, &plan, remark.unwrap_or("批量驳回")).await;
+            let result = do_reject(pool, claims, &plan, client_version, remark.unwrap_or("批量驳回")).await;
             match result {
                 Ok(p) => Ok(BatchResultItem {
                     plan_id: plan_id.to_string(),
@@ -144,7 +156,7 @@ async fn process_single_plan(
             }
         }
         "review" => {
-            let result = do_review(pool, claims, &plan, remark).await;
+            let result = do_review(pool, claims, &plan, client_version, remark).await;
             match result {
                 Ok(p) => Ok(BatchResultItem {
                     plan_id: plan_id.to_string(),
@@ -168,7 +180,7 @@ async fn process_single_plan(
             }
         }
         "submit" => {
-            let result = do_submit(pool, claims, &plan).await;
+            let result = do_submit(pool, claims, &plan, client_version).await;
             match result {
                 Ok(p) => Ok(BatchResultItem {
                     plan_id: plan_id.to_string(),
@@ -199,8 +211,11 @@ async fn do_approve(
     pool: &sqlx::SqlitePool,
     claims: &Claims,
     plan: &MediaPlan,
+    client_version: i64,
     remark: Option<&str>,
 ) -> AppResult<MediaPlan> {
+    check_version(plan, client_version)?;
+
     if plan.status != plan_status::PENDING_AUDIT && plan.status != plan_status::REVIEW_REJECTED {
         return Err(AppError::InvalidStatus(format!(
             "当前状态 '{}' 不允许审核通过",
@@ -223,7 +238,7 @@ async fn do_approve(
     )
     .bind(new_version)
     .bind(&plan.id)
-    .bind(plan.version)
+    .bind(client_version)
     .execute(pool)
     .await?;
 
@@ -278,8 +293,11 @@ async fn do_reject(
     pool: &sqlx::SqlitePool,
     claims: &Claims,
     plan: &MediaPlan,
+    client_version: i64,
     reason: &str,
 ) -> AppResult<MediaPlan> {
+    check_version(plan, client_version)?;
+
     if plan.status != plan_status::PENDING_AUDIT && plan.status != plan_status::REVIEW_REJECTED {
         return Err(AppError::InvalidStatus(format!(
             "当前状态 '{}' 不允许审核驳回",
@@ -303,7 +321,7 @@ async fn do_reject(
     .bind(new_version)
     .bind(reason)
     .bind(&plan.id)
-    .bind(plan.version)
+    .bind(client_version)
     .execute(pool)
     .await?;
 
@@ -333,8 +351,11 @@ async fn do_review(
     pool: &sqlx::SqlitePool,
     claims: &Claims,
     plan: &MediaPlan,
+    client_version: i64,
     remark: Option<&str>,
 ) -> AppResult<MediaPlan> {
+    check_version(plan, client_version)?;
+
     if plan.status != plan_status::PENDING_REVIEW {
         return Err(AppError::InvalidStatus(format!(
             "当前状态 '{}' 不允许复核",
@@ -357,7 +378,7 @@ async fn do_review(
     )
     .bind(new_version)
     .bind(&plan.id)
-    .bind(plan.version)
+    .bind(client_version)
     .execute(pool)
     .await?;
 
@@ -387,7 +408,10 @@ async fn do_submit(
     pool: &sqlx::SqlitePool,
     claims: &Claims,
     plan: &MediaPlan,
+    client_version: i64,
 ) -> AppResult<MediaPlan> {
+    check_version(plan, client_version)?;
+
     if plan.created_by != claims.user_id {
         return Err(AppError::Forbidden("只能提交自己创建的计划单".to_string()));
     }
@@ -422,7 +446,7 @@ async fn do_submit(
     )
     .bind(new_version)
     .bind(&plan.id)
-    .bind(plan.version)
+    .bind(client_version)
     .execute(pool)
     .await?;
 

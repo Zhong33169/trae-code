@@ -9,7 +9,7 @@ mod state;
 use axum::http::Method;
 use axum::routing::{get, post, put};
 use axum::Router;
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::cors::CorsLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::state::AppState;

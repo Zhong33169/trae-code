@@ -88,8 +88,24 @@ pub struct ReviewRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SubmitRequest {
+    pub version: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArchiveRequest {
+    pub version: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BatchPlanItem {
+    pub plan_id: String,
+    pub version: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BatchReviewRequest {
-    pub plan_ids: Vec<String>,
+    pub items: Vec<BatchPlanItem>,
     pub action: String,
     pub remark: Option<String>,
 }

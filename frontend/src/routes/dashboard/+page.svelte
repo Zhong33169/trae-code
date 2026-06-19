@@ -1,8 +1,21 @@
 <script>
 	import { onMount, onDestroy } from 'svelte';
+	import { page } from '$app/stores';
 	import { api } from '$lib/api';
 	import { auth, statusNames, statusColors, roleNames, evidenceTypeNames } from '$lib/store';
 	import { goto } from '$app/navigation';
+
+	let lastRefreshKey = '';
+
+	$effect(() => {
+		const url = $page.url;
+		const refresh = url.searchParams.get('refresh');
+		const key = `${refresh}-${Date.now()}`;
+		if (refresh && key !== lastRefreshKey && $auth.token) {
+			lastRefreshKey = key;
+			refreshAll();
+		}
+	});
 
 	let todoList = [];
 	let allPlans = [];
@@ -107,8 +120,17 @@
 		errorMessage = '';
 
 		try {
+			const allCurrent = [...todoList, ...allPlans];
+			const items = Array.from(selectedIds).map(id => {
+				const plan = allCurrent.find(p => p.id === id);
+				return {
+					plan_id: id,
+					version: plan ? plan.version : 1
+				};
+			});
+
 			const result = await api.batchReview({
-				plan_ids: Array.from(selectedIds),
+				items,
 				action: batchAction,
 				remark: batchRemark || null
 			});
