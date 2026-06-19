@@ -60,19 +60,24 @@ const STATUS_FLOW = {
   },
 };
 
-function validateTransition(role, action, currentStatus, currentVersion, form) {
+function validateTransition(role, action, currentStatus, currentVersion, form, options = {}) {
   const roleActions = STATUS_FLOW[role];
   if (!roleActions) {
-    return { valid: false, reason: `角色(${role})无任何操作权限` };
+    return { valid: false, reason: `角色(${role})无任何操作权限`, code: "wrong_role" };
   }
   const transition = roleActions[action];
   if (!transition) {
-    return { valid: false, reason: `角色(${role})无权执行"${action}"操作` };
+    return { valid: false, reason: `角色(${role})无权执行"${action}"操作`, code: "wrong_role_action" };
   }
   if (!transition.from.includes(currentStatus)) {
-    return { valid: false, reason: `当前状态为"${currentStatus}"，无法执行"${action}"，允许的状态：${transition.from.join("、")}` };
+    return {
+      valid: false,
+      reason: `当前状态为"${currentStatus}"，无法执行"${action}"，允许的状态：${transition.from.join("、")}`,
+      code: "wrong_status",
+    };
   }
-  if (action === "submit" && form) {
+  const evidenceRequired = options.checkEvidence === false ? false : ["submit", "review_approve", "archive"].includes(action);
+  if (evidenceRequired && form) {
     const db = getDb();
     const evidences = db.prepare("SELECT evidence_type FROM form_evidence WHERE form_id = ?").all(form.id);
     const types = new Set(evidences.map((e) => e.evidence_type));
@@ -81,7 +86,12 @@ function validateTransition(role, action, currentStatus, currentVersion, form) {
     if (!types.has("department_confirm")) missing.push("部门确认函");
     if (!types.has("approval_effective")) missing.push("审批生效通知书");
     if (missing.length > 0) {
-      return { valid: false, reason: `证据不足，缺少：${missing.join("、")}` };
+      return {
+        valid: false,
+        reason: `证据不足，缺少：${missing.join("、")}`,
+        code: "missing_evidence",
+        missingEvidence: missing,
+      };
     }
   }
   return { valid: true, toStatus: transition.to };
@@ -196,25 +206,41 @@ app.post("/api/forms/:id/action", async (c) => {
   const { userId, userRole, userName } = auth;
   const formId = c.req.param("id");
   const body = await c.req.json();
-  const { action, comment } = body;
+  const { action, comment, expectedVersion } = body;
 
   if (!action) {
-    return c.json({ error: "缺少操作类型(action)" }, 400);
+    return c.json({ error: "缺少操作类型(action)", code: "missing_action" }, 400);
   }
 
   const db = getDb();
   const form = db.prepare("SELECT * FROM adjustment_forms WHERE id = ?").get(formId);
   if (!form) {
-    return c.json({ error: "预算调整单不存在" }, 404);
+    return c.json({ error: "预算调整单不存在", code: "not_found" }, 404);
+  }
+
+  if (expectedVersion !== undefined && expectedVersion !== null) {
+    const expected = Number(expectedVersion);
+    if (!Number.isNaN(expected) && expected !== form.version) {
+      return c.json(
+        {
+          error: `版本冲突：你看到的是 v${expected}，当前版本已是 v${form.version}，请刷新后重试`,
+          code: "version_conflict",
+          expectedVersion: expected,
+          currentVersion: form.version,
+        },
+        409
+      );
+    }
   }
 
   const validation = validateTransition(userRole, action, form.status, form.version, form);
   if (!validation.valid) {
-    return c.json({ error: validation.reason }, 403);
+    const statusCode = validation.code === "missing_evidence" ? 422 : 403;
+    return c.json({ error: validation.reason, code: validation.code, ...validation }, statusCode);
   }
 
   const newStatus = validation.toStatus;
-  const newVersion = action === "correct" ? form.version + 1 : form.version;
+  const newVersion = form.version + 1;
 
   const actionId = `ACT-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
 
@@ -236,6 +262,7 @@ app.post("/api/forms/:id/action", async (c) => {
     fromStatus: form.status,
     toStatus: newStatus,
     version: newVersion,
+    previousVersion: form.version,
     message: `操作成功：${action}，状态从"${form.status}"变更为"${newStatus}"`,
   });
 });
@@ -270,7 +297,14 @@ app.post("/api/forms/:id/evidence", async (c) => {
 
   const existing = db.prepare("SELECT id FROM form_evidence WHERE form_id = ? AND evidence_type = ?").get(formId, evidence_type);
   if (existing) {
-    return c.json({ error: `该预算调整单已存在"${evidence_type}"类型证据，不能重复添加` }, 409);
+    return c.json(
+      {
+        error: `该预算调整单已存在"${evidence_type}"类型证据，不能重复添加`,
+        code: "duplicate_evidence",
+        evidence_type,
+      },
+      409
+    );
   }
 
   const evidenceId = `EV-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
@@ -278,6 +312,8 @@ app.post("/api/forms/:id/evidence", async (c) => {
     INSERT INTO form_evidence (id, form_id, evidence_type, description, file_name, uploaded_by)
     VALUES (?, ?, ?, ?, ?, ?)
   `).run(evidenceId, formId, evidence_type, description, file_name || null, userId);
+
+  db.prepare("UPDATE adjustment_forms SET updated_at = datetime('now') WHERE id = ?").run(formId);
 
   return c.json({ id: evidenceId, message: "证据添加成功" }, 201);
 });
@@ -312,12 +348,24 @@ app.post("/api/forms/:id/supplement", async (c) => {
   }
 
   const supplementId = `SUP-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
-  db.prepare(`
-    INSERT INTO form_supplements (id, form_id, supplement_type, content, reason, supplemented_by)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).run(supplementId, formId, supplement_type, content, reason, userId);
 
-  return c.json({ id: supplementId, message: "补录成功" }, 201);
+  const tx = db.transaction(() => {
+    db.prepare(`
+      INSERT INTO form_supplements (id, form_id, supplement_type, content, reason, supplemented_by)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(supplementId, formId, supplement_type, content, reason, userId);
+
+    db.prepare("UPDATE adjustment_forms SET updated_at = datetime('now') WHERE id = ?").run(formId);
+  });
+  tx();
+
+  return c.json({
+    id: supplementId,
+    message: "补录成功",
+    supplement_type,
+    content,
+    reason,
+  }, 201);
 });
 
 app.post("/api/forms/batch-action", async (c) => {
@@ -326,31 +374,54 @@ app.post("/api/forms/batch-action", async (c) => {
 
   const { userId, userRole } = auth;
   const body = await c.req.json();
-  const { formIds, action, comment } = body;
+  const { formIds, action, comment, expectedVersions } = body;
 
   if (!Array.isArray(formIds) || formIds.length === 0 || !action) {
-    return c.json({ error: "缺少表单ID列表或操作类型" }, 400);
+    return c.json({ error: "缺少表单ID列表或操作类型", code: "missing_params" }, 400);
   }
 
   const db = getDb();
   const results = [];
 
-  for (const formId of formIds) {
+  for (let i = 0; i < formIds.length; i++) {
+    const formId = formIds[i];
     const form = db.prepare("SELECT * FROM adjustment_forms WHERE id = ?").get(formId);
+
     if (!form) {
-      results.push({ formId, success: false, error: "预算调整单不存在" });
+      results.push({ formId, success: false, error: "预算调整单不存在", code: "not_found" });
       continue;
+    }
+
+    if (expectedVersions && expectedVersions[formId] !== undefined) {
+      const expected = Number(expectedVersions[formId]);
+      if (!Number.isNaN(expected) && expected !== form.version) {
+        results.push({
+          formId,
+          success: false,
+          error: `版本冲突：你看到的是 v${expected}，当前版本已是 v${form.version}`,
+          code: "version_conflict",
+          expectedVersion: expected,
+          currentVersion: form.version,
+        });
+        continue;
+      }
     }
 
     const validation = validateTransition(userRole, action, form.status, form.version, form);
     if (!validation.valid) {
-      results.push({ formId, success: false, error: validation.reason });
+      results.push({
+        formId,
+        success: false,
+        error: validation.reason,
+        code: validation.code,
+        missingEvidence: validation.missingEvidence,
+      });
       continue;
     }
 
     const newStatus = validation.toStatus;
-    const newVersion = action === "correct" ? form.version + 1 : form.version;
-    const actionId = `ACT-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+    const newVersion = form.version + 1;
+    const actionId = `ACT-${Date.now()}-${Math.random().toString(36).substr(2, 5)}-${i}`;
 
     const tx = db.transaction(() => {
       db.prepare("UPDATE adjustment_forms SET status = ?, version = ?, updated_at = datetime('now') WHERE id = ?")
@@ -362,10 +433,25 @@ app.post("/api/forms/batch-action", async (c) => {
     });
     tx();
 
-    results.push({ formId, success: true, fromStatus: form.status, toStatus: newStatus });
+    results.push({
+      formId,
+      success: true,
+      fromStatus: form.status,
+      toStatus: newStatus,
+      version: newVersion,
+      previousVersion: form.version,
+    });
   }
 
-  return c.json({ results });
+  const successCount = results.filter((r) => r.success).length;
+  const failCount = results.length - successCount;
+
+  return c.json({
+    results,
+    successCount,
+    failCount,
+    message: `批量操作完成：成功${successCount}条，失败${failCount}条`,
+  });
 });
 
 app.get("/api/forms/:id/validate-action", (c) => {

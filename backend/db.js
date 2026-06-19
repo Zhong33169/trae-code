@@ -146,7 +146,7 @@ function seedData() {
   insertAction.run("ACT-005-3", "ADJ-2026-005", "correct", "registrar1", "registrar", "补充部门确认函后重新提交", "returned", "draft", 2);
 
   insertForm.run("ADJ-2026-006", "财务部审计费调减（已归档）", "财务部", "decrease", 80000, "审计服务费用减少", "archived", 1, "registrar2");
-  insertEvidence.run("EV-006-1", "ADJ-2026-001", "budget_adjustment", "预算调整申请表", "adjustment_apply.pdf", "registrar2");
+  insertEvidence.run("EV-006-1", "ADJ-2026-006", "budget_adjustment", "预算调整申请表", "adjustment_apply.pdf", "registrar2");
   insertEvidence.run("EV-006-2", "ADJ-2026-006", "department_confirm", "财务部确认函", "dept_confirm.pdf", "registrar2");
   insertEvidence.run("EV-006-3", "ADJ-2026-006", "approval_effective", "审批生效通知书", "approval_notice.pdf", "registrar2");
   insertAction.run("ACT-006-1", "ADJ-2026-006", "submit", "registrar2", "registrar", "提交审计费调减申请", "draft", "pending_review", 1);

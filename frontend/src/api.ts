@@ -75,15 +75,21 @@ export async function createForm(data: {
 export async function submitFormAction(
   formId: string,
   action: string,
-  comment?: string
+  options?: { comment?: string; expectedVersion?: number }
 ) {
+  const { comment, expectedVersion } = options || {};
   const res = await fetch(`${API_BASE}/forms/${formId}/action`, {
     method: "POST",
     headers: headers(),
-    body: JSON.stringify({ action, comment }),
+    body: JSON.stringify({ action, comment, expectedVersion }),
   });
   const result = await res.json();
-  if (!res.ok) throw new Error(result.error || "操作失败");
+  if (!res.ok) {
+    const err: any = new Error(result.error || "操作失败");
+    err.code = result.code;
+    err.detail = result;
+    throw err;
+  }
   return result;
 }
 
@@ -99,7 +105,12 @@ export async function addEvidence(
     body: JSON.stringify({ evidence_type, description, file_name }),
   });
   const result = await res.json();
-  if (!res.ok) throw new Error(result.error || "添加证据失败");
+  if (!res.ok) {
+    const err: any = new Error(result.error || "添加证据失败");
+    err.code = result.code;
+    err.detail = result;
+    throw err;
+  }
   return result;
 }
 
@@ -115,22 +126,33 @@ export async function addSupplement(
     body: JSON.stringify({ supplement_type, content, reason }),
   });
   const result = await res.json();
-  if (!res.ok) throw new Error(result.error || "补录失败");
+  if (!res.ok) {
+    const err: any = new Error(result.error || "补录失败");
+    err.code = result.code;
+    err.detail = result;
+    throw err;
+  }
   return result;
 }
 
 export async function batchAction(
   formIds: string[],
   action: string,
-  comment?: string
+  options?: { comment?: string; expectedVersions?: Record<string, number> }
 ) {
+  const { comment, expectedVersions } = options || {};
   const res = await fetch(`${API_BASE}/forms/batch-action`, {
     method: "POST",
     headers: headers(),
-    body: JSON.stringify({ formIds, action, comment }),
+    body: JSON.stringify({ formIds, action, comment, expectedVersions }),
   });
   const result = await res.json();
-  if (!res.ok) throw new Error(result.error || "批量操作失败");
+  if (!res.ok) {
+    const err: any = new Error(result.error || "批量操作失败");
+    err.code = result.code;
+    err.detail = result;
+    throw err;
+  }
   return result;
 }
 

@@ -216,7 +216,10 @@ export default function App() {
     if (!selectedForm) return;
     try {
       setError("");
-      const result = await submitFormAction(selectedForm.id, action, actionComment);
+      const result = await submitFormAction(selectedForm.id, action, {
+        comment: actionComment,
+        expectedVersion: selectedForm.version,
+      });
       setSuccess(result.message);
       setActionComment("");
       await handleSelectForm(selectedForm.id);
@@ -224,7 +227,13 @@ export default function App() {
       await loadStats();
       setTimeout(() => setSuccess(""), 3000);
     } catch (e: any) {
-      setError(e.message);
+      let msg = e.message;
+      if (e.code === "version_conflict") {
+        msg = `版本冲突：你当前看到的是 v${e.detail.expectedVersion}，服务器已更新到 v${e.detail.currentVersion}，请刷新后重试`;
+      } else if (e.code === "missing_evidence") {
+        msg = `证据不足，缺少：${e.detail.missingEvidence?.join("、")}，请补充后再操作`;
+      }
+      setError(msg);
     }
   };
 
@@ -257,9 +266,16 @@ export default function App() {
       setShowEvidenceAdd(false);
       setEvidenceForm({ evidence_type: "budget_adjustment", description: "", file_name: "" });
       await handleSelectForm(selectedForm.id);
+      await loadForms();
       setTimeout(() => setSuccess(""), 3000);
     } catch (e: any) {
-      setError(e.message);
+      let msg = e.message;
+      if (e.code === "duplicate_evidence") {
+        msg = `重复提交："${evidenceForm.evidence_type}"类型证据已存在，不能重复添加`;
+      } else if (e.code === "wrong_status") {
+        msg = `当前状态无法添加证据：${e.message}`;
+      }
+      setError(msg);
     }
   };
 
@@ -288,12 +304,36 @@ export default function App() {
     if (selectedIds.size === 0) return;
     try {
       setError("");
-      const result = await batchAction(Array.from(selectedIds), action, actionComment);
+      const expectedVersions: Record<string, number> = {};
+      forms.forEach((f) => {
+        if (selectedIds.has(f.id)) {
+          expectedVersions[f.id] = f.version;
+        }
+      });
+      const result = await batchAction(Array.from(selectedIds), action, {
+        comment: actionComment,
+        expectedVersions,
+      });
       const failed = result.results.filter((r: any) => !r.success);
       if (failed.length > 0) {
-        setError(failed.map((f: any) => `${f.formId}: ${f.error}`).join("\n"));
+        const errorLines = failed.map((f: any) => {
+          let detail = "";
+          if (f.code === "version_conflict") {
+            detail = `(版本冲突: v${f.expectedVersion} → v${f.currentVersion})`;
+          } else if (f.code === "missing_evidence") {
+            detail = `(缺证据: ${f.missingEvidence?.join("、")})`;
+          } else if (f.code === "wrong_status") {
+            detail = `(状态不符)`;
+          } else if (f.code === "wrong_role" || f.code === "wrong_role_action") {
+            detail = `(角色无权)`;
+          }
+          return `${f.formId}: ${f.error} ${detail}`;
+        });
+        setError(
+          `批量操作完成：成功${result.successCount}条，失败${result.failCount}条\n${errorLines.join("\n")}`
+        );
       } else {
-        setSuccess(`批量操作成功：${result.results.length}条`);
+        setSuccess(result.message || `批量操作成功：${result.results.length}条`);
       }
       setSelectedIds(new Set());
       setActionComment("");
