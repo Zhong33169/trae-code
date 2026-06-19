@@ -12,14 +12,16 @@ var jwtSecret = []byte("transfer-system-secret-key-change-in-production")
 type JWTClaims struct {
 	UserID   int64  `json:"user_id"`
 	Username string `json:"username"`
+	RealName string `json:"real_name"`
 	Role     string `json:"role"`
 	jwt.RegisteredClaims
 }
 
-func GenerateToken(userID int64, username, role string) (string, error) {
+func GenerateToken(userID int64, username, realName, role string) (string, error) {
 	claims := JWTClaims{
 		UserID:   userID,
 		Username: username,
+		RealName: realName,
 		Role:     role,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),

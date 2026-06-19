@@ -40,7 +40,7 @@ func Login(c echo.Context) error {
 		return utils.Fail(c, http.StatusUnauthorized, "密码错误")
 	}
 
-	token, err := utils.GenerateToken(user.ID, user.Username, string(user.Role))
+	token, err := utils.GenerateToken(user.ID, user.Username, user.RealName, string(user.Role))
 	if err != nil {
 		return utils.Fail(c, http.StatusInternalServerError, "生成token失败")
 	}

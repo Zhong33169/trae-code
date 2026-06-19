@@ -25,6 +25,7 @@ export class ApplicationDetail extends LitElement {
     .status-tag { display: inline-block; padding: 4px 12px; border-radius: 4px; color: #fff; font-size: 13px; }
     .timeout-badge { background: #fff1f0; color: #f5222d; padding: 3px 8px; border-radius: 3px; font-size: 12px; margin-left: 8px; }
     .node-hint { display: inline-block; background: #e6f7ff; color: #1890ff; padding: 3px 8px; border-radius: 3px; font-size: 12px; margin-left: 8px; }
+    .pending-register-hint { display: inline-block; background: #fffbe6; color: #d48806; padding: 3px 8px; border-radius: 3px; font-size: 12px; margin-left: 8px; }
 
     .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
     .card { background: #fff; border-radius: 6px; padding: 20px 24px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 16px; }
@@ -48,7 +49,7 @@ export class ApplicationDetail extends LitElement {
     .timeline-content { font-size: 13px; color: #595959; margin-top: 6px; }
     .timeline-status { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11px; background: #f0f0f0; color: #595959; }
 
-    .actions-bar { display: flex; gap: 10px; flex-wrap: wrap; }
+    .actions-bar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
     .btn { padding: 8px 18px; border-radius: 4px; border: 1px solid transparent; cursor: pointer; font-size: 13px; }
     .btn-primary { background: #1890ff; color: #fff; }
     .btn-primary:hover { background: #40a9ff; }
@@ -113,15 +114,37 @@ export class ApplicationDetail extends LitElement {
     }
   }
 
-  isMyNode() {
+  canRegister() {
     if (!this.app || !this.user) return false;
-    return this.app.current_node === this.user.role;
+    return this.user.role === 'hr_specialist' &&
+      this.app.status === 'approved' &&
+      !this.app.registered;
   }
 
-  canProcess() {
-    if (!this.app) return false;
-    if (['rejected', 'synced'].includes(this.app.status)) return false;
-    return this.isMyNode();
+  canSubmitAtCurrentNode() {
+    if (!this.app || !this.user) return false;
+    if (['synced', 'rejected'].includes(this.app.status)) return false;
+    switch (this.user.role) {
+      case 'hr_specialist':
+        return this.app.current_node === 'hr_specialist' && this.app.status === 'pending_review';
+      case 'salary_supervisor':
+        return this.app.current_node === 'salary_supervisor' && this.app.status === 'budget_checking';
+      case 'hrbp_leader':
+        return this.app.current_node === 'hrbp_leader' && this.app.status === 'pending_confirm';
+      default:
+        return false;
+    }
+  }
+
+  canDoBudgetOrSalary() {
+    if (!this.app || !this.user) return false;
+    return this.user.role === 'salary_supervisor' &&
+      this.app.current_node === 'salary_supervisor' &&
+      this.app.status === 'budget_checking';
+  }
+
+  hasAnyAction() {
+    return this.canSubmitAtCurrentNode() || this.canDoBudgetOrSalary() || this.canRegister();
   }
 
   openDialog(action) {
@@ -163,45 +186,58 @@ export class ApplicationDetail extends LitElement {
         </div>
       ` : ''}
 
+      ${this.canRegister() ? html`
+        <div style="background:#fffbe6; border:1px solid #ffe58f; border-radius:4px; padding:10px 16px; margin-bottom:12px; font-size:13px; color:#d48806;">
+          📋 此申请已审核通过，请您进行异动登记以完成闭环。预算校验：${app.budget_verified ? '✅ 已完成' : '❌ 未完成'} · 调薪处理：${app.salary_processed ? '✅ 已完成' : '❌ 未完成'}
+        </div>
+      ` : ''}
+
       <div class="header-card">
         <div>
           <div class="app-title">${app.application_no}
             <span class="status-tag" style="background:${STATUS_COLORS[app.status] || '#888'}">${STATUS_LABELS[app.status] || app.status}</span>
             ${app.is_timeout ? html`<span class="timeout-badge">已超时</span>` : ''}
+            ${this.canRegister() ? html`<span class="pending-register-hint">待登记</span>` : ''}
             ${app.current_node && app.current_node !== 'completed' && !['synced', 'rejected'].includes(app.status) ? html`
               <span class="node-hint">当前处理：${NODE_LABELS[app.current_node]}</span>
             ` : ''}
+            ${app.status === 'synced' ? html`<span class="node-hint" style="background:#f6ffed;color:#389e0d;">流程已闭环</span>` : ''}
           </div>
           <div class="app-sub">
             发起人：${app.creator?.real_name || '-'} (${app.creator ? ROLE_LABELS[app.creator.role] : ''})
             ·  创建时间：${this.formatDate(app.created_at)}
             ${app.node_deadline ? html` · 节点截止：${this.formatDate(app.node_deadline)}` : ''}
+            ${app.updated_by ? html` · 最后操作人ID：${app.updated_by}` : ''}
           </div>
         </div>
         <div class="actions-bar">
-          ${this.canProcess() ? html`
-            ${this.user.role === 'salary_supervisor' && app.current_node === 'salary_supervisor' ? html`
-              <button class="btn btn-default" ?disabled=${app.budget_verified} @click=${() => this.openDialog('verify_budget')}>
-                ${app.budget_verified ? '预算已校验' : '预算校验'}
-              </button>
-              <button class="btn btn-default" ?disabled=${app.salary_processed} @click=${() => this.openDialog('process_salary')}>
-                ${app.salary_processed ? '调薪已处理' : '调薪处理'}
-              </button>
-            ` : ''}
-            ${this.user.role === 'hr_specialist' && ['approved', 'synced'].includes(app.status) ? html`
-              <button class="btn btn-success" ?disabled=${app.registered} @click=${() => this.openDialog('register')}>
-                ${app.registered ? '已登记' : '异动登记'}
-              </button>
-            ` : ''}
+          ${this.canDoBudgetOrSalary() ? html`
+            <button class="btn btn-default" ?disabled=${app.budget_verified} @click=${() => this.openDialog('verify_budget')}>
+              ${app.budget_verified ? '预算已校验 ✓' : '预算校验'}
+            </button>
+            <button class="btn btn-default" ?disabled=${app.salary_processed} @click=${() => this.openDialog('process_salary')}>
+              ${app.salary_processed ? '调薪已处理 ✓' : '调薪处理'}
+            </button>
+          ` : ''}
+          ${this.canRegister() ? html`
+            <button class="btn btn-success" @click=${() => this.openDialog('register')}>
+              异动登记
+            </button>
+          ` : ''}
+          ${this.canSubmitAtCurrentNode() ? html`
             <button class="btn btn-primary" @click=${() => this.openDialog('submit')}>
               ${app.current_node === 'hr_specialist' ? '提交审核' : app.current_node === 'salary_supervisor' ? '提交确认' : '审核通过'}
             </button>
             <button class="btn btn-danger" @click=${() => this.openDialog('reject')}>驳回</button>
-          ` : html`
+          ` : ''}
+          ${!this.hasAnyAction() ? html`
             <span style="color:#999; font-size:13px;">
-              ${['synced', 'rejected'].includes(app.status) ? '申请已' + STATUS_LABELS[app.status] : '当前非您的处理节点'}
+              ${['synced'].includes(app.status) ? '申请已同步，流程闭环' :
+                ['rejected'].includes(app.status) ? '申请已驳回' :
+                app.status === 'approved' && !app.registered && this.user?.role !== 'hr_specialist' ? '审核通过，等待人事专员登记' :
+                '当前非您的处理节点'}
             </span>
-          `}
+          ` : ''}
           <button class="btn btn-default" @click=${() => this.loadData()}>刷新</button>
         </div>
       </div>
@@ -259,12 +295,14 @@ export class ApplicationDetail extends LitElement {
                 <span class="timeline-status" style="margin-left:8px;">${t.status}</span>
               </div>
               <div class="timeline-sub">
-                ${t.handler ? (t.handler.real_name + ' · ' + ROLE_LABELS[t.handler.role]) : '系统'}
+                ${t.handler_name || t.handler?.real_name || '系统'}
+                ${t.handler?.role ? html` · ${ROLE_LABELS[t.handler.role] || ''}` : ''}
                 · ${this.formatDate(t.created_at)}
               </div>
               <div class="timeline-content">
                 <div>动作：${t.action}</div>
                 ${t.remark ? html`<div>备注：${t.remark}</div>` : ''}
+                ${t.timeout_reason ? html`<div style="color:#f5222d;">超时原因：${t.timeout_reason}</div>` : ''}
               </div>
             </div>
           `)}
@@ -301,7 +339,7 @@ export class ApplicationDetail extends LitElement {
           ` : ''}
           <div class="modal-actions">
             <button class="btn btn-default" @click=${() => this.showProcessDialog = false}>取消</button>
-            <button class="btn ${this.currentAction === 'reject' ? 'btn-danger' : 'btn-primary'}" @click=${this.confirmProcess}>确认</button>
+            <button class="btn ${this.currentAction === 'reject' ? 'btn-danger' : this.currentAction === 'register' ? 'btn-success' : 'btn-primary'}" @click=${this.confirmProcess}>确认</button>
           </div>
         </div>
       </div>

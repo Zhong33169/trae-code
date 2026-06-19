@@ -67,6 +67,7 @@ type TransferApplication struct {
 	SalaryProcessed bool              `json:"salary_processed"`
 	Registered      bool              `json:"registered"`
 	CreatedBy       int64             `json:"created_by"`
+	UpdatedBy       *int64            `json:"updated_by,omitempty"`
 	Creator         *User             `json:"creator,omitempty"`
 	CreatedAt       time.Time         `json:"created_at"`
 	UpdatedAt       time.Time         `json:"updated_at"`
@@ -77,21 +78,25 @@ type TransferApplication struct {
 }
 
 type ProcessingTrail struct {
-	ID          int64     `json:"id"`
-	ApplicationID int64   `json:"application_id"`
-	Node        string    `json:"node"`
-	HandlerID   *int64    `json:"handler_id,omitempty"`
-	Handler     *User     `json:"handler,omitempty"`
-	Action      string    `json:"action"`
-	Remark      string    `json:"remark,omitempty"`
-	Status      string    `json:"status"`
-	IsTimeout   bool      `json:"is_timeout"`
-	CreatedAt   time.Time `json:"created_at"`
+	ID            int64     `json:"id"`
+	ApplicationID int64     `json:"application_id"`
+	Node          string    `json:"node"`
+	HandlerID     *int64    `json:"handler_id,omitempty"`
+	HandlerName   string    `json:"handler_name,omitempty"`
+	Handler       *User     `json:"handler,omitempty"`
+	Action        string    `json:"action"`
+	Remark        string    `json:"remark,omitempty"`
+	Status        string    `json:"status"`
+	IsTimeout     bool      `json:"is_timeout"`
+	TimeoutReason string    `json:"timeout_reason,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 type OperationLog struct {
 	ID         int64     `json:"id"`
 	UserID     int64     `json:"user_id"`
+	UserName   string    `json:"user_name,omitempty"`
+	UserRole   string    `json:"user_role,omitempty"`
 	User       *User     `json:"user,omitempty"`
 	Action     string    `json:"action"`
 	TargetType string    `json:"target_type,omitempty"`

@@ -38,6 +38,8 @@ func getNodeName(node string) string {
 		return "薪酬主管"
 	case "hrbp_leader":
 		return "HRBP负责人"
+	case "completed":
+		return "已完成"
 	default:
 		return node
 	}
@@ -62,17 +64,18 @@ func getStatusName(status string) string {
 	}
 }
 
-func addOperationLog(userID int64, action, targetType string, targetID int64, detail string) {
-	_, _ = db.DB.Exec(
-		"INSERT INTO operation_logs (user_id, action, target_type, target_id, detail) VALUES (?, ?, ?, ?, ?)",
-		userID, action, targetType, targetID, detail,
+func txAddOperationLog(tx *sql.Tx, userID int64, userName, userRole, action, targetType string, targetID int64, detail string) error {
+	_, err := tx.Exec(
+		"INSERT INTO operation_logs (user_id, user_name, user_role, action, target_type, target_id, detail) VALUES (?, ?, ?, ?, ?, ?, ?)",
+		userID, userName, userRole, action, targetType, targetID, detail,
 	)
+	return err
 }
 
-func addProcessingTrail(appID int64, node string, handlerID *int64, action, remark, status string, isTimeout bool) error {
-	_, err := db.DB.Exec(
-		"INSERT INTO processing_trails (application_id, node, handler_id, action, remark, status, is_timeout) VALUES (?, ?, ?, ?, ?, ?, ?)",
-		appID, node, handlerID, action, remark, status, isTimeout,
+func txAddProcessingTrail(tx *sql.Tx, appID int64, node string, handlerID *int64, handlerName, action, remark, status string, isTimeout bool, timeoutReason string) error {
+	_, err := tx.Exec(
+		"INSERT INTO processing_trails (application_id, node, handler_id, handler_name, action, remark, status, is_timeout, timeout_reason) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		appID, node, handlerID, handlerName, action, remark, status, isTimeout, timeoutReason,
 	)
 	return err
 }
@@ -83,12 +86,13 @@ func scanApplication(row interface {
 	var app models.TransferApplication
 	var budgetV, salaryP, registered, isTimeout int
 	var deadline sql.NullTime
+	var updatedBy sql.NullInt64
 
 	err := row.Scan(
 		&app.ID, &app.ApplicationNo, &app.EmployeeID, &app.Type,
 		&app.FromDepartment, &app.ToDepartment, &app.FromPosition, &app.ToPosition,
 		&app.FromSalary, &app.ToSalary, &app.Reason, &app.Status, &app.CurrentNode,
-		&budgetV, &salaryP, &registered, &app.CreatedBy,
+		&budgetV, &salaryP, &registered, &app.CreatedBy, &updatedBy,
 		&app.CreatedAt, &app.UpdatedAt, &deadline, &isTimeout, &app.TimeoutReason,
 	)
 	if err != nil {
@@ -99,6 +103,10 @@ func scanApplication(row interface {
 	app.SalaryProcessed = salaryP == 1
 	app.Registered = registered == 1
 	app.IsTimeout = isTimeout == 1
+	if updatedBy.Valid {
+		v := updatedBy.Int64
+		app.UpdatedBy = &v
+	}
 	if deadline.Valid {
 		t := deadline.Time
 		app.NodeDeadline = &t
@@ -132,7 +140,7 @@ func enrichApplication(app *models.TransferApplication) {
 
 func enrichTrails(app *models.TransferApplication) {
 	rows, err := db.DB.Query(
-		"SELECT id, application_id, node, handler_id, action, remark, status, is_timeout, created_at FROM processing_trails WHERE application_id = ? ORDER BY id",
+		"SELECT id, application_id, node, handler_id, handler_name, action, remark, status, is_timeout, timeout_reason, created_at FROM processing_trails WHERE application_id = ? ORDER BY id",
 		app.ID,
 	)
 	if err != nil {
@@ -144,17 +152,28 @@ func enrichTrails(app *models.TransferApplication) {
 	for rows.Next() {
 		var t models.ProcessingTrail
 		var handlerID sql.NullInt64
+		var handlerName sql.NullString
 		var isTimeout int
-		if err := rows.Scan(&t.ID, &t.ApplicationID, &t.Node, &handlerID, &t.Action, &t.Remark, &t.Status, &isTimeout, &t.CreatedAt); err != nil {
+		var timeoutReason sql.NullString
+		if err := rows.Scan(&t.ID, &t.ApplicationID, &t.Node, &handlerID, &handlerName, &t.Action, &t.Remark, &t.Status, &isTimeout, &timeoutReason, &t.CreatedAt); err != nil {
 			continue
 		}
 		t.IsTimeout = isTimeout == 1
+		if timeoutReason.Valid {
+			t.TimeoutReason = timeoutReason.String
+		}
 		if handlerID.Valid {
 			hid := handlerID.Int64
 			t.HandlerID = &hid
+		}
+		if handlerName.Valid {
+			t.HandlerName = handlerName.String
+		}
+		if t.HandlerID != nil && t.HandlerName == "" {
 			var handler models.User
-			if err := db.DB.QueryRow("SELECT id, real_name, role FROM users WHERE id = ?", hid).Scan(&handler.ID, &handler.RealName, &handler.Role); err == nil {
+			if err := db.DB.QueryRow("SELECT id, real_name, role FROM users WHERE id = ?", *t.HandlerID).Scan(&handler.ID, &handler.RealName, &handler.Role); err == nil {
 				t.Handler = &handler
+				t.HandlerName = handler.RealName
 			}
 		}
 		trails = append(trails, t)
@@ -162,10 +181,10 @@ func enrichTrails(app *models.TransferApplication) {
 	app.Trails = trails
 }
 
-func recalcApplicationStatus(appID int64) error {
+func txRecalcApplicationStatus(tx *sql.Tx, appID int64) error {
 	var app models.TransferApplication
 	var budgetV, salaryP, registered int
-	err := db.DB.QueryRow(
+	err := tx.QueryRow(
 		"SELECT status, current_node, budget_verified, salary_processed, registered FROM transfer_applications WHERE id = ?",
 		appID,
 	).Scan(&app.Status, &app.CurrentNode, &budgetV, &salaryP, &registered)
@@ -182,7 +201,7 @@ func recalcApplicationStatus(appID int64) error {
 	}
 
 	if app.Registered && app.SalaryProcessed && app.BudgetVerified && app.Status == models.StatusApproved {
-		_, err = db.DB.Exec(
+		_, err = tx.Exec(
 			"UPDATE transfer_applications SET status = ?, current_node = ?, updated_at = ? WHERE id = ?",
 			models.StatusSynced, "completed", time.Now(), appID,
 		)
@@ -221,13 +240,19 @@ func CreateApplication(c echo.Context) error {
 	appNo := generateApplicationNo()
 	deadline := getNodeDeadline()
 
-	result, err := db.DB.Exec(`
+	tx, err := db.DB.Begin()
+	if err != nil {
+		return utils.Fail(c, 500, "开启事务失败")
+	}
+	defer tx.Rollback()
+
+	result, err := tx.Exec(`
 		INSERT INTO transfer_applications 
-		(application_no, employee_id, type, from_department, to_department, from_position, to_position, from_salary, to_salary, reason, status, current_node, created_by, node_deadline)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		(application_no, employee_id, type, from_department, to_department, from_position, to_position, from_salary, to_salary, reason, status, current_node, created_by, updated_by, node_deadline)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		appNo, req.EmployeeID, req.Type, req.FromDepartment, req.ToDepartment,
 		req.FromPosition, req.ToPosition, req.FromSalary, req.ToSalary, req.Reason,
-		models.StatusPendingReview, "hr_specialist", uc.UserID, deadline,
+		models.StatusPendingReview, "hr_specialist", uc.UserID, uc.UserID, deadline,
 	)
 	if err != nil {
 		return utils.Fail(c, 500, "创建异动申请失败："+err.Error())
@@ -235,8 +260,16 @@ func CreateApplication(c echo.Context) error {
 
 	appID, _ := result.LastInsertId()
 
-	addProcessingTrail(appID, "hr_specialist", &uc.UserID, "发起申请", req.Reason, "待审核", false)
-	addOperationLog(uc.UserID, "create_application", "transfer_application", appID, "创建异动申请: "+appNo)
+	if err = txAddProcessingTrail(tx, appID, "hr_specialist", &uc.UserID, uc.Username, "发起申请", req.Reason, "待审核", false, ""); err != nil {
+		return utils.Fail(c, 500, "记录轨迹失败")
+	}
+	if err = txAddOperationLog(tx, uc.UserID, uc.RealName, uc.Role, "create_application", "transfer_application", appID, "创建异动申请: "+appNo); err != nil {
+		return utils.Fail(c, 500, "记录日志失败")
+	}
+
+	if err = tx.Commit(); err != nil {
+		return utils.Fail(c, 500, "提交事务失败")
+	}
 
 	return utils.Success(c, map[string]interface{}{
 		"id":             appID,
@@ -251,7 +284,7 @@ func ListApplications(c echo.Context) error {
 
 	query := `SELECT id, application_no, employee_id, type, from_department, to_department, from_position, to_position,
 	          from_salary, to_salary, reason, status, current_node, budget_verified, salary_processed, registered,
-	          created_by, created_at, updated_at, node_deadline, is_timeout, timeout_reason
+	          created_by, updated_by, created_at, updated_at, node_deadline, is_timeout, timeout_reason
 	          FROM transfer_applications WHERE 1=1`
 	args := make([]interface{}, 0)
 
@@ -260,9 +293,9 @@ func ListApplications(c echo.Context) error {
 		query += " AND created_by = ?"
 		args = append(args, uc.UserID)
 	case string(models.RoleSalarySupervisor):
-		query += " AND current_node IN ('salary_supervisor', 'hrbp_leader', 'completed')"
+		query += " AND (current_node IN ('salary_supervisor', 'hrbp_leader', 'completed') OR status IN ('approved', 'synced'))"
 	case string(models.RoleHRBPLeader):
-		query += " AND current_node IN ('hrbp_leader', 'completed') OR status IN ('approved', 'synced')"
+		query += " AND (current_node IN ('hrbp_leader', 'completed') OR status IN ('approved', 'synced'))"
 	}
 
 	if status != "" {
@@ -304,7 +337,7 @@ func GetApplication(c echo.Context) error {
 
 	row := db.DB.QueryRow(`SELECT id, application_no, employee_id, type, from_department, to_department, from_position, to_position,
 		from_salary, to_salary, reason, status, current_node, budget_verified, salary_processed, registered,
-		created_by, created_at, updated_at, node_deadline, is_timeout, timeout_reason
+		created_by, updated_by, created_at, updated_at, node_deadline, is_timeout, timeout_reason
 		FROM transfer_applications WHERE id = ?`, id)
 
 	app, err := scanApplication(row)
@@ -350,10 +383,11 @@ func ProcessApplication(c echo.Context) error {
 	var app models.TransferApplication
 	var deadline sql.NullTime
 	var isTimeout int
+	var budgetV, salaryP, registered int
 	err = tx.QueryRow(
-		"SELECT id, status, current_node, node_deadline, is_timeout FROM transfer_applications WHERE id = ?",
+		"SELECT id, status, current_node, node_deadline, is_timeout, budget_verified, salary_processed, registered FROM transfer_applications WHERE id = ?",
 		id,
-	).Scan(&app.ID, &app.Status, &app.CurrentNode, &deadline, &isTimeout)
+	).Scan(&app.ID, &app.Status, &app.CurrentNode, &deadline, &isTimeout, &budgetV, &salaryP, &registered)
 	if err == sql.ErrNoRows {
 		return utils.ErrorMsg(c, "异动申请不存在")
 	}
@@ -361,6 +395,9 @@ func ProcessApplication(c echo.Context) error {
 		return utils.Fail(c, 500, "查询申请失败")
 	}
 	app.IsTimeout = isTimeout == 1
+	app.BudgetVerified = budgetV == 1
+	app.SalaryProcessed = salaryP == 1
+	app.Registered = registered == 1
 	if deadline.Valid {
 		t := deadline.Time
 		app.NodeDeadline = &t
@@ -369,22 +406,36 @@ func ProcessApplication(c echo.Context) error {
 		}
 	}
 
-	if app.Status == models.StatusRejected || app.Status == models.StatusSynced {
-		return utils.ErrorMsg(c, "该申请已" + getStatusName(string(app.Status)) + "，无法继续处理")
+	if app.Status == models.StatusSynced {
+		return utils.ErrorMsg(c, "该申请已同步，无法继续处理")
+	}
+	if app.Status == models.StatusRejected {
+		return utils.ErrorMsg(c, "该申请已驳回，无法继续处理")
 	}
 
 	canProcess := false
-	switch uc.Role {
-	case string(models.RoleHRSpecialist):
-		canProcess = app.CurrentNode == "hr_specialist"
-	case string(models.RoleSalarySupervisor):
-		canProcess = app.CurrentNode == "salary_supervisor"
-	case string(models.RoleHRBPLeader):
-		canProcess = app.CurrentNode == "hrbp_leader"
+	switch req.Action {
+	case "register":
+		canProcess = uc.Role == string(models.RoleHRSpecialist) &&
+			app.Status == models.StatusApproved && !app.Registered
+	default:
+		switch uc.Role {
+		case string(models.RoleHRSpecialist):
+			canProcess = app.CurrentNode == "hr_specialist" && app.Status == models.StatusPendingReview
+		case string(models.RoleSalarySupervisor):
+			canProcess = app.CurrentNode == "salary_supervisor" && app.Status == models.StatusBudgetChecking
+		case string(models.RoleHRBPLeader):
+			canProcess = app.CurrentNode == "hrbp_leader" && app.Status == models.StatusPendingConfirm
+		}
 	}
 
 	if !canProcess {
-		return utils.ErrorMsg(c, "当前节点需由" + getNodeName(app.CurrentNode) + "处理，您无操作权限")
+		switch req.Action {
+		case "register":
+			return utils.ErrorMsg(c, "仅人事专员可在审核通过后进行异动登记，且申请须为审核通过状态")
+		default:
+			return utils.ErrorMsg(c, "当前节点需由"+getNodeName(app.CurrentNode)+"处理，您无操作权限")
+		}
 	}
 
 	nextNode := app.CurrentNode
@@ -418,56 +469,77 @@ func ProcessApplication(c echo.Context) error {
 		updateDeadline = false
 
 	case "verify_budget":
-		if uc.Role != string(models.RoleSalarySupervisor) {
-			return utils.ErrorMsg(c, "仅薪酬主管可进行预算校验")
+		if app.BudgetVerified {
+			return utils.ErrorMsg(c, "预算已校验，请勿重复操作")
 		}
-		if app.CurrentNode != "salary_supervisor" {
-			return utils.ErrorMsg(c, "当前节点不可进行预算校验")
-		}
-		_, err = tx.Exec("UPDATE transfer_applications SET budget_verified = 1, updated_at = ? WHERE id = ?", time.Now(), id)
+		_, err = tx.Exec("UPDATE transfer_applications SET budget_verified = 1, updated_at = ?, updated_by = ? WHERE id = ?", time.Now(), uc.UserID, id)
 		if err != nil {
 			return utils.Fail(c, 500, "预算校验失败")
 		}
-		addProcessingTrail(id, "salary_supervisor", &uc.UserID, "预算校验", req.Remark, "预算已校验", app.IsTimeout)
-		addOperationLog(uc.UserID, "verify_budget", "transfer_application", id, "异动申请预算校验: "+strconv.FormatInt(id, 10))
-		tx.Commit()
-		recalcApplicationStatus(id)
+		if err = txAddProcessingTrail(tx, id, "salary_supervisor", &uc.UserID, uc.RealName, "预算校验", req.Remark, "预算已校验", app.IsTimeout, req.TimeoutReason); err != nil {
+			return utils.Fail(c, 500, "记录轨迹失败")
+		}
+		if err = txAddOperationLog(tx, uc.UserID, uc.RealName, uc.Role, "verify_budget", "transfer_application", id, "异动申请预算校验: "+strconv.FormatInt(id, 10)); err != nil {
+			return utils.Fail(c, 500, "记录日志失败")
+		}
+		if err = txRecalcApplicationStatus(tx, id); err != nil {
+			return utils.Fail(c, 500, "状态重算失败")
+		}
+		if err = tx.Commit(); err != nil {
+			return utils.Fail(c, 500, "提交事务失败")
+		}
 		return utils.Success(c, map[string]string{"message": "预算校验成功"})
 
 	case "process_salary":
-		if uc.Role != string(models.RoleSalarySupervisor) {
-			return utils.ErrorMsg(c, "仅薪酬主管可处理调薪")
+		if app.SalaryProcessed {
+			return utils.ErrorMsg(c, "调薪已处理，请勿重复操作")
 		}
-		_, err = tx.Exec("UPDATE transfer_applications SET salary_processed = 1, updated_at = ? WHERE id = ?", time.Now(), id)
+		_, err = tx.Exec("UPDATE transfer_applications SET salary_processed = 1, updated_at = ?, updated_by = ? WHERE id = ?", time.Now(), uc.UserID, id)
 		if err != nil {
 			return utils.Fail(c, 500, "调薪处理失败")
 		}
-		addProcessingTrail(id, "salary_supervisor", &uc.UserID, "调薪处理", req.Remark, "调薪已处理", app.IsTimeout)
-		addOperationLog(uc.UserID, "process_salary", "transfer_application", id, "异动申请调薪处理: "+strconv.FormatInt(id, 10))
-		tx.Commit()
-		recalcApplicationStatus(id)
+		if err = txAddProcessingTrail(tx, id, "salary_supervisor", &uc.UserID, uc.RealName, "调薪处理", req.Remark, "调薪已处理", app.IsTimeout, req.TimeoutReason); err != nil {
+			return utils.Fail(c, 500, "记录轨迹失败")
+		}
+		if err = txAddOperationLog(tx, uc.UserID, uc.RealName, uc.Role, "process_salary", "transfer_application", id, "异动申请调薪处理: "+strconv.FormatInt(id, 10)); err != nil {
+			return utils.Fail(c, 500, "记录日志失败")
+		}
+		if err = txRecalcApplicationStatus(tx, id); err != nil {
+			return utils.Fail(c, 500, "状态重算失败")
+		}
+		if err = tx.Commit(); err != nil {
+			return utils.Fail(c, 500, "提交事务失败")
+		}
 		return utils.Success(c, map[string]string{"message": "调薪处理成功"})
 
 	case "register":
-		if uc.Role != string(models.RoleHRSpecialist) {
-			return utils.ErrorMsg(c, "仅人事专员可进行异动登记")
+		if app.Registered {
+			return utils.ErrorMsg(c, "异动已登记，请勿重复操作")
 		}
-		_, err = tx.Exec("UPDATE transfer_applications SET registered = 1, updated_at = ? WHERE id = ?", time.Now(), id)
+		_, err = tx.Exec("UPDATE transfer_applications SET registered = 1, updated_at = ?, updated_by = ? WHERE id = ?", time.Now(), uc.UserID, id)
 		if err != nil {
 			return utils.Fail(c, 500, "异动登记失败")
 		}
-		addProcessingTrail(id, "hr_specialist", &uc.UserID, "异动登记", req.Remark, "已登记", app.IsTimeout)
-		addOperationLog(uc.UserID, "register_transfer", "transfer_application", id, "异动登记完成: "+strconv.FormatInt(id, 10))
-		tx.Commit()
-		recalcApplicationStatus(id)
+		if err = txAddProcessingTrail(tx, id, "hr_specialist", &uc.UserID, uc.RealName, "异动登记", req.Remark, "已登记", app.IsTimeout, req.TimeoutReason); err != nil {
+			return utils.Fail(c, 500, "记录轨迹失败")
+		}
+		if err = txAddOperationLog(tx, uc.UserID, uc.RealName, uc.Role, "register_transfer", "transfer_application", id, "异动登记完成: "+strconv.FormatInt(id, 10)); err != nil {
+			return utils.Fail(c, 500, "记录日志失败")
+		}
+		if err = txRecalcApplicationStatus(tx, id); err != nil {
+			return utils.Fail(c, 500, "状态重算失败")
+		}
+		if err = tx.Commit(); err != nil {
+			return utils.Fail(c, 500, "提交事务失败")
+		}
 		return utils.Success(c, map[string]string{"message": "异动登记成功"})
 
 	default:
-		return utils.ErrorMsg(c, "不支持的处理动作: " + req.Action)
+		return utils.ErrorMsg(c, "不支持的处理动作: "+req.Action)
 	}
 
-	updateSQL := "UPDATE transfer_applications SET status = ?, current_node = ?, updated_at = ?"
-	updateArgs := []interface{}{nextStatus, nextNode, time.Now()}
+	updateSQL := "UPDATE transfer_applications SET status = ?, current_node = ?, updated_at = ?, updated_by = ?"
+	updateArgs := []interface{}{nextStatus, nextNode, time.Now(), uc.UserID}
 
 	if req.TimeoutReason != "" || app.IsTimeout {
 		updateSQL += ", is_timeout = 1, timeout_reason = ?"
@@ -493,18 +565,22 @@ func ProcessApplication(c echo.Context) error {
 		"reject": "驳回申请",
 	}[req.Action]
 
-	if err = addProcessingTrail(id, app.CurrentNode, &uc.UserID, actionName, req.Remark, trailStatus, app.IsTimeout); err != nil {
+	if err = txAddProcessingTrail(tx, id, app.CurrentNode, &uc.UserID, uc.RealName, actionName, req.Remark, trailStatus, app.IsTimeout, req.TimeoutReason); err != nil {
 		return utils.Fail(c, 500, "记录处理轨迹失败")
 	}
 
-	addOperationLog(uc.UserID, "process_application", "transfer_application", id,
-		actionName+": "+getStatusName(string(nextStatus)))
+	if err = txAddOperationLog(tx, uc.UserID, uc.RealName, uc.Role, "process_application", "transfer_application", id,
+		actionName+": "+getStatusName(string(nextStatus))); err != nil {
+		return utils.Fail(c, 500, "记录日志失败")
+	}
+
+	if err = txRecalcApplicationStatus(tx, id); err != nil {
+		return utils.Fail(c, 500, "状态重算失败")
+	}
 
 	if err = tx.Commit(); err != nil {
 		return utils.Fail(c, 500, "提交事务失败")
 	}
-
-	recalcApplicationStatus(id)
 
 	return utils.Success(c, map[string]interface{}{
 		"id":           id,
@@ -536,8 +612,9 @@ func BatchProcess(c echo.Context) error {
 	results := make(map[int64]string)
 
 	for _, id := range req.IDs {
-		var currentNode string
-		err := db.DB.QueryRow("SELECT current_node FROM transfer_applications WHERE id = ?", id).Scan(&currentNode)
+		var currentNode, status string
+		var budgetV, salaryP, registered int
+		err := db.DB.QueryRow("SELECT current_node, status, budget_verified, salary_processed, registered FROM transfer_applications WHERE id = ?", id).Scan(&currentNode, &status, &budgetV, &salaryP, &registered)
 		if err != nil {
 			failCount++
 			results[id] = "申请不存在"
@@ -545,69 +622,167 @@ func BatchProcess(c echo.Context) error {
 		}
 
 		canProcess := false
-		switch uc.Role {
-		case string(models.RoleHRSpecialist):
-			canProcess = currentNode == "hr_specialist"
-		case string(models.RoleSalarySupervisor):
-			canProcess = currentNode == "salary_supervisor" && (req.Action == "submit" || req.Action == "verify_budget" || req.Action == "process_salary")
-		case string(models.RoleHRBPLeader):
-			canProcess = currentNode == "hrbp_leader"
+		switch req.Action {
+		case "register":
+			canProcess = uc.Role == string(models.RoleHRSpecialist) && status == string(models.StatusApproved) && registered == 0
+		default:
+			switch uc.Role {
+			case string(models.RoleHRSpecialist):
+				canProcess = currentNode == "hr_specialist" && status == string(models.StatusPendingReview)
+			case string(models.RoleSalarySupervisor):
+				canProcess = currentNode == "salary_supervisor" && status == string(models.StatusBudgetChecking) && (req.Action == "submit" || req.Action == "verify_budget" || req.Action == "process_salary")
+			case string(models.RoleHRBPLeader):
+				canProcess = currentNode == "hrbp_leader" && status == string(models.StatusPendingConfirm)
+			}
 		}
 
 		if !canProcess {
 			failCount++
-			results[id] = "无权限处理"
+			results[id] = "无权限或状态不匹配"
 			continue
 		}
 
+		tx, txErr := db.DB.Begin()
+		if txErr != nil {
+			failCount++
+			results[id] = "事务开启失败"
+			continue
+		}
+
+		committed := false
+
 		if req.Action == "submit" || req.Action == "reject" {
-			var status string
-			var node string
+			var nextStatus, nextNode string
 			if req.Action == "submit" {
 				switch currentNode {
 				case "hr_specialist":
-					node = "salary_supervisor"
-					status = string(models.StatusBudgetChecking)
+					nextNode = "salary_supervisor"
+					nextStatus = string(models.StatusBudgetChecking)
 				case "salary_supervisor":
-					node = "hrbp_leader"
-					status = string(models.StatusPendingConfirm)
+					nextNode = "hrbp_leader"
+					nextStatus = string(models.StatusPendingConfirm)
 				case "hrbp_leader":
-					node = "completed"
-					status = string(models.StatusApproved)
+					nextNode = "completed"
+					nextStatus = string(models.StatusApproved)
 				}
 			} else {
-				status = string(models.StatusRejected)
-				node = currentNode
+				nextStatus = string(models.StatusRejected)
+				nextNode = currentNode
 			}
-			_, err = db.DB.Exec(
-				"UPDATE transfer_applications SET status = ?, current_node = ?, updated_at = ? WHERE id = ?",
-				status, node, time.Now(), id,
+			_, err = tx.Exec(
+				"UPDATE transfer_applications SET status = ?, current_node = ?, updated_at = ?, updated_by = ? WHERE id = ?",
+				nextStatus, nextNode, time.Now(), uc.UserID, id,
 			)
 			if err != nil {
+				tx.Rollback()
 				failCount++
 				results[id] = "处理失败: " + err.Error()
 				continue
 			}
-			addProcessingTrail(id, currentNode, &uc.UserID, map[string]string{"submit": "批量提交", "reject": "批量驳回"}[req.Action], req.Remark, getStatusName(status), false)
+			trailAction := map[string]string{"submit": "批量提交", "reject": "批量驳回"}[req.Action]
+			if err = txAddProcessingTrail(tx, id, currentNode, &uc.UserID, uc.RealName, trailAction, req.Remark, getStatusName(nextStatus), false, ""); err != nil {
+				tx.Rollback()
+				failCount++
+				results[id] = "记录轨迹失败"
+				continue
+			}
+			if err = txRecalcApplicationStatus(tx, id); err != nil {
+				tx.Rollback()
+				failCount++
+				results[id] = "状态重算失败"
+				continue
+			}
 		} else if req.Action == "verify_budget" {
-			_, err = db.DB.Exec("UPDATE transfer_applications SET budget_verified = 1, updated_at = ? WHERE id = ?", time.Now(), id)
-			addProcessingTrail(id, "salary_supervisor", &uc.UserID, "批量预算校验", req.Remark, "预算已校验", false)
+			_, err = tx.Exec("UPDATE transfer_applications SET budget_verified = 1, updated_at = ?, updated_by = ? WHERE id = ?", time.Now(), uc.UserID, id)
+			if err != nil {
+				tx.Rollback()
+				failCount++
+				results[id] = "预算校验失败"
+				continue
+			}
+			if err = txAddProcessingTrail(tx, id, "salary_supervisor", &uc.UserID, uc.RealName, "批量预算校验", req.Remark, "预算已校验", false, ""); err != nil {
+				tx.Rollback()
+				failCount++
+				results[id] = "记录轨迹失败"
+				continue
+			}
+			if err = txRecalcApplicationStatus(tx, id); err != nil {
+				tx.Rollback()
+				failCount++
+				results[id] = "状态重算失败"
+				continue
+			}
 		} else if req.Action == "process_salary" {
-			_, err = db.DB.Exec("UPDATE transfer_applications SET salary_processed = 1, updated_at = ? WHERE id = ?", time.Now(), id)
-			addProcessingTrail(id, "salary_supervisor", &uc.UserID, "批量调薪处理", req.Remark, "调薪已处理", false)
+			_, err = tx.Exec("UPDATE transfer_applications SET salary_processed = 1, updated_at = ?, updated_by = ? WHERE id = ?", time.Now(), uc.UserID, id)
+			if err != nil {
+				tx.Rollback()
+				failCount++
+				results[id] = "调薪处理失败"
+				continue
+			}
+			if err = txAddProcessingTrail(tx, id, "salary_supervisor", &uc.UserID, uc.RealName, "批量调薪处理", req.Remark, "调薪已处理", false, ""); err != nil {
+				tx.Rollback()
+				failCount++
+				results[id] = "记录轨迹失败"
+				continue
+			}
+			if err = txRecalcApplicationStatus(tx, id); err != nil {
+				tx.Rollback()
+				failCount++
+				results[id] = "状态重算失败"
+				continue
+			}
+		} else if req.Action == "register" {
+			_, err = tx.Exec("UPDATE transfer_applications SET registered = 1, updated_at = ?, updated_by = ? WHERE id = ?", time.Now(), uc.UserID, id)
+			if err != nil {
+				tx.Rollback()
+				failCount++
+				results[id] = "异动登记失败"
+				continue
+			}
+			if err = txAddProcessingTrail(tx, id, "hr_specialist", &uc.UserID, uc.RealName, "批量异动登记", req.Remark, "已登记", false, ""); err != nil {
+				tx.Rollback()
+				failCount++
+				results[id] = "记录轨迹失败"
+				continue
+			}
+			if err = txRecalcApplicationStatus(tx, id); err != nil {
+				tx.Rollback()
+				failCount++
+				results[id] = "状态重算失败"
+				continue
+			}
 		} else {
+			tx.Rollback()
 			failCount++
 			results[id] = "不支持的动作"
 			continue
 		}
 
+		if err = txAddOperationLog(tx, uc.UserID, uc.RealName, uc.Role, "batch_"+req.Action, "transfer_application", id, "批量操作: "+req.Action); err != nil {
+			tx.Rollback()
+			failCount++
+			results[id] = "记录日志失败"
+			continue
+		}
+
+		if err = tx.Commit(); err != nil {
+			failCount++
+			results[id] = "提交事务失败"
+			continue
+		}
+		committed = true
+		_ = committed
+
 		successCount++
 		results[id] = "处理成功"
-		recalcApplicationStatus(id)
 	}
 
-	addOperationLog(uc.UserID, "batch_process", "transfer_application", 0,
-		fmt.Sprintf("批量操作: %s, 成功%d, 失败%d", req.Action, successCount, failCount))
+	_, _ = db.DB.Exec(
+		"INSERT INTO operation_logs (user_id, user_name, user_role, action, target_type, detail) VALUES (?, ?, ?, ?, ?, ?)",
+		uc.UserID, uc.RealName, uc.Role, "batch_process", "transfer_application",
+		fmt.Sprintf("批量操作: %s, 成功%d, 失败%d", req.Action, successCount, failCount),
+	)
 
 	return utils.Success(c, map[string]interface{}{
 		"success_count": successCount,
@@ -628,8 +803,9 @@ func GetStatistics(c echo.Context) error {
 		baseQuery += " AND created_by = ?"
 		args = append(args, uc.UserID)
 	case string(models.RoleSalarySupervisor):
-		baseQuery += " AND current_node IN ('salary_supervisor', 'hrbp_leader', 'completed')"
+		baseQuery += " AND (current_node IN ('salary_supervisor', 'hrbp_leader', 'completed') OR status IN ('approved', 'synced'))"
 	case string(models.RoleHRBPLeader):
+		baseQuery += " AND (current_node IN ('hrbp_leader', 'completed') OR status IN ('approved', 'synced'))"
 	}
 
 	db.DB.QueryRow(baseQuery, args...).Scan(&stats.Total)
@@ -652,6 +828,10 @@ func GetStatistics(c echo.Context) error {
 		if uc.Role == string(models.RoleHRSpecialist) {
 			q += " AND created_by = ?"
 			a = append(a, uc.UserID)
+		} else if uc.Role == string(models.RoleSalarySupervisor) {
+			q += " AND (current_node IN ('salary_supervisor', 'hrbp_leader', 'completed') OR status IN ('approved', 'synced'))"
+		} else if uc.Role == string(models.RoleHRBPLeader) {
+			q += " AND (current_node IN ('hrbp_leader', 'completed') OR status IN ('approved', 'synced'))"
 		}
 		db.DB.QueryRow(q, a...).Scan(item.ptr)
 	}
@@ -661,6 +841,10 @@ func GetStatistics(c echo.Context) error {
 	if uc.Role == string(models.RoleHRSpecialist) {
 		q += " AND created_by = ?"
 		a = append(a, uc.UserID)
+	} else if uc.Role == string(models.RoleSalarySupervisor) {
+		q += " AND (current_node IN ('salary_supervisor', 'hrbp_leader', 'completed') OR status IN ('approved', 'synced'))"
+	} else if uc.Role == string(models.RoleHRBPLeader) {
+		q += " AND (current_node IN ('hrbp_leader', 'completed') OR status IN ('approved', 'synced'))"
 	}
 	db.DB.QueryRow(q, a...).Scan(&stats.TimeoutCount)
 
@@ -668,12 +852,10 @@ func GetStatistics(c echo.Context) error {
 }
 
 func ListOperationLogs(c echo.Context) error {
-	limit := 50
+	limit := 100
 	rows, err := db.DB.Query(`
-		SELECT l.id, l.user_id, l.action, l.target_type, l.target_id, l.detail, l.created_at,
-		       u.real_name, u.role
+		SELECT l.id, l.user_id, l.user_name, l.user_role, l.action, l.target_type, l.target_id, l.detail, l.created_at
 		FROM operation_logs l
-		LEFT JOIN users u ON l.user_id = u.id
 		ORDER BY l.id DESC LIMIT ?`, limit)
 	if err != nil {
 		return utils.Fail(c, 500, "查询操作日志失败")
@@ -686,7 +868,7 @@ func ListOperationLogs(c echo.Context) error {
 		var userName, userRole sql.NullString
 		var targetType, detail sql.NullString
 		var targetID sql.NullInt64
-		if err := rows.Scan(&log.ID, &log.UserID, &log.Action, &targetType, &targetID, &detail, &log.CreatedAt, &userName, &userRole); err != nil {
+		if err := rows.Scan(&log.ID, &log.UserID, &userName, &userRole, &log.Action, &targetType, &targetID, &detail, &log.CreatedAt); err != nil {
 			continue
 		}
 		if targetType.Valid {
@@ -699,9 +881,17 @@ func ListOperationLogs(c echo.Context) error {
 			log.Detail = detail.String
 		}
 		if userName.Valid {
-			log.User = &models.User{ID: log.UserID, RealName: userName.String}
-			if userRole.Valid {
-				log.User.Role = models.Role(userRole.String)
+			log.UserName = userName.String
+		}
+		if userRole.Valid {
+			log.UserRole = userRole.String
+		}
+		if log.UserName == "" {
+			var u models.User
+			if err := db.DB.QueryRow("SELECT id, real_name, role FROM users WHERE id = ?", log.UserID).Scan(&u.ID, &u.RealName, &u.Role); err == nil {
+				log.User = &u
+				log.UserName = u.RealName
+				log.UserRole = string(u.Role)
 			}
 		}
 		logs = append(logs, log)

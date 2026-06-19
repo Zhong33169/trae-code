@@ -12,6 +12,7 @@ type UserContext struct {
 	echo.Context
 	UserID   int64
 	Username string
+	RealName string
 	Role     string
 }
 
@@ -36,6 +37,7 @@ func AuthMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
 			Context:  c,
 			UserID:   claims.UserID,
 			Username: claims.Username,
+			RealName: claims.RealName,
 			Role:     claims.Role,
 		}
 

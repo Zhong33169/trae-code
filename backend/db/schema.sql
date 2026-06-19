@@ -4,7 +4,8 @@ CREATE TABLE IF NOT EXISTS users (
     password TEXT NOT NULL,
     real_name TEXT NOT NULL,
     role TEXT NOT NULL CHECK(role IN ('hr_specialist', 'salary_supervisor', 'hrbp_leader')),
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS employees (
@@ -14,7 +15,8 @@ CREATE TABLE IF NOT EXISTS employees (
     department TEXT NOT NULL,
     position TEXT NOT NULL,
     current_salary REAL NOT NULL DEFAULT 0,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS transfer_applications (
@@ -47,13 +49,15 @@ CREATE TABLE IF NOT EXISTS transfer_applications (
     salary_processed INTEGER DEFAULT 0,
     registered INTEGER DEFAULT 0,
     created_by INTEGER NOT NULL,
+    updated_by INTEGER,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     node_deadline DATETIME,
     is_timeout INTEGER DEFAULT 0,
     timeout_reason TEXT,
     FOREIGN KEY (employee_id) REFERENCES employees(id),
-    FOREIGN KEY (created_by) REFERENCES users(id)
+    FOREIGN KEY (created_by) REFERENCES users(id),
+    FOREIGN KEY (updated_by) REFERENCES users(id)
 );
 
 CREATE TABLE IF NOT EXISTS processing_trails (
@@ -61,10 +65,12 @@ CREATE TABLE IF NOT EXISTS processing_trails (
     application_id INTEGER NOT NULL,
     node TEXT NOT NULL,
     handler_id INTEGER,
+    handler_name TEXT,
     action TEXT NOT NULL,
     remark TEXT,
     status TEXT NOT NULL,
     is_timeout INTEGER DEFAULT 0,
+    timeout_reason TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (application_id) REFERENCES transfer_applications(id),
     FOREIGN KEY (handler_id) REFERENCES users(id)
@@ -73,6 +79,8 @@ CREATE TABLE IF NOT EXISTS processing_trails (
 CREATE TABLE IF NOT EXISTS operation_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL,
+    user_name TEXT,
+    user_role TEXT,
     action TEXT NOT NULL,
     target_type TEXT,
     target_id INTEGER,
@@ -83,5 +91,6 @@ CREATE TABLE IF NOT EXISTS operation_logs (
 
 CREATE INDEX IF NOT EXISTS idx_applications_status ON transfer_applications(status);
 CREATE INDEX IF NOT EXISTS idx_applications_node ON transfer_applications(current_node);
+CREATE INDEX IF NOT EXISTS idx_applications_created_by ON transfer_applications(created_by);
 CREATE INDEX IF NOT EXISTS idx_trails_app ON processing_trails(application_id);
 CREATE INDEX IF NOT EXISTS idx_logs_user ON operation_logs(user_id);

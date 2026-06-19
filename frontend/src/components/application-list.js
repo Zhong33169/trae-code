@@ -134,16 +134,27 @@ export class ApplicationList extends LitElement {
     this.selected = next;
   }
 
-  canBatchSubmit() {
+  canBatchAction(action) {
     if (!this.user || this.selectedCount === 0) return false;
     const role = this.user.role;
     return this.selectedIds.every(id => {
       const app = this.applications.find(a => a.id === id);
       if (!app) return false;
-      if (role === 'hr_specialist') return app.current_node === 'hr_specialist';
-      if (role === 'salary_supervisor') return app.current_node === 'salary_supervisor';
-      if (role === 'hrbp_leader') return app.current_node === 'hrbp_leader';
-      return false;
+      switch (action) {
+        case 'submit':
+          if (role === 'hr_specialist') return app.current_node === 'hr_specialist' && app.status === 'pending_review';
+          if (role === 'salary_supervisor') return app.current_node === 'salary_supervisor' && app.status === 'budget_checking';
+          if (role === 'hrbp_leader') return app.current_node === 'hrbp_leader' && app.status === 'pending_confirm';
+          return false;
+        case 'register':
+          return role === 'hr_specialist' && app.status === 'approved' && !app.registered;
+        case 'verify_budget':
+          return role === 'salary_supervisor' && app.current_node === 'salary_supervisor' && app.status === 'budget_checking' && !app.budget_verified;
+        case 'process_salary':
+          return role === 'salary_supervisor' && app.current_node === 'salary_supervisor' && app.status === 'budget_checking' && !app.salary_processed;
+        default:
+          return false;
+      }
     });
   }
 
@@ -192,11 +203,10 @@ export class ApplicationList extends LitElement {
         ${this.selectedCount > 0 ? html`
           <div class="batch-bar">
             <span>已选择 <span class="count">${this.selectedCount}</span> 项</span>
-            ${this.canBatchSubmit() ? html`<button class="btn btn-primary" @click=${this.openBatchDialog}>批量提交</button>` : ''}
-            ${this.user?.role === 'salary_supervisor' ? html`
-              <button class="btn btn-default" @click=${() => { this._batchAction = 'verify_budget'; this.showBatch = true; }}>批量预算校验</button>
-              <button class="btn btn-default" @click=${() => { this._batchAction = 'process_salary'; this.showBatch = true; }}>批量调薪处理</button>
-            ` : ''}
+            ${this.canBatchAction('submit') ? html`<button class="btn btn-primary" @click=${() => { this._batchAction = 'submit'; this.showBatch = true; }}>批量提交</button>` : ''}
+            ${this.canBatchAction('register') ? html`<button class="btn btn-success" @click=${() => { this._batchAction = 'register'; this.showBatch = true; }}>批量异动登记</button>` : ''}
+            ${this.canBatchAction('verify_budget') ? html`<button class="btn btn-default" @click=${() => { this._batchAction = 'verify_budget'; this.showBatch = true; }}>批量预算校验</button>` : ''}
+            ${this.canBatchAction('process_salary') ? html`<button class="btn btn-default" @click=${() => { this._batchAction = 'process_salary'; this.showBatch = true; }}>批量调薪处理</button>` : ''}
             <button class="btn btn-default" @click=${() => this.selected = {}}>取消选择</button>
           </div>
         ` : ''}
@@ -259,13 +269,18 @@ export class ApplicationList extends LitElement {
 
   renderBatchModal() {
     const actions = [];
-    if (this.user?.role === 'hr_specialist') actions.push({ value: 'submit', label: '提交审核' });
+    if (this.user?.role === 'hr_specialist') {
+      actions.push({ value: 'submit', label: '提交审核' });
+      actions.push({ value: 'register', label: '异动登记' });
+    }
     if (this.user?.role === 'salary_supervisor') {
       actions.push({ value: 'submit', label: '提交审核' });
       actions.push({ value: 'verify_budget', label: '预算校验' });
       actions.push({ value: 'process_salary', label: '调薪处理' });
     }
-    if (this.user?.role === 'hrbp_leader') actions.push({ value: 'submit', label: '审核通过' });
+    if (this.user?.role === 'hrbp_leader') {
+      actions.push({ value: 'submit', label: '审核通过' });
+    }
 
     return html`
       <div class="modal-mask" @click=${e => { if (e.target === e.currentTarget) this.showBatch = false; }}>
