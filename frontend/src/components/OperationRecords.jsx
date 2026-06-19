@@ -16,6 +16,7 @@ const ACTION_LABELS = {
   stage_advance: '阶段推进',
   risk_change: '风险等级变更',
   update_evidence: '更新证据',
+  evidence_update_failed: '证据更新失败',
   create: '创建工单',
 };
 
@@ -32,7 +33,7 @@ export default function OperationRecords({ records }) {
     <div class="timeline">
       {sorted.map((rec, i) => {
         const isReturn = rec.action === 'return';
-        const isValidationFailed = rec.action === 'validation_failed';
+        const isValidationFailed = rec.action === 'validation_failed' || rec.action === 'evidence_update_failed';
         let itemClass = '';
         if (isReturn) itemClass = 'action-return';
         if (isValidationFailed) itemClass = 'action-validation_failed';

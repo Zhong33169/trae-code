@@ -1,6 +1,7 @@
 import { h } from 'preact';
 import { useState, useEffect, useCallback } from 'preact/hooks';
 import { fetchStats } from '../api/client';
+import useRefreshEvent from '../hooks/useRefreshEvent';
 
 const STATUS_LABELS = {
   draft: '待发起',
@@ -44,6 +45,8 @@ export default function Statistics() {
     const interval = setInterval(loadStats, 15000);
     return () => clearInterval(interval);
   }, [loadStats]);
+
+  useRefreshEvent(loadStats);
 
   if (loading) return <div class="page-container"><div class="loading">加载中...</div></div>;
   if (!stats) return <div class="page-container"><div class="empty-state">暂无统计数据</div></div>;

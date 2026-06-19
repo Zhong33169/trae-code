@@ -20,6 +20,12 @@ function parseJSON(val) {
   return [];
 }
 
+function triggerGlobalRefresh() {
+  try {
+    window.dispatchEvent(new CustomEvent('aftersales:refresh'));
+  } catch (e) {}
+}
+
 export default function ActionPanel({ order, currentUser, onAction }) {
   const [opinion, setOpinion] = useState('');
   const [checkedEvidence, setCheckedEvidence] = useState([]);
@@ -37,7 +43,7 @@ export default function ActionPanel({ order, currentUser, onAction }) {
 
   useEffect(() => {
     setCheckedEvidence(providedEvidence);
-  }, [order?.id]);
+  }, [order?.id, order?.evidence_provided]);
 
   if (!currentUser || !order) return null;
 
@@ -65,6 +71,11 @@ export default function ActionPanel({ order, currentUser, onAction }) {
     );
   };
 
+  const finalizeRefresh = () => {
+    triggerGlobalRefresh();
+    if (onAction) onAction();
+  };
+
   const handleSubmit = async (action) => {
     if (!opinion.trim()) {
       setError('请填写处理意见');
@@ -77,10 +88,12 @@ export default function ActionPanel({ order, currentUser, onAction }) {
         const finalEvidence = checkedEvidence.length > 0 ? checkedEvidence : providedEvidence;
         const evidenceChanged = finalEvidence.length !== providedEvidence.length ||
           finalEvidence.some((e, i) => e !== providedEvidence[i]);
-        if (evidenceChanged || finalEvidence.length > 0) {
+        const hasEvidence = finalEvidence.length > 0;
+        if (evidenceChanged || hasEvidence) {
           await updateEvidence(order.id, {
             evidence: finalEvidence,
             handler_id: currentUser.id,
+            version: order.version,
           });
         }
       }
@@ -91,7 +104,6 @@ export default function ActionPanel({ order, currentUser, onAction }) {
         version: order.version,
       });
       setOpinion('');
-      onAction();
     } catch (e) {
       const msg = e.message || '操作失败';
       if (e.details && e.details.missing && e.details.missing.length) {
@@ -101,6 +113,7 @@ export default function ActionPanel({ order, currentUser, onAction }) {
       }
     } finally {
       setSubmitting(false);
+      finalizeRefresh();
     }
   };
 

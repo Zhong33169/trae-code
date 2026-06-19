@@ -4,6 +4,7 @@ import { route } from 'preact-router';
 import { fetchOrders } from '../api/client';
 import RiskBadge from './RiskBadge';
 import CreateOrderModal from './CreateOrderModal';
+import useRefreshEvent from '../hooks/useRefreshEvent';
 
 const STATUS_MAP = {
   draft: '待发起',
@@ -56,6 +57,8 @@ export default function QueueList({ currentUser }) {
     const interval = setInterval(loadOrders, 10000);
     return () => clearInterval(interval);
   }, [loadOrders]);
+
+  useRefreshEvent(loadOrders);
 
   const isOverdue = (deadline) => {
     if (!deadline) return false;

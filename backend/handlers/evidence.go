@@ -3,7 +3,9 @@ package handlers
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"aftersales-backend/models"
@@ -49,7 +51,46 @@ func UpdateEvidence(db *sql.DB) echo.HandlerFunc {
 		}
 
 		if user.Role != "clerk" {
-			return c.JSON(http.StatusForbidden, map[string]string{"error": "只有登记员可以添加证据"})
+			writeValidationRecord(db, &order, "evidence_update_failed", fmt.Sprintf("越权变更证据: 角色 %s 不允许操作", user.Role))
+			return c.JSON(http.StatusForbidden, map[string]string{"error": "只有登记员可以维护证据"})
+		}
+
+		if user.Role != order.HandlerRole {
+			writeValidationRecord(db, &order, "evidence_update_failed", "处理人角色不匹配")
+			return c.JSON(http.StatusForbidden, map[string]string{"error": "当前处理人不是登记员"})
+		}
+
+		if order.Status != "draft" && order.Status != "returned" {
+			writeValidationRecord(db, &order, "evidence_update_failed", fmt.Sprintf("状态 %s 不允许维护证据", order.Status))
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": "当前状态不允许维护证据"})
+		}
+
+		if req.Version != 0 && req.Version != order.Version {
+			writeValidationRecord(db, &order, "evidence_update_failed", "版本冲突")
+			return c.JSON(http.StatusConflict, map[string]string{"error": "版本冲突"})
+		}
+
+		var requiredEvidence []string
+		json.Unmarshal([]byte(order.RequiredEvidence), &requiredEvidence)
+
+		if len(requiredEvidence) > 0 {
+			providedSet := make(map[string]bool)
+			for _, e := range req.Evidence {
+				providedSet[e] = true
+			}
+			missing := []string{}
+			for _, re := range requiredEvidence {
+				if !providedSet[re] {
+					missing = append(missing, re)
+				}
+			}
+			if len(missing) > 0 {
+				writeValidationRecord(db, &order, "evidence_update_failed", fmt.Sprintf("证据未覆盖必填项: %s", strings.Join(missing, "、")))
+				return c.JSON(http.StatusBadRequest, map[string]interface{}{
+					"error":   "必填证据未全部提供",
+					"missing": missing,
+				})
+			}
 		}
 
 		eviJSON, _ := json.Marshal(req.Evidence)
@@ -60,10 +101,19 @@ func UpdateEvidence(db *sql.DB) echo.HandlerFunc {
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		}
 
-		_, err = db.Exec(
-			`INSERT INTO processing_records (order_id, stage, step, action, handler_role, handler_name, opinion, result, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		var record models.ProcessingRecord
+		evidenceDesc := strings.Join(req.Evidence, "、")
+		if evidenceDesc == "" {
+			evidenceDesc = "无"
+		}
+		err = db.QueryRow(
+			`INSERT INTO processing_records (order_id, stage, step, action, handler_role, handler_name, opinion, result, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id, order_id, stage, step, action, handler_role, handler_name, opinion, result, created_at`,
 			order.Id, order.CurrentStage, order.CurrentStep, "update_evidence", user.Role, user.DisplayName,
-			"", "更新证据材料", now,
+			"", fmt.Sprintf("更新证据材料: %s", evidenceDesc), now,
+		).Scan(
+			&record.Id, &record.OrderId, &record.Stage, &record.Step,
+			&record.Action, &record.HandlerRole, &record.HandlerName,
+			&record.Opinion, &record.Result, &record.CreatedAt,
 		)
 		if err != nil {
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -85,6 +135,9 @@ func UpdateEvidence(db *sql.DB) echo.HandlerFunc {
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		}
 
-		return c.JSON(http.StatusOK, updatedOrder)
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"order":  updatedOrder,
+			"record": record,
+		})
 	}
 }

@@ -93,4 +93,5 @@ type OrderDetailResponse struct {
 type EvidenceUpdateRequest struct {
 	Evidence  []string `json:"evidence"`
 	HandlerId int      `json:"handler_id"`
+	Version   int      `json:"version"`
 }

@@ -2,6 +2,12 @@ import { h } from 'preact';
 import { useState } from 'preact/hooks';
 import { createOrder } from '../api/client';
 
+function triggerGlobalRefresh() {
+  try {
+    window.dispatchEvent(new CustomEvent('aftersales:refresh'));
+  } catch (e) {}
+}
+
 const EVIDENCE_OPTIONS = [
   '订单截图',
   '退款申请',
@@ -62,6 +68,7 @@ export default function CreateOrderModal({ onClose, onSuccess }) {
         order_amount: Number(form.order_amount),
         refund_amount: Number(form.refund_amount),
       });
+      triggerGlobalRefresh();
       onSuccess();
     } catch (e) {
       setError(e.message || '创建失败');

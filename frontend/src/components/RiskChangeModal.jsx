@@ -2,6 +2,12 @@ import { h } from 'preact';
 import { useState } from 'preact/hooks';
 import { changeRiskLevel } from '../api/client';
 
+function triggerGlobalRefresh() {
+  try {
+    window.dispatchEvent(new CustomEvent('aftersales:refresh'));
+  } catch (e) {}
+}
+
 export default function RiskChangeModal({ currentLevel, orderId, currentUser, onClose, onSuccess }) {
   const [newLevel, setNewLevel] = useState('');
   const [reason, setReason] = useState('');
@@ -29,6 +35,7 @@ export default function RiskChangeModal({ currentLevel, orderId, currentUser, on
         reason: reason.trim(),
         operator_id: currentUser ? currentUser.id : 1,
       });
+      triggerGlobalRefresh();
       onSuccess();
     } catch (e) {
       setError(e.message || '变更失败');
