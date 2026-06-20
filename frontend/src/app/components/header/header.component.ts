@@ -1,8 +1,10 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router } from '@angular/router';
 import { FormsModule } from '@angular/forms';
+import { Subject, takeUntil } from 'rxjs';
 import { AuthService } from '../../services/auth.service';
+import { OrderService } from '../../services/order.service';
 import { User } from '../../models/app.models';
 
 @Component({
@@ -56,7 +58,8 @@ import { User } from '../../models/app.models';
     .role { font-size: 11px; color: #999; }
   `]
 })
-export class HeaderComponent implements OnInit {
+export class HeaderComponent implements OnInit, OnDestroy {
+  private readonly destroy$ = new Subject<void>();
   user: User | null = null;
   switchAccount: any = '';
   accounts = [
@@ -65,31 +68,36 @@ export class HeaderComponent implements OnInit {
     { username: 'reviewer01', password: '123456', name: '张复核负责人', roleLabel: '体育场馆复核负责人' }
   ];
 
-  constructor(public authService: AuthService, private router: Router) {}
+  constructor(public authService: AuthService, private orderService: OrderService, private router: Router) {}
 
   ngOnInit() {
-    this.authService.user$.subscribe(u => this.user = u);
+    this.authService.user$.pipe(takeUntil(this.destroy$)).subscribe(u => this.user = u);
   }
+
+  ngOnDestroy() { this.destroy$.next(); this.destroy$.complete(); }
 
   get roleLabel(): string {
     const map: any = { registrar: '器材借用登记员', auditor: '器材借用审核主管', reviewer: '体育场馆复核负责人' };
     return map[this.user?.role || ''] || '';
   }
 
-  goHome() { this.router.navigate(['/queue']); }
+  goHome() { this.router.navigate(['/queue'], { replaceUrl: true }); }
 
   doSwitch() {
     if (!this.switchAccount) return;
     const a = this.switchAccount;
     this.switchAccount = '';
     this.authService.switchAccount(a.username, a.password).subscribe({
-      next: () => { this.router.navigate(['/queue']); },
+      next: () => {
+        this.orderService.emit({ kind: 'roleChanged' });
+        this.router.navigate(['/queue'], { replaceUrl: true });
+      },
       error: (e) => alert('切换失败: ' + (e.error?.message || e.message))
     });
   }
 
   logout() {
     this.authService.logout();
-    this.router.navigate(['/login']);
+    this.router.navigate(['/login'], { replaceUrl: true });
   }
 }

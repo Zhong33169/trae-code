@@ -15,12 +15,12 @@
   <div class="title-bar">
     <div class="title">
       <h2><span class="order-no">{{ detail.order.order_no }}</span>
-        <span class="tag" [ngClass]="statusLabels[detail.order.status][1]">{{ statusLabels[detail.order.status][0] }}</span>
+        <span class="tag" [ngClass]="statusMeta(detail.order.status).css">{{ statusMeta(detail.order.status).label }}</span>
         <span class="badge badge-blue" style="margin-left:4px;">v{{ detail.order.version }}</span>
       </h2>
       <div class="meta">
-        创建：{{ detail.order.created_by_name }} · {{ detail.order.created_at?.slice(0,16) }}
-        ｜ 更新：{{ detail.order.updated_at?.slice(0,16) }}
+        创建：{{ detail.order.created_by_name }} · {{ formatDateTime(detail.order.created_at) }}
+        ｜ 更新：{{ formatDateTime(detail.order.updated_at) }}
         <span *ngIf="detail.order.auditor_name">｜ 审核：{{ detail.order.auditor_name }}</span>
         <span *ngIf="detail.order.reviewer_name">｜ 复核：{{ detail.order.reviewer_name }}</span>
       </div>
@@ -51,21 +51,17 @@
   <div class="card mb-12">
     <div class="section-title">🔁 流程进度</div>
     <div class="flow-steps">
-      <div class="flow-step" *ngFor="let step of [
-        { key:'draft', label:'创建草稿', icon:'📝' },
-        { key:'pending_audit', label:'提交审核', icon:'📤' },
-        { key:'audit_decide', label:'审核主管办理', icon:'🔍' },
-        { key:'pending_review', label:'待复核', icon:'⏳' },
-        { key:'review_decide', label:'复核负责人办理', icon:'📋' },
-        { key:'archived', label:'归档完成', icon:'✅' }
-      ]" [ngClass]="flowStepStatus({key:step.key, decider: step.key==='audit_decide' || step.key==='review_decide'})">
-        <div class="step-circle">{{ step.icon }}</div>
-        <div class="step-label">{{ step.label }}
-          <div *ngIf="flowStepStatus({key:step.key, decider: step.key==='audit_decide' || step.key==='review_decide'})==='rejected'" style="color:#ff4d4f;">
-            被驳回
+      <ng-container *ngFor="let step of flowSteps; let i = index; let last = last">
+        <div class="flow-step" [ngClass]="flowStepStatus(step.key, !!step.decider)">
+          <div class="step-circle">{{ ['📝','📤','🔍','⏳','📋','✅'][i] }}</div>
+          <div class="step-label">
+            {{ step.label }}
+            <div *ngIf="flowStepStatus(step.key, !!step.decider)==='rejected'" style="color:#ff4d4f;">
+              被驳回
+            </div>
           </div>
         </div>
-      </div>
+      </ng-container>
     </div>
   </div>
 
@@ -109,8 +105,8 @@
             <div *ngFor="let e of detail.evidences" class="evidence-card">
               <div class="ev-head">
                 <div class="left">
-                  <span class="tag" [ngClass]="{borrow:'tag-borrow',return:'tag-return',loss:'tag-loss'}[e.type]">
-                    {{ evidenceTypes[e.type] }}
+                  <span class="tag" [ngClass]="evidenceMeta(e.type).css">
+                    {{ evidenceMeta(e.type).label }}
                   </span>
                   <span class="text-sm text-bold">{{ e.file_name || '无附件' }}</span>
                 </div>
@@ -119,7 +115,7 @@
               <div class="ev-desc">{{ e.description }}</div>
               <div class="ev-meta">
                 <span>上传：{{ e.uploader_name }}</span>
-                <span>{{ e.created_at?.slice(0,16) }}</span>
+                <span>{{ formatDateTime(e.created_at) }}</span>
               </div>
             </div>
           </div>
@@ -127,19 +123,19 @@
 
         <div [hidden]="tab!=='log'">
           <div class="log-list">
-            <div *ngFor="let l of detail.logs" class="log-item">
+            <div *ngFor="let l of logsOrdered()" class="log-item">
               <div class="log-dot"></div>
               <div class="log-body">
                 <div class="log-title">
-                  {{ l.action }}
-                  <span *ngIf="l.from_status" class="text-sm text-gray"> [{{ statusLabels[l.from_status]?.[0] || l.from_status }}]</span>
+                  {{ actionLabel(l.action) }}
+                  <span *ngIf="l.from_status" class="text-sm text-gray"> [{{ statusMeta(l.from_status).label }}]</span>
                   <span *ngIf="l.to_status && l.to_status !== l.from_status">
                     → <span class="status" [ngClass]="{reject: l.to_status?.includes('reject')}">
-                      {{ statusLabels[l.to_status]?.[0] || l.to_status }}
+                      {{ statusMeta(l.to_status).label }}
                     </span>
                   </span>
                 </div>
-                <div class="log-meta">{{ l.user_name }} · {{ l.created_at?.slice(0,16) }}</div>
+                <div class="log-meta">{{ l.user_name }} · {{ formatDateTime(l.created_at) }}</div>
                 <div class="log-comment" *ngIf="l.comment">💬 {{ l.comment }}</div>
               </div>
             </div>
@@ -152,52 +148,30 @@
       <div class="card mb-12">
         <div class="section-title">👤 办理说明</div>
         <div class="role-hint">
-          <div class="title">当前角色：
-            {{ {registrar:'器材借用登记员', auditor:'器材借用审核主管', reviewer:'体育场馆复核负责人'}[user?.role || ''] }}
-          </div>
-          <div *ngIf="user?.role==='registrar'">
-            🔹 创建草稿，填写借用信息并上传<b>借用证据</b>后提交<br/>
-            🔹 被驳回的单据需要<b>补正信息或证据</b>后重提<br/>
-            🔹 归还后及时上传<b>归还验收证据</b>、如有损耗填写说明并上传<b>损耗确认</b>
-          </div>
-          <div *ngIf="user?.role==='auditor'">
-            🔹 仅可审核<b>待审核</b>状态的单据<br/>
-            🔹 检查借用理由、信息完整性，通过后流转至复核岗<br/>
-            🔹 信息不全或不规范时请<b>驳回</b>并写明修改意见
-          </div>
-          <div *ngIf="user?.role==='reviewer'">
-            🔹 复核时需确认<b>借用、归还、损耗</b>证据齐全且一致<br/>
-            🔹 全部通过则<b>归档</b>，有问题<b>驳回登记员补正</b><br/>
-            🔹 支持"批量复核归档"，逐条显示成功 / 失败原因
-          </div>
+          <div class="title">{{ workingGuide.title }}</div>
+          <ul *ngIf="workingGuide.actions.length">
+            <li *ngFor="let a of workingGuide.actions">{{ a }}</li>
+          </ul>
         </div>
       </div>
 
-      <div class="card mb-12" *ngIf="detail.order.last_failure_reason || detail.order.status==='audit_rejected' || detail.order.status==='review_rejected'">
+      <div class="card mb-12" *ngIf="showFailureBox">
         <div class="section-title" style="color:#cf1322;">🚨 问题与失败原因</div>
-        <div class="reason-box" *ngIf="detail.order.last_failure_reason">
-          <div class="title">⚠️ 最近一次复核失败原因</div>
-          <div>{{ detail.order.last_failure_reason }}</div>
-        </div>
-        <div class="reason-box mt-8" *ngIf="detail.order.status==='audit_rejected'">
-          <div class="title">🚫 审核驳回（需登记员补正）</div>
-          <ul>
-            <li>请参考"审核意见"进行修改</li>
-            <li>修改完成后点击"补正后重提"</li>
+        <div *ngFor="let sec of failureReasons" class="reason-box mt-8">
+          <div class="title">⚠️ {{ sec.label }}</div>
+          <ul *ngIf="sec.lines.length > 1">
+            <li *ngFor="let line of sec.lines">{{ line }}</li>
           </ul>
-        </div>
-        <div class="reason-box mt-8" *ngIf="detail.order.status==='review_rejected' && !detail.order.last_failure_reason">
-          <div class="title">⚠️ 复核驳回（需登记员补正）</div>
-          <ul>
-            <li>请参考"复核意见"和下方复核清单进行补正</li>
-            <li>补正完成后重新提交审核（会再次走完整流程）</li>
-          </ul>
+          <div *ngIf="sec.lines.length === 1">{{ sec.lines[0] }}</div>
         </div>
       </div>
 
-      <div class="card mb-12">
+      <div class="card mb-12" *ngIf="showReviewChecklist">
         <div class="section-title">✅ 复核归档清单</div>
-        <div class="checklist">
+        <div class="alert" [ngClass]="checklistPassAll ? 'alert-ok' : 'alert-warn'">
+          {{ checklistHint }}
+        </div>
+        <div class="checklist mt-12">
           <div *ngFor="let c of reviewChecklist" class="check-item" [ngClass]="{pass:c.pass, fail:!c.pass}">
             <span class="ci-icon">{{ c.pass ? '✔️' : '❌' }}</span>
             <div class="ci-main">
@@ -206,17 +180,14 @@
             </div>
           </div>
         </div>
-        <div class="text-sm text-gray mt-12">
-          清单全部通过后，复核负责人可顺利归档；否则将被驳回并写明原因。
-        </div>
       </div>
 
       <div class="card">
         <div class="section-title">📈 证据统计</div>
         <div class="grid-2">
-          <div class="kv"><span class="k">借用证据：</span><span class="v">{{ detail.evidences.filter(e=>e.type==='borrow').length }} 份</span></div>
-          <div class="kv"><span class="k">归还证据：</span><span class="v">{{ detail.evidences.filter(e=>e.type==='return').length }} 份</span></div>
-          <div class="kv"><span class="k">损耗证据：</span><span class="v">{{ detail.evidences.filter(e=>e.type==='loss').length }} 份</span></div>
+          <div class="kv"><span class="k">借用证据：</span><span class="v">{{ evidenceCount('borrow') }} 份</span></div>
+          <div class="kv"><span class="k">归还证据：</span><span class="v">{{ evidenceCount('return') }} 份</span></div>
+          <div class="kv"><span class="k">损耗证据：</span><span class="v">{{ evidenceCount('loss') }} 份</span></div>
           <div class="kv"><span class="k">合计：</span><span class="v">{{ detail.evidences.length }} 份</span></div>
         </div>
       </div>
@@ -241,7 +212,7 @@
     <div class="alert alert-warn" *ngIf="actionDialog==='audit_reject' || actionDialog==='review_reject'">
       请详细填写驳回理由，便于下一岗位补正。
     </div>
-    <div class="alert alert-warn" *ngIf="actionDialog==='review_approve' && detail && reviewChecklist.some(c=>!c.pass)">
+    <div class="alert alert-warn" *ngIf="actionDialog==='review_approve' && detail && !checklistPassAll">
       ⚠️ 当前复核清单存在未通过项，提交时后端会再次校验并可能驳回。
     </div>
 
@@ -283,7 +254,7 @@
     </div>
     <div class="modal-footer">
       <button class="btn" (click)="closeDialog()">取消</button>
-      <button class="btn btn-primary" [disabled]="submitting" (click)="uploadEvidence()">
+      <button class="btn btn-primary" [disabled]="submitting || !evidenceFormValid()" (click)="uploadEvidence()">
         <span *ngIf="submitting" class="spinner" style="width:14px;height:14px;"></span>
         确认上传
       </button>
