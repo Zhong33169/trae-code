@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"database/sql"
+	"fmt"
 	"net/http"
 	"repair-platform/database"
 	"repair-platform/middleware"
@@ -63,7 +64,7 @@ func CreateHandover(c echo.Context) error {
 	if fromHandlerID == 0 {
 		fromHandlerID = user.ID
 		fromHandler = user.RealName
-		fromShift = user.Shift
+		fromShift = getUserShift(user.ID)
 	}
 	var fromRole string
 	database.DB.QueryRow("SELECT role FROM users WHERE id = ?", fromHandlerID).Scan(&fromRole)
@@ -157,10 +158,11 @@ func ConfirmHandover(c echo.Context) error {
 
 	now := time.Now()
 	if action == "confirm" {
+		currentToShift := getUserShift(toUserID)
 		tx.Exec(`UPDATE shift_handovers SET status = 'confirmed', confirmed_at = ? WHERE id = ?`, now, handoverID)
 		tx.Exec(`UPDATE repair_quotes
 			SET current_handler_id = ?, current_handler = ?, shift = ?, updated_at = ?
-			WHERE id = ?`, toUserID, toUserName, toShift, now, quoteID)
+			WHERE id = ?`, toUserID, toUserName, currentToShift, now, quoteID)
 
 		opRemark := "接收方确认交接: " + toUserName + "(" + models.RoleDisplayNames[toUserRole] + ")" + models.ShiftDisplayNames[toShift]
 		if req.Remark != "" {
@@ -267,4 +269,185 @@ func GetMyHandovers(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, map[string]interface{}{"handovers": list})
+}
+
+type BatchConfirmRequest struct {
+	Items []struct {
+		HandoverID int64  `json:"handover_id"`
+		Action     string `json:"action"`
+		Remark     string `json:"remark"`
+	} `json:"items"`
+}
+
+type BatchResultItem struct {
+	HandoverID int64  `json:"handover_id"`
+	QuoteID    int64  `json:"quote_id,omitempty"`
+	QuoteNo    string `json:"quote_no,omitempty"`
+	Success    bool   `json:"success"`
+	Action     string `json:"action"`
+	Message    string `json:"message"`
+	NewHandler string `json:"new_handler,omitempty"`
+	NewShift   string `json:"new_shift,omitempty"`
+}
+
+func BatchConfirmHandover(c echo.Context) error {
+	user := middleware.GetUser(c)
+	req := new(BatchConfirmRequest)
+	if err := c.Bind(req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "请求参数格式错误"})
+	}
+	if len(req.Items) == 0 {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "批量处理列表不能为空"})
+	}
+	if len(req.Items) > 50 {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "一次最多批量处理50条"})
+	}
+
+	results := make([]BatchResultItem, 0, len(req.Items))
+	successCount := 0
+	failCount := 0
+
+	for _, item := range req.Items {
+		result := BatchResultItem{
+			HandoverID: item.HandoverID,
+			Action:     item.Action,
+		}
+
+		action := "confirm"
+		if item.Action == "reject" {
+			action = "reject"
+		}
+
+		var hid, quoteID, toUserID int64
+		var status, toUserName, toUserRole, toUserNameDb, toRoleDb, toShift string
+		err := database.DB.QueryRow(`SELECT h.id, h.quote_id, h.status, h.to_user_id, h.to_user_name, h.to_user_role
+			FROM shift_handovers h WHERE h.id = ?`, item.HandoverID).Scan(
+			&hid, &quoteID, &status, &toUserID, &toUserName, &toUserRole)
+		if err == sql.ErrNoRows {
+			result.Success = false
+			result.Message = "交接记录不存在"
+			results = append(results, result)
+			failCount++
+			continue
+		}
+		if err != nil {
+			result.Success = false
+			result.Message = "查询交接记录失败: " + err.Error()
+			results = append(results, result)
+			failCount++
+			continue
+		}
+
+		result.QuoteID = quoteID
+		var quoteNo string
+		database.DB.QueryRow("SELECT quote_no FROM repair_quotes WHERE id = ?", quoteID).Scan(&quoteNo)
+		result.QuoteNo = quoteNo
+
+		if toUserID != user.ID && user.Role != models.RoleServiceManager {
+			result.Success = false
+			result.Message = "权限不足：仅交接接收人或服务经理可确认"
+			results = append(results, result)
+			failCount++
+			continue
+		}
+		if status != "pending" {
+			result.Success = false
+			result.Message = "该交接已处理过，状态为：" + map[string]string{
+				"pending":   "待确认",
+				"confirmed": "已接收",
+				"rejected":  "已拒绝",
+			}[status]
+			results = append(results, result)
+			failCount++
+			continue
+		}
+		if action == "reject" && item.Remark == "" {
+			result.Success = false
+			result.Message = "拒绝原因必填"
+			results = append(results, result)
+			failCount++
+			continue
+		}
+
+		database.DB.QueryRow("SELECT real_name, role, shift FROM users WHERE id = ?", toUserID).Scan(&toUserNameDb, &toRoleDb, &toShift)
+
+		var curStatus string
+		database.DB.QueryRow("SELECT status FROM repair_quotes WHERE id = ?", quoteID).Scan(&curStatus)
+
+		tx, err := database.DB.Begin()
+		if err != nil {
+			result.Success = false
+			result.Message = "启动事务失败"
+			results = append(results, result)
+			failCount++
+			continue
+		}
+
+		now := time.Now()
+		if action == "confirm" {
+			currentToShift := getUserShift(toUserID)
+			_, err = tx.Exec(`UPDATE shift_handovers SET status = 'confirmed', confirmed_at = ? WHERE id = ?`, now, hid)
+			if err == nil {
+				_, err = tx.Exec(`UPDATE repair_quotes
+					SET current_handler_id = ?, current_handler = ?, shift = ?, updated_at = ?
+					WHERE id = ?`, toUserID, toUserNameDb, currentToShift, now, quoteID)
+			}
+			if err == nil {
+				opRemark := "批量交接确认: " + toUserNameDb + "(" + models.RoleDisplayNames[toRoleDb] + ")" + models.ShiftDisplayNames[currentToShift]
+				if item.Remark != "" {
+					opRemark += "，备注: " + item.Remark
+				}
+				err = addOperationLog(tx, quoteID, "批量交接确认", curStatus, curStatus, opRemark, user)
+			}
+			if err == nil {
+				result.Success = true
+				result.Message = "交接已确认"
+				result.NewHandler = toUserNameDb
+				result.NewShift = models.ShiftDisplayNames[currentToShift]
+			} else {
+				tx.Rollback()
+				result.Success = false
+				result.Message = "处理失败: " + err.Error()
+			}
+		} else {
+			_, err = tx.Exec(`UPDATE shift_handovers SET status = 'rejected', confirmed_at = ? WHERE id = ?`, now, hid)
+			if err == nil {
+				opRemark := "批量拒绝交接: " + toUserNameDb
+				if item.Remark != "" {
+					opRemark += "，原因: " + item.Remark
+				}
+				err = addOperationLog(tx, quoteID, "批量交接被拒绝", curStatus, curStatus, opRemark, user)
+			}
+			if err == nil {
+				result.Success = true
+				result.Message = "已拒绝交接"
+			} else {
+				tx.Rollback()
+				result.Success = false
+				result.Message = "处理失败: " + err.Error()
+			}
+		}
+
+		if result.Success {
+			if err := tx.Commit(); err != nil {
+				result.Success = false
+				result.Message = "提交事务失败: " + err.Error()
+			}
+		}
+
+		if result.Success {
+			successCount++
+		} else {
+			failCount++
+		}
+		results = append(results, result)
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"message":       fmt.Sprintf("批量处理完成：成功 %d 条，失败 %d 条", successCount, failCount),
+		"total":         len(req.Items),
+		"success_count": successCount,
+		"fail_count":    failCount,
+		"results":       results,
+	})
 }

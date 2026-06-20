@@ -18,6 +18,7 @@ type Claims struct {
 	Username string `json:"username"`
 	RealName string `json:"real_name"`
 	Role     string `json:"role"`
+	Shift    string `json:"shift"`
 	jwt.RegisteredClaims
 }
 
@@ -40,6 +41,7 @@ func GenerateToken(u *models.User) (string, error) {
 		Username: u.Username,
 		RealName: u.RealName,
 		Role:     u.Role,
+		Shift:    u.Shift,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
@@ -80,6 +82,7 @@ func JWTAuth() echo.MiddlewareFunc {
 				Username: claims.Username,
 				RealName: claims.RealName,
 				Role:     claims.Role,
+				Shift:    claims.Shift,
 			}
 
 			ctx := &UserContext{

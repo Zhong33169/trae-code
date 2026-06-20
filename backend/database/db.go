@@ -89,6 +89,7 @@ func CreateTables(db *sql.DB) error {
 			operator_id INTEGER NOT NULL,
 			operator_name TEXT NOT NULL,
 			operator_role TEXT NOT NULL,
+			operator_shift TEXT DEFAULT '',
 			remark TEXT DEFAULT '',
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			FOREIGN KEY (quote_id) REFERENCES repair_quotes(id) ON DELETE CASCADE

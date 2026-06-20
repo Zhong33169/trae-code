@@ -69,16 +69,17 @@ type RepairQuote struct {
 }
 
 type OperationLog struct {
-	ID           int64     `json:"id"`
-	QuoteID      int64     `json:"quote_id"`
-	Operation    string    `json:"operation"`
-	OldStatus    string    `json:"old_status"`
-	NewStatus    string    `json:"new_status"`
-	OperatorID   int64     `json:"operator_id"`
-	OperatorName string    `json:"operator_name"`
-	OperatorRole string    `json:"operator_role"`
-	Remark       string    `json:"remark"`
-	CreatedAt    time.Time `json:"created_at"`
+	ID            int64     `json:"id"`
+	QuoteID       int64     `json:"quote_id"`
+	Operation     string    `json:"operation"`
+	OldStatus     string    `json:"old_status"`
+	NewStatus     string    `json:"new_status"`
+	OperatorID    int64     `json:"operator_id"`
+	OperatorName  string    `json:"operator_name"`
+	OperatorRole  string    `json:"operator_role"`
+	OperatorShift string    `json:"operator_shift"`
+	Remark        string    `json:"remark"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 type ShiftHandover struct {

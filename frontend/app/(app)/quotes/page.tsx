@@ -38,8 +38,17 @@ export default function QuotesListPage() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ type: string; text: string } | null>(null);
   const [showCreate, setShowCreate] = useState(false);
+  const [pendingIncoming, setPendingIncoming] = useState<number>(0);
 
   const canCreate = user?.role === 'customer_service' || user?.role === 'service_manager';
+
+  const loadHandovers = useCallback(async () => {
+    const r = await apiFetch<any>('/api/handovers/mine?status=pending');
+    if (r.ok) {
+      const hs = (r.data.handovers || []).filter((h: any) => h.is_incoming && h.status === 'pending');
+      setPendingIncoming(hs.length);
+    }
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -57,7 +66,17 @@ export default function QuotesListPage() {
     setLoading(false);
   }, [page, pageSize, filters]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { load(); loadHandovers(); }, [load, loadHandovers]);
+
+  useEffect(() => {
+    const handler = () => { loadHandovers(); load(); };
+    window.addEventListener('handover-updated', handler);
+    window.addEventListener('quote-updated', handler);
+    return () => {
+      window.removeEventListener('handover-updated', handler);
+      window.removeEventListener('quote-updated', handler);
+    };
+  }, [load, loadHandovers]);
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
@@ -74,6 +93,15 @@ export default function QuotesListPage() {
       </div>
 
       {message && <div className={`alert alert-${message.type}`}>{message.text}</div>}
+
+      {pendingIncoming > 0 && (
+        <div className="alert bg-orange-50 border-orange-300 text-orange-800 mb-4 flex items-center justify-between">
+          <span>
+            🔔 你有 <b>{pendingIncoming}</b> 条待接收的交接，确认后你将成为新的处理人。
+          </span>
+          <Link href="/handovers" className="btn btn-sm btn-primary ml-4">前往交接中心批量处理 →</Link>
+        </div>
+      )}
 
       <div className="grid grid-cols-8 gap-3 mb-4">
         <StatCard label="进行中" value={stats.summary?.active || 0} color="blue" />

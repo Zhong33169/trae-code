@@ -76,6 +76,7 @@ func main() {
 
 	quotes.POST("/:id/handovers", handlers.CreateHandover)
 	api.POST("/handovers/:handover_id/confirm", handlers.ConfirmHandover)
+	api.POST("/handovers/batch-confirm", handlers.BatchConfirmHandover)
 	api.GET("/handovers/mine", handlers.GetMyHandovers)
 
 	api.GET("/statistics", handlers.GetStatistics)

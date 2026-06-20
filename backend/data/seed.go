@@ -221,9 +221,9 @@ func SeedData(db *sql.DB) error {
 		usr := users[op.usrIdx]
 		opTime := now.Add(op.offset)
 		_, err := tx.Exec(`INSERT INTO operation_logs
-			(quote_id, operation, old_status, new_status, operator_id, operator_name, operator_role, remark, created_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			qid, op.op, op.oldSt, op.newSt, userIDs[op.usrIdx], usr.RealName, usr.Role, op.remark, opTime,
+			(quote_id, operation, old_status, new_status, operator_id, operator_name, operator_role, operator_shift, remark, created_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			qid, op.op, op.oldSt, op.newSt, userIDs[op.usrIdx], usr.RealName, usr.Role, usr.Shift, op.remark, opTime,
 		)
 		if err != nil {
 			return fmt.Errorf("创建操作记录失败: %w", err)

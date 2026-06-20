@@ -14,10 +14,11 @@ import (
 )
 
 func addOperationLog(tx *sql.Tx, quoteID int64, operation, oldStatus, newStatus, remark string, user *middleware.UserInfo) error {
+	shift := getUserShift(user.ID)
 	_, err := tx.Exec(
-		`INSERT INTO operation_logs (quote_id, operation, old_status, new_status, operator_id, operator_name, operator_role, remark)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		quoteID, operation, oldStatus, newStatus, user.ID, user.RealName, user.Role, remark,
+		`INSERT INTO operation_logs (quote_id, operation, old_status, new_status, operator_id, operator_name, operator_role, operator_shift, remark)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		quoteID, operation, oldStatus, newStatus, user.ID, user.RealName, user.Role, shift, remark,
 	)
 	return err
 }
@@ -29,6 +30,17 @@ func checkRoleAllowed(userRole string, allowedRoles []string) bool {
 		}
 	}
 	return false
+}
+
+func getUserInfo(userID int64) (role string, shift string, err error) {
+	err = database.DB.QueryRow("SELECT role, shift FROM users WHERE id = ?", userID).Scan(&role, &shift)
+	return
+}
+
+func getUserShift(userID int64) string {
+	var shift string
+	database.DB.QueryRow("SELECT shift FROM users WHERE id = ?", userID).Scan(&shift)
+	return shift
 }
 
 type ListQuotesRequest struct {
@@ -199,12 +211,12 @@ func GetQuote(c echo.Context) error {
 	statusDisplay, _ := models.StatusDisplayNames[q.Status]
 	shiftDisplay, _ := models.ShiftDisplayNames[q.Shift]
 
-	logRows, _ := database.DB.Query(`SELECT id, operation, old_status, new_status, operator_id, operator_name, operator_role, remark, created_at
+	logRows, _ := database.DB.Query(`SELECT id, operation, old_status, new_status, operator_id, operator_name, operator_role, operator_shift, remark, created_at
 		FROM operation_logs WHERE quote_id = ? ORDER BY id ASC`, id)
 	logs := make([]map[string]interface{}, 0)
 	for logRows.Next() {
 		var l models.OperationLog
-		logRows.Scan(&l.ID, &l.Operation, &l.OldStatus, &l.NewStatus, &l.OperatorID, &l.OperatorName, &l.OperatorRole, &l.Remark, &l.CreatedAt)
+		logRows.Scan(&l.ID, &l.Operation, &l.OldStatus, &l.NewStatus, &l.OperatorID, &l.OperatorName, &l.OperatorRole, &l.OperatorShift, &l.Remark, &l.CreatedAt)
 		oldSt := l.OldStatus
 		newSt := l.NewStatus
 		if name, ok := models.StatusDisplayNames[l.OldStatus]; ok && l.OldStatus != "" {
@@ -214,16 +226,18 @@ func GetQuote(c echo.Context) error {
 			newSt = name
 		}
 		roleDisplay, _ := models.RoleDisplayNames[l.OperatorRole]
+		shiftDisplay, _ := models.ShiftDisplayNames[l.OperatorShift]
 		logs = append(logs, map[string]interface{}{
-			"id":            l.ID,
-			"operation":     l.Operation,
-			"old_status":    oldSt,
-			"new_status":    newSt,
-			"operator_id":   l.OperatorID,
-			"operator_name": l.OperatorName,
-			"operator_role": roleDisplay,
-			"remark":        l.Remark,
-			"created_at":    l.CreatedAt,
+			"id":             l.ID,
+			"operation":      l.Operation,
+			"old_status":     oldSt,
+			"new_status":     newSt,
+			"operator_id":    l.OperatorID,
+			"operator_name":  l.OperatorName,
+			"operator_role":  roleDisplay,
+			"operator_shift": shiftDisplay,
+			"remark":         l.Remark,
+			"created_at":     l.CreatedAt,
 		})
 	}
 	logRows.Close()
@@ -355,7 +369,7 @@ func CreateQuote(c echo.Context) error {
 		 estimate_amount, creator_id, creator_name)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		quoteNo, req.CustomerName, req.CustomerPhone, req.DeviceType, req.DeviceModel, req.FaultDescription,
-		status, user.ID, user.RealName, user.Shift,
+		status, user.ID, user.RealName, getUserShift(user.ID),
 		req.EstimateAmount, user.ID, user.RealName,
 	)
 	if err != nil {
@@ -454,7 +468,7 @@ func FillQuote(c echo.Context) error {
 		    status = ?, current_handler_id = ?, current_handler = ?, shift = ?, updated_at = ?
 		WHERE id = ?`,
 		req.EstimateAmount, req.QuoteDetail, req.EstimateAmount,
-		models.StatusQuoted, user.ID, user.RealName, user.Shift, time.Now(), id)
+		models.StatusQuoted, user.ID, user.RealName, getUserShift(user.ID), time.Now(), id)
 
 	addOperationLog(tx, id, "完成报价填写", curStatus, models.StatusQuoted,
 		fmt.Sprintf("报价金额: %.2f元, 明细: %s", req.EstimateAmount, req.QuoteDetail), user)
