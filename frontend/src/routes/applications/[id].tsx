@@ -1,5 +1,5 @@
 import { useNavigate, useParams } from "@solidjs/router";
-import { createEffect, createSignal, For, Show, onMount } from "solid-js";
+import { createSignal, For, Show, onMount } from "solid-js";
 import { api } from "../lib/api";
 
 const statusColor = (s) => ({
@@ -58,8 +58,8 @@ export default function ApplicationDetail() {
     if (!a || !u) return false;
     const actions = {
       registrar: { draft: ["register_submit"], reject_correction: ["correction_resubmit"], reject_revision: ["appeal_submit"] },
-      auditor: { pending_audit: ["audit_pass","audit_correction","audit_reject"], overdue: ["audit_pass","audit_correction","audit_reject"] },
-      reviewer: { pending_review: ["review_pass","review_reject","review_archive"], appeal_reviewing: ["review_pass","review_reject","review_archive"], conflict: ["review_reject","review_archive"], review_pass: ["review_archive"] },
+      auditor: { pending_audit: ["audit_pass","audit_correction","audit_reject"], overdue: ["audit_pass","audit_correction","audit_reject"], conflict: ["audit_pass"] },
+      reviewer: { pending_review: ["review_pass","review_reject","review_archive"], appeal_reviewing: ["review_pass","review_reject","review_archive"], conflict: ["review_pass","review_reject","review_archive"], review_pass: ["review_archive"] },
     };
     const list = (actions[u.role] || {})[a.status] || [];
     return list.includes(action) && a.current_handler_id === u.id;
@@ -168,7 +168,7 @@ export default function ApplicationDetail() {
         <Show when={loading()}><div class="loading">加载中...</div></Show>
 
         <Show when={!loading() && app()}>
-          <Show when={app()?.prev_opinion && (["pending_audit","pending_review","appeal_reviewing","reject_correction","reject_revision","conflict","overdue"].includes(app()?.status))}>
+          <Show when={app()?.prev_opinion && (["pending_audit","pending_review","appeal_reviewing","reject_correction","reject_revision","conflict","overdue","review_pass"].includes(app()?.status))}>
             <div class="prev-card">
               <div class="p-label">
                 ↓ 上一处理人：{app()?.prev_handler_name || "-"}（{({registrar:"登记员",auditor:"审核主管",reviewer:"复核负责人"}[app()?.prev_handler_role] || "")}）

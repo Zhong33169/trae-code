@@ -84,13 +84,18 @@ router.get('/applications/:id', (req, res) => {
 });
 
 function _updateProcessNode(dbTx, appId, nodeType, version, handler, opinion, result) {
-  const node = dbTx.prepare(`SELECT * FROM process_nodes WHERE app_id = ? AND node_type = ? AND version = ? AND status IN ('processing','pending') ORDER BY id DESC LIMIT 1`).get(appId, nodeType, version);
+  let node = dbTx.prepare(`SELECT * FROM process_nodes WHERE app_id = ? AND node_type = ? AND version = ? AND status IN ('processing','pending') ORDER BY id DESC LIMIT 1`).get(appId, nodeType, version);
+  if (!node) {
+    node = dbTx.prepare(`SELECT * FROM process_nodes WHERE app_id = ? AND node_type = ? AND status IN ('processing','pending') ORDER BY id DESC LIMIT 1`).get(appId, nodeType);
+  }
   if (node) {
     dbTx.prepare(`UPDATE process_nodes SET handler_id = ?, handler_role = ?, handler_name = ?, opinion = ?, result = ?, status = 'completed', end_time = datetime('now','localtime'), duration_seconds = CAST((julianday('now','localtime') - julianday(start_time)) * 86400 AS INTEGER) WHERE id = ?`).run(
       handler ? handler.id : null, handler ? handler.role : null, handler ? handler.name : null,
       opinion, result, node.id
     );
+    return true;
   }
+  return false;
 }
 
 function _addProcessNode(dbTx, appId, nodeType, order, version, handler, status) {
@@ -294,9 +299,9 @@ const NEXT_NODE_MAP = {
   correction_resubmit: 'audit',
   audit_pass: 'review',
   audit_correction: 'correction',
-  audit_reject: 'correction',
+  audit_reject: null,
   review_pass: null,
-  review_reject: 'correction',
+  review_reject: null,
   review_archive: null,
   appeal_submit: 'review',
 };
@@ -337,6 +342,11 @@ router.post('/applications/:id/action', (req, res) => {
       const evCheck = validators.checkEvidence(id, false);
       const nextHandlerUser = db.prepare('SELECT * FROM users WHERE id = ?').get(mapping.nextHandler) || null;
 
+      const clearReject = ['pass', 'archive', 'submit', 'appeal'].includes(mapping.result);
+      const newRejectReason = mapping.result === 'reject' || mapping.result === 'correction'
+        ? (reject_reason || null)
+        : (clearReject ? null : app.reject_reason);
+
       db.prepare(`
         UPDATE credit_applications SET
           status = ?,
@@ -357,11 +367,16 @@ router.post('/applications/:id/action', (req, res) => {
         mapping.newStatus, mapping.nextRole, mapping.nextHandler,
         user.id, user.role, opinion || '', mapping.result,
         newVersion, isOverdue, hasConflict,
-        evCheck.status, reject_reason || null,
+        evCheck.status, newRejectReason,
         id
       );
 
-      _updateProcessNode(db, id, mapping.nodeType, oldVersion, user, opinion || '', mapping.result);
+      let nodeUpdated = false;
+      nodeUpdated = _updateProcessNode(db, id, mapping.nodeType, oldVersion, user, opinion || '', mapping.result);
+      if (!nodeUpdated) {
+        _addProcessNode(db, id, mapping.nodeType, null, oldVersion, user, 'processing');
+        _updateProcessNode(db, id, mapping.nodeType, oldVersion, user, opinion || '', mapping.result);
+      }
 
       if (mapping.newStatus === 'archived') {
         db.prepare(`UPDATE process_nodes SET status = 'completed', end_time = datetime('now','localtime') WHERE app_id = ? AND status IN ('processing','pending')`).run(id);
@@ -375,7 +390,7 @@ router.post('/applications/:id/action', (req, res) => {
       logOperation({
         app_id: id, user_id: user.id, user_name: user.name, user_role: user.role,
         action, old_status: oldStatus, new_status: mapping.newStatus,
-        opinion, reject_reason,
+        opinion, reject_reason: newRejectReason,
         evidence_check: evCheck.status,
         version_from: oldVersion, version_to: newVersion,
         ip: req.ip, extra: JSON.stringify({
@@ -395,6 +410,7 @@ router.post('/applications/:id/action', (req, res) => {
     })();
     res.json({ ok: true, data: updated });
   } catch (e) {
+    console.error('[ACTION ERROR]', e);
     res.status(400).json({ ok: false, msg: e.message || String(e) });
   }
 });

@@ -12,10 +12,10 @@ const ACTION_ALLOWED_STATUSES = {
   audit_pass: ['pending_audit', 'overdue', 'conflict'],
   audit_correction: ['pending_audit', 'overdue'],
   audit_reject: ['pending_audit', 'overdue'],
-  review_pass: ['pending_review', 'appeal_reviewing'],
+  review_pass: ['pending_review', 'appeal_reviewing', 'conflict'],
   review_reject: ['pending_review', 'appeal_reviewing', 'conflict'],
   review_archive: ['pending_review', 'review_pass', 'conflict', 'appeal_reviewing'],
-  appeal_submit: ['reject_revision', 'reject_review'],
+  appeal_submit: ['reject_revision'],
 };
 
 function checkHandler(app, user) {

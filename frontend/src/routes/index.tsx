@@ -157,9 +157,11 @@ export default function Dashboard() {
                 <li style="display:flex; gap:8px"><span class="tag tag-orange">缺证据</span> 上海盛达贸易：退回补正</li>
                 <li style="display:flex; gap:8px"><span class="tag tag-purple">正常</span> 广州鸿源食品：待复核</li>
                 <li style="display:flex; gap:8px"><span class="tag tag-red">逾期</span> 深圳创新科技：审核逾期</li>
-                <li style="display:flex; gap:8px"><span class="tag tag-green">归档</span> 成都锦绣服装：已完成归档</li>
+                <li style="display:flex; gap:8px"><span class="tag tag-green">归档</span> 成都锦绣服装：复核通过待归档</li>
                 <li style="display:flex; gap:8px"><span class="tag tag-red">冲突</span> 杭州远见网络：关联企业冲突</li>
-                <li style="display:flex; gap:8px"><span class="tag tag-yellow">申诉</span> 南京中泰化工：申诉复核中</li>
+                <li style="display:flex; gap:8px"><span class="tag tag-yellow">申诉</span> 南京中泰化工：两轮申诉复核中</li>
+                <li style="display:flex; gap:8px"><span class="tag tag-gray">归档</span> 武汉鑫达物流：正常归档</li>
+                <li style="display:flex; gap:8px"><span class="tag tag-gray">闭环</span> 重庆星锐实业：完整闭环归档</li>
               </ul>
             </div>
           </div>

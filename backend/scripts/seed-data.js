@@ -42,7 +42,7 @@ const applications = [
     current_handler_role: 'registrar', current_handler_id: registrarId,
     prev_handler_id: auditorId, prev_handler_role: 'auditor',
     prev_opinion: '财务报表数据异常，近3个月流水不足，需补充银行流水证明。', prev_result: 'correction',
-    version: 2, evidence_status: 'incomplete',
+    version: 1, evidence_status: 'incomplete',
     reject_reason: '缺少近一年财务报表和近3个月银行流水', created_by: registrarId,
   },
   {
@@ -89,9 +89,9 @@ const applications = [
     status: 'appeal_reviewing',
     current_handler_role: 'reviewer', current_handler_id: reviewerId,
     prev_handler_id: registrarId, prev_handler_role: 'registrar',
-    prev_opinion: '申诉理由：复核驳回理由不成立，已补充新的供应链业务合同和近3个月大额银行流水证据，提交申诉。', prev_result: 'appeal',
+    prev_opinion: '再次申诉：已增加大型国企AA级担保人，资料已补充，再次提交申诉', prev_result: 'appeal',
     version: 3, evidence_status: 'complete',
-    reject_reason: '复核驳回：关联企业化工行业风险评级下调，综合评估风险过高。',
+    reject_reason: null,
     created_by: registrarId,
   },
   {
@@ -188,10 +188,10 @@ const nodesData = [
   { app_id: 1, node_type: 'register', node_order: 1, handler_id: registrarId, handler_role: 'registrar', handler_name: registrarName, opinion: '资料齐全，提交审核', result: 'submit', status: 'completed', start: 4, end: 4, ver: 1 },
   { app_id: 1, node_type: 'audit', node_order: 2, handler_id: auditorId, handler_role: 'auditor', handler_name: auditorName, opinion: null, result: null, status: 'processing', start: 3, ver: 1 },
 
-  // 002 上海盛达：退回补正（V2 correction 处理中）
+  // 002 上海盛达：退回补正（V1 correction 处理中）
   { app_id: 2, node_type: 'register', node_order: 1, handler_id: registrarId, handler_role: 'registrar', handler_name: registrarName, opinion: '初次提交审核', result: 'submit', status: 'completed', start: 6, end: 6, ver: 1 },
   { app_id: 2, node_type: 'audit', node_order: 2, handler_id: auditorId, handler_role: 'auditor', handler_name: auditorName, opinion: '财务报表未提供，银行流水金额不足审批要求', result: 'correction', status: 'completed', start: 5, end: 5, ver: 1 },
-  { app_id: 2, node_type: 'correction', node_order: 3, handler_id: registrarId, handler_role: 'registrar', handler_name: registrarName, opinion: null, result: null, status: 'processing', start: 4, ver: 2 },
+  { app_id: 2, node_type: 'correction', node_order: 3, handler_id: registrarId, handler_role: 'registrar', handler_name: registrarName, opinion: null, result: null, status: 'processing', start: 4, ver: 1 },
 
   // 003 广州鸿源：待复核
   { app_id: 3, node_type: 'register', node_order: 1, handler_id: registrarId, handler_role: 'registrar', handler_name: registrarName, opinion: '企业资质良好，提交审核', result: 'submit', status: 'completed', start: 5, end: 5, ver: 1 },
@@ -212,13 +212,14 @@ const nodesData = [
   { app_id: 6, node_type: 'audit', node_order: 2, handler_id: auditorId, handler_role: 'auditor', handler_name: auditorName, opinion: '审核通过，存在关联企业冲突需复核裁定', result: 'pass', status: 'completed', start: 6, end: 6, ver: 1 },
   { app_id: 6, node_type: 'review', node_order: 3, handler_id: reviewerId, handler_role: 'reviewer', handler_name: reviewerName, opinion: null, result: null, status: 'processing', start: 4, ver: 2 },
 
-  // 007 南京中泰：申诉复核中 V3
-  { app_id: 7, node_type: 'register', node_order: 1, handler_id: registrarId, handler_role: 'registrar', handler_name: registrarName, opinion: '初次提交审核', result: 'submit', status: 'completed', start: 10, end: 10, ver: 1 },
+  // 007 南京中泰：申诉复核中 V3（两轮申诉：驳回→申诉→再驳回→再申诉）
+  { app_id: 7, node_type: 'register', node_order: 1, handler_id: registrarId, handler_role: 'registrar', handler_name: registrarName, opinion: '初次提交审核，资料齐全', result: 'submit', status: 'completed', start: 10, end: 10, ver: 1 },
   { app_id: 7, node_type: 'audit', node_order: 2, handler_id: auditorId, handler_role: 'auditor', handler_name: auditorName, opinion: '审核通过，150万化工行业授信', result: 'pass', status: 'completed', start: 8, end: 8, ver: 1 },
-  { app_id: 7, node_type: 'review', node_order: 3, handler_id: reviewerId, handler_role: 'reviewer', handler_name: reviewerName, opinion: '关联企业化工行业风险评级下调，综合评估风险过高，驳回', result: 'reject', status: 'completed', start: 6, end: 6, ver: 1 },
-  { app_id: 7, node_type: 'correction', node_order: 4, handler_id: registrarId, handler_role: 'registrar', handler_name: registrarName, opinion: '补充银行流水和业务合同，准备申诉', result: null, status: 'completed', start: 4, end: 4, ver: 2 },
-  { app_id: 7, node_type: 'appeal', node_order: 5, handler_id: registrarId, handler_role: 'registrar', handler_name: registrarName, opinion: '不认可驳回理由，补充新的供应链合同和大额银行流水，提交申诉', result: 'appeal', status: 'completed', start: 3, end: 3, ver: 2 },
-  { app_id: 7, node_type: 'review', node_order: 6, handler_id: reviewerId, handler_role: 'reviewer', handler_name: reviewerName, opinion: null, result: null, status: 'processing', start: 2, ver: 3 },
+  { app_id: 7, node_type: 'review', node_order: 3, handler_id: reviewerId, handler_role: 'reviewer', handler_name: reviewerName, opinion: '首次复核驳回：化工行业风险偏高', result: 'reject', status: 'completed', start: 6, end: 6, ver: 1 },
+  { app_id: 7, node_type: 'appeal', node_order: 4, handler_id: registrarId, handler_role: 'registrar', handler_name: registrarName, opinion: '不认可驳回理由，补充供应链合同和大额银行流水，首次申诉', result: 'appeal', status: 'completed', start: 5, end: 5, ver: 1 },
+  { app_id: 7, node_type: 'review', node_order: 5, handler_id: reviewerId, handler_role: 'reviewer', handler_name: reviewerName, opinion: '首次申诉复核驳回：行业风险评级持续下调，需增加合格担保人', result: 'reject', status: 'completed', start: 4, end: 4, ver: 2 },
+  { app_id: 7, node_type: 'appeal', node_order: 6, handler_id: registrarId, handler_role: 'registrar', handler_name: registrarName, opinion: '已增加大型国企AA级担保人，再次申诉', result: 'appeal', status: 'completed', start: 3, end: 3, ver: 2 },
+  { app_id: 7, node_type: 'review', node_order: 7, handler_id: reviewerId, handler_role: 'reviewer', handler_name: reviewerName, opinion: null, result: null, status: 'processing', start: 2, ver: 3 },
 
   // 008 武汉鑫达：归档（简单通过）
   { app_id: 8, node_type: 'register', node_order: 1, handler_id: registrarId, handler_role: 'registrar', handler_name: registrarName, opinion: '资料齐全提交审核', result: 'submit', status: 'completed', start: 9, end: 9, ver: 1 },
@@ -228,13 +229,12 @@ const nodesData = [
   // 009 重庆星锐：⭐ 完整闭环样例（退回补正→重提→审核通过→复核驳回→申诉→再复核→归档）
   { app_id: 9, node_type: 'register', node_order: 1, handler_id: registrarId, handler_role: 'registrar', handler_name: registrarName, opinion: '首次提交，5项必填证据齐全', result: 'submit', status: 'completed', start: 15, end: 15, ver: 1 },
   { app_id: 9, node_type: 'audit', node_order: 2, handler_id: auditorId, handler_role: 'auditor', handler_name: auditorName, opinion: '退回补正：近3个月银行流水金额不足月均120万审批阈值，需补充Q3凭证', result: 'correction', status: 'completed', start: 13, end: 13, ver: 1 },
-  { app_id: 9, node_type: 'correction', node_order: 3, handler_id: registrarId, handler_role: 'registrar', handler_name: registrarName, opinion: '已补充Q3季度9、10、11月银行流水和4份大额订单合同', result: 'submit', status: 'completed', start: 11, end: 11, ver: 2 },
+  { app_id: 9, node_type: 'correction', node_order: 3, handler_id: registrarId, handler_role: 'registrar', handler_name: registrarName, opinion: '已补充Q3季度9、10、11月银行流水和4份大额订单合同', result: 'submit', status: 'completed', start: 11, end: 11, ver: 1 },
   { app_id: 9, node_type: 'audit', node_order: 4, handler_id: auditorId, handler_role: 'auditor', handler_name: auditorName, opinion: '补正资料有效，月均流水达标，审核通过', result: 'pass', status: 'completed', start: 9, end: 9, ver: 2 },
   { app_id: 9, node_type: 'review', node_order: 5, handler_id: reviewerId, handler_role: 'reviewer', handler_name: reviewerName, opinion: '首次复核驳回：经营流水连续性不足，需补充第3季度完整业务凭证', result: 'reject', status: 'completed', start: 7, end: 7, ver: 2 },
-  { app_id: 9, node_type: 'correction', node_order: 6, handler_id: registrarId, handler_role: 'registrar', handler_name: registrarName, opinion: '收集了3季度12份完整业务凭证和供应商对账函', result: null, status: 'completed', start: 5, end: 5, ver: 3 },
-  { app_id: 9, node_type: 'appeal', node_order: 7, handler_id: registrarId, handler_role: 'registrar', handler_name: registrarName, opinion: '已补充Q3完整业务凭证12份+供应商对账函3份，认为原驳回理由不成立，申诉提交', result: 'appeal', status: 'completed', start: 4, end: 4, ver: 3 },
-  { app_id: 9, node_type: 'review', node_order: 8, handler_id: reviewerId, handler_role: 'reviewer', handler_name: reviewerName, opinion: '申诉资料核查通过，月均流水+业务凭证完整，复核通过', result: 'pass', status: 'completed', start: 2, end: 2, ver: 3 },
-  { app_id: 9, node_type: 'review', node_order: 9, handler_id: reviewerId, handler_role: 'reviewer', handler_name: reviewerName, opinion: '完整流程闭环验证通过：申请→退回补正→重提→复核驳回→申诉→再复核→归档，授信160万', result: 'archive', status: 'completed', start: 1, end: 1, ver: 3 },
+  { app_id: 9, node_type: 'appeal', node_order: 6, handler_id: registrarId, handler_role: 'registrar', handler_name: registrarName, opinion: '已补充Q3完整业务凭证12份+供应商对账函3份，认为原驳回理由不成立，申诉提交', result: 'appeal', status: 'completed', start: 5, end: 5, ver: 2 },
+  { app_id: 9, node_type: 'review', node_order: 7, handler_id: reviewerId, handler_role: 'reviewer', handler_name: reviewerName, opinion: '申诉资料核查通过，月均流水+业务凭证完整，复核通过', result: 'pass', status: 'completed', start: 2, end: 2, ver: 3 },
+  { app_id: 9, node_type: 'review', node_order: 8, handler_id: reviewerId, handler_role: 'reviewer', handler_name: reviewerName, opinion: '完整流程闭环验证通过：申请→退回补正→重提→复核驳回→申诉→再复核→归档，授信160万', result: 'archive', status: 'completed', start: 1, end: 1, ver: 3 },
 ];
 
 const insertNode = db.prepare(`
@@ -282,10 +282,11 @@ const logsData = [
   // 007
   { app_id: 7, user_id: registrarId, user_name: registrarName, user_role: 'registrar', action: 'create', old_status: null, new_status: 'draft', version_from: 1, version_to: 1 },
   { app_id: 7, user_id: registrarId, user_name: registrarName, user_role: 'registrar', action: 'register_submit', old_status: 'draft', new_status: 'pending_audit', opinion: '初次提交审核，资料齐全', evidence_check: 'complete', version_from: 1, version_to: 1 },
-  { app_id: 7, user_id: auditorId, user_name: auditorName, user_role: 'auditor', action: 'audit_pass', old_status: 'pending_audit', new_status: 'pending_review', opinion: '审核通过', evidence_check: 'complete', version_from: 1, version_to: 1 },
-  { app_id: 7, user_id: reviewerId, user_name: reviewerName, user_role: 'reviewer', action: 'review_reject', old_status: 'pending_review', new_status: 'reject_revision', opinion: '复核评估：化工行业风险偏高', reject_reason: '复核驳回：关联企业化工行业风险评级下调，综合评估风险过高。', evidence_check: 'complete', version_from: 1, version_to: 1 },
-  { app_id: 7, user_id: registrarId, user_name: registrarName, user_role: 'registrar', action: 'evidence_update', old_status: 'reject_revision', new_status: 'reject_revision', evidence_check: 'complete', version_from: 1, version_to: 1, extra: JSON.stringify({evidence_id:6, evidence_name:'主要业务合同', is_submitted:1}) },
-  { app_id: 7, user_id: registrarId, user_name: registrarName, user_role: 'registrar', action: 'appeal_submit', old_status: 'reject_revision', new_status: 'appeal_reviewing', opinion: '补充新的供应链合同和大额银行流水，不认可驳回理由，提交申诉', evidence_check: 'complete', version_from: 2, version_to: 3 },
+  { app_id: 7, user_id: auditorId, user_name: auditorName, user_role: 'auditor', action: 'audit_pass', old_status: 'pending_audit', new_status: 'pending_review', opinion: '审核通过，150万化工行业授信', evidence_check: 'complete', version_from: 1, version_to: 1 },
+  { app_id: 7, user_id: reviewerId, user_name: reviewerName, user_role: 'reviewer', action: 'review_reject', old_status: 'pending_review', new_status: 'reject_revision', opinion: '首次复核驳回：化工行业风险偏高', reject_reason: '首次复核驳回：关联企业化工行业风险评级下调，综合评估风险过高。', evidence_check: 'complete', version_from: 1, version_to: 1 },
+  { app_id: 7, user_id: registrarId, user_name: registrarName, user_role: 'registrar', action: 'appeal_submit', old_status: 'reject_revision', new_status: 'appeal_reviewing', opinion: '补充供应链合同和大额银行流水，不认可驳回理由，首次申诉', evidence_check: 'complete', version_from: 1, version_to: 2 },
+  { app_id: 7, user_id: reviewerId, user_name: reviewerName, user_role: 'reviewer', action: 'review_reject', old_status: 'appeal_reviewing', new_status: 'reject_revision', opinion: '首次申诉复核驳回：行业风险评级持续下调', reject_reason: '首次申诉复核驳回：化工行业风险评级持续下调，需增加合格担保人。', evidence_check: 'complete', version_from: 2, version_to: 2 },
+  { app_id: 7, user_id: registrarId, user_name: registrarName, user_role: 'registrar', action: 'appeal_submit', old_status: 'reject_revision', new_status: 'appeal_reviewing', opinion: '已增加大型国企AA级担保人，资料已补充，再次申诉', evidence_check: 'complete', version_from: 2, version_to: 3 },
   // 008
   { app_id: 8, user_id: registrarId, user_name: registrarName, user_role: 'registrar', action: 'create', old_status: null, new_status: 'draft', version_from: 1, version_to: 1 },
   { app_id: 8, user_id: registrarId, user_name: registrarName, user_role: 'registrar', action: 'register_submit', old_status: 'draft', new_status: 'pending_audit', opinion: '资料齐全提交审核', evidence_check: 'complete', version_from: 1, version_to: 1 },
