@@ -1,6 +1,10 @@
 import { useState, useEffect } from 'preact/hooks'
 import { Link, useParams, useNavigate } from 'react-router-dom'
-import { User, PolicyOrder, Attachment, ReviewRecord, AuditLog, api } from '../api/client'
+import {
+  User, PolicyOrder, Attachment, ReviewRecord, AuditLog,
+  RequiredAttachmentDef, AttachmentCompletion, ATTACHMENT_STATUS_LABELS, ROLE_LABELS,
+  api
+} from '../api/client'
 
 interface Props {
   user: User
@@ -10,19 +14,22 @@ function OrderDetail({ user }: Props) {
   const { id } = useParams()
   const navigate = useNavigate()
   const [order, setOrder] = useState<PolicyOrder | null>(null)
+  const [requiredDefs, setRequiredDefs] = useState<RequiredAttachmentDef[]>([])
   const [attachments, setAttachments] = useState<Attachment[]>([])
+  const [groupedAttachments, setGroupedAttachments] = useState<Record<string, Attachment[]>>({})
+  const [attachmentCompletion, setAttachmentCompletion] = useState<AttachmentCompletion[]>([])
   const [reviews, setReviews] = useState<ReviewRecord[]>([])
   const [audits, setAudits] = useState<AuditLog[]>([])
   const [loading, setLoading] = useState(true)
 
-  const [showAddAttachment, setShowAddAttachment] = useState(false)
+  const [showAddAttachment, setShowAddAttachment] = useState<{ type: 'new' | 'reupload'; attId?: number; defId?: number } | null>(null)
   const [showRejectAttachment, setShowRejectAttachment] = useState<number | null>(null)
   const [showReviewReject, setShowReviewReject] = useState(false)
   const [showApproverReject, setShowApproverReject] = useState(false)
   const [showApprove, setShowApprove] = useState(false)
   const [showArchive, setShowArchive] = useState(false)
 
-  const [attachmentForm, setAttachmentForm] = useState({ name: '', fileType: 'pdf', required: true })
+  const [attachmentForm, setAttachmentForm] = useState({ name: '', fileType: 'pdf', requiredDefId: '' as string | number })
   const [rejectReason, setRejectReason] = useState('')
   const [rejectForm, setRejectForm] = useState({ rejectReason: '', failureReason: '', timeoutDays: 5 })
   const [approveForm, setApproveForm] = useState({ remark: '', auditRemark: '', resultContent: '' })
@@ -37,9 +44,12 @@ function OrderDetail({ user }: Props) {
     try {
       const res = await api.orders.get(parseInt(id!))
       setOrder(res.order)
-      setAttachments(res.attachments)
-      setReviews(res.reviews)
-      setAudits(res.audits)
+      setRequiredDefs(res.requiredDefs || [])
+      setAttachments(res.attachments || [])
+      setGroupedAttachments(res.groupedAttachments || {})
+      setAttachmentCompletion(res.attachmentCompletion || [])
+      setReviews(res.reviews || [])
+      setAudits(res.audits || [])
     } catch (e: any) {
       alert(e.message)
     } finally {
@@ -47,21 +57,34 @@ function OrderDetail({ user }: Props) {
     }
   }
 
+  const validCount = attachmentCompletion.filter(c => c.attachment_id && c.rejected === 0).length
+  const totalRequired = requiredDefs.length
+  const hasAllAttachments = totalRequired > 0 && validCount >= totalRequired
+
   const handleAddAttachment = async (e: Event) => {
     e.preventDefault()
     if (!order) return
     setActionLoading(true)
     try {
-      await api.attachments.add({
-        orderId: order.id,
-        name: attachmentForm.name,
-        fileType: attachmentForm.fileType,
-        fileSize: Math.floor(Math.random() * 2000000) + 100000,
-        required: attachmentForm.required,
-        userId: user.id
-      })
-      setShowAddAttachment(false)
-      setAttachmentForm({ name: '', fileType: 'pdf', required: true })
+      if (showAddAttachment?.type === 'reupload' && showAddAttachment.attId) {
+        await api.attachments.reupload(showAddAttachment.attId, {
+          name: attachmentForm.name,
+          fileType: attachmentForm.fileType,
+          fileSize: Math.floor(Math.random() * 2000000) + 100000
+        })
+      } else {
+        const defId = attachmentForm.requiredDefId ? Number(attachmentForm.requiredDefId) : undefined
+        await api.attachments.add({
+          orderId: order.id,
+          name: attachmentForm.name,
+          fileType: attachmentForm.fileType,
+          fileSize: Math.floor(Math.random() * 2000000) + 100000,
+          required: !!defId,
+          requiredDefId: defId
+        })
+      }
+      setShowAddAttachment(null)
+      setAttachmentForm({ name: '', fileType: 'pdf', requiredDefId: '' })
       loadDetail()
     } catch (e: any) {
       alert(e.message)
@@ -70,13 +93,28 @@ function OrderDetail({ user }: Props) {
     }
   }
 
+  const openReupload = (att: Attachment) => {
+    setAttachmentForm({ name: att.name, fileType: att.file_type, requiredDefId: att.required_def_id || '' })
+    setShowAddAttachment({ type: 'reupload', attId: att.id, defId: att.required_def_id || undefined })
+  }
+
+  const openAddNew = (defId?: number) => {
+    const def = defId ? requiredDefs.find(d => d.id === defId) : null
+    setAttachmentForm({
+      name: def ? `${def.name}.pdf` : '',
+      fileType: 'pdf',
+      requiredDefId: defId || ''
+    })
+    setShowAddAttachment({ type: 'new', defId })
+  }
+
   const handleRejectAttachment = async (attId: number) => {
     if (!rejectReason.trim()) {
       alert('请填写驳回原因')
       return
     }
     try {
-      await api.attachments.reject(attId, { rejectReason, userId: user.id })
+      await api.attachments.reject(attId, { rejectReason })
       setShowRejectAttachment(null)
       setRejectReason('')
       loadDetail()
@@ -89,7 +127,7 @@ function OrderDetail({ user }: Props) {
     if (!order) return
     setActionLoading(true)
     try {
-      await api.review.submit({ orderId: order.id, userId: user.id })
+      await api.review.submit({ orderId: order.id })
       alert('提交审核成功')
       loadDetail()
     } catch (e: any) {
@@ -103,7 +141,7 @@ function OrderDetail({ user }: Props) {
     if (!order) return
     setActionLoading(true)
     try {
-      await api.review.correctionSubmit({ orderId: order.id, userId: user.id })
+      await api.review.correctionSubmit({ orderId: order.id })
       alert('补正完成，已重新提交审核')
       loadDetail()
     } catch (e: any) {
@@ -119,7 +157,6 @@ function OrderDetail({ user }: Props) {
     try {
       await api.review.reviewApprove({
         orderId: order.id,
-        userId: user.id,
         remark: approveForm.remark,
         auditRemark: approveForm.auditRemark
       })
@@ -144,7 +181,6 @@ function OrderDetail({ user }: Props) {
     try {
       await api.review.reviewReject({
         orderId: order.id,
-        userId: user.id,
         rejectReason: rejectForm.rejectReason,
         failureReason: rejectForm.failureReason,
         timeoutDays: rejectForm.timeoutDays
@@ -166,7 +202,6 @@ function OrderDetail({ user }: Props) {
     try {
       await api.review.approverApprove({
         orderId: order.id,
-        userId: user.id,
         remark: approveForm.remark,
         auditRemark: approveForm.auditRemark,
         resultContent: approveForm.resultContent
@@ -192,7 +227,6 @@ function OrderDetail({ user }: Props) {
     try {
       await api.review.approverReject({
         orderId: order.id,
-        userId: user.id,
         rejectReason: rejectForm.rejectReason,
         failureReason: rejectForm.failureReason
       })
@@ -213,7 +247,6 @@ function OrderDetail({ user }: Props) {
     try {
       await api.review.archive({
         orderId: order.id,
-        userId: user.id,
         auditRemark: approveForm.auditRemark
       })
       setShowArchive(false)
@@ -264,9 +297,6 @@ function OrderDetail({ user }: Props) {
   const canArchive = isApprover && order.status === 'APPROVED'
   const canDelete = isRegistrar && order.status === 'DRAFT'
 
-  const hasAllAttachments = attachments.filter(a => a.required && !a.rejected).length >=
-    attachments.filter(a => a.required).length && attachments.filter(a => a.required).length > 0
-
   const formatDate = (dateStr: string) => {
     return new Date(dateStr).toLocaleString('zh-CN', {
       year: 'numeric', month: '2-digit', day: '2-digit',
@@ -275,10 +305,34 @@ function OrderDetail({ user }: Props) {
   }
 
   const formatFileSize = (bytes: number) => {
+    if (!bytes) return '0 B'
     if (bytes < 1024) return bytes + ' B'
     if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
     return (bytes / 1024 / 1024).toFixed(1) + ' MB'
   }
+
+  const getAttachmentClass = (att: Attachment) => {
+    if (att.att_status === 'REJECTED') return 'rejected'
+    if (att.att_status === 'SUPERSEDED') return 'superseded'
+    return ''
+  }
+
+  const getStatusBadge = (att: Attachment) => {
+    if (att.att_status === 'ACTIVE' && att.rejected === 0) {
+      return <span class="status-badge status-active">有效</span>
+    }
+    if (att.att_status === 'REJECTED' || att.rejected === 1) {
+      return <span class="status-badge status-rejected">已驳回</span>
+    }
+    if (att.att_status === 'SUPERSEDED') {
+      return <span class="status-badge status-superseded">已作废</span>
+    }
+    return null
+  }
+
+  const missingDefs = requiredDefs.filter(def =>
+    !attachmentCompletion.find(c => c.def_id === def.id && c.attachment_id && c.rejected === 0)
+  )
 
   return (
     <div>
@@ -364,7 +418,7 @@ function OrderDetail({ user }: Props) {
               disabled={!hasAllAttachments || actionLoading}
             >
               📤 发起审核
-              {!hasAllAttachments && '（请先补齐附件）'}
+              {!hasAllAttachments && `（还差 ${totalRequired - validCount} 个必备附件）`}
             </button>
           )}
           {canCorrectionSubmit && (
@@ -374,7 +428,7 @@ function OrderDetail({ user }: Props) {
               disabled={!hasAllAttachments || actionLoading}
             >
               ✅ 补正完成，重新提交
-              {!hasAllAttachments && '（请先补齐附件）'}
+              {!hasAllAttachments && `（还差 ${totalRequired - validCount} 个必备附件）`}
             </button>
           )}
           {canReview && (
@@ -402,67 +456,158 @@ function OrderDetail({ user }: Props) {
               📦 归档
             </button>
           )}
-          {canEditAttachments && (
-            <button class="btn btn-default" onClick={() => setShowAddAttachment(true)}>
-              ➕ 添加附件
-            </button>
-          )}
         </div>
       </div>
 
       <div class="card">
         <h3 class="section-title">
-          附件材料
+          必备附件清单
           <span style={{ fontSize: 13, fontWeight: 'normal', marginLeft: 12, color: hasAllAttachments ? '#52c41a' : '#faad14' }}>
-            {attachments.filter(a => a.required && !a.rejected).length}/{attachments.filter(a => a.required).length} 个必要附件
-            {!hasAllAttachments && attachments.filter(a => a.required).length > 0 && '（需补齐）'}
+            {validCount}/{totalRequired} 个必备附件已齐全
+            {!hasAllAttachments && totalRequired > 0 && `（还缺 ${totalRequired - validCount} 个）`}
           </span>
         </h3>
 
-        {attachments.length === 0 ? (
-          <div class="empty">暂无附件</div>
+        {requiredDefs.length === 0 ? (
+          <div class="empty">未配置必备附件清单，请联系管理员</div>
         ) : (
-          attachments.map(att => (
-            <div key={att.id} class={`attachment-item ${att.rejected ? 'rejected' : ''}`}>
-              <div class="attachment-info">
-                <div class="attachment-icon">📄</div>
-                <div>
-                  <div>
-                    {att.name}
-                    {att.required && <span style={{ color: '#ff4d4f', fontSize: 12, marginLeft: 8 }}>（必填）</span>}
-                    {att.rejected && <span class="reject-badge">已驳回</span>}
+          <div class="def-list">
+            {requiredDefs.map(def => {
+              const versions = groupedAttachments[`def_${def.id}`] || []
+              const activeAtt = versions.find(v => v.att_status === 'ACTIVE' && v.rejected === 0)
+              const rejectedAtts = versions.filter(v => v.att_status === 'REJECTED' || v.rejected === 1)
+              const supersededAtts = versions.filter(v => v.att_status === 'SUPERSEDED')
+              const isDone = !!activeAtt
+              const missingDef = missingDefs.find(d => d.id === def.id)
+              const canUploadThis = canEditAttachments && !isDone
+              const activeForReject = versions.find(v => v.att_status === 'ACTIVE')
+
+              return (
+                <div key={def.id} class={`def-item ${isDone ? 'def-complete' : 'def-incomplete'}`}>
+                  <div class="def-header">
+                    <span class="def-icon">{isDone ? '✅' : '⭕'}</span>
+                    <span class="def-name">{def.name}</span>
+                    <span class="def-status">
+                      {isDone ? '已上传' : '待上传'}
+                    </span>
+                    <div style={{ marginLeft: 'auto' }}>
+                      {canRejectAttachment && activeForReject && (
+                        <button class="link-btn danger" onClick={() => setShowRejectAttachment(activeForReject.id)}>
+                          驳回
+                        </button>
+                      )}
+                      {canUploadThis && !activeAtt && (
+                        <button class="link-btn" onClick={() => openAddNew(def.id)}>
+                          上传
+                        </button>
+                      )}
+                    </div>
                   </div>
-                  <div style={{ fontSize: 12, color: '#8c8c8c', marginTop: 2 }}>
-                    {att.file_type.toUpperCase()} · {formatFileSize(att.file_size)} ·
-                    上传人：{att.uploader_name} · {formatDate(att.created_at)}
-                  </div>
-                  {att.rejected && att.reject_reason && (
-                    <div class="reject-reason">❌ 驳回原因：{att.reject_reason}</div>
+
+                  {rejectedAtts.length > 0 && (
+                    <div class="version-list">
+                      {rejectedAtts.map(att => (
+                        <div key={att.id} class={`attachment-item ${getAttachmentClass(att)}`}>
+                          <div class="attachment-info">
+                            <div class="attachment-icon">📄</div>
+                            <div>
+                              <div>
+                                {att.name}
+                                {att.version > 1 && <span class="version-tag">V{att.version}</span>}
+                                {getStatusBadge(att)}
+                              </div>
+                              <div style={{ fontSize: 12, color: '#8c8c8c', marginTop: 2 }}>
+                                {att.file_type.toUpperCase()} · {formatFileSize(att.file_size)} ·
+                                上传人：{att.uploader_name} · {formatDate(att.created_at)}
+                              </div>
+                              {att.reject_reason && (
+                                <div class="reject-reason">❌ 驳回原因：{att.reject_reason}</div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {supersededAtts.length > 0 && (
+                    <div class="version-list">
+                      {supersededAtts.map(att => (
+                        <div key={att.id} class={`attachment-item ${getAttachmentClass(att)}`}>
+                          <div class="attachment-info">
+                            <div class="attachment-icon">📄</div>
+                            <div>
+                              <div>
+                                {att.name}
+                                {att.version > 1 && <span class="version-tag">V{att.version}</span>}
+                                {getStatusBadge(att)}
+                              </div>
+                              <div style={{ fontSize: 12, color: '#8c8c8c', marginTop: 2 }}>
+                                {att.file_type.toUpperCase()} · {formatFileSize(att.file_size)} ·
+                                上传人：{att.uploader_name} · {formatDate(att.created_at)}
+                              </div>
+                              {att.reject_reason && (
+                                <div class="reject-reason" style={{ background: '#f5f5f5', color: '#8c8c8c' }}>
+                                  📌 历史驳回原因（已作废版本）：{att.reject_reason}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {activeAtt && (
+                    <div class="version-list">
+                      <div class={`attachment-item ${getAttachmentClass(activeAtt)}`}>
+                        <div class="attachment-info">
+                          <div class="attachment-icon">📄</div>
+                          <div>
+                            <div>
+                              {activeAtt.name}
+                              {activeAtt.version > 1 && <span class="version-tag">V{activeAtt.version}</span>}
+                              {getStatusBadge(activeAtt)}
+                            </div>
+                            <div style={{ fontSize: 12, color: '#8c8c8c', marginTop: 2 }}>
+                              {activeAtt.file_type.toUpperCase()} · {formatFileSize(activeAtt.file_size)} ·
+                              上传人：{activeAtt.uploader_name} · {formatDate(activeAtt.created_at)}
+                            </div>
+                          </div>
+                        </div>
+                        <div>
+                          {canEditAttachments && (
+                            <button class="link-btn" onClick={() => openReupload(activeAtt)}>
+                              重新上传
+                            </button>
+                          )}
+                          {canEditAttachments && order.status === 'DRAFT' && (
+                            <button class="link-btn danger" onClick={() => handleDeleteAttachment(activeAtt.id)}>
+                              删除
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {missingDef && rejectedAtts.length === 0 && !activeAtt && (
+                    <div style={{ padding: '8px 16px', fontSize: 13, color: '#8c8c8c', background: '#fafafa' }}>
+                      尚未上传此附件
+                    </div>
+                  )}
+
+                  {rejectedAtts.length > 0 && !activeAtt && canEditAttachments && (
+                    <div style={{ padding: '8px 16px' }}>
+                      <button class="btn btn-default btn-sm" onClick={() => openReupload(rejectedAtts[rejectedAtts.length - 1])}>
+                        🔄 重新上传被驳回附件
+                      </button>
+                    </div>
                   )}
                 </div>
-              </div>
-              <div>
-                {canRejectAttachment && !att.rejected && (
-                  <button class="link-btn danger" onClick={() => setShowRejectAttachment(att.id)}>
-                    驳回附件
-                  </button>
-                )}
-                {canEditAttachments && att.rejected && (
-                  <button class="link-btn" onClick={() => {
-                    setAttachmentForm({ name: att.name, fileType: att.file_type, required: att.required === 1 })
-                    setShowAddAttachment(true)
-                  }}>
-                    重新上传
-                  </button>
-                )}
-                {canEditAttachments && (
-                  <button class="link-btn danger" onClick={() => handleDeleteAttachment(att.id)}>
-                    删除
-                  </button>
-                )}
-              </div>
-            </div>
-          ))
+              )
+            })}
+          </div>
         )}
       </div>
 
@@ -476,7 +621,10 @@ function OrderDetail({ user }: Props) {
               <div key={r.id} class="timeline-item">
                 <div>
                   <span class="timeline-action">{r.action}</span>
-                  <span class="timeline-operator">{r.operator_name}</span>
+                  <span class="timeline-operator">
+                    {r.operator_name}
+                    {r.operator_role && `（${ROLE_LABELS[r.operator_role] || r.operator_role}）`}
+                  </span>
                 </div>
                 <div class="timeline-time">{formatDate(r.created_at)}</div>
                 {r.from_status && r.to_status && (
@@ -500,6 +648,7 @@ function OrderDetail({ user }: Props) {
             <div key={a.id} class="audit-item">
               <div class="audit-reason">
                 ⚠️ {a.action} - {a.operator_name}
+                {a.operator_role && `（${ROLE_LABELS[a.operator_role] || a.operator_role}）`}
                 <span style={{ fontSize: 12, fontWeight: 'normal', marginLeft: 8 }}>
                   {formatDate(a.created_at)}
                 </span>
@@ -516,10 +665,30 @@ function OrderDetail({ user }: Props) {
       </div>
 
       {showAddAttachment && (
-        <div class="modal-mask" onClick={() => setShowAddAttachment(false)}>
+        <div class="modal-mask" onClick={() => setShowAddAttachment(null)}>
           <div class="modal" onClick={(e) => e.stopPropagation()}>
-            <h3 class="modal-title">{showRejectAttachment ? '重新上传附件' : '添加附件'}</h3>
+            <h3 class="modal-title">
+              {showAddAttachment.type === 'reupload' ? '🔄 重新上传附件（将作废旧版本）' : '➕ 上传附件'}
+            </h3>
+            {showAddAttachment.type === 'reupload' && (
+              <div class="alert alert-warning" style={{ fontSize: 13, marginBottom: 16 }}>
+                ⚠️ 重新上传后，原附件将标记为「已作废」，但驳回原因会保留作为历史记录。
+              </div>
+            )}
             <form onSubmit={handleAddAttachment}>
+              <div class="form-group">
+                <label>所属必备清单</label>
+                <select
+                  value={String(attachmentForm.requiredDefId)}
+                  onInput={(e) => setAttachmentForm({ ...attachmentForm, requiredDefId: (e.target as HTMLSelectElement).value })}
+                  disabled={!!attachmentForm.requiredDefId}
+                >
+                  <option value="">— 不属于必备清单（补充附件）—</option>
+                  {requiredDefs.map(def => (
+                    <option key={def.id} value={def.id}>{def.name}</option>
+                  ))}
+                </select>
+              </div>
               <div class="form-group">
                 <label>附件名称</label>
                 <input
@@ -530,39 +699,27 @@ function OrderDetail({ user }: Props) {
                   required
                 />
               </div>
-              <div class="form-row">
-                <div class="form-group">
-                  <label>文件类型</label>
-                  <select
-                    value={attachmentForm.fileType}
-                    onInput={(e) => setAttachmentForm({ ...attachmentForm, fileType: (e.target as HTMLSelectElement).value })}
-                  >
-                    <option value="pdf">PDF</option>
-                    <option value="doc">Word</option>
-                    <option value="xls">Excel</option>
-                    <option value="jpg">图片</option>
-                  </select>
-                </div>
-                <div class="form-group">
-                  <label>是否必填</label>
-                  <select
-                    value={attachmentForm.required ? '1' : '0'}
-                    onInput={(e) => setAttachmentForm({ ...attachmentForm, required: (e.target as HTMLSelectElement).value === '1' })}
-                  >
-                    <option value="1">是</option>
-                    <option value="0">否</option>
-                  </select>
-                </div>
+              <div class="form-group">
+                <label>文件类型</label>
+                <select
+                  value={attachmentForm.fileType}
+                  onInput={(e) => setAttachmentForm({ ...attachmentForm, fileType: (e.target as HTMLSelectElement).value })}
+                >
+                  <option value="pdf">PDF</option>
+                  <option value="doc">Word</option>
+                  <option value="xls">Excel</option>
+                  <option value="jpg">图片</option>
+                </select>
               </div>
               <div class="alert alert-info" style={{ fontSize: 12 }}>
                 💡 演示环境：文件大小将自动生成
               </div>
               <div class="modal-footer">
-                <button type="button" class="btn btn-default" onClick={() => setShowAddAttachment(false)}>
+                <button type="button" class="btn btn-default" onClick={() => setShowAddAttachment(null)}>
                   取消
                 </button>
                 <button type="submit" class="btn btn-primary" disabled={actionLoading}>
-                  {actionLoading ? '上传中...' : '上传'}
+                  {actionLoading ? '上传中...' : (showAddAttachment.type === 'reupload' ? '重新上传' : '上传')}
                 </button>
               </div>
             </form>
@@ -579,7 +736,7 @@ function OrderDetail({ user }: Props) {
               <textarea
                 value={rejectReason}
                 onInput={(e) => setRejectReason((e.target as HTMLTextAreaElement).value)}
-                placeholder="请填写驳回原因"
+                placeholder="请填写驳回原因（将永久保留在附件历史中）"
                 rows={4}
               />
             </div>

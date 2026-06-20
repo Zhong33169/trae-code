@@ -1,9 +1,11 @@
 import { Hono } from 'hono'
 import db from '../db/index.js'
+import { ROLES } from '../db/schema.js'
+import { requireRole } from '../middleware/auth.js'
 
 const app = new Hono()
 
-app.get('/', (c) => {
+app.get('/', requireRole(ROLES.REGISTRAR, ROLES.REVIEWER, ROLES.APPROVER), (c) => {
   const orderId = c.req.query('orderId')
   const operatorId = c.req.query('operatorId')
   
@@ -33,7 +35,7 @@ app.get('/', (c) => {
   return c.json({ logs })
 })
 
-app.get('/failures', (c) => {
+app.get('/failures', requireRole(ROLES.REGISTRAR, ROLES.REVIEWER, ROLES.APPROVER), (c) => {
   const logs = db.prepare(`
     SELECT a.*, o.order_no, o.title, u.name as operator_name, u.role as operator_role
     FROM audit_logs a

@@ -4,6 +4,8 @@ export const ROLES = {
   APPROVER: 'APPROVER'
 } as const
 
+export type RoleType = typeof ROLES[keyof typeof ROLES]
+
 export const STATUS = {
   DRAFT: 'DRAFT',
   PENDING_REVIEW: 'PENDING_REVIEW',
@@ -13,6 +15,8 @@ export const STATUS = {
   ARCHIVED: 'ARCHIVED',
   REJECTED: 'REJECTED'
 } as const
+
+export type StatusType = typeof STATUS[keyof typeof STATUS]
 
 export const STATUS_LABELS: Record<string, string> = {
   DRAFT: '草稿',
@@ -40,4 +44,16 @@ export const ABNORMAL_LABELS: Record<string, string> = {
   MISSING_ATTACHMENT: '缺材料',
   TIMEOUT: '超时',
   REJECTED: '已退回'
+}
+
+export const ATTACHMENT_STATUS = {
+  ACTIVE: 'ACTIVE',
+  REJECTED: 'REJECTED',
+  SUPERSEDED: 'SUPERSEDED'
+} as const
+
+export const ATTACHMENT_STATUS_LABELS: Record<string, string> = {
+  ACTIVE: '有效',
+  REJECTED: '已驳回',
+  SUPERSEDED: '已作废（已替换）'
 }

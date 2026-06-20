@@ -1,6 +1,8 @@
 import { Hono } from 'hono'
 import db from '../db/index.js'
 import { STATUS, ROLES, ABNORMAL_TYPES } from '../db/schema.js'
+import { requireRole, getUserId } from '../middleware/auth.js'
+import { checkAttachmentsByDefs } from './orders.js'
 
 const app = new Hono()
 
@@ -10,8 +12,8 @@ const insertReview = db.prepare(`
 `)
 
 const insertAudit = db.prepare(`
-  INSERT INTO audit_logs (order_id, operator_id, action, failure_reason, detail)
-  VALUES (?, ?, ?, ?, ?)
+  INSERT INTO audit_logs (order_id, operator_id, action, failure_reason, detail, created_at)
+  VALUES (?, ?, ?, ?, ?, ?)
 `)
 
 const updateOrderStatus = db.prepare(`
@@ -19,14 +21,9 @@ const updateOrderStatus = db.prepare(`
   WHERE id = ?
 `)
 
-const checkAttachments = (orderId: number) => {
-  const required = db.prepare('SELECT COUNT(*) as cnt FROM attachments WHERE order_id = ? AND required = 1').get(orderId) as any
-  const valid = db.prepare('SELECT COUNT(*) as cnt FROM attachments WHERE order_id = ? AND required = 1 AND rejected = 0').get(orderId) as any
-  return { required: required.cnt, valid: valid.cnt, allValid: required.cnt > 0 && valid.cnt >= required.cnt }
-}
-
-app.post('/submit', async (c) => {
-  const { orderId, userId, remark } = await c.req.json()
+app.post('/submit', requireRole(ROLES.REGISTRAR), async (c) => {
+  const { orderId, remark } = await c.req.json()
+  const userId = getUserId(c)
   
   const order = db.prepare('SELECT * FROM policy_orders WHERE id = ?').get(orderId) as any
   if (!order) return c.json({ error: '兑现单不存在' }, 404)
@@ -35,10 +32,10 @@ app.post('/submit', async (c) => {
     return c.json({ error: '只有草稿状态可以提交审核' }, 400)
   }
   
-  const { allValid, required, valid } = checkAttachments(orderId)
+  const { allValid, required, valid } = checkAttachmentsByDefs(orderId)
   if (!allValid) {
-    insertAudit.run(orderId, userId, '提交审核失败', '附件不齐全', `需要 ${required} 个必要附件，当前只有 ${valid} 个有效附件`)
-    return c.json({ error: `附件不齐全，需要补齐 ${required - valid} 个必要附件才能提交` }, 400)
+    insertAudit.run(orderId, userId, '提交审核失败', '附件不齐全', `需要 ${required} 个必备附件，当前只有 ${valid} 个有效附件`, new Date().toISOString())
+    return c.json({ error: `附件不齐全，需要补齐 ${required - valid} 个必备附件才能提交` }, 400)
   }
   
   updateOrderStatus.run(STATUS.PENDING_REVIEW, null, null, null, null, null, new Date().toISOString(), orderId)
@@ -47,8 +44,9 @@ app.post('/submit', async (c) => {
   return c.json({ success: true, status: STATUS.PENDING_REVIEW })
 })
 
-app.post('/correction/submit', async (c) => {
-  const { orderId, userId, remark } = await c.req.json()
+app.post('/correction/submit', requireRole(ROLES.REGISTRAR), async (c) => {
+  const { orderId, remark } = await c.req.json()
+  const userId = getUserId(c)
   
   const order = db.prepare('SELECT * FROM policy_orders WHERE id = ?').get(orderId) as any
   if (!order) return c.json({ error: '兑现单不存在' }, 404)
@@ -57,10 +55,14 @@ app.post('/correction/submit', async (c) => {
     return c.json({ error: '只有待补正状态可以提交审核' }, 400)
   }
   
-  const { allValid, required, valid } = checkAttachments(orderId)
+  const { allValid, required, valid } = checkAttachmentsByDefs(orderId)
   if (!allValid) {
-    insertAudit.run(orderId, userId, '补正提交失败', '附件不齐全', `需要 ${required} 个必要附件，当前只有 ${valid} 个有效附件，尚有 ${required - valid} 个被驳回或缺失`)
-    return c.json({ error: `附件不齐全，还有 ${required - valid} 个必要附件被驳回或缺失，请补齐后再提交` }, 400)
+    insertAudit.run(
+      orderId, userId, '补正提交失败', '附件不齐全', 
+      `需要 ${required} 个必备附件，当前只有 ${valid} 个有效附件，尚有 ${required - valid} 个被驳回或缺失`, 
+      new Date().toISOString()
+    )
+    return c.json({ error: `附件不齐全，还有 ${required - valid} 个必备附件被驳回或缺失，请补齐后再提交` }, 400)
   }
   
   updateOrderStatus.run(STATUS.PENDING_REVIEW, null, null, null, null, null, new Date().toISOString(), orderId)
@@ -69,8 +71,9 @@ app.post('/correction/submit', async (c) => {
   return c.json({ success: true, status: STATUS.PENDING_REVIEW })
 })
 
-app.post('/review/approve', async (c) => {
-  const { orderId, userId, remark, auditRemark } = await c.req.json()
+app.post('/review/approve', requireRole(ROLES.REVIEWER), async (c) => {
+  const { orderId, remark, auditRemark } = await c.req.json()
+  const userId = getUserId(c)
   
   const order = db.prepare('SELECT * FROM policy_orders WHERE id = ?').get(orderId) as any
   if (!order) return c.json({ error: '兑现单不存在' }, 404)
@@ -79,9 +82,9 @@ app.post('/review/approve', async (c) => {
     return c.json({ error: '只有待审核状态可以审核通过' }, 400)
   }
   
-  const { allValid, required, valid } = checkAttachments(orderId)
+  const { allValid, required, valid } = checkAttachmentsByDefs(orderId)
   if (!allValid) {
-    insertAudit.run(orderId, userId, '审核通过失败', '附件不齐全', `需要 ${required} 个必要附件，当前只有 ${valid} 个有效附件`)
+    insertAudit.run(orderId, userId, '审核通过失败', '附件不齐全', `需要 ${required} 个必备附件，当前只有 ${valid} 个有效附件`, new Date().toISOString())
     return c.json({ error: '附件不齐全，不能通过审核' }, 400)
   }
   
@@ -91,8 +94,9 @@ app.post('/review/approve', async (c) => {
   return c.json({ success: true, status: STATUS.REVIEWED })
 })
 
-app.post('/review/reject', async (c) => {
-  const { orderId, userId, remark, rejectReason, failureReason, timeoutDays } = await c.req.json()
+app.post('/review/reject', requireRole(ROLES.REVIEWER), async (c) => {
+  const { orderId, remark, rejectReason, failureReason, timeoutDays } = await c.req.json()
+  const userId = getUserId(c)
   
   const order = db.prepare('SELECT * FROM policy_orders WHERE id = ?').get(orderId) as any
   if (!order) return c.json({ error: '兑现单不存在' }, 404)
@@ -107,14 +111,15 @@ app.post('/review/reject', async (c) => {
   insertReview.run(orderId, userId, '驳回补正', remark || '材料需要补正', order.status, STATUS.PENDING_CORRECTION)
   
   if (failureReason) {
-    insertAudit.run(orderId, userId, '审核驳回', failureReason, rejectReason || remark)
+    insertAudit.run(orderId, userId, '审核驳回', failureReason, rejectReason || remark, new Date().toISOString())
   }
   
   return c.json({ success: true, status: STATUS.PENDING_CORRECTION })
 })
 
-app.post('/approver/approve', async (c) => {
-  const { orderId, userId, remark, resultContent, auditRemark } = await c.req.json()
+app.post('/approver/approve', requireRole(ROLES.APPROVER), async (c) => {
+  const { orderId, remark, resultContent, auditRemark } = await c.req.json()
+  const userId = getUserId(c)
   
   const order = db.prepare('SELECT * FROM policy_orders WHERE id = ?').get(orderId) as any
   if (!order) return c.json({ error: '兑现单不存在' }, 404)
@@ -129,8 +134,9 @@ app.post('/approver/approve', async (c) => {
   return c.json({ success: true, status: STATUS.APPROVED })
 })
 
-app.post('/approver/reject', async (c) => {
-  const { orderId, userId, remark, rejectReason, failureReason } = await c.req.json()
+app.post('/approver/reject', requireRole(ROLES.APPROVER), async (c) => {
+  const { orderId, remark, rejectReason, failureReason } = await c.req.json()
+  const userId = getUserId(c)
   
   const order = db.prepare('SELECT * FROM policy_orders WHERE id = ?').get(orderId) as any
   if (!order) return c.json({ error: '兑现单不存在' }, 404)
@@ -143,14 +149,15 @@ app.post('/approver/reject', async (c) => {
   insertReview.run(orderId, userId, '复核退回', remark || '不符合条件，予以退回', order.status, STATUS.REJECTED)
   
   if (failureReason) {
-    insertAudit.run(orderId, userId, '复核驳回', failureReason, rejectReason || remark)
+    insertAudit.run(orderId, userId, '复核驳回', failureReason, rejectReason || remark, new Date().toISOString())
   }
   
   return c.json({ success: true, status: STATUS.REJECTED })
 })
 
-app.post('/approver/archive', async (c) => {
-  const { orderId, userId, remark, auditRemark } = await c.req.json()
+app.post('/approver/archive', requireRole(ROLES.APPROVER), async (c) => {
+  const { orderId, remark, auditRemark } = await c.req.json()
+  const userId = getUserId(c)
   
   const order = db.prepare('SELECT * FROM policy_orders WHERE id = ?').get(orderId) as any
   if (!order) return c.json({ error: '兑现单不存在' }, 404)

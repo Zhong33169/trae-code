@@ -6,6 +6,28 @@ export const ROLE_LABELS: Record<string, string> = {
   APPROVER: '园区招商中心复核负责人'
 }
 
+export const STATUS_LABELS: Record<string, string> = {
+  DRAFT: '草稿',
+  PENDING_REVIEW: '待审核',
+  PENDING_CORRECTION: '待补正',
+  REVIEWED: '审核通过',
+  APPROVED: '复核通过',
+  ARCHIVED: '已归档',
+  REJECTED: '已退回'
+}
+
+export const ATTACHMENT_STATUS_LABELS: Record<string, string> = {
+  ACTIVE: '有效',
+  REJECTED: '已驳回',
+  SUPERSEDED: '已作废（已替换）'
+}
+
+export const ABNORMAL_LABELS: Record<string, string> = {
+  MISSING_ATTACHMENT: '缺材料',
+  TIMEOUT: '超时',
+  REJECTED: '已退回'
+}
+
 export interface User {
   id: number
   username: string
@@ -38,18 +60,46 @@ export interface PolicyOrder {
   required_attachments: number
 }
 
-export interface Attachment {
+export interface RequiredAttachmentDef {
   id: number
   order_id: number
   name: string
+  sort_order: number
+  has_active?: number
+}
+
+export interface Attachment {
+  id: number
+  order_id: number
+  required_def_id: number | null
+  parent_id: number | null
+  name: string
   file_type: string
   file_size: number
+  att_status: string
+  statusLabel: string
   required: number
   rejected: number
   reject_reason: string | null
+  version: number
   uploaded_by: number
   uploader_name: string
+  def_name?: string
+  def_sort?: number
   created_at: string
+}
+
+export interface AttachmentCompletion {
+  def_id: number
+  def_name: string
+  sort_order: number
+  attachment_id: number | null
+  attachment_name: string | null
+  att_status: string | null
+  rejected: number | null
+  reject_reason: string | null
+  version: number | null
+  created_at: string | null
 }
 
 export interface ReviewRecord {
@@ -57,6 +107,7 @@ export interface ReviewRecord {
   order_id: number
   operator_id: number
   operator_name: string
+  operator_role?: string
   action: string
   remark: string | null
   from_status: string | null
@@ -78,13 +129,31 @@ export interface AuditLog {
   title?: string
 }
 
+function getCurrentUserId(): string | null {
+  try {
+    const raw = localStorage.getItem('currentUser')
+    if (raw) {
+      const user = JSON.parse(raw)
+      return String(user.id)
+    }
+  } catch {
+  }
+  return null
+}
+
 async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(options.headers as Record<string, string> || {})
+  }
+  const uid = getCurrentUserId()
+  if (uid) {
+    headers['X-User-Id'] = uid
+  }
+  
   const res = await fetch(BASE_URL + url, {
     ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...options.headers
-    }
+    headers
   })
   
   const data = await res.json()
@@ -121,8 +190,16 @@ export const api = {
       return request<{ orders: PolicyOrder[] }>(`/orders${qs ? '?' + qs : ''}`)
     },
     get: (id: number) =>
-      request<{ order: PolicyOrder; attachments: Attachment[]; reviews: ReviewRecord[]; audits: AuditLog[] }>(`/orders/${id}`),
-    create: (data: { title: string; applicant: string; amount: number; userId: number }) =>
+      request<{ 
+        order: PolicyOrder
+        requiredDefs: RequiredAttachmentDef[]
+        attachments: Attachment[]
+        groupedAttachments: Record<string, Attachment[]>
+        attachmentCompletion: AttachmentCompletion[]
+        reviews: ReviewRecord[]
+        audits: AuditLog[]
+      }>(`/orders/${id}`),
+    create: (data: { title: string; applicant: string; amount: number; requiredAttachmentNames?: string[]; userId?: number }) =>
       request<{ id: number; orderNo: string }>('/orders', {
         method: 'POST',
         body: JSON.stringify(data)
@@ -136,7 +213,7 @@ export const api = {
       request<{ success: boolean }>(`/orders/${id}`, {
         method: 'DELETE'
       }),
-    batchResult: (data: { orderIds: number[]; action: string; userId: number; remark?: string }) =>
+    batchResult: (data: { orderIds: number[]; action: string; userId?: number; remark?: string }) =>
       request<{ success: boolean; summary: string; results: any[] }>('/orders/batch-result', {
         method: 'POST',
         body: JSON.stringify(data)
@@ -144,17 +221,22 @@ export const api = {
   },
   
   attachments: {
-    add: (data: { orderId: number; name: string; fileType: string; fileSize: number; required: boolean; userId: number }) =>
+    add: (data: { orderId: number; name: string; fileType: string; fileSize: number; required?: boolean; requiredDefId?: number; userId?: number }) =>
       request<{ attachment: Attachment }>('/attachments', {
         method: 'POST',
         body: JSON.stringify(data)
       }),
-    update: (id: number, data: { name: string; fileType: string; fileSize: number; userId: number }) =>
+    reupload: (id: number, data: { name: string; fileType: string; fileSize: number; userId?: number }) =>
+      request<{ attachment: Attachment; oldRejectReason: string | null; replacedAttachmentId: number }>(`/attachments/${id}/reupload`, {
+        method: 'POST',
+        body: JSON.stringify(data)
+      }),
+    update: (id: number, data: { name: string; fileType: string; fileSize: number; userId?: number }) =>
       request<{ attachment: Attachment }>(`/attachments/${id}`, {
         method: 'PUT',
         body: JSON.stringify(data)
       }),
-    reject: (id: number, data: { rejectReason: string; userId: number }) =>
+    reject: (id: number, data: { rejectReason: string; userId?: number }) =>
       request<{ attachment: Attachment }>(`/attachments/${id}/reject`, {
         method: 'POST',
         body: JSON.stringify(data)
@@ -162,41 +244,43 @@ export const api = {
     delete: (id: number) =>
       request<{ success: boolean }>(`/attachments/${id}`, {
         method: 'DELETE'
-      })
+      }),
+    getRequiredDefs: (orderId: number) =>
+      request<{ defs: RequiredAttachmentDef[] }>(`/attachments/required-defs/${orderId}`)
   },
   
   review: {
-    submit: (data: { orderId: number; userId: number; remark?: string }) =>
+    submit: (data: { orderId: number; userId?: number; remark?: string }) =>
       request<{ success: boolean; status: string }>('/review/submit', {
         method: 'POST',
         body: JSON.stringify(data)
       }),
-    correctionSubmit: (data: { orderId: number; userId: number; remark?: string }) =>
+    correctionSubmit: (data: { orderId: number; userId?: number; remark?: string }) =>
       request<{ success: boolean; status: string }>('/review/correction/submit', {
         method: 'POST',
         body: JSON.stringify(data)
       }),
-    reviewApprove: (data: { orderId: number; userId: number; remark?: string; auditRemark?: string }) =>
+    reviewApprove: (data: { orderId: number; userId?: number; remark?: string; auditRemark?: string }) =>
       request<{ success: boolean; status: string }>('/review/review/approve', {
         method: 'POST',
         body: JSON.stringify(data)
       }),
-    reviewReject: (data: { orderId: number; userId: number; remark?: string; rejectReason?: string; failureReason?: string; timeoutDays?: number }) =>
+    reviewReject: (data: { orderId: number; userId?: number; remark?: string; rejectReason?: string; failureReason?: string; timeoutDays?: number }) =>
       request<{ success: boolean; status: string }>('/review/review/reject', {
         method: 'POST',
         body: JSON.stringify(data)
       }),
-    approverApprove: (data: { orderId: number; userId: number; remark?: string; resultContent?: string; auditRemark?: string }) =>
+    approverApprove: (data: { orderId: number; userId?: number; remark?: string; resultContent?: string; auditRemark?: string }) =>
       request<{ success: boolean; status: string }>('/review/approver/approve', {
         method: 'POST',
         body: JSON.stringify(data)
       }),
-    approverReject: (data: { orderId: number; userId: number; remark?: string; rejectReason?: string; failureReason?: string }) =>
+    approverReject: (data: { orderId: number; userId?: number; remark?: string; rejectReason?: string; failureReason?: string }) =>
       request<{ success: boolean; status: string }>('/review/approver/reject', {
         method: 'POST',
         body: JSON.stringify(data)
       }),
-    archive: (data: { orderId: number; userId: number; remark?: string; auditRemark?: string }) =>
+    archive: (data: { orderId: number; userId?: number; remark?: string; auditRemark?: string }) =>
       request<{ success: boolean; status: string }>('/review/approver/archive', {
         method: 'POST',
         body: JSON.stringify(data)
