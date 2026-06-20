@@ -106,6 +106,11 @@ func (s *OrderService) GetOrderList(query *OrderQuery, userCtx interface{}) (*Or
 		models.StatusPendingSubmit,
 		models.StatusReturned,
 		models.StatusResubmitted,
+		models.StatusPendingVerify,
+		models.StatusVerifyPassed,
+		models.StatusPendingReview,
+		models.StatusReviewPassed,
+		models.StatusArchived,
 	}
 	for _, status := range groupStatuses {
 		var count int64
@@ -750,11 +755,11 @@ func (s *OrderService) AddEvidence(req *AddEvidenceRequest, userID int64, userNa
 
 	var order models.InventoryAdjustOrder
 	if err := database.First(&order, req.OrderID).Error; err != nil {
-		return nil, errors.New("订单不存在")
+		return nil, fmt.Errorf("订单不存在")
 	}
 
 	if order.Status == models.StatusArchived {
-		return nil, errors.New("已归档的订单不能再补充证据")
+		return nil, fmt.Errorf("已归档的订单不能再补充证据")
 	}
 
 	validTypes := map[models.EvidenceType]bool{
@@ -764,14 +769,72 @@ func (s *OrderService) AddEvidence(req *AddEvidenceRequest, userID int64, userNa
 		models.EvidenceTypeSupplement: true,
 	}
 	if !validTypes[req.Type] {
-		return nil, errors.New("无效的证据类型")
+		return nil, fmt.Errorf("无效的证据类型")
 	}
 
-	if req.Type == models.EvidenceTypeVerify && userRole != models.RoleWarehouseSupervisor {
-		return nil, errors.New("只有仓储主管可以上传核验证据")
+	roleNameMap := map[models.Role]string{
+		models.RoleWarehouseKeeper:    "库管员",
+		models.RoleWarehouseSupervisor: "仓储主管",
+		models.RoleOperationManager:   "运营经理",
 	}
-	if req.Type == models.EvidenceTypeReview && userRole != models.RoleOperationManager {
-		return nil, errors.New("只有运营经理可以上传复核证据")
+
+	typeNameMap := map[models.EvidenceType]string{
+		models.EvidenceTypeRegister:   "登记",
+		models.EvidenceTypeVerify:     "核验",
+		models.EvidenceTypeReview:     "复核",
+		models.EvidenceTypeSupplement: "补录",
+	}
+
+	switch req.Type {
+	case models.EvidenceTypeRegister:
+		if userRole != models.RoleWarehouseKeeper {
+			return nil, fmt.Errorf("登记证据只能由库管员上传，当前角色: %s", roleNameMap[userRole])
+		}
+		if order.CreatedBy != userID {
+			return nil, fmt.Errorf("登记证据只能由订单创建人上传")
+		}
+		if order.Status != models.StatusPendingSubmit {
+			return nil, fmt.Errorf("当前状态为%s，不能上传登记证据（仅待提交状态可上传）",
+				statusText(order.Status))
+		}
+
+	case models.EvidenceTypeSupplement:
+		if userRole != models.RoleWarehouseKeeper {
+			return nil, fmt.Errorf("补录证据只能由库管员上传，当前角色: %s", roleNameMap[userRole])
+		}
+		if order.CreatedBy != userID {
+			return nil, fmt.Errorf("补录证据只能由订单创建人上传")
+		}
+		if order.Status != models.StatusReturned {
+			return nil, fmt.Errorf("当前状态为%s，不能上传补录证据（仅退回状态可上传）",
+				statusText(order.Status))
+		}
+
+	case models.EvidenceTypeVerify:
+		if userRole != models.RoleWarehouseSupervisor {
+			return nil, fmt.Errorf("核验证据只能由仓储主管上传，当前角色: %s", roleNameMap[userRole])
+		}
+		if order.Status != models.StatusPendingVerify && order.Status != models.StatusResubmitted {
+			return nil, fmt.Errorf("当前状态为%s，不能上传核验证据（仅待核验/补正重提状态可上传）",
+				statusText(order.Status))
+		}
+
+	case models.EvidenceTypeReview:
+		if userRole != models.RoleOperationManager {
+			return nil, fmt.Errorf("复核证据只能由运营经理上传，当前角色: %s", roleNameMap[userRole])
+		}
+		if order.Status != models.StatusPendingReview {
+			return nil, fmt.Errorf("当前状态为%s，不能上传复核证据（仅待复核状态可上传）",
+				statusText(order.Status))
+		}
+	}
+
+	var existingCount int64
+	database.Model(&models.OrderEvidence{}).
+		Where("order_id = ? AND type = ? AND file_name = ?", req.OrderID, req.Type, req.FileName).
+		Count(&existingCount)
+	if existingCount > 0 {
+		return nil, fmt.Errorf("%s证据中已存在同名文件: %s", typeNameMap[req.Type], req.FileName)
 	}
 
 	evidence := &models.OrderEvidence{
@@ -802,6 +865,29 @@ func (s *OrderService) AddEvidence(req *AddEvidenceRequest, userID int64, userNa
 	database.Create(opLog)
 
 	return evidence, nil
+}
+
+func statusText(s models.OrderStatus) string {
+	switch s {
+	case models.StatusPendingSubmit:
+		return "待提交"
+	case models.StatusReturned:
+		return "已退回"
+	case models.StatusResubmitted:
+		return "补正重提"
+	case models.StatusPendingVerify:
+		return "待核验"
+	case models.StatusVerifyPassed:
+		return "核验通过"
+	case models.StatusPendingReview:
+		return "待复核"
+	case models.StatusReviewPassed:
+		return "复核通过"
+	case models.StatusArchived:
+		return "已归档"
+	default:
+		return "未知状态"
+	}
 }
 
 func supplementTypeText(t models.SupplementType) string {

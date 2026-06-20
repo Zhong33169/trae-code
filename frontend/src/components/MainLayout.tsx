@@ -377,7 +377,28 @@ const MainLayout: Component<{ onLogout: () => void }> = (props) => {
     const user = currentUser();
     if (!user) return false;
     if (order.status === 'archived') return false;
-    return true;
+    const allowed = getAllowedEvidenceTypes(user.role, order.status, user.id, order.created_by);
+    return allowed.length > 0;
+  };
+
+  const getAllowedEvidenceTypes = (
+    role: string,
+    status: string,
+    userId: number,
+    createdBy: number
+  ): EvidenceType[] => {
+    const types: EvidenceType[] = [];
+    if (role === 'warehouse_keeper' && userId === createdBy) {
+      if (status === 'pending_submit') types.push('register');
+      if (status === 'returned') types.push('supplement');
+    }
+    if (role === 'warehouse_supervisor') {
+      if (status === 'pending_verify' || status === 'resubmitted') types.push('verify');
+    }
+    if (role === 'operation_manager') {
+      if (status === 'pending_review') types.push('review');
+    }
+    return types;
   };
 
   const filterGroups: { key: OrderStatus | null; label: string; color: string }[] = [
@@ -385,6 +406,11 @@ const MainLayout: Component<{ onLogout: () => void }> = (props) => {
     { key: 'pending_submit', label: '待提交', color: statusColor.pending_submit },
     { key: 'returned', label: '已退回', color: statusColor.returned },
     { key: 'resubmitted', label: '重新提交', color: statusColor.resubmitted },
+    { key: 'pending_verify', label: '待核验', color: statusColor.pending_verify },
+    { key: 'verify_passed', label: '核验通过', color: statusColor.verify_passed },
+    { key: 'pending_review', label: '待复核', color: statusColor.pending_review },
+    { key: 'review_passed', label: '复核通过', color: statusColor.review_passed },
+    { key: 'archived', label: '已归档', color: statusColor.archived },
   ];
 
   const allWarehouses = Array.from(new Set(orders().map((o) => o.warehouse)));
@@ -875,7 +901,18 @@ const MainLayout: Component<{ onLogout: () => void }> = (props) => {
               <div style={{ display: 'flex', gap: '6px' }}>
                 <Show when={canAddEvidence(selectedOrder()!)}>
                   <button
-                    onClick={() => setShowEvidence(true)}
+                    onClick={() => {
+                      const user = currentUser()!;
+                      const order = selectedOrder()!;
+                      const allowed = getAllowedEvidenceTypes(user.role, order.status, user.id, order.created_by);
+                      if (allowed.length > 0) {
+                        setEvidenceForm({
+                          ...evidenceForm(),
+                          type: allowed[0],
+                        });
+                      }
+                      setShowEvidence(true);
+                    }}
                     style={{
                       padding: '4px 10px',
                       background: '#1890ff',
@@ -1509,31 +1546,36 @@ const MainLayout: Component<{ onLogout: () => void }> = (props) => {
             </h3>
 
             <div style={{ marginBottom: '16px' }}>
-              <label style={{ display: 'block', marginBottom: '6px', color: '#595959', fontWeight: 500 }}>
-                证据类型 <span style={{ color: '#ff4d4f' }}>*</span>
-              </label>
-              <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-                {(['register', 'verify', 'review', 'supplement'] as EvidenceType[]).map((type) => (
-                  <label key={type} style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
-                    <input
-                      type="radio"
-                      name="evidenceType"
-                      checked={evidenceForm().type === type}
-                      onChange={() => setEvidenceForm({ ...evidenceForm(), type })}
-                    />
-                    <span style={{
-                      padding: '2px 8px',
-                      borderRadius: '4px',
-                      background: '#1890ff20',
-                      color: '#1890ff',
-                      fontSize: '13px',
-                    }}>
-                      {evidenceTypeText[type]}
-                    </span>
-                  </label>
-                ))}
+                <label style={{ display: 'block', marginBottom: '6px', color: '#595959', fontWeight: 500 }}>
+                  证据类型 <span style={{ color: '#ff4d4f' }}>*</span>
+                </label>
+                <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                  {(() => {
+                    const user = currentUser()!;
+                    const order = selectedOrder()!;
+                    const allowed = getAllowedEvidenceTypes(user.role, order.status, user.id, order.created_by);
+                    return allowed.map((type) => (
+                      <label key={type} style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
+                        <input
+                          type="radio"
+                          name="evidenceType"
+                          checked={evidenceForm().type === type}
+                          onChange={() => setEvidenceForm({ ...evidenceForm(), type })}
+                        />
+                        <span style={{
+                          padding: '2px 8px',
+                          borderRadius: '4px',
+                          background: '#1890ff20',
+                          color: '#1890ff',
+                          fontSize: '13px',
+                        }}>
+                          {evidenceTypeText[type]}
+                        </span>
+                      </label>
+                    ));
+                  })()}
+                </div>
               </div>
-            </div>
 
             <div style={{ marginBottom: '16px' }}>
               <label style={{ display: 'block', marginBottom: '6px', color: '#595959', fontWeight: 500 }}>
