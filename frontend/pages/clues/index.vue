@@ -119,7 +119,11 @@ const loadList = async () => {
     if (filters.role) q.set('role', filters.role)
     list.value = await get<any[]>(`/api/clues${q.toString() ? '?' + q.toString() : ''}`)
     stats.value = await get<any>('/api/stats')
-  } catch (e) {
+  } catch (e: any) {
+    if (e?.status === 403) {
+      list.value = []
+      stats.value = {}
+    }
     console.error(e)
   }
 }

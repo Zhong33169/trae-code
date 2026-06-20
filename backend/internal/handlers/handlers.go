@@ -189,18 +189,7 @@ func ListClues(c *fiber.Ctx) error {
 	userID, _, _, curRole := middleware.GetCurrentUser(c)
 
 	q := db.DB.Model(&models.NewsClue{}).Preload("Evidences")
-
-	switch models.Role(curRole) {
-	case models.RoleRegistrar:
-		q = q.Where("registrar_id = ?", userID)
-	case models.RoleAuditor:
-		q = q.Where("auditor_id = ? OR status IN ?", userID, []string{
-			string(models.StatusSubmitted), string(models.StatusReSubmit),
-		})
-	case models.RoleReviewer:
-		// 复核负责人可以看全部，重点关注需要复核的
-	default:
-	}
+	q = q.Scopes(models.ScopeWhere(userID, models.Role(curRole)))
 
 	if status != "" {
 		q = q.Where("status = ?", status)
@@ -811,17 +800,22 @@ type StatsResp struct {
 }
 
 func GetStats(c *fiber.Ctx) error {
+	userID, _, _, curRole := middleware.GetCurrentUser(c)
+	scope := models.ScopeWhere(userID, models.Role(curRole))
+
 	var resp StatsResp
 	resp.ByStatus = map[string]int64{}
 	resp.ByRole = map[string]int64{}
 
-	db.DB.Model(&models.NewsClue{}).Count(&resp.Total)
-	db.DB.Model(&models.NewsClue{}).Where("status = ?", models.StatusArchived).Count(&resp.Archived)
-	db.DB.Model(&models.NewsClue{}).Where("status = ?", models.StatusAppealed).Count(&resp.Appealing)
-	db.DB.Model(&models.NewsClue{}).Where("status = ? OR status = ?", models.StatusOverdue, models.StatusConflict).Count(&resp.Overdue)
+	sess := db.DB.Model(&models.NewsClue{}).Scopes(scope)
+
+	sess.Count(&resp.Total)
+	db.DB.Model(&models.NewsClue{}).Scopes(scope).Where("status = ?", models.StatusArchived).Count(&resp.Archived)
+	db.DB.Model(&models.NewsClue{}).Scopes(scope).Where("status = ?", models.StatusAppealed).Count(&resp.Appealing)
+	db.DB.Model(&models.NewsClue{}).Scopes(scope).Where("status = ? OR status = ?", models.StatusOverdue, models.StatusConflict).Count(&resp.Overdue)
 
 	today := time.Now().Format("2006-01-02")
-	db.DB.Model(&models.NewsClue{}).Where("date(created_at) = ?", today).Count(&resp.TodayNew)
+	db.DB.Model(&models.NewsClue{}).Scopes(scope).Where("date(created_at) = ?", today).Count(&resp.TodayNew)
 
 	statuses := []models.ClueStatus{
 		models.StatusDraft, models.StatusSubmitted, models.StatusReSubmit, models.StatusAssigned,
@@ -831,18 +825,18 @@ func GetStats(c *fiber.Ctx) error {
 	}
 	for _, s := range statuses {
 		var cnt int64
-		db.DB.Model(&models.NewsClue{}).Where("status = ?", s).Count(&cnt)
+		db.DB.Model(&models.NewsClue{}).Scopes(scope).Where("status = ?", s).Count(&cnt)
 		resp.ByStatus[s.Label()] = cnt
 	}
-	// 按办理维度
+	// 按办理维度（按可见范围内计算
 	var reg int64
-	db.DB.Model(&models.NewsClue{}).Where("status IN ?", []string{string(models.StatusDraft), string(models.StatusSubmitted), string(models.StatusReSubmit), string(models.StatusReturned), string(models.StatusLackEvidence), string(models.StatusAppealAccept)}).Count(&reg)
+	db.DB.Model(&models.NewsClue{}).Scopes(scope).Where("status IN ?", []string{string(models.StatusDraft), string(models.StatusSubmitted), string(models.StatusReSubmit), string(models.StatusReturned), string(models.StatusLackEvidence), string(models.StatusAppealAccept)}).Count(&reg)
 	resp.ByRole["登记员待办"] = reg
 	var aud int64
-	db.DB.Model(&models.NewsClue{}).Where("status IN ?", []string{string(models.StatusSubmitted), string(models.StatusReSubmit), string(models.StatusAssigned), string(models.StatusVerifying)}).Count(&aud)
+	db.DB.Model(&models.NewsClue{}).Scopes(scope).Where("status IN ?", []string{string(models.StatusSubmitted), string(models.StatusReSubmit), string(models.StatusAssigned), string(models.StatusVerifying)}).Count(&aud)
 	resp.ByRole["审核主管待办"] = aud
 	var rev int64
-	db.DB.Model(&models.NewsClue{}).Where("status IN ?", []string{string(models.StatusVerifying), string(models.StatusOverdue), string(models.StatusAppealed), string(models.StatusConflict)}).Count(&rev)
+	db.DB.Model(&models.NewsClue{}).Scopes(scope).Where("status IN ?", []string{string(models.StatusVerifying), string(models.StatusOverdue), string(models.StatusAppealed), string(models.StatusConflict)}).Count(&rev)
 	resp.ByRole["复核负责人待办"] = rev
 
 	return c.JSON(resp)

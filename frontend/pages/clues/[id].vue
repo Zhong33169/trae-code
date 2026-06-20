@@ -377,9 +377,19 @@ const availableActions = computed(() => {
 })
 
 const loadData = async () => {
-  data.value = await get(`/api/clues/${id.value}`)
-  const users = await get<any[]>('/api/users')
-  auditors.value = users.filter((u: any) => u.role === 'auditor')
+  try {
+    data.value = await get(`/api/clues/${id.value}`)
+    const users = await get<any[]>('/api/users')
+    auditors.value = users.filter((u: any) => u.role === 'auditor')
+  } catch (e: any) {
+    if (e?.status === 403) {
+      data.value = null
+      showToast('🚫 无权限查看该线索单详情，自动返回列表')
+      setTimeout(() => navigateTo('/clues'), 1500)
+    } else {
+      throw e
+    }
+  }
 }
 
 const openAction = (a: any) => {

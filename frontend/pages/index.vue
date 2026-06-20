@@ -101,6 +101,10 @@ const refresh = async () => {
     const list = await get<any[]>('/api/clues')
     recentList.value = list.slice(0, 8)
   } catch (e: any) {
+    if (e?.status === 403) {
+      stats.value = {}
+      recentList.value = []
+    }
     console.error(e)
   }
 }

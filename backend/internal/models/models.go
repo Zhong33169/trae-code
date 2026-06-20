@@ -2,6 +2,8 @@ package models
 
 import (
 	"time"
+
+	"gorm.io/gorm"
 )
 
 type Role string
@@ -182,12 +184,32 @@ func (c *NewsClue) CanView(userID string, userRole Role) bool {
 	case RoleReviewer:
 		return true
 	case RoleAuditor:
-		return c.AuditorID == "" || c.AuditorID == userID ||
-			c.Status == StatusSubmitted || c.Status == StatusReSubmit
+		// 分派给自己的所有状态 + 未分派池中待分派的 submitted/resubmitted
+		if c.AuditorID == userID {
+			return true
+		}
+		return c.AuditorID == "" && (c.Status == StatusSubmitted || c.Status == StatusReSubmit)
 	case RoleRegistrar:
 		return c.RegistrarID == userID
 	default:
 		return false
+	}
+}
+
+// ScopeWhere 返回 GORM 作用域条件，用于列表查询时按可见范围过滤
+func ScopeWhere(userID string, userRole Role) func(*gorm.DB) *gorm.DB {
+	return func(db *gorm.DB) *gorm.DB {
+		switch userRole {
+		case RoleReviewer:
+			return db
+		case RoleAuditor:
+			return db.Where(`(auditor_id = ? OR (auditor_id = '' AND status IN (?,?)))`,
+				userID, StatusSubmitted, StatusReSubmit)
+		case RoleRegistrar:
+			return db.Where("registrar_id = ?", userID)
+		default:
+			return db.Where("1=0")
+		}
 	}
 }
 
