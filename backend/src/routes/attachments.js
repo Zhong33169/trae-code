@@ -49,28 +49,59 @@ router.post('/:careRecordId/upload', upload.single('file'), (req, res) => {
   const fileSize = req.file ? req.file.size : 0;
   const fileType = req.file ? path.extname(req.file.originalname) : req.body.file_type || '';
 
+  const replacedAtt = replaced_attachment_id
+    ? db.prepare('SELECT * FROM attachments WHERE id = ? AND care_record_id = ?').get(replaced_attachment_id, careRecordId)
+    : null;
+
+  const finalCategory = category || (replacedAtt ? replacedAtt.category : 'other');
+  const finalIsRequired = is_required !== undefined
+    ? (is_required === '1' ? 1 : 0)
+    : (replacedAtt ? replacedAtt.is_required : 0);
+  const finalUploadType = upload_type || (replacedAtt ? 'resubmit' : 'initial');
+
   const result = db.prepare(`
     INSERT INTO attachments (care_record_id, file_name, file_type, file_size, category, is_required, upload_type, status, uploaded_by, supplement_reason, replaced_attachment_id)
     VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)
   `).run(
     careRecordId, fileName, fileType, fileSize,
-    category || 'other', is_required === '1' ? 1 : 0,
-    upload_type || 'initial',
+    finalCategory, finalIsRequired, finalUploadType,
     parseInt(req.headers['x-user-id']) || 0,
     supplement_reason || null,
     replaced_attachment_id ? parseInt(replaced_attachment_id) : null
   );
 
-  auditLog(careRecordId, 'upload_attachment', null,
-    { file_name: fileName, category, upload_type: upload_type || 'initial' },
-    null,
-    `上传附件: ${fileName} (${upload_type === 'supplement' ? '补传' : upload_type === 'resubmit' ? '重新提交' : '初始上传'})`,
+  const newId = result.lastInsertRowid;
+
+  let detail = `上传附件: ${fileName}`;
+  const uploadTypeLabel = {
+    initial: '初始上传',
+    supplement: '补传',
+    resubmit: '重新提交'
+  }[finalUploadType] || finalUploadType;
+
+  detail += ` (${uploadTypeLabel})`;
+
+  if (replacedAtt) {
+    detail += `，替换原附件 #${replacedAtt.id} (${replacedAtt.file_name})`;
+    if (replacedAtt.status === 'rejected') {
+      detail += `，原附件驳回原因: ${replacedAtt.reject_reason}`;
+    }
+  }
+  if (supplement_reason) {
+    detail += `，补传原因: ${supplement_reason}`;
+  }
+
+  auditLog(careRecordId, 'upload_attachment',
+    replacedAtt ? { replaced_file: replacedAtt.file_name, replaced_id: replacedAtt.id } : null,
+    { id: newId, file_name: fileName, upload_type: finalUploadType, category: finalCategory },
+    supplement_reason || null,
+    detail,
     req
   );
 
   db.prepare('UPDATE care_records SET updated_at = ? WHERE id = ?').run(new Date().toISOString(), careRecordId);
 
-  res.status(201).json({ id: result.lastInsertRowid, message: '附件已上传' });
+  res.status(201).json({ id: newId, message: '附件已上传', replaced_attachment: replacedAtt ? { id: replacedAtt.id, file_name: replacedAtt.file_name } : null });
 });
 
 router.put('/:id/review', requireRole('reviewer', 'admin'), (req, res) => {

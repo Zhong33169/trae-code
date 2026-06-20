@@ -63,6 +63,10 @@ onMounted(() => {
 
 watch([filterStatus, filterPriority, filterAnomaly], loadRecords)
 
+watch(() => userStore.careListRefreshKey, () => {
+  loadRecords()
+})
+
 let debounceTimer
 watch(filterKeyword, () => {
   clearTimeout(debounceTimer)

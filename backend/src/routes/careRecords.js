@@ -201,12 +201,23 @@ router.put('/:id/status', requireRole('doctor', 'nurse', 'reviewer', 'admin'), (
   }
 
   const updates = { status };
-  if (status === 'processing' && nurse_id) {
-    updates.nurse_id = nurse_id;
+
+  if (status === 'processing') {
+    if (!nurse_id && req.user.role === 'nurse') {
+      updates.nurse_id = req.user.id;
+    } else if (nurse_id) {
+      updates.nurse_id = nurse_id;
+    }
   }
-  if (status === 'reviewing' && reviewer_id) {
-    updates.reviewer_id = reviewer_id;
+
+  if (status === 'reviewing') {
+    if (!reviewer_id && req.user.role === 'reviewer') {
+      updates.reviewer_id = req.user.id;
+    } else if (reviewer_id) {
+      updates.reviewer_id = reviewer_id;
+    }
   }
+
   if (status === 'returned' && return_reason) {
     updates.return_reason = return_reason;
   }
@@ -217,8 +228,23 @@ router.put('/:id/status', requireRole('doctor', 'nurse', 'reviewer', 'admin'), (
 
   db.prepare(`UPDATE care_records SET ${setClauses} WHERE id = @id`).run(updates);
 
-  const detail = return_reason ? `退回原因: ${return_reason}` : `状态从 ${current.status} 变更为 ${status}`;
-  auditLog(id, 'status_change', { status: current.status }, { status, return_reason }, null, detail, req);
+  const oldInfo = { status: current.status };
+  const newInfo = { status };
+  if (updates.nurse_id) {
+    oldInfo.nurse_id = current.nurse_id;
+    newInfo.nurse_id = updates.nurse_id;
+  }
+  if (updates.reviewer_id) {
+    oldInfo.reviewer_id = current.reviewer_id;
+    newInfo.reviewer_id = updates.reviewer_id;
+  }
+
+  let detail = `状态从 ${current.status} 变更为 ${status}`;
+  if (updates.nurse_id) detail += `，经办护士: ${updates.nurse_id}`;
+  if (updates.reviewer_id) detail += `，复核人: ${updates.reviewer_id}`;
+  if (status === 'returned' && return_reason) detail += `，退回原因: ${return_reason}`;
+
+  auditLog(id, 'status_change', oldInfo, newInfo, return_reason, detail, req);
 
   if (status === 'returned' || status === 'overdue') {
     auditLog(id, `${status}_recorded`, null, null, return_reason || '超时未处理',

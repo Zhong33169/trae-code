@@ -2,7 +2,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '../stores/user'
-import { getCareRecord, updateCareRecordStatus, addMedication, createDischarge, confirmDischarge, uploadAttachment, reviewAttachment, supplementAttachment } from '../api/care'
+import { getCareRecord, updateCareRecordStatus, addMedication, createDischarge, confirmDischarge, uploadAttachment, reviewAttachment, supplementAttachment, getUsers } from '../api/care'
 
 const route = useRoute()
 const router = useRouter()
@@ -14,12 +14,21 @@ const activeTab = ref('basic')
 const msg = ref('')
 const msgType = ref('info')
 
+const nurses = ref([])
+const reviewers = ref([])
+const users = ref([])
+
+const showNurseDialog = ref(false)
+const showReviewerDialog = ref(false)
+const selectedNurseId = ref(null)
+const selectedReviewerId = ref(null)
+
 const returnReason = ref('')
 const showReturnDialog = ref(false)
 
 const medForm = ref({ medicine_name: '', dosage: '', route: '', frequency: '', start_time: '', end_time: '', notes: '' })
 const dischargeForm = ref({ discharge_date: '', discharge_summary: '', follow_up: '', condition_at_discharge: '' })
-const uploadForm = ref({ category: 'other', is_required: '0', upload_type: 'initial', supplement_reason: '', file_name: '', file_type: '' })
+const uploadForm = ref({ category: 'other', is_required: '0', upload_type: 'initial', supplement_reason: '', file_name: '', file_type: '', replaced_attachment_id: '' })
 const rejectReason = ref('')
 const showRejectDialog = ref(false)
 const rejectingAttId = ref(null)
@@ -58,14 +67,54 @@ async function loadRecord() {
   loading.value = false
 }
 
+async function loadUsers() {
+  try {
+    const res = await getUsers()
+    users.value = res.data
+    nurses.value = res.data.filter(u => u.role === 'nurse')
+    reviewers.value = res.data.filter(u => u.role === 'reviewer')
+  } catch (e) {
+    console.error('加载用户列表失败', e)
+  }
+}
+
 async function changeStatus(newStatus, extra = {}) {
   try {
     await updateCareRecordStatus(record.value.id, { status: newStatus, ...extra })
     showMsg(`状态已更新为 ${statusMap[newStatus]}`, 'success')
     loadRecord()
+    userStore.refreshCareList()
   } catch (e) {
     showMsg(e.response?.data?.error || '状态更新失败', 'danger')
   }
+}
+
+function openNurseDialog() {
+  selectedNurseId.value = null
+  showNurseDialog.value = true
+}
+
+function handleSelectNurse() {
+  if (!selectedNurseId.value) {
+    showMsg('请选择经办护士', 'warning')
+    return
+  }
+  changeStatus('processing', { nurse_id: selectedNurseId.value })
+  showNurseDialog.value = false
+}
+
+function openReviewerDialog() {
+  selectedReviewerId.value = null
+  showReviewerDialog.value = true
+}
+
+function handleSelectReviewer() {
+  if (!selectedReviewerId.value) {
+    showMsg('请选择复核人', 'warning')
+    return
+  }
+  changeStatus('reviewing', { reviewer_id: selectedReviewerId.value })
+  showReviewerDialog.value = false
 }
 
 function handleReturn() {
@@ -123,6 +172,10 @@ async function handleUpload() {
     showMsg('请填写文件名（演示模式）', 'warning')
     return
   }
+  if (uploadForm.value.upload_type === 'resubmit' && !uploadForm.value.replaced_attachment_id) {
+    showMsg('重新提交请选择被替换的附件', 'warning')
+    return
+  }
   try {
     const formData = new FormData()
     formData.append('file_name', uploadForm.value.file_name)
@@ -133,10 +186,14 @@ async function handleUpload() {
     if (uploadForm.value.supplement_reason) {
       formData.append('supplement_reason', uploadForm.value.supplement_reason)
     }
+    if (uploadForm.value.replaced_attachment_id) {
+      formData.append('replaced_attachment_id', uploadForm.value.replaced_attachment_id)
+    }
     await uploadAttachment(record.value.id, formData)
     showMsg('附件已上传', 'success')
-    uploadForm.value = { category: 'other', is_required: '0', upload_type: 'initial', supplement_reason: '', file_name: '', file_type: '' }
+    uploadForm.value = { category: 'other', is_required: '0', upload_type: 'initial', supplement_reason: '', file_name: '', file_type: '', replaced_attachment_id: '' }
     loadRecord()
+    userStore.refreshCareList()
   } catch (e) {
     showMsg('上传附件失败', 'danger')
   }
@@ -219,7 +276,15 @@ const canAdvanceStatus = computed(() => {
   return result
 })
 
-onMounted(loadRecord)
+const rejectedAttachments = computed(() => {
+  if (!record.value?.attachments) return []
+  return record.value.attachments.filter(a => a.status === 'rejected')
+})
+
+onMounted(() => {
+  loadRecord()
+  loadUsers()
+})
 </script>
 
 <template>
@@ -260,10 +325,10 @@ onMounted(loadRecord)
       <div class="card-header">
         <h3>住院护理单信息</h3>
         <div style="display:flex;gap:8px">
-          <button v-if="canAdvanceStatus.processing" class="btn btn-sm btn-primary" @click="changeStatus('processing')">
+          <button v-if="canAdvanceStatus.processing" class="btn btn-sm btn-primary" @click="openNurseDialog">
             {{ record.status === 'initiated' ? '开始办理' : '重新办理' }}
           </button>
-          <button v-if="canAdvanceStatus.reviewing" class="btn btn-sm btn-warning" @click="changeStatus('reviewing')">
+          <button v-if="canAdvanceStatus.reviewing" class="btn btn-sm btn-warning" @click="openReviewerDialog">
             提交复核
           </button>
           <button v-if="canAdvanceStatus.archived" class="btn btn-sm btn-success" @click="changeStatus('archived')">
@@ -385,6 +450,15 @@ onMounted(loadRecord)
               <option value="initial">初始上传</option>
               <option value="supplement">补传</option>
               <option value="resubmit">重新提交</option>
+            </select>
+          </div>
+          <div class="form-group" v-if="uploadForm.upload_type === 'resubmit'">
+            <label>选择被替换的附件 *</label>
+            <select v-model="uploadForm.replaced_attachment_id">
+              <option value="">请选择被驳回的附件</option>
+              <option v-for="att in rejectedAttachments" :key="att.id" :value="att.id">
+                #{{ att.id }} - {{ att.file_name }} (驳回原因: {{ att.reject_reason }})
+              </option>
             </select>
           </div>
           <div class="form-group" v-if="uploadForm.upload_type === 'supplement' || uploadForm.upload_type === 'resubmit'">
@@ -553,6 +627,44 @@ onMounted(loadRecord)
         </div>
       </div>
       <div v-else class="empty-state">暂无审计记录</div>
+    </div>
+
+    <div v-if="showNurseDialog" class="dialog-overlay" @click.self="showNurseDialog = false">
+      <div class="dialog-box">
+        <h3>选择经办护士</h3>
+        <div class="form-group">
+          <label>护士 *</label>
+          <select v-model="selectedNurseId">
+            <option value="">请选择护士</option>
+            <option v-for="n in nurses" :key="n.id" :value="n.id">
+              {{ n.name }}
+            </option>
+          </select>
+        </div>
+        <div style="display:flex;gap:8px;justify-content:flex-end">
+          <button class="btn btn-outline" @click="showNurseDialog = false">取消</button>
+          <button class="btn btn-primary" @click="handleSelectNurse">确认开始办理</button>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="showReviewerDialog" class="dialog-overlay" @click.self="showReviewerDialog = false">
+      <div class="dialog-box">
+        <h3>选择复核人</h3>
+        <div class="form-group">
+          <label>复核人 *</label>
+          <select v-model="selectedReviewerId">
+            <option value="">请选择复核人</option>
+            <option v-for="r in reviewers" :key="r.id" :value="r.id">
+              {{ r.name }}
+            </option>
+          </select>
+        </div>
+        <div style="display:flex;gap:8px;justify-content:flex-end">
+          <button class="btn btn-outline" @click="showReviewerDialog = false">取消</button>
+          <button class="btn btn-warning" @click="handleSelectReviewer">确认提交复核</button>
+        </div>
+      </div>
     </div>
 
     <div v-if="showReturnDialog" class="dialog-overlay" @click.self="showReturnDialog = false">
