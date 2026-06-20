@@ -17,6 +17,7 @@ class AppRoot extends LitElement {
     error: { type: String },
     selectedIds: { type: Array },
     showCreateDialog: { type: Boolean },
+    batchResult: { type: Object },
   };
 
   static styles = css`
@@ -661,8 +662,52 @@ class AppRoot extends LitElement {
     return map[status] || '#6b7280';
   }
 
+  _renderBatchResult() {
+    if (!this.batchResult) return '';
+    const br = this.batchResult;
+    return html`
+      <div style="background:white;border-radius:8px;padding:16px;margin-bottom:16px;border-left:4px solid ${br.failed.length > 0 ? 'var(--danger)' : 'var(--success)'};box-shadow:var(--shadow-sm)">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">
+          <div>
+            <div style="font-weight:600;font-size:15px;color:var(--gray-900)">批量「${br.action}」结果</div>
+            <div style="font-size:12px;color:var(--gray-500);margin-top:4px">${br.timestamp}</div>
+          </div>
+          <button class="btn btn-outline btn-sm" @click=${() => { this.batchResult = null; }}>关闭</button>
+        </div>
+        <div style="display:flex;gap:24px;margin-bottom:12px">
+          <div>
+            <span style="font-size:12px;color:var(--gray-500)">成功</span>
+            <div style="font-size:24px;font-weight:700;color:var(--success)">${br.succeeded.length}</div>
+          </div>
+          <div>
+            <span style="font-size:12px;color:var(--gray-500)">失败</span>
+            <div style="font-size:24px;font-weight:700;color:var(--danger)">${br.failed.length}</div>
+          </div>
+        </div>
+        ${br.failed.length > 0 ? html`
+          <div style="border-top:1px solid var(--gray-200);padding-top:12px">
+            <div style="font-size:13px;font-weight:600;color:var(--gray-700);margin-bottom:8px">失败分类：</div>
+            ${Object.entries(br.categories).filter(([_, items]) => items.length > 0).map(([cat, items]) => html`
+              <div style="margin-bottom:8px">
+                <div style="font-size:12px;font-weight:500;color:var(--danger);margin-bottom:4px">
+                  ${cat} (${items.length} 条)
+                </div>
+                <div style="font-size:12px;color:var(--gray-600);padding-left:12px">
+                  ${items.map((r, i) => html`
+                    <div>#${r.id}: ${r.error}</div>
+                  `)}
+                </div>
+              </div>
+            `)}
+          </div>
+        ` : ''}
+      </div>
+    `;
+  }
+
   _renderList() {
     return html`
+      ${this.batchResult ? this._renderBatchResult() : ''}
       <div class="page-header">
         <h2 class="page-title">待办队列</h2>
         ${this.user?.role === '登记员' ? html`
@@ -778,14 +823,40 @@ class AppRoot extends LitElement {
     try {
       const selectedApps = this.applications.filter(a => this.selectedIds.includes(a.id));
       const result = await batchAction(selectedApps, action, opinion);
-      const succeeded = result.results.filter(r => r.success).length;
-      const failed = result.results.filter(r => !r.success).length;
-      let msg = `批量操作完成：成功 ${succeeded} 条，失败 ${failed} 条`;
-      if (failed > 0) {
-        const errors = result.results.filter(r => !r.success).map(r => `#${r.id}: ${r.error}`).join('\n');
-        msg += `\n\n失败详情：\n${errors}`;
+      
+      const succeeded = result.results.filter(r => r.success);
+      const failed = result.results.filter(r => !r.success);
+      
+      const categories = {
+        '并发冲突': [],
+        '材料缺失': [],
+        '逾期拦截': [],
+        '顺序错误': [],
+        '其他错误': [],
+      };
+      
+      for (const r of failed) {
+        if (r.error.includes('版本冲突') || r.error.includes('并发冲突')) {
+          categories['并发冲突'].push(r);
+        } else if (r.error.includes('材料缺失')) {
+          categories['材料缺失'].push(r);
+        } else if (r.error.includes('逾期')) {
+          categories['逾期拦截'].push(r);
+        } else if (r.error.includes('顺序') || r.error.includes('越权')) {
+          categories['顺序错误'].push(r);
+        } else {
+          categories['其他错误'].push(r);
+        }
       }
-      alert(msg);
+      
+      this.batchResult = {
+        action,
+        succeeded,
+        failed,
+        categories,
+        timestamp: new Date().toLocaleString(),
+      };
+      
       this.selectedIds = [];
       await this._loadApplications();
       await this._loadDashboard();

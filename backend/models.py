@@ -85,6 +85,7 @@ class ApplicationListItem(BaseModel):
     overdue_reason: Optional[str] = None
     overdue_action: Optional[str] = None
     updated_at: str
+    version: int
     last_action: Optional[str] = None
     last_action_result: Optional[str] = None
     is_overdue: bool = False

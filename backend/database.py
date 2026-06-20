@@ -349,17 +349,30 @@ async def seed_demo_data():
             overdue_reason = app.get("overdue_reason")
             overdue_action = app.get("overdue_action")
 
+            version_map = {
+                "草稿": 1,
+                "待审核": 2,
+                "审核中": 3,
+                "待补正": 3,
+                "待复核归档": 4,
+                "复核归档中": 5,
+                "已办结": 6,
+                "已驳回": 4,
+                "已逾期": 2,
+            }
+            version = version_map.get(app["status"], 1)
+
             cursor = await db.execute(
                 """INSERT INTO transfer_applications
                 (application_no, seller_name, seller_id_no, buyer_name, buyer_id_no,
                  vehicle_plate, vehicle_vin, vehicle_brand, status, current_role,
-                 assignee_id, deadline_at, overdue_reason, overdue_action)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                 assignee_id, deadline_at, overdue_reason, overdue_action, version)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (app["no"], app["seller"][0], app["seller"][1],
                  app["buyer"][0], app["buyer"][1],
                  app["plate"], app["vin"], app["brand"],
                  app["status"], app["role"], assignee, deadline_str,
-                 overdue_reason, overdue_action),
+                 overdue_reason, overdue_action, version),
             )
             app_id = cursor.lastrowid
 
@@ -447,6 +460,66 @@ async def seed_demo_data():
                     (application_id, action, from_status, to_status, operator_id, operator_name, operator_role, opinion)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                     (app_id, "复核归档", "复核归档中", "已办结", 3, "王五", "复核负责人", "复核通过，已归档"),
+                )
+
+            if app["status"] == "审核中":
+                await db.execute(
+                    """INSERT INTO process_records
+                    (application_id, action, from_status, to_status, operator_id, operator_name, operator_role, opinion)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (app_id, "提交审核", "草稿", "待审核", 1, "张三", "登记员", "材料齐全，提交审核"),
+                )
+                await db.execute(
+                    """INSERT INTO process_records
+                    (application_id, action, from_status, to_status, operator_id, operator_name, operator_role, opinion)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (app_id, "开始审核", "待审核", "审核中", 2, "李四", "审核主管", "开始审核，材料核对中"),
+                )
+
+            if app["status"] == "待复核归档":
+                await db.execute(
+                    """INSERT INTO process_records
+                    (application_id, action, from_status, to_status, operator_id, operator_name, operator_role, opinion)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (app_id, "提交审核", "草稿", "待审核", 1, "张三", "登记员", "材料齐全，提交审核"),
+                )
+                await db.execute(
+                    """INSERT INTO process_records
+                    (application_id, action, from_status, to_status, operator_id, operator_name, operator_role, opinion)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (app_id, "开始审核", "待审核", "审核中", 2, "李四", "审核主管", ""),
+                )
+                await db.execute(
+                    """INSERT INTO process_records
+                    (application_id, action, from_status, to_status, operator_id, operator_name, operator_role, opinion)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (app_id, "审核通过", "审核中", "待复核归档", 2, "李四", "审核主管", "材料审核通过"),
+                )
+
+            if app["status"] == "复核归档中":
+                await db.execute(
+                    """INSERT INTO process_records
+                    (application_id, action, from_status, to_status, operator_id, operator_name, operator_role, opinion)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (app_id, "提交审核", "草稿", "待审核", 1, "张三", "登记员", "材料齐全，提交审核"),
+                )
+                await db.execute(
+                    """INSERT INTO process_records
+                    (application_id, action, from_status, to_status, operator_id, operator_name, operator_role, opinion)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (app_id, "开始审核", "待审核", "审核中", 2, "李四", "审核主管", ""),
+                )
+                await db.execute(
+                    """INSERT INTO process_records
+                    (application_id, action, from_status, to_status, operator_id, operator_name, operator_role, opinion)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (app_id, "审核通过", "审核中", "待复核归档", 2, "李四", "审核主管", "材料审核通过"),
+                )
+                await db.execute(
+                    """INSERT INTO process_records
+                    (application_id, action, from_status, to_status, operator_id, operator_name, operator_role, opinion)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (app_id, "开始复核", "待复核归档", "复核归档中", 3, "王五", "复核负责人", ""),
                 )
 
         await db.commit()
