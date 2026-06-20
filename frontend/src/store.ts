@@ -263,7 +263,6 @@ export const useStore = create<Store>((set, get) => ({
       get().showToast(result.message)
       return null
     }
-    get().clearSelection()
     get().loadAppointments()
     return result
   },
@@ -279,7 +278,6 @@ export const useStore = create<Store>((set, get) => ({
       get().showToast(result.message)
       return null
     }
-    get().clearSelection()
     get().loadAppointments()
     return result
   },
