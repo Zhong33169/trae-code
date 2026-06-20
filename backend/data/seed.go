@@ -77,7 +77,7 @@ func SeedData() error {
 			Warehouse: "北京中心仓", SKU: "SKU-A002", ProductName: "平板电脑",
 			BatchNo: "B20260515", SystemStock: 150, ActualStock: 148, AdjustQuantity: -2,
 			AdjustReason: "发货串号导致库存差异，已核实订单记录",
-			Status: models.StatusVerifyPassed, Version: 2,
+			Status: models.StatusPendingReview, Version: 3,
 			CreatedBy: users[0].ID, CreatedByName: users[0].RealName,
 			VerifiedBy: &users[2].ID, VerifiedByName: &users[2].RealName,
 			VerifiedAt: timePtr(now.AddDate(0, 0, -2)),
@@ -89,7 +89,7 @@ func SeedData() error {
 			Warehouse: "成都分仓", SKU: "SKU-E005", ProductName: "充电宝",
 			BatchNo: "B20260105", SystemStock: 300, ActualStock: 295, AdjustQuantity: -5,
 			AdjustReason: "电池自然损耗，属正常范围",
-			Status: models.StatusPendingReview, Version: 1,
+			Status: models.StatusPendingReview, Version: 2,
 			CreatedBy: users[1].ID, CreatedByName: users[1].RealName,
 			VerifiedBy: &users[2].ID, VerifiedByName: &users[2].RealName,
 			VerifiedAt: timePtr(now.AddDate(0, 0, -1)),
@@ -101,7 +101,7 @@ func SeedData() error {
 			Warehouse: "深圳分仓", SKU: "SKU-F008", ProductName: "无线充电器",
 			BatchNo: "B20260428", SystemStock: 400, ActualStock: 415, AdjustQuantity: 15,
 			AdjustReason: "客户退回商品重新入库",
-			Status: models.StatusReviewPassed, Version: 2,
+			Status: models.StatusReviewPassed, Version: 3,
 			CreatedBy: users[0].ID, CreatedByName: users[0].RealName,
 			VerifiedBy: &users[2].ID, VerifiedByName: &users[2].RealName,
 			VerifiedAt: timePtr(now.AddDate(0, 0, -4)),
@@ -116,17 +116,35 @@ func SeedData() error {
 			Warehouse: "杭州分仓", SKU: "SKU-G003", ProductName: "蓝牙耳机Pro",
 			BatchNo: "B20260315", SystemStock: 250, ActualStock: 245, AdjustQuantity: -5,
 			AdjustReason: "错发商品已补发，原商品追回中",
-			Status: models.StatusArchived, Version: 3,
+			Status: models.StatusArchived, Version: 4,
 			CreatedBy: users[1].ID, CreatedByName: users[1].RealName,
 			VerifiedBy: &users[2].ID, VerifiedByName: &users[2].RealName,
 			VerifiedAt: timePtr(now.AddDate(0, 0, -10)),
-			VerifyOpinion: strPtr("错发记录完整，待复核"),
+			VerifyOpinion: strPtr("错发记录完整，同意核验通过"),
 			ReviewedBy: &users[3].ID, ReviewedByName: &users[3].RealName,
 			ReviewedAt: timePtr(now.AddDate(0, 0, -8)),
 			ReviewOpinion: strPtr("复核通过，同意归档"),
 			ArchivedBy: &users[3].ID, ArchivedByName: &users[3].RealName,
 			ArchivedAt: timePtr(now.AddDate(0, 0, -7)),
 			CreateAt: now.AddDate(0, 0, -15),
+		},
+		{
+			OrderNo: "IA20260601009", Title: "H类商品盘点差异-009", AdjustType: "盘亏调整",
+			Warehouse: "北京中心仓", SKU: "SKU-H002", ProductName: "移动电源",
+			BatchNo: "B20260520", SystemStock: 120, ActualStock: 115, AdjustQuantity: -5,
+			AdjustReason: "盘点差异5件，原因待查",
+			Status: models.StatusPendingSubmit, Version: 1,
+			CreatedBy: users[0].ID, CreatedByName: users[0].RealName,
+			CreateAt: now.AddDate(0, 0, -1),
+		},
+		{
+			OrderNo: "IA20260601010", Title: "I类商品调拨差异-010", AdjustType: "调拨调整",
+			Warehouse: "上海分仓", SKU: "SKU-I004", ProductName: "保护壳",
+			BatchNo: "B20260525", SystemStock: 300, ActualStock: 310, AdjustQuantity: 10,
+			AdjustReason: "调拨入库差异，多出10件",
+			Status: models.StatusPendingVerify, Version: 1,
+			CreatedBy: users[1].ID, CreatedByName: users[1].RealName,
+			CreateAt: now.AddDate(0, 0, -2),
 		},
 	}
 	for i := range orders {
@@ -151,6 +169,7 @@ func SeedData() error {
 		{OrderID: 8, Type: models.EvidenceTypeSupplement, FileName: "补发快递单.jpg", FileType: "image/jpeg", FileSize: 1280000, Remark: "补录：补发商品快递单", UploadedBy: users[1].ID, UploadByName: users[1].RealName},
 		{OrderID: 8, Type: models.EvidenceTypeVerify, FileName: "核验意见.pdf", FileType: "pdf", FileSize: 768000, Remark: "主管核验意见", UploadedBy: users[2].ID, UploadByName: users[2].RealName},
 		{OrderID: 8, Type: models.EvidenceTypeReview, FileName: "复核意见书.pdf", FileType: "pdf", FileSize: 896000, Remark: "经理复核意见", UploadedBy: users[3].ID, UploadByName: users[3].RealName},
+		{OrderID: 10, Type: models.EvidenceTypeRegister, FileName: "调拨差异说明.pdf", FileType: "pdf", FileSize: 640000, Remark: "调拨入库差异记录", UploadedBy: users[1].ID, UploadByName: users[1].RealName},
 	}
 	for i := range evidences {
 		if err := database.Create(&evidences[i]).Error; err != nil {
@@ -208,6 +227,33 @@ func SeedData() error {
 	for i := range supplements {
 		if err := database.Create(&supplements[i]).Error; err != nil {
 			return fmt.Errorf("failed to create supplement: %w", err)
+		}
+	}
+
+	logs := []models.OperationLog{
+		{OrderID: 2, Operation: "提交核验", OldStatus: models.StatusPendingSubmit, NewStatus: models.StatusPendingVerify, OperatorID: users[0].ID, OperatorName: users[0].RealName, OperatorRole: users[0].Role, Remark: "库管员提交库存调整单，等待仓储主管核验"},
+		{OrderID: 3, Operation: "提交核验", OldStatus: models.StatusPendingSubmit, NewStatus: models.StatusPendingVerify, OperatorID: users[1].ID, OperatorName: users[1].RealName, OperatorRole: users[1].Role, Remark: "库管员提交库存调整单"},
+		{OrderID: 3, Operation: "核验退回", OldStatus: models.StatusPendingVerify, NewStatus: models.StatusReturned, OperatorID: users[2].ID, OperatorName: users[2].RealName, OperatorRole: users[2].Role, Remark: "缺少破损照片证据，且调整原因描述不清晰，请补充后重新提交"},
+		{OrderID: 5, Operation: "提交核验", OldStatus: models.StatusPendingSubmit, NewStatus: models.StatusPendingVerify, OperatorID: users[0].ID, OperatorName: users[0].RealName, OperatorRole: users[0].Role, Remark: "提交核验"},
+		{OrderID: 5, Operation: "核验通过", OldStatus: models.StatusPendingVerify, NewStatus: models.StatusVerifyPassed, OperatorID: users[2].ID, OperatorName: users[2].RealName, OperatorRole: users[2].Role, Remark: "证据充分，原因合理，同意核验通过"},
+		{OrderID: 5, Operation: "待复核认领", OldStatus: models.StatusVerifyPassed, NewStatus: models.StatusPendingReview, OperatorID: users[2].ID, OperatorName: users[2].RealName, OperatorRole: users[2].Role, Remark: "核验通过，进入待复核队列"},
+		{OrderID: 6, Operation: "提交核验", OldStatus: models.StatusPendingSubmit, NewStatus: models.StatusPendingVerify, OperatorID: users[1].ID, OperatorName: users[1].RealName, OperatorRole: users[1].Role, Remark: "提交核验"},
+		{OrderID: 6, Operation: "核验通过", OldStatus: models.StatusPendingVerify, NewStatus: models.StatusVerifyPassed, OperatorID: users[2].ID, OperatorName: users[2].RealName, OperatorRole: users[2].Role, Remark: "损耗率在合理范围内，同意提交复核"},
+		{OrderID: 6, Operation: "待复核认领", OldStatus: models.StatusVerifyPassed, NewStatus: models.StatusPendingReview, OperatorID: users[2].ID, OperatorName: users[2].RealName, OperatorRole: users[2].Role, Remark: "核验通过，进入待复核队列"},
+		{OrderID: 7, Operation: "提交核验", OldStatus: models.StatusPendingSubmit, NewStatus: models.StatusPendingVerify, OperatorID: users[0].ID, OperatorName: users[0].RealName, OperatorRole: users[0].Role, Remark: "提交核验"},
+		{OrderID: 7, Operation: "核验通过", OldStatus: models.StatusPendingVerify, NewStatus: models.StatusVerifyPassed, OperatorID: users[2].ID, OperatorName: users[2].RealName, OperatorRole: users[2].Role, Remark: "退货单齐全，入库核验无误"},
+		{OrderID: 7, Operation: "待复核认领", OldStatus: models.StatusVerifyPassed, NewStatus: models.StatusPendingReview, OperatorID: users[2].ID, OperatorName: users[2].RealName, OperatorRole: users[2].Role, Remark: "核验通过，进入待复核队列"},
+		{OrderID: 7, Operation: "复核通过", OldStatus: models.StatusPendingReview, NewStatus: models.StatusReviewPassed, OperatorID: users[3].ID, OperatorName: users[3].RealName, OperatorRole: users[3].Role, Remark: "复核通过，待归档"},
+		{OrderID: 8, Operation: "提交核验", OldStatus: models.StatusPendingSubmit, NewStatus: models.StatusPendingVerify, OperatorID: users[1].ID, OperatorName: users[1].RealName, OperatorRole: users[1].Role, Remark: "提交核验"},
+		{OrderID: 8, Operation: "核验通过", OldStatus: models.StatusPendingVerify, NewStatus: models.StatusVerifyPassed, OperatorID: users[2].ID, OperatorName: users[2].RealName, OperatorRole: users[2].Role, Remark: "错发记录完整，同意核验通过"},
+		{OrderID: 8, Operation: "待复核认领", OldStatus: models.StatusVerifyPassed, NewStatus: models.StatusPendingReview, OperatorID: users[2].ID, OperatorName: users[2].RealName, OperatorRole: users[2].Role, Remark: "核验通过，进入待复核队列"},
+		{OrderID: 8, Operation: "复核通过", OldStatus: models.StatusPendingReview, NewStatus: models.StatusReviewPassed, OperatorID: users[3].ID, OperatorName: users[3].RealName, OperatorRole: users[3].Role, Remark: "复核通过，同意归档"},
+		{OrderID: 8, Operation: "归档", OldStatus: models.StatusReviewPassed, NewStatus: models.StatusArchived, OperatorID: users[3].ID, OperatorName: users[3].RealName, OperatorRole: users[3].Role, Remark: "运营经理完成归档"},
+		{OrderID: 10, Operation: "提交核验", OldStatus: models.StatusPendingSubmit, NewStatus: models.StatusPendingVerify, OperatorID: users[1].ID, OperatorName: users[1].RealName, OperatorRole: users[1].Role, Remark: "提交核验"},
+	}
+	for i := range logs {
+		if err := database.Create(&logs[i]).Error; err != nil {
+			return fmt.Errorf("failed to create log: %w", err)
 		}
 	}
 

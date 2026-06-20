@@ -202,6 +202,23 @@ func AddSupplement(c *gin.Context) {
 	responseSuccess(c, supplement)
 }
 
+func AddEvidence(c *gin.Context) {
+	var req services.AddEvidenceRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		responseError(c, http.StatusBadRequest, "参数错误", err.Error())
+		return
+	}
+
+	userCtx := middleware.GetUserContext(c)
+	evidence, err := orderService.AddEvidence(&req, userCtx.UserID, userCtx.RealName, userCtx.Role)
+	if err != nil {
+		responseError(c, http.StatusBadRequest, "补充证据失败", err.Error())
+		return
+	}
+
+	responseSuccess(c, evidence)
+}
+
 func BatchSubmit(c *gin.Context) {
 	var req services.BatchSubmitRequest
 	if err := c.ShouldBindJSON(&req); err != nil {

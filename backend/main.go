@@ -55,6 +55,7 @@ func main() {
 				orders.POST("/archive", middleware.RequireRoles(models.RoleOperationManager), handlers.ArchiveOrder)
 				orders.POST("/batch-submit", middleware.RequireRoles(models.RoleWarehouseKeeper), handlers.BatchSubmit)
 				orders.POST("/supplement", handlers.AddSupplement)
+				orders.POST("/evidence", handlers.AddEvidence)
 			}
 		}
 	}

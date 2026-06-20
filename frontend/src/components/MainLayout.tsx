@@ -12,6 +12,7 @@ import {
   reviewOrder,
   archiveOrder,
   addSupplement,
+  addEvidence,
   batchSubmit,
   getOrderDetail,
   type OrderQuery,
@@ -24,6 +25,7 @@ import type {
   SupplementType,
   SupplementRecord,
   OrderEvidence,
+  EvidenceType,
 } from '../types';
 import {
   statusText,
@@ -45,8 +47,10 @@ const MainLayout: Component<{ onLogout: () => void }> = (props) => {
   const [selectedIds, setSelectedIds] = createSignal<number[]>([]);
   const [showDetail, setShowDetail] = createSignal(false);
   const [showSupplement, setShowSupplement] = createSignal(false);
+  const [showEvidence, setShowEvidence] = createSignal(false);
   const [statistics, setStatistics] = createSignal<any>(null);
   const [message, setMessage] = createSignal<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [refreshTick, setRefreshTick] = createSignal(0);
 
   const [query, setQuery] = createSignal<OrderQuery>({
     page: 1,
@@ -62,6 +66,14 @@ const MainLayout: Component<{ onLogout: () => void }> = (props) => {
     reason: '',
   });
 
+  const [evidenceForm, setEvidenceForm] = createSignal({
+    type: 'supplement' as EvidenceType,
+    file_name: '',
+    file_type: '',
+    file_size: 0,
+    remark: '',
+  });
+
   const [opinionForm, setOpinionForm] = createSignal({
     pass: true,
     opinion: '',
@@ -72,15 +84,29 @@ const MainLayout: Component<{ onLogout: () => void }> = (props) => {
     if (usersRes.code === 200 && usersRes.data) {
       setUsers(usersRes.data);
     }
-    loadData();
+    refreshAll();
+  });
+
+  createEffect(() => {
+    const _tick = refreshTick();
+    loadList();
     loadStatistics();
   });
 
   createEffect(() => {
-    loadData();
+    const q = query();
+    loadList();
   });
 
-  const loadData = async () => {
+  const refreshAll = () => {
+    setRefreshTick((t) => t + 1);
+    const sel = selectedOrder();
+    if (sel) {
+      loadOrderDetail(sel.id);
+    }
+  };
+
+  const loadList = async () => {
     setLoading(true);
     try {
       const res = await getOrderList(query());
@@ -105,6 +131,11 @@ const MainLayout: Component<{ onLogout: () => void }> = (props) => {
     const res = await getOrderDetail(orderId);
     if (res.code === 200 && res.data) {
       setOrderDetail(res.data);
+      const updated = res.data.order;
+      setSelectedOrder((prev) => {
+        if (prev && prev.id === updated.id) return updated;
+        return prev;
+      });
     }
   };
 
@@ -119,7 +150,9 @@ const MainLayout: Component<{ onLogout: () => void }> = (props) => {
     setSelectedIds([]);
     setSelectedOrder(null);
     setShowDetail(false);
+    setOrderDetail(null);
     showMessage('success', `已切换到 ${user.real_name}（${roleText[user.role]}）`);
+    refreshAll();
   };
 
   const handleStatusFilter = (status: OrderStatus | null) => {
@@ -160,12 +193,9 @@ const MainLayout: Component<{ onLogout: () => void }> = (props) => {
     const res = await submitOrder(order.id, order.version);
     if (res.code === 200) {
       showMessage('success', '提交成功');
-      loadData();
-      if (selectedOrder()?.id === order.id) {
-        loadOrderDetail(order.id);
-      }
+      refreshAll();
     } else {
-      showMessage('error', res.message || '提交失败');
+      showMessage('error', res.details || res.message || '提交失败');
     }
   };
 
@@ -173,12 +203,9 @@ const MainLayout: Component<{ onLogout: () => void }> = (props) => {
     const res = await resubmitOrder(order.id, order.version);
     if (res.code === 200) {
       showMessage('success', '重新提交成功');
-      loadData();
-      if (selectedOrder()?.id === order.id) {
-        loadOrderDetail(order.id);
-      }
+      refreshAll();
     } else {
-      showMessage('error', res.message || '重新提交失败');
+      showMessage('error', res.details || res.message || '重新提交失败');
     }
   };
 
@@ -190,13 +217,10 @@ const MainLayout: Component<{ onLogout: () => void }> = (props) => {
     const res = await verifyOrder(order.id, order.version, opinionForm().pass, opinionForm().opinion);
     if (res.code === 200) {
       showMessage('success', opinionForm().pass ? '核验通过' : '已退回');
-      loadData();
       setOpinionForm({ pass: true, opinion: '' });
-      if (selectedOrder()?.id === order.id) {
-        loadOrderDetail(order.id);
-      }
+      refreshAll();
     } else {
-      showMessage('error', res.message || '核验失败');
+      showMessage('error', res.details || res.message || '核验失败');
     }
   };
 
@@ -208,13 +232,10 @@ const MainLayout: Component<{ onLogout: () => void }> = (props) => {
     const res = await reviewOrder(order.id, order.version, opinionForm().pass, opinionForm().opinion);
     if (res.code === 200) {
       showMessage('success', opinionForm().pass ? '复核通过' : '已退回');
-      loadData();
       setOpinionForm({ pass: true, opinion: '' });
-      if (selectedOrder()?.id === order.id) {
-        loadOrderDetail(order.id);
-      }
+      refreshAll();
     } else {
-      showMessage('error', res.message || '复核失败');
+      showMessage('error', res.details || res.message || '复核失败');
     }
   };
 
@@ -222,12 +243,9 @@ const MainLayout: Component<{ onLogout: () => void }> = (props) => {
     const res = await archiveOrder(order.id, order.version);
     if (res.code === 200) {
       showMessage('success', '归档成功');
-      loadData();
-      if (selectedOrder()?.id === order.id) {
-        loadOrderDetail(order.id);
-      }
+      refreshAll();
     } else {
-      showMessage('error', res.message || '归档失败');
+      showMessage('error', res.details || res.message || '归档失败');
     }
   };
 
@@ -256,9 +274,39 @@ const MainLayout: Component<{ onLogout: () => void }> = (props) => {
         new_value: '',
         reason: '',
       });
-      loadOrderDetail(order.id);
+      refreshAll();
     } else {
-      showMessage('error', res.message || '补录失败');
+      showMessage('error', res.details || res.message || '补录失败');
+    }
+  };
+
+  const handleAddEvidence = async () => {
+    const order = selectedOrder();
+    if (!order) return;
+
+    if (!evidenceForm().file_name.trim()) {
+      showMessage('error', '请填写证据文件名');
+      return;
+    }
+
+    const res = await addEvidence({
+      order_id: order.id,
+      ...evidenceForm(),
+    });
+
+    if (res.code === 200) {
+      showMessage('success', '证据补充成功');
+      setShowEvidence(false);
+      setEvidenceForm({
+        type: 'supplement',
+        file_name: '',
+        file_type: '',
+        file_size: 0,
+        remark: '',
+      });
+      refreshAll();
+    } else {
+      showMessage('error', res.details || res.message || '补充证据失败');
     }
   };
 
@@ -274,9 +322,9 @@ const MainLayout: Component<{ onLogout: () => void }> = (props) => {
         `批量提交完成：成功 ${res.data?.success_count || 0} 条，失败 ${res.data?.fail_count || 0} 条`
       );
       setSelectedIds([]);
-      loadData();
+      refreshAll();
     } else {
-      showMessage('error', res.message || '批量提交失败');
+      showMessage('error', res.details || res.message || '批量提交失败');
     }
   };
 
@@ -322,6 +370,13 @@ const MainLayout: Component<{ onLogout: () => void }> = (props) => {
     if (!user) return false;
     if (order.status === 'archived') return false;
     if (user.role === 'warehouse_keeper' && order.created_by !== user.id) return false;
+    return true;
+  };
+
+  const canAddEvidence = (order: InventoryAdjustOrder) => {
+    const user = currentUser();
+    if (!user) return false;
+    if (order.status === 'archived') return false;
     return true;
   };
 
@@ -526,13 +581,15 @@ const MainLayout: Component<{ onLogout: () => void }> = (props) => {
               { label: '已退回', value: statistics.status_stats?.returned || 0, color: '#ff4d4f' },
               { label: '重新提交', value: statistics.status_stats?.resubmitted || 0, color: '#1890ff' },
               { label: '待核验', value: statistics.status_stats?.pending_verify || 0, color: '#fa8c16' },
+              { label: '核验通过', value: statistics.status_stats?.verify_passed || 0, color: '#52c41a' },
               { label: '待复核', value: statistics.status_stats?.pending_review || 0, color: '#722ed1' },
+              { label: '复核通过', value: statistics.status_stats?.review_passed || 0, color: '#13c2c2' },
               { label: '已归档', value: statistics.status_stats?.archived || 0, color: '#8c8c8c' },
             ].map((item) => (
               <div key={item.label} style={{
                 flex: 1,
-                minWidth: '120px',
-                padding: '16px',
+                minWidth: '100px',
+                padding: '12px',
                 background: '#fafafa',
                 borderRadius: '8px',
                 borderLeft: `4px solid ${item.color}`,
@@ -540,7 +597,7 @@ const MainLayout: Component<{ onLogout: () => void }> = (props) => {
                 <div style={{ fontSize: '12px', color: '#8c8c8c', marginBottom: '4px' }}>
                   {item.label}
                 </div>
-                <div style={{ fontSize: '24px', fontWeight: 600, color: item.color }}>
+                <div style={{ fontSize: '22px', fontWeight: 600, color: item.color }}>
                   {item.value}
                 </div>
               </div>
@@ -595,7 +652,7 @@ const MainLayout: Component<{ onLogout: () => void }> = (props) => {
             </button>
 
             <button
-              onClick={loadData}
+              onClick={() => refreshAll()}
               style={{
                 padding: '6px 16px',
                 background: '#fff',
@@ -619,7 +676,6 @@ const MainLayout: Component<{ onLogout: () => void }> = (props) => {
                   <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 500, color: '#595959' }}>标题</th>
                   <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 500, color: '#595959' }}>仓库</th>
                   <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 500, color: '#595959' }}>SKU</th>
-                  <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 500, color: '#595959' }}>商品</th>
                   <th style={{ padding: '12px 16px', textAlign: 'center', fontWeight: 500, color: '#595959' }}>调整数量</th>
                   <th style={{ padding: '12px 16px', textAlign: 'center', fontWeight: 500, color: '#595959' }}>状态</th>
                   <th style={{ padding: '12px 16px', textAlign: 'center', fontWeight: 500, color: '#595959' }}>版本</th>
@@ -630,14 +686,14 @@ const MainLayout: Component<{ onLogout: () => void }> = (props) => {
               <tbody>
                 <Show when={loading()}>
                   <tr>
-                    <td colSpan={11} style={{ padding: '40px', textAlign: 'center', color: '#8c8c8c' }}>
+                    <td colSpan={10} style={{ padding: '40px', textAlign: 'center', color: '#8c8c8c' }}>
                       加载中...
                     </td>
                   </tr>
                 </Show>
                 <Show when={!loading() && orders().length === 0}>
                   <tr>
-                    <td colSpan={11} style={{ padding: '40px', textAlign: 'center', color: '#8c8c8c' }}>
+                    <td colSpan={10} style={{ padding: '40px', textAlign: 'center', color: '#8c8c8c' }}>
                       暂无数据
                     </td>
                   </tr>
@@ -667,7 +723,6 @@ const MainLayout: Component<{ onLogout: () => void }> = (props) => {
                       <td style={{ padding: '12px 16px', fontFamily: 'monospace', fontSize: '12px' }}>
                         {order.sku}
                       </td>
-                      <td style={{ padding: '12px 16px' }}>{order.product_name}</td>
                       <td style={{
                         padding: '12px 16px',
                         textAlign: 'center',
@@ -800,7 +855,7 @@ const MainLayout: Component<{ onLogout: () => void }> = (props) => {
         </div>
 
         <div style={{
-          width: '380px',
+          width: '400px',
           background: '#fff',
           borderLeft: '1px solid #f0f0f0',
           display: 'flex',
@@ -816,22 +871,39 @@ const MainLayout: Component<{ onLogout: () => void }> = (props) => {
             <h3 style={{ fontSize: '15px', fontWeight: 600, margin: 0 }}>
               {selectedOrder() ? '订单关键证据' : '请选择订单查看详情'}
             </h3>
-            <Show when={selectedOrder() && canSupplement(selectedOrder()!)}>
-              <button
-                onClick={() => {
-                  setShowSupplement(true);
-                }}
-                style={{
-                  padding: '4px 12px',
-                  background: '#722ed1',
-                  border: 'none',
-                  borderRadius: '4px',
-                  color: '#fff',
-                  fontSize: '12px',
-                }}
-              >
-                + 移动补录
-              </button>
+            <Show when={selectedOrder()}>
+              <div style={{ display: 'flex', gap: '6px' }}>
+                <Show when={canAddEvidence(selectedOrder()!)}>
+                  <button
+                    onClick={() => setShowEvidence(true)}
+                    style={{
+                      padding: '4px 10px',
+                      background: '#1890ff',
+                      border: 'none',
+                      borderRadius: '4px',
+                      color: '#fff',
+                      fontSize: '12px',
+                    }}
+                  >
+                    + 补充证据
+                  </button>
+                </Show>
+                <Show when={canSupplement(selectedOrder()!)}>
+                  <button
+                    onClick={() => setShowSupplement(true)}
+                    style={{
+                      padding: '4px 10px',
+                      background: '#722ed1',
+                      border: 'none',
+                      borderRadius: '4px',
+                      color: '#fff',
+                      fontSize: '12px',
+                    }}
+                  >
+                    + 移动补录
+                  </button>
+                </Show>
+              </div>
             </Show>
           </div>
 
@@ -843,7 +915,7 @@ const MainLayout: Component<{ onLogout: () => void }> = (props) => {
                 padding: '60px 20px',
                 fontSize: '13px',
               }}>
-                <div style={{ fontSize: '48px', marginBottom: '12px', opacity: 0.3 }}>📋</div>
+                <div style={{ fontSize: '48px', marginBottom: '12px', opacity: 0.3 }}>&#128203;</div>
                 点击左侧订单查看登记、过程核验、复核归档的关键证据
               </div>
             </Show>
@@ -881,6 +953,10 @@ const MainLayout: Component<{ onLogout: () => void }> = (props) => {
                     </span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                    <span style={{ color: '#8c8c8c' }}>版本：</span>
+                    <span>v{orderDetail()!.order.version}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
                     <span style={{ color: '#8c8c8c' }}>调整数量：</span>
                     <span style={{
                       color: orderDetail()!.order.adjust_quantity > 0 ? '#52c41a' : '#ff4d4f',
@@ -895,6 +971,21 @@ const MainLayout: Component<{ onLogout: () => void }> = (props) => {
                       {orderDetail()!.order.adjust_reason}
                     </div>
                   </div>
+                  <Show when={orderDetail()!.order.verify_opinion}>
+                    <div style={{
+                      marginTop: '8px',
+                      padding: '8px',
+                      background: '#f6ffed',
+                      border: '1px solid #b7eb8f',
+                      borderRadius: '4px',
+                      color: '#389e0d',
+                    }}>
+                      <div style={{ fontSize: '12px', fontWeight: 500, marginBottom: '4px' }}>
+                        核验意见：
+                      </div>
+                      {orderDetail()!.order.verify_opinion}
+                    </div>
+                  </Show>
                   <Show when={orderDetail()!.order.return_reason}>
                     <div style={{
                       marginTop: '8px',
@@ -945,7 +1036,7 @@ const MainLayout: Component<{ onLogout: () => void }> = (props) => {
                             {evidenceTypeText[evidence.type]}
                           </span>
                           <span style={{ color: '#262626', fontWeight: 500 }}>
-                            📎 {evidence.file_name}
+                            &#128206; {evidence.file_name}
                           </span>
                         </div>
                         <div style={{ color: '#8c8c8c', fontSize: '11px' }}>
@@ -1025,7 +1116,7 @@ const MainLayout: Component<{ onLogout: () => void }> = (props) => {
                             <span style={{ color: '#ff4d4f', textDecoration: 'line-through' }}>
                               {supp.old_value}
                             </span>
-                            <span style={{ color: '#8c8c8c', margin: '0 4px' }}>→</span>
+                            <span style={{ color: '#8c8c8c', margin: '0 4px' }}>&#8594;</span>
                             <span style={{ color: '#52c41a' }}>{supp.new_value}</span>
                           </div>
                         </Show>
@@ -1053,7 +1144,7 @@ const MainLayout: Component<{ onLogout: () => void }> = (props) => {
                   操作记录
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  <For each={orderDetail()!.logs.slice(0, 10)}>
+                  <For each={orderDetail()!.logs.slice(0, 15)}>
                     {(log) => (
                       <div style={{
                         padding: '8px',
@@ -1384,6 +1475,176 @@ const MainLayout: Component<{ onLogout: () => void }> = (props) => {
                 }}
               >
                 确认补录
+              </button>
+            </div>
+          </div>
+        </div>
+      </Show>
+
+      <Show when={showEvidence() && selectedOrder()}>
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+          }}
+          onClick={() => setShowEvidence(false)}
+        >
+          <div
+            style={{
+              background: '#fff',
+              borderRadius: '12px',
+              width: '90%',
+              maxWidth: '480px',
+              padding: '24px',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 style={{ fontSize: '18px', fontWeight: 600, marginBottom: '20px' }}>
+              补充证据 - {selectedOrder()!.order_no}
+            </h3>
+
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ display: 'block', marginBottom: '6px', color: '#595959', fontWeight: 500 }}>
+                证据类型 <span style={{ color: '#ff4d4f' }}>*</span>
+              </label>
+              <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                {(['register', 'verify', 'review', 'supplement'] as EvidenceType[]).map((type) => (
+                  <label key={type} style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
+                    <input
+                      type="radio"
+                      name="evidenceType"
+                      checked={evidenceForm().type === type}
+                      onChange={() => setEvidenceForm({ ...evidenceForm(), type })}
+                    />
+                    <span style={{
+                      padding: '2px 8px',
+                      borderRadius: '4px',
+                      background: '#1890ff20',
+                      color: '#1890ff',
+                      fontSize: '13px',
+                    }}>
+                      {evidenceTypeText[type]}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ display: 'block', marginBottom: '6px', color: '#595959', fontWeight: 500 }}>
+                文件名 <span style={{ color: '#ff4d4f' }}>*</span>
+              </label>
+              <input
+                type="text"
+                placeholder="如：盘点表_20260621.pdf"
+                value={evidenceForm().file_name}
+                onInput={(e) => setEvidenceForm({ ...evidenceForm(), file_name: (e.target as HTMLInputElement).value })}
+                style={{
+                  width: '100%',
+                  padding: '10px',
+                  border: '1px solid #d9d9d9',
+                  borderRadius: '6px',
+                  fontSize: '13px',
+                }}
+              />
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '16px' }}>
+              <div>
+                <label style={{ display: 'block', marginBottom: '6px', color: '#595959', fontSize: '12px' }}>
+                  文件类型
+                </label>
+                <select
+                  value={evidenceForm().file_type}
+                  onChange={(e) => setEvidenceForm({ ...evidenceForm(), file_type: (e.target as HTMLSelectElement).value })}
+                  style={{
+                    width: '100%',
+                    padding: '8px',
+                    border: '1px solid #d9d9d9',
+                    borderRadius: '6px',
+                    fontSize: '13px',
+                  }}
+                >
+                  <option value="">选择类型</option>
+                  <option value="pdf">PDF</option>
+                  <option value="image/jpeg">图片(JPG)</option>
+                  <option value="image/png">图片(PNG)</option>
+                  <option value="xlsx">Excel</option>
+                  <option value="docx">Word</option>
+                </select>
+              </div>
+              <div>
+                <label style={{ display: 'block', marginBottom: '6px', color: '#595959', fontSize: '12px' }}>
+                  文件大小(字节)
+                </label>
+                <input
+                  type="number"
+                  placeholder="如：1024000"
+                  value={evidenceForm().file_size || ''}
+                  onInput={(e) => setEvidenceForm({ ...evidenceForm(), file_size: Number((e.target as HTMLInputElement).value) || 0 })}
+                  style={{
+                    width: '100%',
+                    padding: '8px',
+                    border: '1px solid #d9d9d9',
+                    borderRadius: '6px',
+                    fontSize: '13px',
+                  }}
+                />
+              </div>
+            </div>
+
+            <div style={{ marginBottom: '20px' }}>
+              <label style={{ display: 'block', marginBottom: '6px', color: '#595959', fontWeight: 500 }}>
+                备注
+              </label>
+              <textarea
+                placeholder="请说明证据内容..."
+                value={evidenceForm().remark}
+                onInput={(e) => setEvidenceForm({ ...evidenceForm(), remark: (e.target as HTMLTextAreaElement).value })}
+                style={{
+                  width: '100%',
+                  padding: '10px',
+                  border: '1px solid #d9d9d9',
+                  borderRadius: '6px',
+                  fontSize: '13px',
+                  minHeight: '60px',
+                  resize: 'vertical',
+                }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => setShowEvidence(false)}
+                style={{
+                  padding: '10px 24px',
+                  background: '#fff',
+                  border: '1px solid #d9d9d9',
+                  borderRadius: '6px',
+                  color: '#595959',
+                  fontSize: '14px',
+                }}
+              >
+                取消
+              </button>
+              <button
+                onClick={handleAddEvidence}
+                style={{
+                  padding: '10px 24px',
+                  background: '#1890ff',
+                  border: 'none',
+                  borderRadius: '6px',
+                  color: '#fff',
+                  fontSize: '14px',
+                  fontWeight: 500,
+                }}
+              >
+                确认补充
               </button>
             </div>
           </div>

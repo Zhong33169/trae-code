@@ -71,6 +71,15 @@ type BatchSubmitRequest struct {
 	OrderIDs []int64 `json:"order_ids" binding:"required,min=1"`
 }
 
+type AddEvidenceRequest struct {
+	OrderID  int64               `json:"order_id" binding:"required"`
+	Type     models.EvidenceType `json:"type" binding:"required"`
+	FileName string              `json:"file_name" binding:"required,min=1"`
+	FileType string              `json:"file_type"`
+	FileSize int64               `json:"file_size"`
+	Remark   string              `json:"remark"`
+}
+
 func (s *OrderService) GetOrderList(query *OrderQuery, userCtx interface{}) (*OrderListResult, error) {
 	database := db.GetDB()
 	dbQuery := database.Model(&models.InventoryAdjustOrder{})
@@ -281,7 +290,7 @@ func (s *OrderService) VerifyOrder(req *VerifyOrderRequest, userID int64, userNa
 
 		oldStatus := order.Status
 		now := time.Now()
-		order.Status = models.StatusPendingReview
+		order.Status = models.StatusVerifyPassed
 		order.VerifiedBy = &userID
 		order.VerifiedByName = &userName
 		order.VerifiedAt = &now
@@ -294,17 +303,41 @@ func (s *OrderService) VerifyOrder(req *VerifyOrderRequest, userID int64, userNa
 			return nil, fmt.Errorf("更新订单状态失败: %w", err)
 		}
 
-		log := &models.OperationLog{
+		opLog := &models.OperationLog{
 			OrderID:      req.OrderID,
 			Operation:    "核验通过",
 			OldStatus:    oldStatus,
-			NewStatus:    models.StatusPendingReview,
+			NewStatus:    models.StatusVerifyPassed,
 			OperatorID:   userID,
 			OperatorName: userName,
 			OperatorRole: userRole,
 			Remark:       req.Opinion,
 		}
-		if err := tx.Create(log).Error; err != nil {
+		if err := tx.Create(opLog).Error; err != nil {
+			tx.Rollback()
+			return nil, fmt.Errorf("创建操作日志失败: %w", err)
+		}
+
+		order.Status = models.StatusPendingReview
+		order.Version++
+		order.UpdateAt = now
+
+		if err := tx.Save(&order).Error; err != nil {
+			tx.Rollback()
+			return nil, fmt.Errorf("更新订单状态失败: %w", err)
+		}
+
+		claimLog := &models.OperationLog{
+			OrderID:      req.OrderID,
+			Operation:    "待复核认领",
+			OldStatus:    models.StatusVerifyPassed,
+			NewStatus:    models.StatusPendingReview,
+			OperatorID:   userID,
+			OperatorName: userName,
+			OperatorRole: userRole,
+			Remark:       "核验通过，进入待复核队列",
+		}
+		if err := tx.Create(claimLog).Error; err != nil {
 			tx.Rollback()
 			return nil, fmt.Errorf("创建操作日志失败: %w", err)
 		}
@@ -679,11 +712,21 @@ func (s *OrderService) BatchSubmit(req *BatchSubmitRequest, userID int64, userNa
 		return nil, errors.New("只有库管员可以批量提交")
 	}
 
+	database := db.GetDB()
 	successIDs := make([]int64, 0)
 	failResults := make([]map[string]interface{}, 0)
 
 	for _, orderID := range req.OrderIDs {
-		result, err := s.SubmitOrder(&SubmitOrderRequest{OrderID: orderID, Version: 1}, userID, userName, userRole)
+		var order models.InventoryAdjustOrder
+		if err := database.First(&order, orderID).Error; err != nil {
+			failResults = append(failResults, map[string]interface{}{
+				"order_id": orderID,
+				"error":    "订单不存在",
+			})
+			continue
+		}
+
+		result, err := s.SubmitOrder(&SubmitOrderRequest{OrderID: orderID, Version: order.Version}, userID, userName, userRole)
 		if err != nil {
 			failResults = append(failResults, map[string]interface{}{
 				"order_id": orderID,
@@ -702,6 +745,65 @@ func (s *OrderService) BatchSubmit(req *BatchSubmitRequest, userID int64, userNa
 	}, nil
 }
 
+func (s *OrderService) AddEvidence(req *AddEvidenceRequest, userID int64, userName string, userRole models.Role) (*models.OrderEvidence, error) {
+	database := db.GetDB()
+
+	var order models.InventoryAdjustOrder
+	if err := database.First(&order, req.OrderID).Error; err != nil {
+		return nil, errors.New("订单不存在")
+	}
+
+	if order.Status == models.StatusArchived {
+		return nil, errors.New("已归档的订单不能再补充证据")
+	}
+
+	validTypes := map[models.EvidenceType]bool{
+		models.EvidenceTypeRegister:   true,
+		models.EvidenceTypeVerify:     true,
+		models.EvidenceTypeReview:     true,
+		models.EvidenceTypeSupplement: true,
+	}
+	if !validTypes[req.Type] {
+		return nil, errors.New("无效的证据类型")
+	}
+
+	if req.Type == models.EvidenceTypeVerify && userRole != models.RoleWarehouseSupervisor {
+		return nil, errors.New("只有仓储主管可以上传核验证据")
+	}
+	if req.Type == models.EvidenceTypeReview && userRole != models.RoleOperationManager {
+		return nil, errors.New("只有运营经理可以上传复核证据")
+	}
+
+	evidence := &models.OrderEvidence{
+		OrderID:      req.OrderID,
+		Type:         req.Type,
+		FileName:     req.FileName,
+		FileType:     req.FileType,
+		FileSize:     req.FileSize,
+		Remark:       req.Remark,
+		UploadedBy:   userID,
+		UploadByName: userName,
+	}
+
+	if err := database.Create(evidence).Error; err != nil {
+		return nil, fmt.Errorf("创建证据记录失败: %w", err)
+	}
+
+	opLog := &models.OperationLog{
+		OrderID:      req.OrderID,
+		Operation:    "补充证据-" + evidenceTypeText(req.Type),
+		OldStatus:    order.Status,
+		NewStatus:    order.Status,
+		OperatorID:   userID,
+		OperatorName: userName,
+		OperatorRole: userRole,
+		Remark:       fmt.Sprintf("上传证据: %s，备注: %s", req.FileName, req.Remark),
+	}
+	database.Create(opLog)
+
+	return evidence, nil
+}
+
 func supplementTypeText(t models.SupplementType) string {
 	switch t {
 	case models.SupplementTypeException:
@@ -710,6 +812,21 @@ func supplementTypeText(t models.SupplementType) string {
 		return "补正"
 	case models.SupplementTypeReview:
 		return "复核"
+	default:
+		return "未知"
+	}
+}
+
+func evidenceTypeText(t models.EvidenceType) string {
+	switch t {
+	case models.EvidenceTypeRegister:
+		return "登记"
+	case models.EvidenceTypeVerify:
+		return "核验"
+	case models.EvidenceTypeReview:
+		return "复核"
+	case models.EvidenceTypeSupplement:
+		return "补录"
 	default:
 		return "未知"
 	}

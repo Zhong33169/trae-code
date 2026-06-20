@@ -156,6 +156,22 @@ export async function addSupplement(req: SupplementRequest): Promise<ApiResponse
   });
 }
 
+export interface AddEvidenceRequest {
+  order_id: number;
+  type: string;
+  file_name: string;
+  file_type?: string;
+  file_size?: number;
+  remark?: string;
+}
+
+export async function addEvidence(req: AddEvidenceRequest): Promise<ApiResponse<any>> {
+  return request('/orders/evidence', {
+    method: 'POST',
+    body: JSON.stringify(req),
+  });
+}
+
 export async function batchSubmit(orderIds: number[]): Promise<ApiResponse<any>> {
   return request('/orders/batch-submit', {
     method: 'POST',
