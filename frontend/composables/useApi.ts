@@ -5,6 +5,13 @@ export interface ApiOptions {
   headers?: Record<string, string>
 }
 
+export interface ApiError {
+  status: number
+  message: string
+  data?: any
+  code?: string
+}
+
 let toastShown: Record<number, number> = {}
 
 const showOnceToast = (msg: string, key: number) => {
@@ -14,6 +21,12 @@ const showOnceToast = (msg: string, key: number) => {
   if (typeof window !== 'undefined') {
     const ev = new CustomEvent('api-toast', { detail: msg })
     window.dispatchEvent(ev)
+  }
+}
+
+const broadcast = (evt: string, detail?: any) => {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(evt, { detail }))
   }
 }
 
@@ -40,24 +53,37 @@ export const useApi = () => {
       })
       return resp as T
     } catch (e: any) {
-      if (e?.status === 401) {
+      const status = e?.status || 500
+      const data = e?.data || {}
+      const message = data?.error || data?.message || e?.message || '请求失败'
+
+      if (status === 401) {
         authStore.logout()
         if (!path.includes('/auth/login')) {
           navigateTo('/login')
         }
       }
-      if (e?.status === 403) {
-        showOnceToast('🚫 ' + (e?.data?.error || '权限不足，无操作权限'), 403)
+      if (status === 403) {
+        showOnceToast('🚫 ' + message, 403)
+        broadcast('api:forbidden', { path, message })
       }
-      if (e?.status === 409) {
-        showOnceToast('⚠️ ' + (e?.data?.error || '版本冲突，请刷新后重试'), 409)
+      if (status === 409) {
+        showOnceToast('⚠️ ' + message, 409)
+        broadcast('api:conflict', { path, message })
       }
-      const msg = e?.data?.error || e?.message || '请求失败'
-      throw new Error(msg)
+      if (status === 400 && (message.includes('证据') || message.includes('缺少'))) {
+        showOnceToast('📎 ' + message, 400)
+      }
+
+      const err: ApiError = { status, message, data }
+      if (data?.code) err.code = data.code
+      throw err
     }
   }
 
-  return { request, get: <T>(p: string, o?: ApiOptions) => request<T>(p, { ...o, method: 'GET' }),
+  return {
+    request,
+    get: <T>(p: string, o?: ApiOptions) => request<T>(p, { ...o, method: 'GET' }),
     post: <T>(p: string, body?: any, o?: ApiOptions) => request<T>(p, { ...o, method: 'POST', body })
   }
 }

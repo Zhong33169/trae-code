@@ -120,5 +120,20 @@ const statusStyle = (name: string) => {
 
 const fmtTime = (t: string) => t ? t.replace('T', ' ').slice(0, 16) : '-'
 
-onMounted(refresh)
+const onForbidden = () => { stats.value = {}; recentList.value = [] }
+const onConflict = () => { refresh() }
+
+onMounted(() => {
+  refresh()
+  if (typeof window !== 'undefined') {
+    window.addEventListener('api:forbidden', onForbidden)
+    window.addEventListener('api:conflict', onConflict)
+  }
+})
+onBeforeUnmount(() => {
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('api:forbidden', onForbidden)
+    window.removeEventListener('api:conflict', onConflict)
+  }
+})
 </script>

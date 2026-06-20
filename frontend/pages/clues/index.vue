@@ -165,10 +165,23 @@ const roleScopeTip = computed(() => {
   return ''
 })
 
+const onForbidden = () => { list.value = []; stats.value = {} }
+const onConflict = () => { loadList() }
+
 onMounted(() => {
   loadList()
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) loadList()
   })
+  if (typeof window !== 'undefined') {
+    window.addEventListener('api:forbidden', onForbidden)
+    window.addEventListener('api:conflict', onConflict)
+  }
+})
+onBeforeUnmount(() => {
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('api:forbidden', onForbidden)
+    window.removeEventListener('api:conflict', onConflict)
+  }
 })
 </script>

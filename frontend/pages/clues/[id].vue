@@ -279,6 +279,7 @@
 </template>
 
 <script setup lang="ts">
+import type { ApiError } from '~/composables/useApi'
 const route = useRoute()
 const authStore = useAuthStore()
 const { get, post } = useApi()
@@ -469,19 +470,56 @@ const submitAction = async () => {
     showToast('✅ 操作成功')
     currentAction.value = null
     await loadData()
-  } catch (e: any) {
-    const msg = e.message || '操作失败'
-    showToast('❌ ' + msg)
-    if (msg.includes('版本') || msg.includes('冲突') || msg.includes('version')) {
-      setTimeout(async () => {
-        showToast('🔄 检测到版本冲突，正在刷新最新数据...')
-        await loadData()
-      }, 1200)
+  } catch (e: ApiError | any) {
+    const err: ApiError = (e as ApiError) || { status: 500, message: '操作失败' }
+    currentAction.value = null
+    processing.value = false
+    if (err.status === 403) {
+      data.value = null
+      showToast('🚫 越权操作，已返回列表')
+      setTimeout(() => navigateTo('/clues'), 1200)
+      return
     }
+    if (err.status === 409) {
+      showToast('⚠️ ' + err.message)
+      setTimeout(async () => {
+        showToast('🔄 同步刷新最新数据...')
+        await loadData()
+      }, 1000)
+      return
+    }
+    if (err.status === 400 && err.message.includes('证据')) {
+      showToast('📎 ' + err.message)
+      return
+    }
+    showToast('❌ ' + (err.message || '操作失败'))
   } finally {
     processing.value = false
   }
 }
 
-onMounted(loadData)
+const onForbidden = () => {
+  currentAction.value = null
+  data.value = null
+}
+const onConflict = async () => {
+  currentAction.value = null
+  if (data.value) {
+    try { await loadData() } catch {}
+  }
+}
+
+onMounted(() => {
+  loadData()
+  if (typeof window !== 'undefined') {
+    window.addEventListener('api:forbidden', onForbidden)
+    window.addEventListener('api:conflict', onConflict)
+  }
+})
+onBeforeUnmount(() => {
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('api:forbidden', onForbidden)
+    window.removeEventListener('api:conflict', onConflict)
+  }
+})
 </script>
