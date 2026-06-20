@@ -253,9 +253,12 @@ export const useStore = create<Store>((set, get) => ({
   },
 
   batchReview: async (action) => {
-    const ids = Array.from(get().selectedIds)
-    if (ids.length === 0) return null
-    const result = await api.batchReview({ ids, action })
+    const { appointments, selectedIds } = get()
+    const items = appointments
+      .filter((a) => selectedIds.has(a.id))
+      .map((a) => ({ id: a.id, version: a.version }))
+    if (items.length === 0) return null
+    const result = await api.batchReview({ items, action })
     if (isApiError(result)) {
       get().showToast(result.message)
       return null
@@ -266,9 +269,12 @@ export const useStore = create<Store>((set, get) => ({
   },
 
   batchArchive: async (action) => {
-    const ids = Array.from(get().selectedIds)
-    if (ids.length === 0) return null
-    const result = await api.batchArchive({ ids, action })
+    const { appointments, selectedIds } = get()
+    const items = appointments
+      .filter((a) => selectedIds.has(a.id))
+      .map((a) => ({ id: a.id, version: a.version }))
+    if (items.length === 0) return null
+    const result = await api.batchArchive({ items, action })
     if (isApiError(result)) {
       get().showToast(result.message)
       return null

@@ -69,6 +69,7 @@ export interface BatchResult {
   id: string
   success: boolean
   error?: string
+  error_code?: string
 }
 
 export interface FilterState {

@@ -539,17 +539,17 @@ pub async fn batch_review(
     let conn = db.lock().unwrap();
     let mut results = Vec::new();
 
-    for id in &body.ids {
-        let result = process_single_review(&conn, &claims, id, &body.action, body.comment.as_deref());
+    for item in &body.items {
+        let result = process_single_review(&conn, &claims, &item.id, item.version, &body.action, body.comment.as_deref());
         match result {
             Ok(_) => results.push(BatchResultItem {
-                id: id.clone(),
+                id: item.id.clone(),
                 success: true,
                 error: None,
                 error_code: None,
             }),
             Err(e) => results.push(BatchResultItem {
-                id: id.clone(),
+                id: item.id.clone(),
                 success: false,
                 error: Some(e.to_string()),
                 error_code: Some(e.error_code().to_string()),
@@ -564,6 +564,7 @@ fn process_single_review(
     conn: &Connection,
     claims: &AuthClaims,
     id: &str,
+    expected_version: i64,
     action: &str,
     comment: Option<&str>,
 ) -> Result<(), AppError> {
@@ -576,6 +577,7 @@ fn process_single_review(
         .map_err(|_| AppError::NotFound("预约单不存在".into()))?;
 
     validate_status(&["pending_review", "rejected_for_review"], &appointment.status)?;
+    validate_version(expected_version, appointment.version)?;
 
     let evidence = get_evidence_for_appointment(conn, id);
 
@@ -612,17 +614,17 @@ pub async fn batch_archive(
     let conn = db.lock().unwrap();
     let mut results = Vec::new();
 
-    for id in &body.ids {
-        let result = process_single_archive(&conn, &claims, id, &body.action, body.comment.as_deref());
+    for item in &body.items {
+        let result = process_single_archive(&conn, &claims, &item.id, item.version, &body.action, body.comment.as_deref());
         match result {
             Ok(_) => results.push(BatchResultItem {
-                id: id.clone(),
+                id: item.id.clone(),
                 success: true,
                 error: None,
                 error_code: None,
             }),
             Err(e) => results.push(BatchResultItem {
-                id: id.clone(),
+                id: item.id.clone(),
                 success: false,
                 error: Some(e.to_string()),
                 error_code: Some(e.error_code().to_string()),
@@ -637,6 +639,7 @@ fn process_single_archive(
     conn: &Connection,
     claims: &AuthClaims,
     id: &str,
+    expected_version: i64,
     action: &str,
     comment: Option<&str>,
 ) -> Result<(), AppError> {
@@ -649,6 +652,7 @@ fn process_single_archive(
         .map_err(|_| AppError::NotFound("预约单不存在".into()))?;
 
     validate_status(&["pending_archive"], &appointment.status)?;
+    validate_version(expected_version, appointment.version)?;
 
     let evidence = get_evidence_for_appointment(conn, id);
 

@@ -149,15 +149,21 @@ pub struct CreateEvidenceRequest {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct BatchItem {
+    pub id: String,
+    pub version: i64,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct BatchReviewRequest {
-    pub ids: Vec<String>,
+    pub items: Vec<BatchItem>,
     pub action: String,
     pub comment: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct BatchArchiveRequest {
-    pub ids: Vec<String>,
+    pub items: Vec<BatchItem>,
     pub action: String,
     pub comment: Option<String>,
 }

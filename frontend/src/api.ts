@@ -82,14 +82,14 @@ export async function archiveAppointment(id: string, data: { action: 'archive' |
   })
 }
 
-export async function batchReview(data: { ids: string[]; action: 'approve' | 'reject'; comment?: string }) {
+export async function batchReview(data: { items: { id: string; version: number }[]; action: 'approve' | 'reject'; comment?: string }) {
   return request<BatchResult[]>('/appointments/batch-review', {
     method: 'POST',
     body: JSON.stringify(data),
   })
 }
 
-export async function batchArchive(data: { ids: string[]; action: 'archive' | 'reject'; comment?: string }) {
+export async function batchArchive(data: { items: { id: string; version: number }[]; action: 'archive' | 'reject'; comment?: string }) {
   return request<BatchResult[]>('/appointments/batch-archive', {
     method: 'POST',
     body: JSON.stringify(data),
