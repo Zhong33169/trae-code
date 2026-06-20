@@ -9,10 +9,8 @@ import {
   useContext,
   useContextProvider,
   useStore,
-  useOnMount,
+  useTask$,
   $,
-  type Signal,
-  createSignal,
 } from "@builder.io/qwik";
 import type { User, UserRole } from "~/types";
 import api from "~/services/api";
@@ -33,9 +31,11 @@ export const RefreshSignalContext = createContextId<{
 
 // ---------- Provider ----------
 export const AppStateProvider = component$<{ children: any }>(({ children }) => {
-  // Refresh signal
-  const [tick, setTick] = createSignal(0);
-  const bump = $(() => setTick(tick.value + 1));
+  // Refresh signal - useStore instead of createSignal for Qwik 1.9 compliance
+  const refreshState = useStore({ tick: 0 });
+  const bump = $(() => {
+    refreshState.tick += 1;
+  });
 
   // User state
   const userState = useStore({
@@ -66,14 +66,14 @@ export const AppStateProvider = component$<{ children: any }>(({ children }) => 
     }),
   });
 
-  useOnMount$(async () => {
+  useTask$(async () => {
     await userState.refreshUsers();
   });
 
   useContextProvider(CurrentUserContext, userState);
   useContextProvider(RefreshSignalContext, {
     get tick() {
-      return tick.value;
+      return refreshState.tick;
     },
     bump,
   });

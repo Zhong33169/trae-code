@@ -6,6 +6,8 @@
 // Enum definitions matching backend Python Enums (value = snake_case strings)
 export type UserRole = "inspector" | "handler" | "reviewer";
 
+export type CheckItemValue = boolean | null;
+
 export type InspectionStatus =
   | "draft"
   | "pending_handling"
@@ -140,6 +142,7 @@ export interface InspectionOrderListItem {
   inspection_result: InspectionResult | null;
   inspection_date: string;
   due_date: string | null;
+  inspection_remark: string | null;
   last_handler_opinion: string | null;
   last_handler_result: string | null;
   handler_opinion: string | null;
@@ -317,4 +320,13 @@ export interface InspectionOrderInitiateRequest {
   maintenance_check: boolean | null;
   maintenance_evidence?: string | null;
   maintenance_remark?: string | null;
+}
+
+// ========= Filter for list page =========
+export interface InspectionListFilter {
+  status?: InspectionStatus | "";
+  risk_level?: RiskLevel | "";
+  result?: InspectionResult | "";
+  location?: string;
+  keyword?: string;
 }

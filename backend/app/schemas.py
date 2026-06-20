@@ -421,6 +421,7 @@ class InspectionOrderListItem(BaseModel):
     inspection_result: Optional[InspectionResult] = None
     inspection_date: datetime
     due_date: Optional[datetime] = None
+    inspection_remark: Optional[str] = None
     last_handler_opinion: Optional[str] = None
     last_handler_result: Optional[str] = None
     handler_opinion: Optional[str] = None

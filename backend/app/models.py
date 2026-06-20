@@ -119,6 +119,8 @@ class InspectionOrder(Base):
     maintenance_evidence = Column(String(500))
     maintenance_remark = Column(Text)
 
+    inspection_remark = Column(Text)
+
     last_handler_opinion = Column(Text)
     last_handler_result = Column(String(100))
 

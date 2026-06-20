@@ -1297,7 +1297,7 @@ export default component$(() => {
                       </span>
                     </div>
                     <div class="text-xs text-gray-600">
-                      <span class="font-semibold">{r.changed_by_name}</span>
+                      <span class="font-semibold">{r.operator_name || `用户#${r.operator_id}`}</span>
                       {r.reason && ` · 原因：${r.reason}`}
                     </div>
                   </li>

@@ -203,6 +203,7 @@ def _enrich_order_list_item(db: Session, order: InspectionOrder) -> InspectionOr
         inspection_result=order.inspection_result,
         inspection_date=order.inspection_date,
         due_date=order.due_date,
+        inspection_remark=order.inspection_remark,
         last_handler_opinion=order.last_handler_opinion,
         last_handler_result=order.last_handler_result,
         handler_opinion=order.handler_opinion,
