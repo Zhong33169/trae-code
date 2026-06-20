@@ -1,22 +1,27 @@
 import { A, Body, FileRoutes, Head, Html, Meta, Scripts, Title, useLocation } from "@solidjs/start";
-import { createContext, createSignal, onMount, Show, Switch, Match, Suspense, useContext } from "solid-js";
+import { createContext, createSignal, onMount, onCleanup, Show, Switch, Match, Suspense, useContext } from "solid-js";
+import { api } from "./lib/api";
 import "./app.css";
 
-const UserContext = createContext();
+export const UserContext = createContext();
+
+export function useUser() {
+  return useContext(UserContext);
+}
 
 export default function Root() {
   const [user, setUser] = createSignal(null);
   const location = useLocation();
 
   onMount(() => {
-    try {
-      const saved = localStorage.getItem("credit_user");
-      if (saved) setUser(JSON.parse(saved));
-    } catch {}
+    const saved = api.getCurrentUser();
+    if (saved) setUser(saved);
+    const off = api.onUserChange((u) => setUser(u));
+    onCleanup(off);
   });
 
   const doLogout = () => {
-    localStorage.removeItem("credit_user");
+    api.clearUser();
     setUser(null);
     if (location.pathname !== "/login") window.location.href = "/login";
   };
@@ -25,7 +30,7 @@ export default function Root() {
   const roleLabel = (r) => ({registrar:"授信登记员",auditor:"授信审核主管",reviewer:"B2B复核负责人"}[r] || r);
 
   return (
-    <UserContext.Provider value={{ user, setUser, doLogout }}>
+    <UserContext.Provider value={{ user, setUser, doLogout, api }}>
       <Html lang="zh-CN">
         <Head>
           <Title>授信申请审批系统</Title>

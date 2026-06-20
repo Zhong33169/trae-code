@@ -330,7 +330,16 @@ router.post('/applications/:id/action', (req, res) => {
         });
         db.prepare('COMMIT').run();
       } catch (e) { try { db.prepare('ROLLBACK').run(); } catch {} }
-      return res.status(400).json({ ok: false, msg: validation.msg });
+      return res.status(400).json({
+        ok: false,
+        msg: validation.msg,
+        fail: {
+          action: action + '_fail',
+          reason: validation.msg,
+          app_status: app.status,
+          version: app.version,
+        }
+      });
     }
 
     const updated = db.transaction(() => {

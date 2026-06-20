@@ -1,10 +1,12 @@
 import { useNavigate } from "@solidjs/router";
 import { createSignal, Show } from "solid-js";
-import { api } from "../lib/api";
+import { useUser } from "../root";
 
 export default function NewApp() {
   const nav = useNavigate();
-  const user = () => { try { return JSON.parse(localStorage.getItem("credit_user") || "null"); } catch { return null; } };
+  const ctx = useUser();
+  const user = () => ctx?.user?.();
+  const api = ctx?.api;
   const [form, setForm] = createSignal({
     company_name: "", credit_line: "", applicant: "", contact_phone: "", business_type: ""
   });

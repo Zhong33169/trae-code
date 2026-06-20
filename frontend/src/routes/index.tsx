@@ -1,6 +1,6 @@
 import { useNavigate } from "@solidjs/router";
-import { createResource, createSignal, For, Show, Suspense, createEffect } from "solid-js";
-import { api } from "../lib/api";
+import { createSignal, For, Show, Suspense, createEffect, onMount, onCleanup } from "solid-js";
+import { useUser } from "./root";
 
 const statusColor = (s) => ({
   draft:"gray", pending_audit:"blue", reject_correction:"orange", audit_pass:"cyan",
@@ -17,7 +17,9 @@ const statusLabel = (s) => ({
 
 export default function Dashboard() {
   const nav = useNavigate();
-  const user = () => { try { const s = localStorage.getItem("credit_user"); return s ? JSON.parse(s) : null; } catch { return null; } };
+  const ctx = useUser();
+  const user = () => ctx?.user?.();
+  const api = ctx?.api;
   const [stats, setStats] = createSignal({});
   const [todos, setTodos] = createSignal([]);
   const [refresh, setRefresh] = createSignal(0);
@@ -32,6 +34,10 @@ export default function Dashboard() {
   };
 
   createEffect(() => { refresh(); load(); });
+
+  let offRefresh;
+  onMount(() => { offRefresh = api.onRefresh(() => load()); });
+  onCleanup(() => { if (offRefresh) offRefresh(); });
 
   const statItems = () => {
     const s = stats() || {};

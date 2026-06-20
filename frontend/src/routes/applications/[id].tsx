@@ -1,6 +1,6 @@
 import { useNavigate, useParams } from "@solidjs/router";
-import { createSignal, For, Show, onMount } from "solid-js";
-import { api } from "../lib/api";
+import { createSignal, For, Show, onMount, onCleanup } from "solid-js";
+import { useUser } from "../root";
 
 const statusColor = (s) => ({
   draft:"gray", pending_audit:"blue", reject_correction:"orange", audit_pass:"cyan",
@@ -19,11 +19,13 @@ export default function ApplicationDetail() {
   const params = useParams();
   const nav = useNavigate();
   const id = parseInt(params.id);
-  const user = () => { try { return JSON.parse(localStorage.getItem("credit_user") || "null"); } catch { return null; } };
+  const ctx = useUser();
+  const user = () => ctx?.user?.();
+  const api = ctx?.api;
 
   const [data, setData] = createSignal(null);
   const [loading, setLoading] = createSignal(true);
-  const [modal, setModal] = createSignal(null); // {action, title, needReject}
+  const [modal, setModal] = createSignal(null);
   const [opinion, setOpinion] = createSignal("");
   const [rejectReason, setRejectReason] = createSignal("");
   const [saving, setSaving] = createSignal(false);
@@ -41,6 +43,12 @@ export default function ApplicationDetail() {
   };
 
   onMount(load);
+
+  let offRefresh;
+  onMount(() => {
+    offRefresh = api.onRefresh(() => load());
+  });
+  onCleanup(() => { if (offRefresh) offRefresh(); });
 
   const app = () => data()?.app;
   const evidence = () => data()?.evidence || [];

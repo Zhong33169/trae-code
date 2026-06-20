@@ -1,5 +1,5 @@
-import { createEffect, createSignal, For, Show } from "solid-js";
-import { api } from "../lib/api";
+import { createEffect, createSignal, For, Show, onMount, onCleanup } from "solid-js";
+import { useUser } from "./root";
 
 const statusLabel = (s) => ({
   draft:"草稿", pending_audit:"待审核", reject_correction:"退回补正", audit_pass:"审核通过",
@@ -13,17 +13,26 @@ const statusColor = (s) => ({
 }[s] || "gray");
 
 export default function Stats() {
+  const ctx = useUser();
+  const api = ctx?.api;
   const [data, setData] = createSignal(null);
   const [apps, setApps] = createSignal([]);
   const [loading, setLoading] = createSignal(true);
 
-  createEffect(async () => {
+  const load = async () => {
+    setLoading(true);
     try {
       const [r1, r2] = await Promise.all([api.stats(), api.applications({})]);
       if (r1 && r1.ok) setData(r1.data);
       if (r2 && r2.ok) setApps(r2.data);
     } finally { setLoading(false); }
-  });
+  };
+
+  createEffect(load);
+
+  let offRefresh;
+  onMount(() => { offRefresh = api.onRefresh(() => load()); });
+  onCleanup(() => { if (offRefresh) offRefresh(); });
 
   const d = () => data() || {};
   const byStatus = () => Object.fromEntries((d().byStatus || []).map(x => [x.status, x.n]));

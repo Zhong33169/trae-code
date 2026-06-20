@@ -1,6 +1,6 @@
 import { useNavigate, useSearchParams } from "@solidjs/router";
-import { createResource, createSignal, For, Show, Suspense, createEffect } from "solid-js";
-import { api } from "../lib/api";
+import { createSignal, For, Show, Suspense, createEffect, onMount, onCleanup } from "solid-js";
+import { useUser } from "../root";
 
 const statusColor = (s) => ({
   draft:"gray", pending_audit:"blue", reject_correction:"orange", audit_pass:"cyan",
@@ -17,7 +17,9 @@ const statusLabel = (s) => ({
 export default function Applications() {
   const nav = useNavigate();
   const [params, setParams] = useSearchParams();
-  const user = () => { try { const s = localStorage.getItem("credit_user"); return s ? JSON.parse(s) : null; } catch { return null; } };
+  const ctx = useUser();
+  const user = () => ctx?.user?.();
+  const api = ctx?.api;
 
   const [statusList, setStatusList] = createSignal([]);
   const [keyword, setKeyword] = createSignal(params.keyword || "");
@@ -51,6 +53,10 @@ export default function Applications() {
   };
 
   createEffect(load);
+
+  let offRefresh;
+  onMount(() => { offRefresh = api.onRefresh(() => load()); });
+  onCleanup(() => { if (offRefresh) offRefresh(); });
 
   createEffect(async () => {
     try { const r = await api.statusDict(); if (r.ok) setStatusList(r.data); } catch {}
