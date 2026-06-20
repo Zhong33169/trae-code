@@ -1,0 +1,23 @@
+{
+  "name": "equipment-inspection-frontend",
+  "version": "0.1.0",
+  "description": "社区健身房器械巡检系统前端",
+  "scripts": {
+    "dev": "vite --mode development",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "@builder.io/qwik": "^1.9.0",
+    "@builder.io/qwik-city": "^1.9.0",
+    "typescript": "^5.3.0",
+    "vite": "^5.0.0",
+    "vite-tsconfig-paths": "^4.2.0"
+  },
+  "dependencies": {
+    "undici": "^6.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
