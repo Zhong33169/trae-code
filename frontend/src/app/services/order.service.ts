@@ -1,6 +1,7 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable, Subject } from 'rxjs';
+import { tap } from 'rxjs/operators';
 import {
   ApiResponse, OrderSummary, OrderDetail, QueueStats,
   BatchResultItem, Evidence
@@ -32,6 +33,10 @@ export class OrderService {
 
   emit(event: RefreshEvent) { this.refresh$.next(event); }
 
+  private emitOnSuccess<T extends { code: number }>(ev: RefreshEvent) {
+    return tap<T>((r: T) => { if (r.code === 0) this.emit(ev); });
+  }
+
   list(params: ListParams = {}): Observable<ApiResponse<{ rows: OrderSummary[]; total: number }>> {
     let httpParams = new HttpParams();
     if (params.status) httpParams = httpParams.set('status', params.status);
@@ -52,44 +57,44 @@ export class OrderService {
   }
 
   create(data: any): Observable<ApiResponse<OrderDetail>> {
-    const req = this.http.post<ApiResponse<OrderDetail>>('/api/orders', data);
-    req.subscribe({ next: () => this.emit({ kind: 'all' }) });
-    return req;
+    return this.http.post<ApiResponse<OrderDetail>>('/api/orders', data).pipe(
+      this.emitOnSuccess({ kind: 'all' })
+    );
   }
 
   submit(id: number, data: any): Observable<ApiResponse<OrderDetail>> {
-    const req = this.http.post<ApiResponse<OrderDetail>>(`/api/orders/${id}/submit`, data);
-    req.subscribe({ next: r => { if (r.code === 0) this.emit({ kind: 'all' }); } });
-    return req;
+    return this.http.post<ApiResponse<OrderDetail>>(`/api/orders/${id}/submit`, data).pipe(
+      this.emitOnSuccess({ kind: 'all' })
+    );
   }
 
   audit(id: number, decision: 'approve' | 'reject', data: any = {}): Observable<ApiResponse<OrderDetail>> {
-    const req = this.http.post<ApiResponse<OrderDetail>>(`/api/orders/${id}/audit`, { ...data, decision });
-    req.subscribe({ next: r => { if (r.code === 0) this.emit({ kind: 'all' }); } });
-    return req;
+    return this.http.post<ApiResponse<OrderDetail>>(`/api/orders/${id}/audit`, { ...data, decision }).pipe(
+      this.emitOnSuccess({ kind: 'all' })
+    );
   }
 
   review(id: number, decision: 'approve' | 'reject', data: any = {}): Observable<ApiResponse<OrderDetail>> {
-    const req = this.http.post<ApiResponse<OrderDetail>>(`/api/orders/${id}/review`, { ...data, decision });
-    req.subscribe({ next: r => { if (r.code === 0) this.emit({ kind: 'all' }); } });
-    return req;
+    return this.http.post<ApiResponse<OrderDetail>>(`/api/orders/${id}/review`, { ...data, decision }).pipe(
+      this.emitOnSuccess({ kind: 'all' })
+    );
   }
 
   batchReview(orderIds: number[], data: any = {}): Observable<ApiResponse<BatchResultItem[]>> {
-    const req = this.http.post<ApiResponse<BatchResultItem[]>>('/api/orders/batch-review', { orderIds, ...data });
-    req.subscribe({ next: r => { if (r.code === 0) this.emit({ kind: 'all' }); } });
-    return req;
+    return this.http.post<ApiResponse<BatchResultItem[]>>('/api/orders/batch-review', { orderIds, ...data }).pipe(
+      this.emitOnSuccess({ kind: 'all' })
+    );
   }
 
   addEvidence(orderId: number, data: Partial<Evidence> & { type: string; description: string }) {
-    const req = this.http.post<ApiResponse<any>>(`/api/orders/${orderId}/evidences`, data);
-    req.subscribe({ next: r => { if (r.code === 0) this.emit({ kind: 'all' }); } });
-    return req;
+    return this.http.post<ApiResponse<any>>(`/api/orders/${orderId}/evidences`, data).pipe(
+      this.emitOnSuccess({ kind: 'all' })
+    );
   }
 
   deleteEvidence(evidenceId: number) {
-    const req = this.http.delete<ApiResponse<any>>(`/api/orders/evidences/${evidenceId}`);
-    req.subscribe({ next: r => { if (r.code === 0) this.emit({ kind: 'all' }); } });
-    return req;
+    return this.http.delete<ApiResponse<any>>(`/api/orders/evidences/${evidenceId}`).pipe(
+      this.emitOnSuccess({ kind: 'all' })
+    );
   }
 }

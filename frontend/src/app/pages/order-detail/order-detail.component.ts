@@ -310,6 +310,12 @@ export class OrderDetailComponent implements OnInit, OnDestroy {
     setTimeout(() => { if (this.msg?.text === text) this.msg = null; }, 5000);
   }
   openActionDialog(dialog: string) {
+    if (this.submitting) return;
+    if (!this.canDo(dialog.replace(/_approve|_reject/, '')) && !this.canDo(dialog)) {
+      // 通用的权限提示
+      const hint = this.actionDisabledHint(dialog);
+      if (hint) { alert(hint); return; }
+    }
     if (dialog === 'review_approve') this.actionForm.decision = 'approve';
     if (dialog === 'review_reject') this.actionForm.decision = 'reject';
     if (dialog === 'audit_approve') this.actionForm.decision = 'approve';
@@ -317,43 +323,46 @@ export class OrderDetailComponent implements OnInit, OnDestroy {
     this.actionForm.comment = '';
     this.actionDialog = dialog;
   }
-  closeDialog() { this.actionDialog = ''; this.evidenceDialog = false; }
+  closeDialog() { if (this.submitting) return; this.actionDialog = ''; this.evidenceDialog = false; }
 
   runSubmit() {
-    if (!this.detail) return;
+    if (!this.detail || this.submitting) return;
     this.submitting = true;
+    const finish = () => { this.submitting = false; };
     this.orderService.submit(this.detail.order.id, {
       version: this.detail.order.version,
       comment: this.actionForm.comment
     }).subscribe({
       next: r => {
-        this.submitting = false;
+        finish();
         if (r.code === 0) { this.detail = r.data; this.closeDialog(); this.flash('success', '已提交审核'); this.computeReviewChecklist(); }
         else this.flash('error', r.message);
       },
-      error: e => { this.submitting = false; this.flash('error', e.error?.message || e.message); }
+      error: e => { finish(); this.flash('error', e.error?.message || e.message); }
     });
   }
   runAudit() {
-    if (!this.detail) return;
+    if (!this.detail || this.submitting) return;
     const decision = this.actionDialog === 'audit_approve' ? 'approve' : 'reject';
     this.submitting = true;
+    const finish = () => { this.submitting = false; };
     this.orderService.audit(this.detail.order.id, decision, {
       comment: this.actionForm.comment,
       version: this.detail.order.version
     }).subscribe({
       next: r => {
-        this.submitting = false;
+        finish();
         if (r.code === 0) { this.detail = r.data; this.closeDialog(); this.flash('success', decision === 'approve' ? '审核通过' : '已驳回'); this.computeReviewChecklist(); }
         else this.flash('error', r.message);
       },
-      error: e => { this.submitting = false; this.flash('error', e.error?.message || e.message); }
+      error: e => { finish(); this.flash('error', e.error?.message || e.message); }
     });
   }
   runReview() {
-    if (!this.detail) return;
+    if (!this.detail || this.submitting) return;
     const decision = this.actionDialog === 'review_approve' ? 'approve' : 'reject';
     this.submitting = true;
+    const finish = () => { this.submitting = false; };
     this.orderService.review(this.detail.order.id, decision, {
       comment: this.actionForm.comment,
       version: this.detail.order.version,
@@ -361,12 +370,12 @@ export class OrderDetailComponent implements OnInit, OnDestroy {
       loss_remark: this.detail.order.loss_remark
     }).subscribe({
       next: r => {
-        this.submitting = false;
+        finish();
         if (r.code === 0) { this.detail = r.data; this.closeDialog(); this.flash('success', decision === 'approve' ? '复核通过，已归档' : '已驳回'); this.computeReviewChecklist(); }
         else this.flash('error', r.message + (r.failureReason ? '（' + r.failureReason + '）' : ''));
       },
       error: e => {
-        this.submitting = false;
+        finish();
         let msg = e.error?.message || e.message;
         if (e.error?.failureReason) msg += `\n【原因】${e.error.failureReason}`;
         this.flash('error', msg);
@@ -374,12 +383,18 @@ export class OrderDetailComponent implements OnInit, OnDestroy {
     });
   }
   runAction() {
+    if (this.submitting) return;
     if (this.actionDialog.startsWith('submit')) this.runSubmit();
     else if (this.actionDialog.startsWith('audit')) this.runAudit();
     else if (this.actionDialog.startsWith('review')) this.runReview();
   }
 
   openEvidenceDialog() {
+    if (this.submitting) return;
+    if (!this.canDo('add_evidence')) {
+      const hint = this.actionDisabledHint('add_evidence');
+      if (hint) { alert(hint); return; }
+    }
     this.evidenceForm = { type: 'borrow', description: '', file_name: '' };
     this.evidenceDialog = true;
   }
@@ -387,26 +402,37 @@ export class OrderDetailComponent implements OnInit, OnDestroy {
     return !!(this.evidenceForm.type && this.evidenceForm.description?.trim());
   }
   uploadEvidence() {
-    if (!this.detail) return;
+    if (!this.detail || this.submitting) return;
     if (!this.evidenceFormValid()) { alert('请完整选择证据类型并填写描述'); return; }
     this.submitting = true;
+    const finish = () => { this.submitting = false; };
     this.orderService.addEvidence(this.detail.order.id, this.evidenceForm).subscribe({
       next: r => {
-        this.submitting = false;
+        finish();
         if (r.code === 0) { this.closeDialog(); this.loadDetail(); this.flash('success', '证据已上传'); }
         else this.flash('error', r.message);
       },
-      error: e => { this.submitting = false; this.flash('error', e.error?.message || e.message); }
+      error: e => { finish(); this.flash('error', e.error?.message || e.message); }
     });
   }
+  deletingEvidence = false;
   deleteEvidence(id: number) {
+    if (this.submitting || this.deletingEvidence) return;
+    if (!this.canDo('delete_evidence')) {
+      const hint = this.actionDisabledHint('delete_evidence');
+      if (hint) { alert(hint); return; }
+    }
     if (!confirm('确定删除该证据？删除后不可恢复。')) return;
+    this.deletingEvidence = true;
+    this.submitting = true;
+    const finish = () => { this.submitting = false; this.deletingEvidence = false; };
     this.orderService.deleteEvidence(id).subscribe({
       next: r => {
+        finish();
         if (r.code === 0) { this.loadDetail(); this.flash('success', '证据已删除'); }
         else this.flash('error', r.message);
       },
-      error: e => this.flash('error', e.error?.message || e.message)
+      error: e => { finish(); this.flash('error', e.error?.message || e.message); }
     });
   }
 

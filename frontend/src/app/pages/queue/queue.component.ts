@@ -307,13 +307,14 @@ export class QueueComponent implements OnInit, OnDestroy {
 
   // ================= 批量复核（下沉 + 联动刷新）=================
   openBatchReview() {
+    if (this.batchRunning) return;
     if (this.selectedCount === 0) { alert('请先勾选待复核的单据'); return; }
     this.batchDialog = true;
     this.batchRunning = false;
     this.batchResults = [];
   }
   runBatchReview() {
-    if (!this.selectedCount) return;
+    if (!this.selectedCount || this.batchRunning) return;
     this.batchRunning = true;
     this.orderService.batchReview(this.selectedIds).subscribe({
       next: r => {
@@ -351,6 +352,7 @@ export class QueueComponent implements OnInit, OnDestroy {
 
   // ================= 新建（下沉校验）=================
   openCreateDialog() {
+    if (this.createLoading) return;
     if (this.user?.role !== 'registrar') { alert('仅器材借用登记员可以新建借用单'); return; }
     this.createForm = { applicant: '', department: '', equipment_name: '', equipment_model: '', quantity: 1, borrow_reason: '', expected_return_date: '' };
     this.createDialog = true;
@@ -371,30 +373,32 @@ export class QueueComponent implements OnInit, OnDestroy {
     return null;
   }
   submitCreate(directAudit: boolean) {
+    if (this.createLoading) return;
     const err = this.validateCreateForm();
     if (err) { alert(err); return; }
     this.createLoading = true;
+    const finish = () => { this.createLoading = false; };
     this.orderService.create(this.createForm).subscribe({
       next: r => {
-        if (r.code !== 0) { this.createLoading = false; alert(r.message); return; }
+        if (r.code !== 0) { finish(); alert(r.message); return; }
         const newId = r.data?.order?.id;
         if (directAudit && newId) {
           this.orderService.submit(newId, { ...this.createForm, version: r.data.order?.version }).subscribe({
             next: rs => {
-              this.createLoading = false;
+              finish();
               this.createDialog = false;
               if (rs.code !== 0) alert(rs.message);
               if (newId) this.router.navigate(['/order', newId]);
             },
-            error: e => { this.createLoading = false; alert(e.error?.message || e.message); }
+            error: e => { finish(); alert(e.error?.message || e.message); }
           });
         } else {
-          this.createLoading = false;
+          finish();
           this.createDialog = false;
           if (newId) this.router.navigate(['/order', newId]);
         }
       },
-      error: e => { this.createLoading = false; alert(e.error?.message || e.message); }
+      error: e => { finish(); alert(e.error?.message || e.message); }
     });
   }
 
