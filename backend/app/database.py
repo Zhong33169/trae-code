@@ -87,21 +87,13 @@ REJECT_MAP = {
     ROLE_MANAGER: ["pending_courseware", "courseware_reviewing", "pending_evaluation", "evaluating"],
 }
 
-ALL_FIELDS = [
-    "id", "form_no", "title", "instructor_name", "instructor_id", "course_name",
-    "course_type", "training_company", "start_date", "end_date", "location",
-    "student_count", "description", "status", "status_label", "created_by",
-    "created_by_name", "created_at", "updated_at", "current_node_entered_at",
-    "courseware_status", "evaluation_status", "is_timeout", "timeout_remaining_hours",
-]
-
 FIELD_VISIBILITY = {
     ROLE_CLERK: [
         "id", "form_no", "title", "instructor_name", "instructor_id", "course_name",
         "course_type", "training_company", "start_date", "end_date", "location",
         "student_count", "description", "status", "status_label", "created_by",
-        "created_by_name", "created_at", "updated_at", "current_node_entered_at",
-        "courseware_status", "evaluation_status", "is_timeout", "timeout_remaining_hours",
+        "created_by_name", "created_at", "updated_at", "courseware_status",
+        "evaluation_status", "is_timeout", "timeout_remaining_hours",
     ],
     ROLE_SUPERVISOR: [
         "id", "form_no", "title", "instructor_name", "instructor_id", "course_name",
@@ -116,8 +108,11 @@ FIELD_VISIBILITY = {
         "student_count", "description", "status", "status_label", "created_by",
         "created_by_name", "created_at", "updated_at", "current_node_entered_at",
         "courseware_status", "evaluation_status", "is_timeout", "timeout_remaining_hours",
+        "has_pending_timeout",
     ],
 }
+
+ALL_FIELDS = list({field for fields in FIELD_VISIBILITY.values() for field in fields})
 
 FIELD_LABELS = {
     "id": "ID",
@@ -144,6 +139,7 @@ FIELD_LABELS = {
     "evaluation_status": "课后评价状态",
     "is_timeout": "是否超时",
     "timeout_remaining_hours": "超时剩余时间",
+    "has_pending_timeout": "有待处理超时",
 }
 
 SUBMIT_ACTION_STRATEGY = {
@@ -197,6 +193,51 @@ SUBMIT_ACTION_STRATEGY = {
 }
 
 
+def enrich_form(conn, form_dict):
+    c = conn.cursor()
+    form_id = form_dict.get("id")
+    if not form_id:
+        return form_dict
+
+    result = dict(form_dict)
+
+    creator = c.execute(
+        "SELECT display_name FROM users WHERE id=?",
+        (form_dict.get("created_by"),),
+    ).fetchone()
+    if creator:
+        result["created_by_name"] = creator["display_name"]
+
+    pending_timeout = c.execute(
+        "SELECT id, node_name, timeout_at FROM timeout_records WHERE form_id=? AND status='pending' ORDER BY created_at DESC LIMIT 1",
+        (form_id,),
+    ).fetchone()
+
+    result["has_pending_timeout"] = pending_timeout is not None
+
+    current_status = form_dict.get("status")
+    current_node_entered_at = form_dict.get("current_node_entered_at")
+
+    if current_status in NODE_TIME_LIMITS and current_node_entered_at:
+        try:
+            now = datetime.now()
+            entered = datetime.strptime(current_node_entered_at, "%Y-%m-%d %H:%M:%S")
+            limit_hours = NODE_TIME_LIMITS[current_status]
+            elapsed_hours = (now - entered).total_seconds() / 3600
+            remaining_hours = limit_hours - elapsed_hours
+
+            result["timeout_remaining_hours"] = round(remaining_hours, 1)
+            result["is_timeout"] = remaining_hours < 0 or pending_timeout is not None
+        except (ValueError, TypeError):
+            result["timeout_remaining_hours"] = None
+            result["is_timeout"] = pending_timeout is not None
+    else:
+        result["timeout_remaining_hours"] = None
+        result["is_timeout"] = pending_timeout is not None
+
+    return result
+
+
 def apply_visibility(form_dict, role):
     allowed = FIELD_VISIBILITY.get(role, [])
     return {k: v for k, v in form_dict.items() if k in allowed}
@@ -238,6 +279,23 @@ def state_machine_transition(conn, form_id, role, action, **kwargs):
     elif action == "timeout_handle":
         if role != ROLE_CLERK:
             raise ValueError("只有登记员可处理超时")
+        pending_timeout = c.execute(
+            "SELECT id FROM timeout_records WHERE form_id=? AND status='pending' ORDER BY created_at DESC LIMIT 1",
+            (form_id,),
+        ).fetchone()
+        if not pending_timeout:
+            raise ValueError("该排课单没有待处理的超时记录")
+        reason = kwargs.get("reason")
+        follow_up = kwargs.get("follow_up")
+        operator_id = kwargs.get("operator_id")
+        if not reason or not follow_up:
+            raise ValueError("超时处理必须填写原因和后续处理记录")
+        c.execute(
+            """UPDATE timeout_records
+            SET reason=?, follow_up=?, handled_by=?, handled_at=?, status='handled'
+            WHERE id=?""",
+            (reason, follow_up, operator_id, current_time, pending_timeout["id"]),
+        )
         new_status = "timeout_handling"
     elif action == "archive":
         if role != ROLE_MANAGER or current_status != "pending_archive":
@@ -316,6 +374,10 @@ def state_machine_transition(conn, form_id, role, action, **kwargs):
         score = kwargs.get("score", 0)
         comment = kwargs.get("comment", "")
         remark = f"课后评价: 分数{score}, {comment}"
+    elif action == "timeout_handle":
+        reason = kwargs.get("reason", "")
+        follow_up = kwargs.get("follow_up", "")
+        remark = f"超时处理: 原因={reason}, 后续处理={follow_up}"
 
     c.execute(
         """INSERT INTO operation_logs (form_id, operator_id, action, from_status, to_status, remark)

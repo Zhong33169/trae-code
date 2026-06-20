@@ -437,7 +437,7 @@ class AppFormDetail extends LitElement {
 
             ${this._renderFlowTracker()}
 
-            ${f.timeout_remaining_hours !== null && f.timeout_remaining_hours !== undefined ? html`
+            ${f.timeout_remaining_hours !== undefined && f.timeout_remaining_hours !== null ? html`
               <div style="margin-bottom:12px;">
                 <span class="remaining ${f.is_timeout ? 'timeout' : ''}">
                   ${f.is_timeout ? '已超时' : `剩余 ${f.timeout_remaining_hours}h`}
@@ -448,16 +448,17 @@ class AppFormDetail extends LitElement {
             <div class="field-row"><span class="field-label">标题</span><span class="field-value">${f.title}</span></div>
             <div class="field-row"><span class="field-label">讲师</span><span class="field-value">${f.instructor_name}${f.instructor_id ? ` (${f.instructor_id})` : ''}</span></div>
             <div class="field-row"><span class="field-label">课程</span><span class="field-value">${f.course_name}</span></div>
-            <div class="field-row"><span class="field-label">课程类型</span><span class="field-value">${f.course_type || '-'}</span></div>
-            <div class="field-row"><span class="field-label">培训公司</span><span class="field-value">${f.training_company || '-'}</span></div>
-            <div class="field-row"><span class="field-label">培训日期</span><span class="field-value">${f.start_date || '-'} ~ ${f.end_date || '-'}</span></div>
-            <div class="field-row"><span class="field-label">地点</span><span class="field-value">${f.location || '-'}</span></div>
-            <div class="field-row"><span class="field-label">学员人数</span><span class="field-value">${f.student_count || 0}</span></div>
-            <div class="field-row"><span class="field-label">描述</span><span class="field-value">${f.description || '-'}</span></div>
-            <div class="field-row"><span class="field-label">创建人</span><span class="field-value">${f.created_by_name || '-'}</span></div>
-            <div class="field-row"><span class="field-label">创建时间</span><span class="field-value">${f.created_at}</span></div>
-            <div class="field-row"><span class="field-label">课件审核</span><span class="field-value">${CW_STATUS[f.courseware_status] || f.courseware_status}</span></div>
-            <div class="field-row"><span class="field-label">课后评价</span><span class="field-value">${EVAL_STATUS[f.evaluation_status] || f.evaluation_status}</span></div>
+            ${f.course_type !== undefined ? html`<div class="field-row"><span class="field-label">课程类型</span><span class="field-value">${f.course_type || '-'}</span></div>` : ''}
+            ${f.training_company !== undefined ? html`<div class="field-row"><span class="field-label">培训公司</span><span class="field-value">${f.training_company || '-'}</span></div>` : ''}
+            ${f.start_date !== undefined ? html`<div class="field-row"><span class="field-label">培训日期</span><span class="field-value">${f.start_date || '-'} ~ ${f.end_date || '-'}</span></div>` : ''}
+            ${f.location !== undefined ? html`<div class="field-row"><span class="field-label">地点</span><span class="field-value">${f.location || '-'}</span></div>` : ''}
+            ${f.student_count !== undefined ? html`<div class="field-row"><span class="field-label">学员人数</span><span class="field-value">${f.student_count || 0}</span></div>` : ''}
+            ${f.description !== undefined ? html`<div class="field-row"><span class="field-label">描述</span><span class="field-value">${f.description || '-'}</span></div>` : ''}
+            ${f.created_by_name !== undefined ? html`<div class="field-row"><span class="field-label">创建人</span><span class="field-value">${f.created_by_name || '-'}</span></div>` : ''}
+            ${f.created_at !== undefined ? html`<div class="field-row"><span class="field-label">创建时间</span><span class="field-value">${f.created_at}</span></div>` : ''}
+            ${f.courseware_status !== undefined ? html`<div class="field-row"><span class="field-label">课件审核</span><span class="field-value">${CW_STATUS[f.courseware_status] || f.courseware_status || '-'}</span></div>` : ''}
+            ${f.evaluation_status !== undefined ? html`<div class="field-row"><span class="field-label">课后评价</span><span class="field-value">${EVAL_STATUS[f.evaluation_status] || f.evaluation_status || '-'}</span></div>` : ''}
+            ${f.current_node_entered_at !== undefined ? html`<div class="field-row"><span class="field-label">节点进入时间</span><span class="field-value">${f.current_node_entered_at || '-'}</span></div>` : ''}
           </div>
 
           ${this._renderActions()}

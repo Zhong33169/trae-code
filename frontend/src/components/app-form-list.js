@@ -192,9 +192,6 @@ class AppFormList extends LitElement {
         api.getStatistics(),
       ]);
       let items = listResp.items || [];
-      if (this.showTimeoutOnly) {
-        items = items.filter(f => f.is_timeout);
-      }
       this.forms = items;
       this.total = listResp.total || items.length;
       this.statistics = stats;
@@ -304,6 +301,7 @@ class AppFormList extends LitElement {
                 <th>标题</th>
                 <th>讲师</th>
                 <th>课程</th>
+                <th>创建人</th>
                 <th>状态</th>
                 <th>课件审核</th>
                 <th>课后评价</th>
@@ -321,13 +319,14 @@ class AppFormList extends LitElement {
                   <td>${f.title}</td>
                   <td>${f.instructor_name}</td>
                   <td>${f.course_name}</td>
+                  <td>${f.created_by_name || '-'}</td>
                   <td>
                     <span class="status-badge s-${f.status}">${f.status_label}</span>
                     ${f.is_timeout ? html`<span class="timeout-mark">超时</span>` : ''}
                   </td>
-                  <td>${CW_STATUS[f.courseware_status] || f.courseware_status}</td>
-                  <td>${EVAL_STATUS[f.evaluation_status] || f.evaluation_status}</td>
-                  <td>${f.created_at?.substring(0, 16)}</td>
+                  <td>${f.courseware_status ? (CW_STATUS[f.courseware_status] || f.courseware_status) : '-'}</td>
+                  <td>${f.evaluation_status ? (EVAL_STATUS[f.evaluation_status] || f.evaluation_status) : '-'}</td>
+                  <td>${f.created_at ? f.created_at.substring(0, 16) : '-'}</td>
                   <td>
                     ${f.timeout_remaining_hours !== null && f.timeout_remaining_hours !== undefined
                       ? html`<span class="remaining ${f.is_timeout ? 'timeout' : ''}">${f.is_timeout ? '已超时' : f.timeout_remaining_hours + 'h'}</span>`
