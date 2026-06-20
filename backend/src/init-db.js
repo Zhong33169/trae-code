@@ -71,22 +71,24 @@ function createSchema() {
     CREATE TABLE IF NOT EXISTS idempotent_requests (
       request_id TEXT PRIMARY KEY,
       user_id INTEGER NOT NULL,
+      user_role TEXT,
       order_id INTEGER,
       action TEXT NOT NULL,
       version INTEGER,
       request_payload TEXT,
       response_code INTEGER NOT NULL,
       response_body TEXT NOT NULL,
+      request_ip TEXT,
+      user_agent TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES users(id)
     );
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_idempotent_unique
-      ON idempotent_requests(user_id, COALESCE(order_id, -1), action, COALESCE(version, -1));
 
     CREATE INDEX IF NOT EXISTS idx_orders_status ON equipment_orders(status);
     CREATE INDEX IF NOT EXISTS idx_orders_created_by ON equipment_orders(created_by);
     CREATE INDEX IF NOT EXISTS idx_evidences_order_id ON evidences(order_id);
     CREATE INDEX IF NOT EXISTS idx_logs_order_id ON operation_logs(order_id);
+    CREATE INDEX IF NOT EXISTS idx_idempotent_user_action ON idempotent_requests(user_id, action, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_idempotent_created ON idempotent_requests(created_at DESC);
   `);
 }
@@ -327,6 +329,61 @@ function seedData() {
       '2支损坏',
       'EB-0008-loss.pdf', userId.registrar);
   }
+
+  /* ------------------------------------------------------------------
+     幂等审计演示数据：模拟几条已完成的幂等请求（展示 user_role / request_ip / user_agent）
+     ------------------------------------------------------------------ */
+  const insertIdemStmt = db.prepare(`
+    INSERT INTO idempotent_requests (
+      request_id, user_id, user_role, order_id, action, version,
+      request_payload, response_code, response_body, request_ip, user_agent
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  const demoTs = Date.now();
+  insertIdemStmt.run(
+    `demo-create-${demoTs - 5000}`,
+    userId.registrar, 'registrar', null, 'create', null,
+    JSON.stringify({ applicant: '演示样例-登记员创建', department: '测试部' }),
+    200, JSON.stringify({ code: 0, message: 'success', data: null }),
+    '192.168.1.23',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/120'
+  );
+  insertIdemStmt.run(
+    `demo-submit-${demoTs - 4000}`,
+    userId.registrar, 'registrar', 4, 'submit', 1,
+    JSON.stringify({ version: 1, comment: '提交审核演示' }),
+    200, JSON.stringify({ code: 0, message: 'success', data: null }),
+    '192.168.1.23',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/120'
+  );
+  insertIdemStmt.run(
+    `demo-audit-${demoTs - 3000}`,
+    userId.auditor, 'auditor', 4, 'audit', 2,
+    JSON.stringify({ decision: 'approve', version: 2 }),
+    200, JSON.stringify({ code: 0, message: 'success', data: null }),
+    '10.0.0.88',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Edge/120'
+  );
+  insertIdemStmt.run(
+    `demo-review-fail-${demoTs - 2000}`,
+    userId.reviewer, 'reviewer', 8, 'review', 1,
+    JSON.stringify({ decision: 'approve', version: 1 }),
+    400, JSON.stringify({
+      code: 400, ok: false,
+      message: '复核校验失败：归还验收证据未提及借出数量8支；损耗说明描述不完整；损耗确认证据描述不完整',
+      failureReason: '归还验收证据未提及借出数量8支；损耗说明描述不完整；损耗确认证据描述不完整'
+    }),
+    '10.0.0.15',
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X) AppleWebKit/605'
+  );
+  insertIdemStmt.run(
+    `demo-addEvidence-${demoTs - 1000}`,
+    userId.registrar, 'registrar', 5, 'addEvidence', 1,
+    JSON.stringify({ type: 'borrow', description: '演示-登记员补传证据', version: 1 }),
+    200, JSON.stringify({ code: 0, message: 'success', data: null }),
+    '192.168.1.23',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/120'
+  );
 }
 
 function init() {

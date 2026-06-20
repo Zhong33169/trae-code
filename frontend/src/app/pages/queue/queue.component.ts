@@ -313,6 +313,11 @@ export class QueueComponent implements OnInit, OnDestroy {
     this.batchRunning = false;
     this.batchResults = [];
   }
+  closeBatchDialogSafe() {
+    if (this.batchRunning) return;
+    this.batchDialog = false;
+    this.batchResults = [];
+  }
   runBatchReview() {
     if (!this.selectedCount || this.batchRunning) return;
     const reqMeta: WriteRequestMeta = {
@@ -334,6 +339,7 @@ export class QueueComponent implements OnInit, OnDestroy {
             return { ...it, order, ...meta };
           });
           this.resetSelection();
+          this.refreshPreviewAfterBatch();
         }
       },
       error: e => {
@@ -349,10 +355,17 @@ export class QueueComponent implements OnInit, OnDestroy {
       complete: () => this.batchRunning = false
     });
   }
+  private refreshPreviewAfterBatch() {
+    if (this.previewOrder) {
+      const updated = this.orders.find(o => o.id === this.previewOrder?.id);
+      if (updated) this.preview(updated);
+      else { this.previewOrder = this.orders[0] || null; this.previewEvidences = []; if (this.previewOrder) this.preview(this.previewOrder); }
+    }
+  }
   goToFailedResult(result: any) {
     if (result.status === 'success') return;
     const order = this.orders.find(o => o.id === result.orderId);
-    if (order) { this.batchDialog = false; this.goDetail(order); }
+    if (order) { this.closeBatchDialogSafe(); this.goDetail(order); }
   }
 
   // ================= 新建（下沉校验）=================
@@ -361,6 +374,10 @@ export class QueueComponent implements OnInit, OnDestroy {
     if (this.user?.role !== 'registrar') { alert('仅器材借用登记员可以新建借用单'); return; }
     this.createForm = { applicant: '', department: '', equipment_name: '', equipment_model: '', quantity: 1, borrow_reason: '', expected_return_date: '' };
     this.createDialog = true;
+  }
+  closeCreateDialogSafe() {
+    if (this.createLoading) return;
+    this.createDialog = false;
   }
   validateCreateForm(): string | null {
     const f = this.createForm;
@@ -401,7 +418,7 @@ export class QueueComponent implements OnInit, OnDestroy {
           this.orderService.submit(newId, { ...this.createForm, version: r.data.order?.version }, submitMeta.requestId).subscribe({
             next: rs => {
               finish();
-              this.createDialog = false;
+              this.closeCreateDialogSafe();
               if (rs.code !== 0) alert(rs.message);
               if (newId) this.router.navigate(['/order', newId]);
             },
@@ -409,7 +426,7 @@ export class QueueComponent implements OnInit, OnDestroy {
           });
         } else {
           finish();
-          this.createDialog = false;
+          this.closeCreateDialogSafe();
           if (newId) this.router.navigate(['/order', newId]);
         }
       },

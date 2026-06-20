@@ -95,9 +95,21 @@ function getQueueStats() {
   };
 }
 
+function checkVersion(currentVersion, expectedVersion, label = '单据') {
+  if (expectedVersion == null) return null;
+  if (currentVersion !== expectedVersion) {
+    return {
+      ok: false,
+      code: 409,
+      message: `版本冲突：${label}当前版本 v${currentVersion}，提交版本 v${expectedVersion}，请刷新页面后重试`
+    };
+  }
+  return null;
+}
+
 // ======================= 写操作：全部幂等包裹 =======================
 
-function createOrder(user, requestId, data) {
+function createOrder(user, requestId, data, ctx = {}) {
   const fn = () => {
     const orderNo = `EB-${new Date().getFullYear()}-${String(Date.now() % 10000).padStart(4, '0')}`;
     const tx = db.transaction(() => {
@@ -119,24 +131,24 @@ function createOrder(user, requestId, data) {
     return tx();
   };
   const wrap = idempotent(requestId, {
-    userId: user.id, orderId: null, action: 'create',
-    version: null, payload: data
+    userId: user.id, userRole: user.role, orderId: null, action: 'create',
+    version: null, payload: data,
+    requestIp: ctx.requestIp, userAgent: ctx.userAgent
   }, fn);
   return wrap.hit ? { ...wrap.response, ok: wrap.response.code === 0 } : wrap.response;
 }
 
-function submitForAudit(user, requestId, orderId, data = {}) {
+function submitForAudit(user, requestId, orderId, data = {}, ctx = {}) {
   const fn = () => {
     const order = db.prepare('SELECT * FROM equipment_orders WHERE id = ?').get(orderId);
     if (!order) return { ok: false, code: 404, message: '借用单不存在' };
+    const versionErr = checkVersion(order.version, data.version);
+    if (versionErr) return versionErr;
     if (order.created_by !== user.id) {
       return { ok: false, code: 403, message: `仅创建人（登记员）可以提交审核，当前操作人不是该单创建人` };
     }
     if (![ORDER_STATUS.DRAFT, ORDER_STATUS.AUDIT_REJECTED, ORDER_STATUS.REVIEW_REJECTED].includes(order.status)) {
       return { ok: false, code: 400, message: `当前状态为【${statusName(order.status)}】，无法提交审核` };
-    }
-    if (data.version !== undefined && data.version !== order.version) {
-      return { ok: false, code: 400, message: `版本冲突：当前版本v${order.version}，提交版本v${data.version}，请刷新后重试` };
     }
     const tx = db.transaction(() => {
       const result = db.prepare(`
@@ -167,28 +179,28 @@ function submitForAudit(user, requestId, orderId, data = {}) {
     try {
       return tx();
     } catch (e) {
-      if (e.message === 'VERSION_CONFLICT') return { ok: false, code: 400, message: '更新失败，版本可能已被他人修改，请刷新' };
+      if (e.message === 'VERSION_CONFLICT') return { ok: false, code: 409, message: '更新失败，版本可能已被他人修改，请刷新' };
       throw e;
     }
   };
   const wrap = idempotent(requestId, {
-    userId: user.id, orderId, action: 'submit',
-    version: data.version, payload: data
+    userId: user.id, userRole: user.role, orderId, action: 'submit',
+    version: data.version, payload: data,
+    requestIp: ctx.requestIp, userAgent: ctx.userAgent
   }, fn);
   return wrap.hit ? { ...wrap.response, ok: wrap.response.code === 0 } : wrap.response;
 }
 
-function auditOrder(user, requestId, orderId, decision, data = {}) {
+function auditOrder(user, requestId, orderId, decision, data = {}, ctx = {}) {
   const fn = () => {
     const order = db.prepare('SELECT * FROM equipment_orders WHERE id = ?').get(orderId);
     if (!order) return { ok: false, code: 404, message: '借用单不存在' };
+    const versionErr = checkVersion(order.version, data.version);
+    if (versionErr) return versionErr;
     if (order.status !== ORDER_STATUS.PENDING_AUDIT) {
       return { ok: false, code: 400, message: `当前状态为【${statusName(order.status)}】，审核仅可在【待审核】状态进行` };
     }
     const toStatus = decision === 'approve' ? ORDER_STATUS.PENDING_REVIEW : ORDER_STATUS.AUDIT_REJECTED;
-    if (data.version !== undefined && data.version !== order.version) {
-      return { ok: false, code: 400, message: `版本冲突：当前v${order.version}，请刷新` };
-    }
     const auditErrors = validateEvidenceForAudit(order, []);
     if (decision === 'approve' && auditErrors.length) {
       return { ok: false, code: 400, message: `审核前校验失败：${auditErrors.join('；')}` };
@@ -213,28 +225,28 @@ function auditOrder(user, requestId, orderId, decision, data = {}) {
     try {
       return tx();
     } catch (e) {
-      if (e.message === 'VERSION_CONFLICT') return { ok: false, code: 400, message: '审核失败，版本冲突，请刷新后重试' };
+      if (e.message === 'VERSION_CONFLICT') return { ok: false, code: 409, message: '审核失败，版本冲突，请刷新后重试' };
       throw e;
     }
   };
   const wrap = idempotent(requestId, {
-    userId: user.id, orderId, action: 'audit',
-    version: data.version, payload: { decision, ...data }
+    userId: user.id, userRole: user.role, orderId, action: 'audit',
+    version: data.version, payload: { decision, ...data },
+    requestIp: ctx.requestIp, userAgent: ctx.userAgent
   }, fn);
   return wrap.hit ? { ...wrap.response, ok: wrap.response.code === 0 } : wrap.response;
 }
 
-function reviewOrder(user, requestId, orderId, decision, data = {}) {
+function reviewOrder(user, requestId, orderId, decision, data = {}, ctx = {}) {
   const fn = () => {
     const order = db.prepare('SELECT * FROM equipment_orders WHERE id = ?').get(orderId);
     if (!order) return { ok: false, code: 404, message: '借用单不存在' };
+    const versionErr = checkVersion(order.version, data.version);
+    if (versionErr) return versionErr;
     if (order.status !== ORDER_STATUS.PENDING_REVIEW && order.status !== ORDER_STATUS.REVIEW_REJECTED) {
       return { ok: false, code: 400, message: `当前状态为【${statusName(order.status)}】，复核仅可在待复核/复核驳回状态进行` };
     }
     const toStatus = decision === 'approve' ? ORDER_STATUS.ARCHIVED : ORDER_STATUS.REVIEW_REJECTED;
-    if (data.version !== undefined && data.version !== order.version) {
-      return { ok: false, code: 400, message: `版本冲突：当前v${order.version}，请刷新` };
-    }
     const evidences = db.prepare('SELECT * FROM evidences WHERE order_id = ?').all(orderId);
     const reviewErrors = validateEvidenceForReview(order, evidences);
     if (decision === 'approve' && reviewErrors.length) {
@@ -259,7 +271,7 @@ function reviewOrder(user, requestId, orderId, decision, data = {}) {
       try {
         return tx();
       } catch (e) {
-        if (e.message === 'VERSION_CONFLICT') return { ok: false, code: 400, message: '复核失败，版本冲突，请刷新后重试' };
+        if (e.message === 'VERSION_CONFLICT') return { ok: false, code: 409, message: '复核失败，版本冲突，请刷新后重试' };
         throw e;
       }
     }
@@ -292,35 +304,37 @@ function reviewOrder(user, requestId, orderId, decision, data = {}) {
     try {
       return tx();
     } catch (e) {
-      if (e.message === 'VERSION_CONFLICT') return { ok: false, code: 400, message: '复核失败，版本冲突，请刷新后重试' };
+      if (e.message === 'VERSION_CONFLICT') return { ok: false, code: 409, message: '复核失败，版本冲突，请刷新后重试' };
       throw e;
     }
   };
   const wrap = idempotent(requestId, {
-    userId: user.id, orderId, action: 'review',
-    version: data.version, payload: { decision, ...data }
+    userId: user.id, userRole: user.role, orderId, action: 'review',
+    version: data.version, payload: { decision, ...data },
+    requestIp: ctx.requestIp, userAgent: ctx.userAgent
   }, fn);
   return wrap.hit ? { ...wrap.response, ok: wrap.response.code === 0 } : wrap.response;
 }
 
-function batchReviewOrders(user, requestId, orderIds, data = {}) {
+function batchReviewOrders(user, requestId, orderIds, data = {}, ctx = {}) {
   const fn = () => {
     const results = [];
     for (const oid of orderIds) {
       try {
         const subReqId = `${requestId}__${oid}`;
         const subFn = () => {
-          const r = reviewOrder(user, subReqId, oid, 'approve', data);
+          const r = reviewOrder(user, subReqId, oid, 'approve', data, ctx);
           return r;
         };
         const subWrap = idempotent(subReqId, {
-          userId: user.id, orderId: oid, action: 'review',
-          version: data.version, payload: { decision: 'approve', ...data }
+          userId: user.id, userRole: user.role, orderId: oid, action: 'review',
+          version: data.version, payload: { decision: 'approve', ...data },
+          requestIp: ctx.requestIp, userAgent: ctx.userAgent
         }, subFn);
         const res = subWrap.hit ? { ...subWrap.response, ok: subWrap.response.code === 0 } : subWrap.response;
         results.push({
           orderId: oid,
-          status: res.ok ? 'success' : (res.message?.includes('版本') ? 'retry' : 'failed'),
+          status: res.ok ? 'success' : (res.code === 409 ? 'retry' : 'failed'),
           message: res.message,
           failureReason: res.failureReason || null
         });
@@ -331,16 +345,19 @@ function batchReviewOrders(user, requestId, orderIds, data = {}) {
     return { ok: true, data: results };
   };
   const wrap = idempotent(requestId, {
-    userId: user.id, orderId: null, action: 'batchReview',
-    version: null, payload: { orderIds, ...data }
+    userId: user.id, userRole: user.role, orderId: null, action: 'batchReview',
+    version: null, payload: { orderIds, ...data },
+    requestIp: ctx.requestIp, userAgent: ctx.userAgent
   }, fn);
   return wrap.hit ? { ...wrap.response, ok: wrap.response.code === 0 } : wrap.response;
 }
 
-function addEvidence(user, requestId, orderId, evidenceData) {
+function addEvidence(user, requestId, orderId, evidenceData, ctx = {}) {
   const fn = () => {
     const order = db.prepare('SELECT * FROM equipment_orders WHERE id = ?').get(orderId);
     if (!order) return { ok: false, code: 404, message: '借用单不存在' };
+    const versionErr = checkVersion(order.version, evidenceData.version);
+    if (versionErr) return versionErr;
     if (order.status === ORDER_STATUS.ARCHIVED) return { ok: false, code: 400, message: '已归档单据不可新增证据' };
     if (order.created_by !== user.id && user.role !== ROLES.REGISTRAR) {
       return { ok: false, code: 403, message: '仅登记员（创建人）可上传证据' };
@@ -371,26 +388,25 @@ function addEvidence(user, requestId, orderId, evidenceData) {
     }
   };
   const wrap = idempotent(requestId, {
-    userId: user.id, orderId, action: 'addEvidence',
-    version: evidenceData.version, payload: evidenceData
+    userId: user.id, userRole: user.role, orderId, action: 'addEvidence',
+    version: evidenceData.version, payload: evidenceData,
+    requestIp: ctx.requestIp, userAgent: ctx.userAgent
   }, fn);
   return wrap.hit ? { ...wrap.response, ok: wrap.response.code === 0 } : wrap.response;
 }
 
-function deleteEvidence(user, requestId, evidenceId, data = {}) {
-  const ev = db.prepare('SELECT * FROM evidences WHERE id = ?').get(evidenceId);
-  if (!ev) return { ok: false, code: 404, message: '证据不存在' };
-  const order = db.prepare('SELECT * FROM equipment_orders WHERE id = ?').get(ev.order_id);
-  if (!order) return { ok: false, code: 404, message: '所属借用单不存在' };
-  if (order.status === ORDER_STATUS.ARCHIVED) return { ok: false, code: 400, message: '已归档单据证据不可删除' };
-  if (ev.uploaded_by !== user.id) {
-    return { ok: false, code: 403, message: '仅上传者可删除证据' };
-  }
-  const version = data.version;
-  if (version != null && order.version !== version) {
-    return { ok: false, code: 409, message: `版本冲突：当前版本 ${order.version}，提交版本 ${version}，请刷新后重试` };
-  }
+function deleteEvidence(user, requestId, evidenceId, data = {}, ctx = {}) {
   const fn = () => {
+    const ev = db.prepare('SELECT * FROM evidences WHERE id = ?').get(evidenceId);
+    if (!ev) return { ok: false, code: 404, message: '证据不存在' };
+    const order = db.prepare('SELECT * FROM equipment_orders WHERE id = ?').get(ev.order_id);
+    if (!order) return { ok: false, code: 404, message: '所属借用单不存在' };
+    const versionErr = checkVersion(order.version, data.version);
+    if (versionErr) return versionErr;
+    if (order.status === ORDER_STATUS.ARCHIVED) return { ok: false, code: 400, message: '已归档单据证据不可删除' };
+    if (ev.uploaded_by !== user.id) {
+      return { ok: false, code: 403, message: '仅上传者可删除证据' };
+    }
     const tx = db.transaction(() => {
       db.prepare('DELETE FROM evidences WHERE id = ?').run(evidenceId);
       db.prepare(`INSERT INTO operation_logs (order_id, user_id, action, from_status, to_status, comment)
@@ -407,8 +423,9 @@ function deleteEvidence(user, requestId, evidenceId, data = {}) {
     }
   };
   const wrap = idempotent(requestId, {
-    userId: user.id, orderId: ev.order_id, action: 'deleteEvidence',
-    version: order.version, payload: { evidenceId, ...data }
+    userId: user.id, userRole: user.role, orderId: null, action: 'deleteEvidence',
+    version: data.version, payload: { evidenceId, ...data },
+    requestIp: ctx.requestIp, userAgent: ctx.userAgent
   }, fn);
   return wrap.hit ? { ...wrap.response, ok: wrap.response.code === 0 } : wrap.response;
 }

@@ -312,7 +312,6 @@ export class OrderDetailComponent implements OnInit, OnDestroy {
   openActionDialog(dialog: string) {
     if (this.submitting) return;
     if (!this.canDo(dialog.replace(/_approve|_reject/, '')) && !this.canDo(dialog)) {
-      // 通用的权限提示
       const hint = this.actionDisabledHint(dialog);
       if (hint) { alert(hint); return; }
     }
@@ -323,7 +322,28 @@ export class OrderDetailComponent implements OnInit, OnDestroy {
     this.actionForm.comment = '';
     this.actionDialog = dialog;
   }
-  closeDialog() { if (this.submitting) return; this.actionDialog = ''; this.evidenceDialog = false; }
+  closeActionDialogSafe() {
+    if (this.submitting) return;
+    this.actionDialog = '';
+  }
+  openEvidenceDialog() {
+    if (this.submitting || this.uploadingEvidence) return;
+    if (!this.canDo('add_evidence')) {
+      const hint = this.actionDisabledHint('add_evidence');
+      if (hint) { alert(hint); return; }
+    }
+    this.evidenceForm = { type: 'borrow', description: '', file_name: '' };
+    this.evidenceDialog = true;
+  }
+  closeEvidenceDialogSafe() {
+    if (this.submitting || this.uploadingEvidence) return;
+    this.evidenceDialog = false;
+  }
+  closeDialog() {
+    if (this.submitting || this.uploadingEvidence || this.deletingEvidence) return;
+    this.actionDialog = '';
+    this.evidenceDialog = false;
+  }
 
   runSubmit() {
     if (!this.detail || this.submitting) return;
@@ -410,15 +430,6 @@ export class OrderDetailComponent implements OnInit, OnDestroy {
     else if (this.actionDialog.startsWith('review')) this.runReview();
   }
 
-  openEvidenceDialog() {
-    if (this.submitting) return;
-    if (!this.canDo('add_evidence')) {
-      const hint = this.actionDisabledHint('add_evidence');
-      if (hint) { alert(hint); return; }
-    }
-    this.evidenceForm = { type: 'borrow', description: '', file_name: '' };
-    this.evidenceDialog = true;
-  }
   evidenceFormValid(): boolean {
     return !!(this.evidenceForm.type && this.evidenceForm.description?.trim());
   }

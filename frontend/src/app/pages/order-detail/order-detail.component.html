@@ -195,7 +195,7 @@
   </div>
 </div>
 
-<div class="modal-mask" *ngIf="actionDialog" (click.self)="closeDialog()">
+<div class="modal-mask" *ngIf="actionDialog" (click.self)="closeActionDialogSafe()">
   <div class="modal-box">
     <h3 *ngIf="actionDialog==='submit'">✉️ 提交审核</h3>
     <h3 *ngIf="actionDialog==='audit_approve'">✅ 审核通过</h3>
@@ -219,25 +219,26 @@
     <div class="form-item dialog-form-item">
       <label>备注 / 意见 <span class="text-gray text-sm">（{{ actionDialog.includes('reject') ? '驳回必填' : '选填' }}）</span></label>
       <textarea [(ngModel)]="actionForm.comment"
+        [disabled]="submitting"
         [placeholder]="actionDialog.includes('reject') ? '请详细说明驳回原因' : '（可选）'"></textarea>
     </div>
 
     <div class="modal-footer">
-      <button class="btn" (click)="closeDialog()">取消</button>
+      <button class="btn" [disabled]="submitting" (click)="closeActionDialogSafe()">取消</button>
       <button class="btn btn-primary" (click)="runAction()" [disabled]="submitting || (actionDialog.includes('reject') && !actionForm.comment.trim())">
         <span *ngIf="submitting" class="spinner" style="width:14px;height:14px;"></span>
-        确认
+        {{ submitting ? '处理中...' : '确认' }}
       </button>
     </div>
   </div>
 </div>
 
-<div class="modal-mask" *ngIf="evidenceDialog" (click.self)="closeDialog()">
+<div class="modal-mask" *ngIf="evidenceDialog" (click.self)="closeEvidenceDialogSafe()">
   <div class="modal-box">
     <h3>➕ 上传证据</h3>
     <div class="form-item">
       <label>证据类型 *</label>
-      <select [(ngModel)]="evidenceForm.type">
+      <select [(ngModel)]="evidenceForm.type" [disabled]="submitting || uploadingEvidence">
         <option value="borrow">设备借用（借用签收单）</option>
         <option value="return">归还验收（归还清单）</option>
         <option value="loss">损耗确认（损耗说明）</option>
@@ -246,17 +247,18 @@
     <div class="form-item">
       <label>证据描述 *</label>
       <textarea [(ngModel)]="evidenceForm.description"
+        [disabled]="submitting || uploadingEvidence"
         placeholder="请描述证据内容，如：2024-06-20 陈同学签署的借用签收单"></textarea>
     </div>
     <div class="form-item">
       <label>附件文件名（模拟）</label>
-      <input [(ngModel)]="evidenceForm.file_name" placeholder="如：签收单.pdf（选填）" />
+      <input [(ngModel)]="evidenceForm.file_name" [disabled]="submitting || uploadingEvidence" placeholder="如：签收单.pdf（选填）" />
     </div>
     <div class="modal-footer">
-      <button class="btn" (click)="closeDialog()">取消</button>
-      <button class="btn btn-primary" [disabled]="submitting || !evidenceFormValid()" (click)="uploadEvidence()">
-        <span *ngIf="submitting" class="spinner" style="width:14px;height:14px;"></span>
-        确认上传
+      <button class="btn" [disabled]="submitting || uploadingEvidence" (click)="closeEvidenceDialogSafe()">取消</button>
+      <button class="btn btn-primary" [disabled]="submitting || uploadingEvidence || !evidenceFormValid()" (click)="uploadEvidence()">
+        <span *ngIf="uploadingEvidence" class="spinner" style="width:14px;height:14px;"></span>
+        {{ uploadingEvidence ? '上传中...' : '确认上传' }}
       </button>
     </div>
   </div>

@@ -9,6 +9,13 @@ function getRequestId(ctx) {
   return ctx.request.headers['x-request-id'] || ctx.request.body?.requestId;
 }
 
+function getRequestCtx(ctx) {
+  return {
+    requestIp: ctx.request.ip || ctx.req?.connection?.remoteAddress || null,
+    userAgent: ctx.request.headers['user-agent'] || null
+  };
+}
+
 function badRequest(ctx, message, code = 400, extra = {}) {
   ctx.status = code;
   ctx.body = { code, message, ...extra };
@@ -61,7 +68,7 @@ router.post('/', authMiddleware([ROLES.REGISTRAR]), async (ctx) => {
   if (missing.length) return badRequest(ctx, `缺少必填字段: ${missing.join(', ')}`);
   const requestId = getRequestId(ctx);
   if (!requestId) return badRequest(ctx, '缺少幂等请求 ID (X-Request-Id header)');
-  const res = orderService.createOrder(ctx.state.user, requestId, data);
+  const res = orderService.createOrder(ctx.state.user, requestId, data, getRequestCtx(ctx));
   writeResponse(ctx, res);
 });
 
@@ -69,7 +76,7 @@ router.post('/:id/submit', authMiddleware([ROLES.REGISTRAR]), async (ctx) => {
   const data = ctx.request.body || {};
   const requestId = getRequestId(ctx);
   if (!requestId) return badRequest(ctx, '缺少幂等请求 ID (X-Request-Id header)');
-  const res = orderService.submitForAudit(ctx.state.user, requestId, parseInt(ctx.params.id), data);
+  const res = orderService.submitForAudit(ctx.state.user, requestId, parseInt(ctx.params.id), data, getRequestCtx(ctx));
   writeResponse(ctx, res);
 });
 
@@ -78,7 +85,7 @@ router.post('/:id/audit', authMiddleware([ROLES.AUDITOR]), async (ctx) => {
   if (!['approve', 'reject'].includes(data.decision)) return badRequest(ctx, 'decision 必须是 approve 或 reject');
   const requestId = getRequestId(ctx);
   if (!requestId) return badRequest(ctx, '缺少幂等请求 ID (X-Request-Id header)');
-  const res = orderService.auditOrder(ctx.state.user, requestId, parseInt(ctx.params.id), data.decision, data);
+  const res = orderService.auditOrder(ctx.state.user, requestId, parseInt(ctx.params.id), data.decision, data, getRequestCtx(ctx));
   writeResponse(ctx, res);
 });
 
@@ -87,11 +94,7 @@ router.post('/:id/review', authMiddleware([ROLES.REVIEWER]), async (ctx) => {
   if (!['approve', 'reject'].includes(data.decision)) return badRequest(ctx, 'decision 必须是 approve 或 reject');
   const requestId = getRequestId(ctx);
   if (!requestId) return badRequest(ctx, '缺少幂等请求 ID (X-Request-Id header)');
-  const res = orderService.reviewOrder(ctx.state.user, requestId, parseInt(ctx.params.id), data.decision, data);
-  if (!res.ok) {
-    writeResponse(ctx, res);
-    return;
-  }
+  const res = orderService.reviewOrder(ctx.state.user, requestId, parseInt(ctx.params.id), data.decision, data, getRequestCtx(ctx));
   writeResponse(ctx, res);
 });
 
@@ -100,7 +103,7 @@ router.post('/batch-review', authMiddleware([ROLES.REVIEWER]), async (ctx) => {
   if (!Array.isArray(data.orderIds) || data.orderIds.length === 0) return badRequest(ctx, 'orderIds 必须是非空数组');
   const requestId = getRequestId(ctx);
   if (!requestId) return badRequest(ctx, '缺少幂等请求 ID (X-Request-Id header)');
-  const res = orderService.batchReviewOrders(ctx.state.user, requestId, data.orderIds, data);
+  const res = orderService.batchReviewOrders(ctx.state.user, requestId, data.orderIds, data, getRequestCtx(ctx));
   writeResponse(ctx, res);
 });
 
@@ -109,7 +112,7 @@ router.post('/:id/evidences', authMiddleware([ROLES.REGISTRAR]), async (ctx) => 
   if (!data.type || !data.description) return badRequest(ctx, 'type 和 description 必填');
   const requestId = getRequestId(ctx);
   if (!requestId) return badRequest(ctx, '缺少幂等请求 ID (X-Request-Id header)');
-  const res = orderService.addEvidence(ctx.state.user, requestId, parseInt(ctx.params.id), data);
+  const res = orderService.addEvidence(ctx.state.user, requestId, parseInt(ctx.params.id), data, getRequestCtx(ctx));
   writeResponse(ctx, res);
 });
 
@@ -117,7 +120,7 @@ router.delete('/evidences/:evidenceId', authMiddleware([ROLES.REGISTRAR]), async
   const data = ctx.request.body || {};
   const requestId = getRequestId(ctx);
   if (!requestId) return badRequest(ctx, '缺少幂等请求 ID (X-Request-Id header)');
-  const res = orderService.deleteEvidence(ctx.state.user, requestId, parseInt(ctx.params.evidenceId), data);
+  const res = orderService.deleteEvidence(ctx.state.user, requestId, parseInt(ctx.params.evidenceId), data, getRequestCtx(ctx));
   writeResponse(ctx, res);
 });
 

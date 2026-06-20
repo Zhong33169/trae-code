@@ -169,7 +169,7 @@
   </aside>
 </div>
 
-<div class="modal-mask" *ngIf="batchDialog" (click.self)="batchDialog=false;batchRunning=false">
+<div class="modal-mask" *ngIf="batchDialog" (click.self)="closeBatchDialogSafe()">
   <div class="modal-box" style="width:680px;max-width:95vw;">
     <h3>📦 批量复核归档</h3>
     <div class="alert alert-info mb-12" *ngIf="!batchResults.length">
@@ -177,7 +177,7 @@
       复核将校验：借用证据、归还验收证据、损耗说明与损耗证据一致性。<br/>
       下方将逐条显示结果，失败的原因会列明，可点击"进入办理"逐一处理。
     </div>
-    <div *ngIf="batchRunning" style="text-align:center;padding:30px;"><span class="spinner"></span><div class="text-sm text-gray mt-8">正在处理中...</div></div>
+    <div *ngIf="batchRunning" style="text-align:center;padding:30px;"><span class="spinner"></span><div class="text-sm text-gray mt-8">正在处理中，请勿关闭窗口...</div></div>
 
     <div *ngIf="batchResults.length && !batchRunning">
       <div class="mb-12 flex-between">
@@ -203,51 +203,51 @@
     </div>
 
     <div class="modal-footer">
-      <button class="btn" (click)="batchDialog=false;batchResults=[];">{{ batchResults.length ? '关闭' : '取消' }}</button>
+      <button class="btn" [disabled]="batchRunning" (click)="closeBatchDialogSafe()">{{ batchResults.length ? '关闭' : '取消' }}</button>
       <button class="btn btn-primary" *ngIf="!batchResults.length" [disabled]="batchRunning" (click)="runBatchReview()">开始批量复核</button>
     </div>
   </div>
 </div>
 
-<div class="modal-mask" *ngIf="createDialog" (click.self)="createDialog=false">
+<div class="modal-mask" *ngIf="createDialog" (click.self)="closeCreateDialogSafe()">
   <div class="modal-box" style="width:520px;max-width:95vw;">
     <h3>+ 新建器材借用单</h3>
     <div class="grid-2">
       <div class="form-item">
         <label>借用人 *</label>
-        <input type="text" [(ngModel)]="createForm.applicant" placeholder="姓名">
+        <input type="text" [(ngModel)]="createForm.applicant" placeholder="姓名" [disabled]="createLoading">
       </div>
       <div class="form-item">
         <label>所属部门 *</label>
-        <input type="text" [(ngModel)]="createForm.department" placeholder="社团/部门">
+        <input type="text" [(ngModel)]="createForm.department" placeholder="社团/部门" [disabled]="createLoading">
       </div>
     </div>
     <div class="grid-2">
       <div class="form-item">
         <label>器材名称 *</label>
-        <input type="text" [(ngModel)]="createForm.equipment_name" placeholder="如：篮球">
+        <input type="text" [(ngModel)]="createForm.equipment_name" placeholder="如：篮球" [disabled]="createLoading">
       </div>
       <div class="form-item">
         <label>器材型号</label>
-        <input type="text" [(ngModel)]="createForm.equipment_model" placeholder="选填">
+        <input type="text" [(ngModel)]="createForm.equipment_model" placeholder="选填" [disabled]="createLoading">
       </div>
     </div>
     <div class="grid-2">
       <div class="form-item">
         <label>数量 *</label>
-        <input type="number" [(ngModel)]="createForm.quantity" min="1">
+        <input type="number" [(ngModel)]="createForm.quantity" min="1" [disabled]="createLoading">
       </div>
       <div class="form-item">
         <label>预计归还日期 *</label>
-        <input type="date" [(ngModel)]="createForm.expected_return_date">
+        <input type="date" [(ngModel)]="createForm.expected_return_date" [disabled]="createLoading">
       </div>
     </div>
     <div class="form-item">
       <label>借用理由 *</label>
-      <textarea [(ngModel)]="createForm.borrow_reason" placeholder="请说明借用用途、时段等"></textarea>
+      <textarea [(ngModel)]="createForm.borrow_reason" placeholder="请说明借用用途、时段等" [disabled]="createLoading"></textarea>
     </div>
     <div class="modal-footer">
-      <button class="btn" (click)="createDialog=false">取消</button>
+      <button class="btn" [disabled]="createLoading" (click)="closeCreateDialogSafe()">取消</button>
       <button class="btn" [disabled]="createLoading" (click)="submitCreate(false)">仅保存草稿</button>
       <button class="btn btn-primary" [disabled]="createLoading" (click)="submitCreate(true)">
         <span *ngIf="createLoading" class="spinner" style="width:14px;height:14px;"></span>

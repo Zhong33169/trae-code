@@ -20,18 +20,21 @@ function findIdempotentRequest(requestId) {
 
 function saveIdempotentRequest(ctx) {
   const {
-    requestId, userId, orderId, action, version,
-    requestPayload, responseCode, responseBody
+    requestId, userId, userRole, orderId, action, version,
+    requestPayload, responseCode, responseBody,
+    requestIp, userAgent
   } = ctx;
   db.prepare(`
     INSERT INTO idempotent_requests (
-      request_id, user_id, order_id, action, version,
-      request_payload, response_code, response_body
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      request_id, user_id, user_role, order_id, action, version,
+      request_payload, response_code, response_body,
+      request_ip, user_agent
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
-    requestId, userId, orderId ?? null, action, version ?? null,
+    requestId, userId, userRole ?? null, orderId ?? null, action, version ?? null,
     requestPayload ? JSON.stringify(requestPayload) : null,
-    responseCode, JSON.stringify(responseBody)
+    responseCode, JSON.stringify(responseBody),
+    requestIp ?? null, userAgent ?? null
   );
 }
 
@@ -44,7 +47,7 @@ function buildIdempotentResponse(row) {
 }
 
 function idempotent(requestId, ctx, fn) {
-  const { userId, orderId, action, version, payload } = ctx;
+  const { userId, userRole, orderId, action, version, payload, requestIp, userAgent } = ctx;
 
   if (!requestId || !isValidIdempotentAction(action)) {
     throw new Error(`无效的幂等上下文: requestId=${requestId}, action=${action}`);
@@ -63,7 +66,7 @@ function idempotent(requestId, ctx, fn) {
       result = fn();
       if (result && result.ok === false && !result.data) {
         saveIdempotentRequest({
-          requestId, userId, orderId, action, version,
+          requestId, userId, userRole, orderId, action, version,
           requestPayload: payload,
           responseCode: result.code || 400,
           responseBody: {
@@ -71,13 +74,14 @@ function idempotent(requestId, ctx, fn) {
             message: result.message,
             failureReason: result.failureReason || null,
             ok: false
-          }
+          },
+          requestIp, userAgent
         });
         status.status = 'failed';
         return status;
       }
       saveIdempotentRequest({
-        requestId, userId, orderId, action, version,
+        requestId, userId, userRole, orderId, action, version,
         requestPayload: payload,
         responseCode: 200,
         responseBody: {
@@ -85,7 +89,8 @@ function idempotent(requestId, ctx, fn) {
           message: result.message || 'success',
           data: result.data || null,
           ok: true
-        }
+        },
+        requestIp, userAgent
       });
       status.status = 'ok';
       return status;
