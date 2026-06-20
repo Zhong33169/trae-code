@@ -1,4 +1,4 @@
-import type { Appointment, AppointmentDetail, ApiError, BatchResult, Evidence, EvidenceType } from './types'
+import type { Appointment, AppointmentDetail, ApiError, BatchResult, BatchResultWithId, BatchSummary, BatchDetail, Evidence, EvidenceType } from './types'
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T | ApiError> {
   const token = localStorage.getItem('token')
@@ -83,17 +83,28 @@ export async function archiveAppointment(id: string, data: { action: 'archive' |
 }
 
 export async function batchReview(data: { items: { id: string; version: number }[]; action: 'approve' | 'reject'; comment?: string }) {
-  return request<BatchResult[]>('/appointments/batch-review', {
+  return request<BatchResultWithId>('/appointments/batch-review', {
     method: 'POST',
     body: JSON.stringify(data),
   })
 }
 
 export async function batchArchive(data: { items: { id: string; version: number }[]; action: 'archive' | 'reject'; comment?: string }) {
-  return request<BatchResult[]>('/appointments/batch-archive', {
+  return request<BatchResultWithId>('/appointments/batch-archive', {
     method: 'POST',
     body: JSON.stringify(data),
   })
+}
+
+export async function fetchBatches(params?: { action_type?: 'batch_review' | 'batch_archive'; limit?: number }) {
+  const q = new URLSearchParams()
+  if (params?.action_type) q.set('action_type', params.action_type)
+  if (params?.limit) q.set('limit', String(params.limit))
+  return request<BatchSummary[]>(`/batches${q.toString() ? `?${q.toString()}` : ''}`)
+}
+
+export async function fetchBatchDetail(id: string) {
+  return request<BatchDetail>(`/batches/${id}`)
 }
 
 export async function fetchEvidence(appointmentId: string, type?: EvidenceType) {

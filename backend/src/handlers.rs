@@ -72,6 +72,7 @@ fn row_to_operation_log(row: &rusqlite::Row) -> rusqlite::Result<OperationLog> {
         operator: row.get("operator")?,
         operator_role: row.get("operator_role")?,
         detail: row.get("detail")?,
+        batch_id: row.get("batch_id").ok().flatten(),
         timestamp: row.get("timestamp")?,
     })
 }
@@ -103,12 +104,27 @@ fn group_evidence(all: Vec<Evidence>) -> EvidenceGroup {
 
 fn get_logs_for_appointment(conn: &Connection, apt_id: &str) -> Vec<OperationLog> {
     let mut stmt = conn.prepare(
-        "SELECT id, appointment_id, action, operator, operator_role, detail, timestamp FROM operation_logs WHERE appointment_id = ?1 ORDER BY id"
+        "SELECT id, appointment_id, action, operator, operator_role, detail, batch_id, timestamp FROM operation_logs WHERE appointment_id = ?1 ORDER BY id"
     ).unwrap();
     stmt.query_map(rusqlite::params![apt_id], row_to_operation_log)
         .unwrap()
         .filter_map(|r| r.ok())
         .collect()
+}
+
+fn get_batch_records_for_appointment(conn: &Connection, apt_id: &str) -> Vec<AppointmentBatchItem> {
+    let mut stmt = conn.prepare(
+        "SELECT bi.batch_id, b.action_type, b.action, bi.success, bi.error_code, bi.error_message, b.created_at FROM batch_items bi JOIN batches b ON bi.batch_id = b.id WHERE bi.appointment_id = ?1 ORDER BY b.created_at DESC"
+    ).unwrap();
+    stmt.query_map(rusqlite::params![apt_id], |row| Ok(AppointmentBatchItem {
+        batch_id: row.get(0)?,
+        action_type: row.get(1)?,
+        action: row.get(2)?,
+        success: row.get::<_, i64>(3)? != 0,
+        error_code: row.get(4).ok().flatten(),
+        error_message: row.get(5).ok().flatten(),
+        created_at: row.get(6)?,
+    })).unwrap().filter_map(|r| r.ok()).collect()
 }
 
 fn build_version_history(logs: &[OperationLog]) -> Vec<VersionRecord> {
@@ -148,11 +164,34 @@ fn insert_operation_log(
     operator_role: &str,
     detail: &str,
 ) {
+    insert_operation_log_with_batch(conn, appointment_id, action, operator, operator_role, detail, None)
+}
+
+fn insert_operation_log_with_batch(
+    conn: &Connection,
+    appointment_id: &str,
+    action: &str,
+    operator: &str,
+    operator_role: &str,
+    detail: &str,
+    batch_id: Option<&str>,
+) {
     let now = chrono::Utc::now().to_rfc3339();
     let _ = conn.execute(
-        "INSERT INTO operation_logs (appointment_id, action, operator, operator_role, detail, timestamp) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        rusqlite::params![appointment_id, action, operator, operator_role, detail, now],
+        "INSERT INTO operation_logs (appointment_id, action, operator, operator_role, detail, batch_id, timestamp) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        rusqlite::params![appointment_id, action, operator, operator_role, detail, batch_id, now],
     );
+}
+
+fn generate_batch_id(action_type: &str) -> String {
+    let prefix = match action_type {
+        "batch_review" => "BR",
+        "batch_archive" => "BA",
+        _ => "BX",
+    };
+    let ts = chrono::Utc::now().format("%Y%m%d%H%M%S");
+    let rand = uuid::Uuid::new_v4().simple().to_string();
+    format!("{}-{}-{}", prefix, ts, &rand[..6])
 }
 
 pub async fn login(db: Db, body: web::Json<LoginRequest>) -> Result<HttpResponse, AppError> {
@@ -286,6 +325,7 @@ pub async fn get_appointment(
     let evidence = group_evidence(all_evidence);
     let operation_logs = get_logs_for_appointment(&conn, &id);
     let version_history = build_version_history(&operation_logs);
+    let batch_records = get_batch_records_for_appointment(&conn, &id);
 
     Ok(HttpResponse::Ok().json(AppointmentDetail {
         id: appointment.id.clone(),
@@ -303,6 +343,7 @@ pub async fn get_appointment(
         evidence,
         version_history,
         operation_logs,
+        batch_records,
     }))
 }
 
@@ -529,37 +570,6 @@ pub async fn archive_appointment(
     Ok(HttpResponse::Ok().json(updated))
 }
 
-pub async fn batch_review(
-    claims: AuthClaims,
-    db: Db,
-    body: web::Json<BatchReviewRequest>,
-) -> Result<HttpResponse, AppError> {
-    validate_role("reviewer", &claims.role)?;
-
-    let conn = db.lock().unwrap();
-    let mut results = Vec::new();
-
-    for item in &body.items {
-        let result = process_single_review(&conn, &claims, &item.id, item.version, &body.action, body.comment.as_deref());
-        match result {
-            Ok(_) => results.push(BatchResultItem {
-                id: item.id.clone(),
-                success: true,
-                error: None,
-                error_code: None,
-            }),
-            Err(e) => results.push(BatchResultItem {
-                id: item.id.clone(),
-                success: false,
-                error: Some(e.to_string()),
-                error_code: Some(e.error_code().to_string()),
-            }),
-        }
-    }
-
-    Ok(HttpResponse::Ok().json(results))
-}
-
 fn process_single_review(
     conn: &Connection,
     claims: &AuthClaims,
@@ -567,6 +577,7 @@ fn process_single_review(
     expected_version: i64,
     action: &str,
     comment: Option<&str>,
+    batch_id: Option<&str>,
 ) -> Result<(), AppError> {
     let appointment = conn
         .query_row(
@@ -600,22 +611,60 @@ fn process_single_review(
         rusqlite::params![new_status, new_version, claims.sub, now, id],
     ).map_err(|e| AppError::InternalError(e.to_string()))?;
 
-    insert_operation_log(conn, id, action_name, &claims.sub, &claims.role, detail_text);
+    insert_operation_log_with_batch(conn, id, action_name, &claims.sub, &claims.role, detail_text, batch_id);
     Ok(())
 }
 
-pub async fn batch_archive(
+fn persist_batch(
+    conn: &Connection,
+    batch_id: &str,
+    action_type: &str,
+    action: &str,
+    claims: &AuthClaims,
+    comment: Option<&str>,
+    results: &[BatchResultItem],
+) {
+    let total = results.len() as i64;
+    let success = results.iter().filter(|r| r.success).count() as i64;
+    let fail = total - success;
+    let now = chrono::Utc::now().to_rfc3339();
+
+    let _ = conn.execute(
+        "INSERT INTO batches (id, action_type, action, operator, operator_role, comment, total_count, success_count, fail_count, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        rusqlite::params![
+            batch_id, action_type, action, claims.sub, claims.role,
+            comment, total, success, fail, now
+        ],
+    );
+
+    for r in results {
+        let success_int: i64 = if r.success { 1 } else { 0 };
+        let _ = conn.execute(
+            "INSERT INTO batch_items (batch_id, appointment_id, success, error_code, error_message) VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![
+                batch_id, r.id, success_int,
+                r.error_code.as_deref(), r.error.as_deref()
+            ],
+        );
+    }
+}
+
+pub async fn batch_review(
     claims: AuthClaims,
     db: Db,
-    body: web::Json<BatchArchiveRequest>,
+    body: web::Json<BatchReviewRequest>,
 ) -> Result<HttpResponse, AppError> {
-    validate_role("archivist", &claims.role)?;
+    validate_role("reviewer", &claims.role)?;
 
     let conn = db.lock().unwrap();
+    let batch_id = generate_batch_id("batch_review");
     let mut results = Vec::new();
 
     for item in &body.items {
-        let result = process_single_archive(&conn, &claims, &item.id, item.version, &body.action, body.comment.as_deref());
+        let result = process_single_review(
+            &conn, &claims, &item.id, item.version,
+            &body.action, body.comment.as_deref(), Some(&batch_id),
+        );
         match result {
             Ok(_) => results.push(BatchResultItem {
                 id: item.id.clone(),
@@ -632,7 +681,52 @@ pub async fn batch_archive(
         }
     }
 
-    Ok(HttpResponse::Ok().json(results))
+    persist_batch(&conn, &batch_id, "batch_review", &body.action, &claims, body.comment.as_deref(), &results);
+
+    Ok(HttpResponse::Ok().json(BatchResultWithId {
+        batch_id,
+        results,
+    }))
+}
+
+pub async fn batch_archive(
+    claims: AuthClaims,
+    db: Db,
+    body: web::Json<BatchArchiveRequest>,
+) -> Result<HttpResponse, AppError> {
+    validate_role("archivist", &claims.role)?;
+
+    let conn = db.lock().unwrap();
+    let batch_id = generate_batch_id("batch_archive");
+    let mut results = Vec::new();
+
+    for item in &body.items {
+        let result = process_single_archive(
+            &conn, &claims, &item.id, item.version,
+            &body.action, body.comment.as_deref(), Some(&batch_id),
+        );
+        match result {
+            Ok(_) => results.push(BatchResultItem {
+                id: item.id.clone(),
+                success: true,
+                error: None,
+                error_code: None,
+            }),
+            Err(e) => results.push(BatchResultItem {
+                id: item.id.clone(),
+                success: false,
+                error: Some(e.to_string()),
+                error_code: Some(e.error_code().to_string()),
+            }),
+        }
+    }
+
+    persist_batch(&conn, &batch_id, "batch_archive", &body.action, &claims, body.comment.as_deref(), &results);
+
+    Ok(HttpResponse::Ok().json(BatchResultWithId {
+        batch_id,
+        results,
+    }))
 }
 
 fn process_single_archive(
@@ -642,6 +736,7 @@ fn process_single_archive(
     expected_version: i64,
     action: &str,
     comment: Option<&str>,
+    batch_id: Option<&str>,
 ) -> Result<(), AppError> {
     let appointment = conn
         .query_row(
@@ -675,8 +770,103 @@ fn process_single_archive(
         rusqlite::params![new_status, new_version, claims.sub, now, id],
     ).map_err(|e| AppError::InternalError(e.to_string()))?;
 
-    insert_operation_log(conn, id, action_name, &claims.sub, &claims.role, detail_text);
+    insert_operation_log_with_batch(conn, id, action_name, &claims.sub, &claims.role, detail_text, batch_id);
     Ok(())
+}
+
+pub async fn list_batches(
+    _claims: AuthClaims,
+    db: Db,
+    q: web::Query<BatchListQuery>,
+) -> Result<HttpResponse, AppError> {
+    let conn = db.lock().unwrap();
+    let limit = q.limit.unwrap_or(20).min(100);
+    let mut sql = "SELECT id, action_type, action, operator, operator_role, comment, total_count, success_count, fail_count, created_at FROM batches".to_string();
+    let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+
+    if let Some(ref action_type) = q.action_type {
+        if params.is_empty() {
+            sql.push_str(" WHERE");
+        }
+        params.push(Box::new(action_type.clone()));
+        sql.push_str(&format!(" action_type = ?{}", params.len()));
+    }
+
+    sql.push_str(" ORDER BY created_at DESC LIMIT ?");
+    params.push(Box::new(limit));
+
+    let mut stmt = conn.prepare(&sql).map_err(|e| AppError::InternalError(e.to_string()))?;
+    let params_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+    let rows = stmt.query_map(params_refs.as_slice(), |row| {
+        Ok(BatchSummary {
+            id: row.get("id")?,
+            action_type: row.get("action_type")?,
+            action: row.get("action")?,
+            operator: row.get("operator")?,
+            operator_role: row.get("operator_role")?,
+            comment: row.get("comment")?,
+            total_count: row.get("total_count")?,
+            success_count: row.get("success_count")?,
+            fail_count: row.get("fail_count")?,
+            created_at: row.get("created_at")?,
+        })
+    }).map_err(|e| AppError::InternalError(e.to_string()))?;
+
+    let mut batches = Vec::new();
+    for row in rows {
+        batches.push(row.map_err(|e| AppError::InternalError(e.to_string()))?);
+    }
+    Ok(HttpResponse::Ok().json(batches))
+}
+
+pub async fn get_batch_detail(
+    _claims: AuthClaims,
+    db: Db,
+    path: web::Path<String>,
+) -> Result<HttpResponse, AppError> {
+    let batch_id = path.into_inner();
+    let conn = db.lock().unwrap();
+
+    let batch = conn.query_row(
+        "SELECT id, action_type, action, operator, operator_role, comment, total_count, success_count, fail_count, created_at FROM batches WHERE id = ?1",
+        rusqlite::params![&batch_id],
+        |row| {
+            Ok(BatchDetail {
+                id: row.get("id")?,
+                action_type: row.get("action_type")?,
+                action: row.get("action")?,
+                operator: row.get("operator")?,
+                operator_role: row.get("operator_role")?,
+                comment: row.get("comment")?,
+                total_count: row.get("total_count")?,
+                success_count: row.get("success_count")?,
+                fail_count: row.get("fail_count")?,
+                created_at: row.get("created_at")?,
+                items: Vec::new(),
+            })
+        },
+    ).map_err(|_| AppError::NotFound("批次不存在".into()))?;
+
+    let mut stmt = conn.prepare(
+        "SELECT id, appointment_id, success, error_code, error_message FROM batch_items WHERE batch_id = ?1 ORDER BY id"
+    ).map_err(|e| AppError::InternalError(e.to_string()))?;
+    let rows = stmt.query_map(rusqlite::params![&batch_id], |row| {
+        let success_int: i64 = row.get("success")?;
+        Ok(BatchDetailItem {
+            id: row.get::<_, i64>("id")?.to_string(),
+            appointment_id: row.get("appointment_id")?,
+            success: success_int == 1,
+            error_code: row.get("error_code")?,
+            error_message: row.get("error_message")?,
+        })
+    }).map_err(|e| AppError::InternalError(e.to_string()))?;
+
+    let mut items = Vec::new();
+    for row in rows {
+        items.push(row.map_err(|e| AppError::InternalError(e.to_string()))?);
+    }
+
+    Ok(HttpResponse::Ok().json(BatchDetail { items, ..batch }))
 }
 
 pub async fn list_evidence(

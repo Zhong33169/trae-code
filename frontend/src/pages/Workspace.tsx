@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { LogOut } from 'lucide-react'
+import { LogOut, ListOrdered } from 'lucide-react'
 import { useStore } from '@/store'
 import RoleSwitcher from '@/components/RoleSwitcher'
 import FilterBar from '@/components/FilterBar'
@@ -8,6 +8,7 @@ import AppointmentQueue from '@/components/AppointmentQueue'
 import EvidenceSidebar from '@/components/EvidenceSidebar'
 import AppointmentDetail from '@/components/AppointmentDetail'
 import BatchActionBar from '@/components/BatchActionBar'
+import BatchHistoryPanel from '@/components/BatchHistoryPanel'
 import CreateForm from '@/components/CreateForm'
 
 export default function Workspace() {
@@ -16,6 +17,8 @@ export default function Workspace() {
   const logout = useStore((s) => s.logout)
   const loadAppointments = useStore((s) => s.loadAppointments)
   const loadAppointmentDetail = useStore((s) => s.loadAppointmentDetail)
+  const loadBatches = useStore((s) => s.loadBatches)
+  const openBatchHistory = useStore((s) => s.openBatchHistory)
   const toasts = useStore((s) => s.toasts)
   const removeToast = useStore((s) => s.removeToast)
   const currentAppointment = useStore((s) => s.currentAppointment)
@@ -29,6 +32,7 @@ export default function Workspace() {
       return
     }
     loadAppointments()
+    loadBatches({ limit: 20 })
   }, [token, user])
 
   const handleLogout = () => {
@@ -44,11 +48,17 @@ export default function Workspace() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* 顶部导航 */}
       <header className="bg-navy text-white px-6 py-3 shadow-md">
         <div className="max-w-6xl mx-auto flex items-center justify-between">
           <h1 className="text-lg font-bold">展会预约管理系统</h1>
           <div className="flex items-center gap-4">
+            <button
+              onClick={openBatchHistory}
+              className="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-md text-sm transition-colors"
+            >
+              <ListOrdered className="w-4 h-4" />
+              批次记录
+            </button>
             <RoleSwitcher />
             <button
               onClick={handleLogout}
@@ -61,10 +71,8 @@ export default function Workspace() {
         </div>
       </header>
 
-      {/* 主体内容 */}
       <main className="max-w-6xl mx-auto px-6 py-6">
         <div className="flex gap-6">
-          {/* 左侧：筛选 + 队列 */}
           <div className="flex-1 space-y-4">
             <FilterBar />
             <AppointmentQueue
@@ -72,23 +80,17 @@ export default function Workspace() {
               onOpenCreate={() => setShowCreate(true)}
             />
           </div>
-          {/* 右侧：证据侧边栏 */}
           <div className="w-72 shrink-0">
             <EvidenceSidebar />
           </div>
         </div>
       </main>
 
-      {/* 预约单详情抽屉 */}
       {currentAppointment && <AppointmentDetail />}
-
-      {/* 批量操作浮动栏 */}
       <BatchActionBar />
-
-      {/* 发起预约单表单 */}
+      <BatchHistoryPanel />
       {showCreate && <CreateForm onClose={() => setShowCreate(false)} />}
 
-      {/* Toast 通知 */}
       <div className="fixed top-4 right-4 z-[100] space-y-2">
         {toasts.map((toast) => (
           <div

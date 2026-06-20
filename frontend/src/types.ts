@@ -30,6 +30,7 @@ export interface AppointmentDetail extends Appointment {
   }
   version_history: VersionRecord[]
   operation_logs: OperationLog[]
+  batch_records: AppointmentBatchItem[]
 }
 
 export interface Evidence {
@@ -56,8 +57,19 @@ export interface OperationLog {
   action: string
   operator: string
   operator_role: string
-  timestamp: string
   detail: string
+  batch_id?: string
+  timestamp: string
+}
+
+export interface AppointmentBatchItem {
+  batch_id: string
+  action_type: string
+  action: string
+  success: boolean
+  error_code?: string
+  error_message?: string
+  created_at: string
 }
 
 export interface ApiError {
@@ -70,6 +82,46 @@ export interface BatchResult {
   success: boolean
   error?: string
   error_code?: string
+}
+
+export interface BatchResultWithId {
+  batch_id: string
+  results: BatchResult[]
+}
+
+export interface BatchSummary {
+  id: string
+  action_type: 'batch_review' | 'batch_archive'
+  action: string
+  operator: string
+  operator_role: Role
+  comment?: string
+  total_count: number
+  success_count: number
+  fail_count: number
+  created_at: string
+}
+
+export interface BatchDetailItem {
+  id: string
+  appointment_id: string
+  success: boolean
+  error_code?: string
+  error_message?: string
+}
+
+export interface BatchDetail {
+  id: string
+  action_type: 'batch_review' | 'batch_archive'
+  action: string
+  operator: string
+  operator_role: Role
+  comment?: string
+  total_count: number
+  success_count: number
+  fail_count: number
+  created_at: string
+  items: BatchDetailItem[]
 }
 
 export interface FilterState {

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { XCircle, Clock, AlertTriangle, Edit, FileCheck, CheckCircle } from 'lucide-react'
+import { XCircle, Clock, AlertTriangle, Edit, FileCheck, CheckCircle, ListOrdered } from 'lucide-react'
 import { useStore } from '@/store'
 import type { AppointmentStatus, EvidenceType } from '@/types'
 
@@ -34,6 +34,7 @@ export default function AppointmentDetail() {
   const archiveAppointment = useStore((s) => s.archiveAppointment)
   const addEvidence = useStore((s) => s.addEvidence)
   const loadAppointmentDetail = useStore((s) => s.loadAppointmentDetail)
+  const openBatchDetail = useStore((s) => s.openBatchDetail)
 
   const [correcting, setCorrecting] = useState(false)
   const [correctForm, setCorrectForm] = useState({ visitor_name: '', visitor_phone: '', visitor_id_number: '', exhibition_name: '' })
@@ -223,16 +224,69 @@ export default function AppointmentDetail() {
               {apt.operation_logs.map((log) => (
                 <div key={log.id} className="flex items-start gap-2 text-sm">
                   <Clock className="w-4 h-4 text-gray-400 mt-0.5 shrink-0" />
-                  <div>
+                  <div className="flex-1 min-w-0">
                     <span className="text-gray-700">{log.action}</span>
                     <span className="text-gray-400 ml-2">{log.operator}({log.operator_role})</span>
                     <div className="text-xs text-gray-400">{new Date(log.timestamp).toLocaleString()}</div>
                     {log.detail && <div className="text-xs text-gray-500 mt-0.5">{log.detail}</div>}
+                    {log.batch_id && (
+                      <div className="text-xs mt-1">
+                        <button
+                          onClick={() => openBatchDetail(log.batch_id!)}
+                          className="inline-flex items-center gap-1 text-navy hover:underline"
+                        >
+                          <ListOrdered className="w-3 h-3" />
+                          关联批次 {log.batch_id}
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}
             </div>
           </section>
+
+          {/* 关联批次 */}
+          {apt.batch_records && apt.batch_records.length > 0 && (
+            <section>
+              <h3 className="text-sm font-semibold text-navy mb-3">关联批次</h3>
+              <div className="space-y-2">
+                {apt.batch_records.map((br) => (
+                  <div
+                    key={br.batch_id}
+                    className={`p-3 rounded-md text-sm ${
+                      br.success ? 'bg-green-50' : 'bg-red-50'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {br.success ? (
+                        <CheckCircle className="w-4 h-4 text-green-600 shrink-0" />
+                      ) : (
+                        <XCircle className="w-4 h-4 text-red-600 shrink-0" />
+                      )}
+                      <button
+                        onClick={() => openBatchDetail(br.batch_id)}
+                        className="font-semibold text-navy hover:underline"
+                      >
+                        {br.batch_id}
+                      </button>
+                      <span className={`text-xs px-1.5 py-0.5 rounded ${
+                        br.success ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                      }`}>
+                        {br.success ? '处理成功' : br.error_code || '处理失败'}
+                      </span>
+                      <span className="text-xs text-gray-400 ml-auto">
+                        {new Date(br.created_at).toLocaleString()}
+                      </span>
+                    </div>
+                    {br.error_message && (
+                      <div className="text-xs text-red-600 mt-1 ml-6">{br.error_message}</div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
         </div>
 
         {/* 底部操作栏 */}

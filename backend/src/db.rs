@@ -49,13 +49,40 @@ fn create_tables(conn: &Connection) -> Result<(), rusqlite::Error> {
             operator TEXT NOT NULL,
             operator_role TEXT NOT NULL,
             detail TEXT NOT NULL DEFAULT '',
+            batch_id TEXT,
             timestamp TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS batches (
+            id TEXT PRIMARY KEY,
+            action_type TEXT NOT NULL CHECK(action_type IN ('batch_review', 'batch_archive')),
+            action TEXT NOT NULL,
+            operator TEXT NOT NULL,
+            operator_role TEXT NOT NULL,
+            comment TEXT,
+            total_count INTEGER NOT NULL DEFAULT 0,
+            success_count INTEGER NOT NULL DEFAULT 0,
+            fail_count INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS batch_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            batch_id TEXT NOT NULL REFERENCES batches(id),
+            appointment_id TEXT NOT NULL,
+            success INTEGER NOT NULL,
+            error_code TEXT,
+            error_message TEXT,
+            UNIQUE(batch_id, appointment_id)
         );
 
         CREATE INDEX IF NOT EXISTS idx_appointments_status ON appointments(status);
         CREATE INDEX IF NOT EXISTS idx_evidence_appointment_id ON evidence(appointment_id);
         CREATE INDEX IF NOT EXISTS idx_operation_logs_appointment_id ON operation_logs(appointment_id);
-        CREATE INDEX IF NOT EXISTS idx_appointments_visitor_id ON appointments(visitor_id_number, exhibition_name);"
+        CREATE INDEX IF NOT EXISTS idx_appointments_visitor_id ON appointments(visitor_id_number, exhibition_name);
+        CREATE INDEX IF NOT EXISTS idx_batches_created_at ON batches(created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_batch_items_appointment_id ON batch_items(appointment_id);
+        CREATE INDEX IF NOT EXISTS idx_batch_items_batch_id ON batch_items(batch_id);"
     )?;
     Ok(())
 }

@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { User, Appointment, AppointmentDetail, FilterState, Role, AppointmentStatus, ApiError, BatchResult, EvidenceType } from './types'
+import type { User, Appointment, AppointmentDetail, FilterState, Role, AppointmentStatus, ApiError, BatchResult, BatchResultWithId, BatchSummary, BatchDetail, EvidenceType } from './types'
 import * as api from './api'
 import { isApiError } from './api'
 
@@ -31,6 +31,11 @@ interface Store {
   loading: boolean
   toasts: Toast[]
   toastId: number
+  batches: BatchSummary[]
+  currentBatchDetail: BatchDetail | null
+  showBatchHistory: boolean
+  showBatchDetailModal: boolean
+  lastBatchResult: (BatchResultWithId & { items?: BatchResult[] }) | null
 
   showToast: (message: string, type?: 'error' | 'success') => void
   removeToast: (id: number) => void
@@ -67,8 +72,16 @@ interface Store {
   reviewAppointment: (id: string, action: 'approve' | 'reject', version: number) => Promise<boolean>
   archiveAppointment: (id: string, action: 'archive' | 'reject', version: number) => Promise<boolean>
 
-  batchReview: (action: 'approve' | 'reject') => Promise<BatchResult[] | null>
-  batchArchive: (action: 'archive' | 'reject') => Promise<BatchResult[] | null>
+  batchReview: (action: 'approve' | 'reject') => Promise<BatchResultWithId | null>
+  batchArchive: (action: 'archive' | 'reject') => Promise<BatchResultWithId | null>
+  clearLastBatchResult: () => void
+
+  loadBatches: (params?: { action_type?: 'batch_review' | 'batch_archive'; limit?: number }) => Promise<void>
+  loadBatchDetail: (id: string) => Promise<void>
+  openBatchHistory: () => void
+  closeBatchHistory: () => void
+  openBatchDetail: (id: string) => Promise<void>
+  closeBatchDetail: () => void
 
   addEvidence: (appointmentId: string, type: EvidenceType, content: string) => Promise<boolean>
 }
@@ -85,6 +98,11 @@ export const useStore = create<Store>((set, get) => ({
   loading: false,
   toasts: [],
   toastId: 0,
+  batches: [],
+  currentBatchDetail: null,
+  showBatchHistory: false,
+  showBatchDetailModal: false,
+  lastBatchResult: null,
 
   showToast: (message, type = 'error') => {
     const id = get().toastId + 1
@@ -263,7 +281,9 @@ export const useStore = create<Store>((set, get) => ({
       get().showToast(result.message)
       return null
     }
+    set({ lastBatchResult: result })
     get().loadAppointments()
+    get().loadBatches()
     return result
   },
 
@@ -278,8 +298,47 @@ export const useStore = create<Store>((set, get) => ({
       get().showToast(result.message)
       return null
     }
+    set({ lastBatchResult: result })
     get().loadAppointments()
+    get().loadBatches()
     return result
+  },
+
+  clearLastBatchResult: () => {
+    set({ lastBatchResult: null })
+  },
+
+  loadBatches: async (params) => {
+    const result = await api.fetchBatches(params)
+    if (isApiError(result)) return
+    set({ batches: result })
+  },
+
+  loadBatchDetail: async (id) => {
+    const result = await api.fetchBatchDetail(id)
+    if (isApiError(result)) {
+      get().showToast(result.message)
+      return
+    }
+    set({ currentBatchDetail: result })
+  },
+
+  openBatchHistory: () => {
+    set({ showBatchHistory: true })
+    get().loadBatches()
+  },
+
+  closeBatchHistory: () => {
+    set({ showBatchHistory: false })
+  },
+
+  openBatchDetail: async (id) => {
+    await get().loadBatchDetail(id)
+    set({ showBatchDetailModal: true })
+  },
+
+  closeBatchDetail: () => {
+    set({ showBatchDetailModal: false, currentBatchDetail: null })
   },
 
   addEvidence: async (appointmentId, type, content) => {

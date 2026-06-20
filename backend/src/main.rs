@@ -47,6 +47,11 @@ async fn main() -> std::io::Result<()> {
                             .route("/{id}/archive", web::put().to(handlers::archive_appointment))
                             .route("/{id}/evidence", web::get().to(handlers::list_evidence))
                             .route("/{id}/evidence", web::post().to(handlers::add_evidence)),
+                    )
+                    .service(
+                        web::scope("/batches")
+                            .route("", web::get().to(handlers::list_batches))
+                            .route("/{id}", web::get().to(handlers::get_batch_detail)),
                     ),
             )
     })
