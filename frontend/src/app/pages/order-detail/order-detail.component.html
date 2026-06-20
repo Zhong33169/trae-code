@@ -1,0 +1,292 @@
+<div class="breadcrumb">
+  <a (click)="backToList()">借用单队列</a>
+  <span class="sep">›</span>
+  <span *ngIf="detail">{{ detail.order.order_no }}</span>
+  <span *ngIf="!detail">详情</span>
+</div>
+
+<div class="msg-float" *ngIf="msg" [ngClass]="msg.type">
+  {{ msg.text }}
+</div>
+
+<div *ngIf="loading" style="text-align:center;padding:60px;"><span class="spinner"></span></div>
+
+<div *ngIf="detail && !loading">
+  <div class="title-bar">
+    <div class="title">
+      <h2><span class="order-no">{{ detail.order.order_no }}</span>
+        <span class="tag" [ngClass]="statusLabels[detail.order.status][1]">{{ statusLabels[detail.order.status][0] }}</span>
+        <span class="badge badge-blue" style="margin-left:4px;">v{{ detail.order.version }}</span>
+      </h2>
+      <div class="meta">
+        创建：{{ detail.order.created_by_name }} · {{ detail.order.created_at?.slice(0,16) }}
+        ｜ 更新：{{ detail.order.updated_at?.slice(0,16) }}
+        <span *ngIf="detail.order.auditor_name">｜ 审核：{{ detail.order.auditor_name }}</span>
+        <span *ngIf="detail.order.reviewer_name">｜ 复核：{{ detail.order.reviewer_name }}</span>
+      </div>
+    </div>
+    <div class="actions">
+      <button class="btn" (click)="loadDetail()">🔄 刷新</button>
+      <button class="btn" *ngIf="canDo('submit')" (click)="openActionDialog('submit')">
+        ✉️ {{ detail.order.status === 'draft' ? '提交审核' : '补正后重提' }}
+      </button>
+      <button class="btn btn-primary" *ngIf="canDo('audit_approve')" (click)="openActionDialog('audit_approve')">
+        ✅ 审核通过
+      </button>
+      <button class="btn btn-danger" *ngIf="canDo('audit_reject')" (click)="openActionDialog('audit_reject')">
+        🚫 审核驳回
+      </button>
+      <button class="btn btn-success" *ngIf="canDo('review_approve')" (click)="openActionDialog('review_approve')">
+        📦 复核归档
+      </button>
+      <button class="btn btn-warn" *ngIf="canDo('review_reject')" (click)="openActionDialog('review_reject')">
+        ⚠️ 复核驳回
+      </button>
+      <button class="btn btn-primary" *ngIf="canDo('add_evidence')" (click)="openEvidenceDialog()">
+        ➕ 上传证据
+      </button>
+    </div>
+  </div>
+
+  <div class="card mb-12">
+    <div class="section-title">🔁 流程进度</div>
+    <div class="flow-steps">
+      <div class="flow-step" *ngFor="let step of [
+        { key:'draft', label:'创建草稿', icon:'📝' },
+        { key:'pending_audit', label:'提交审核', icon:'📤' },
+        { key:'audit_decide', label:'审核主管办理', icon:'🔍' },
+        { key:'pending_review', label:'待复核', icon:'⏳' },
+        { key:'review_decide', label:'复核负责人办理', icon:'📋' },
+        { key:'archived', label:'归档完成', icon:'✅' }
+      ]" [ngClass]="flowStepStatus({key:step.key, decider: step.key==='audit_decide' || step.key==='review_decide'})">
+        <div class="step-circle">{{ step.icon }}</div>
+        <div class="step-label">{{ step.label }}
+          <div *ngIf="flowStepStatus({key:step.key, decider: step.key==='audit_decide' || step.key==='review_decide'})==='rejected'" style="color:#ff4d4f;">
+            被驳回
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid-layout">
+    <div>
+      <div class="card">
+        <div class="tabs">
+          <div class="tab" [ngClass]="{active:tab==='info'}" (click)="tab='info'">📝 基本信息</div>
+          <div class="tab" [ngClass]="{active:tab==='evidence'}" (click)="tab='evidence'">
+            📄 证据 ({{ detail.evidences.length }})
+          </div>
+          <div class="tab" [ngClass]="{active:tab==='log'}" (click)="tab='log'">📊 操作日志 ({{ detail.logs.length }})</div>
+        </div>
+
+        <div [hidden]="tab!=='info'">
+          <div class="kv-grid">
+            <div class="kv"><span class="k">借用人：</span><span class="v">{{ detail.order.applicant }}</span></div>
+            <div class="kv"><span class="k">所属部门：</span><span class="v">{{ detail.order.department }}</span></div>
+            <div class="kv"><span class="k">器材名称：</span><span class="v">{{ detail.order.equipment_name }}</span></div>
+            <div class="kv"><span class="k">数量：</span><span class="v">{{ detail.order.quantity }} 件</span></div>
+            <div class="kv" *ngIf="detail.order.equipment_model"><span class="k">器材型号：</span><span class="v">{{ detail.order.equipment_model }}</span></div>
+            <div class="kv"><span class="k">预计归还：</span><span class="v">{{ detail.order.expected_return_date }}</span></div>
+            <div class="kv" *ngIf="detail.order.actual_return_date"><span class="k">实还日期：</span><span class="v">{{ detail.order.actual_return_date }}</span></div>
+            <div class="kv" *ngIf="detail.order.loss_remark"><span class="k">损耗情况：</span><span class="v warn">{{ detail.order.loss_remark }}</span></div>
+            <div class="kv full"><span class="k">借用理由：</span><span class="v">{{ detail.order.borrow_reason }}</span></div>
+          </div>
+
+          <div *ngIf="detail.order.audit_comment" class="alert alert-warn mt-16">
+            <b>📝 审核意见：</b>{{ detail.order.audit_comment }}
+          </div>
+          <div *ngIf="detail.order.review_comment" class="alert alert-error mt-8">
+            <b>📝 复核意见：</b>{{ detail.order.review_comment }}
+          </div>
+        </div>
+
+        <div [hidden]="tab!=='evidence'">
+          <div *ngIf="!detail.evidences.length" class="empty">暂无证据记录
+            <div class="text-sm text-gray mt-8">点击右上角"上传证据"添加借用、归还、损耗凭证</div>
+          </div>
+          <div class="evidence-list" *ngIf="detail.evidences.length">
+            <div *ngFor="let e of detail.evidences" class="evidence-card">
+              <div class="ev-head">
+                <div class="left">
+                  <span class="tag" [ngClass]="{borrow:'tag-borrow',return:'tag-return',loss:'tag-loss'}[e.type]">
+                    {{ evidenceTypes[e.type] }}
+                  </span>
+                  <span class="text-sm text-bold">{{ e.file_name || '无附件' }}</span>
+                </div>
+                <button class="btn btn-sm" *ngIf="canDo('delete_evidence')" (click)="deleteEvidence(e.id)">删除</button>
+              </div>
+              <div class="ev-desc">{{ e.description }}</div>
+              <div class="ev-meta">
+                <span>上传：{{ e.uploader_name }}</span>
+                <span>{{ e.created_at?.slice(0,16) }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div [hidden]="tab!=='log'">
+          <div class="log-list">
+            <div *ngFor="let l of detail.logs" class="log-item">
+              <div class="log-dot"></div>
+              <div class="log-body">
+                <div class="log-title">
+                  {{ l.action }}
+                  <span *ngIf="l.from_status" class="text-sm text-gray"> [{{ statusLabels[l.from_status]?.[0] || l.from_status }}]</span>
+                  <span *ngIf="l.to_status && l.to_status !== l.from_status">
+                    → <span class="status" [ngClass]="{reject: l.to_status?.includes('reject')}">
+                      {{ statusLabels[l.to_status]?.[0] || l.to_status }}
+                    </span>
+                  </span>
+                </div>
+                <div class="log-meta">{{ l.user_name }} · {{ l.created_at?.slice(0,16) }}</div>
+                <div class="log-comment" *ngIf="l.comment">💬 {{ l.comment }}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="card mb-12">
+        <div class="section-title">👤 办理说明</div>
+        <div class="role-hint">
+          <div class="title">当前角色：
+            {{ {registrar:'器材借用登记员', auditor:'器材借用审核主管', reviewer:'体育场馆复核负责人'}[user?.role || ''] }}
+          </div>
+          <div *ngIf="user?.role==='registrar'">
+            🔹 创建草稿，填写借用信息并上传<b>借用证据</b>后提交<br/>
+            🔹 被驳回的单据需要<b>补正信息或证据</b>后重提<br/>
+            🔹 归还后及时上传<b>归还验收证据</b>、如有损耗填写说明并上传<b>损耗确认</b>
+          </div>
+          <div *ngIf="user?.role==='auditor'">
+            🔹 仅可审核<b>待审核</b>状态的单据<br/>
+            🔹 检查借用理由、信息完整性，通过后流转至复核岗<br/>
+            🔹 信息不全或不规范时请<b>驳回</b>并写明修改意见
+          </div>
+          <div *ngIf="user?.role==='reviewer'">
+            🔹 复核时需确认<b>借用、归还、损耗</b>证据齐全且一致<br/>
+            🔹 全部通过则<b>归档</b>，有问题<b>驳回登记员补正</b><br/>
+            🔹 支持"批量复核归档"，逐条显示成功 / 失败原因
+          </div>
+        </div>
+      </div>
+
+      <div class="card mb-12" *ngIf="detail.order.last_failure_reason || detail.order.status==='audit_rejected' || detail.order.status==='review_rejected'">
+        <div class="section-title" style="color:#cf1322;">🚨 问题与失败原因</div>
+        <div class="reason-box" *ngIf="detail.order.last_failure_reason">
+          <div class="title">⚠️ 最近一次复核失败原因</div>
+          <div>{{ detail.order.last_failure_reason }}</div>
+        </div>
+        <div class="reason-box mt-8" *ngIf="detail.order.status==='audit_rejected'">
+          <div class="title">🚫 审核驳回（需登记员补正）</div>
+          <ul>
+            <li>请参考"审核意见"进行修改</li>
+            <li>修改完成后点击"补正后重提"</li>
+          </ul>
+        </div>
+        <div class="reason-box mt-8" *ngIf="detail.order.status==='review_rejected' && !detail.order.last_failure_reason">
+          <div class="title">⚠️ 复核驳回（需登记员补正）</div>
+          <ul>
+            <li>请参考"复核意见"和下方复核清单进行补正</li>
+            <li>补正完成后重新提交审核（会再次走完整流程）</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="card mb-12">
+        <div class="section-title">✅ 复核归档清单</div>
+        <div class="checklist">
+          <div *ngFor="let c of reviewChecklist" class="check-item" [ngClass]="{pass:c.pass, fail:!c.pass}">
+            <span class="ci-icon">{{ c.pass ? '✔️' : '❌' }}</span>
+            <div class="ci-main">
+              <div class="label">{{ c.label }}</div>
+              <div class="detail">{{ c.detail }}</div>
+            </div>
+          </div>
+        </div>
+        <div class="text-sm text-gray mt-12">
+          清单全部通过后，复核负责人可顺利归档；否则将被驳回并写明原因。
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="section-title">📈 证据统计</div>
+        <div class="grid-2">
+          <div class="kv"><span class="k">借用证据：</span><span class="v">{{ detail.evidences.filter(e=>e.type==='borrow').length }} 份</span></div>
+          <div class="kv"><span class="k">归还证据：</span><span class="v">{{ detail.evidences.filter(e=>e.type==='return').length }} 份</span></div>
+          <div class="kv"><span class="k">损耗证据：</span><span class="v">{{ detail.evidences.filter(e=>e.type==='loss').length }} 份</span></div>
+          <div class="kv"><span class="k">合计：</span><span class="v">{{ detail.evidences.length }} 份</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-mask" *ngIf="actionDialog" (click.self)="closeDialog()">
+  <div class="modal-box">
+    <h3 *ngIf="actionDialog==='submit'">✉️ 提交审核</h3>
+    <h3 *ngIf="actionDialog==='audit_approve'">✅ 审核通过</h3>
+    <h3 *ngIf="actionDialog==='audit_reject'">🚫 审核驳回</h3>
+    <h3 *ngIf="actionDialog==='review_approve'">📦 复核通过并归档</h3>
+    <h3 *ngIf="actionDialog==='review_reject'">⚠️ 复核驳回</h3>
+
+    <div class="alert alert-info" *ngIf="actionDialog==='submit'">
+      将单据状态推进至【待审核】，由审核主管办理。
+      <div class="mt-8" *ngIf="detail?.order.status==='audit_rejected' || detail?.order.status==='review_rejected'">
+        这是一次补正重提，流程将从头经过审核和复核。
+      </div>
+    </div>
+    <div class="alert alert-warn" *ngIf="actionDialog==='audit_reject' || actionDialog==='review_reject'">
+      请详细填写驳回理由，便于下一岗位补正。
+    </div>
+    <div class="alert alert-warn" *ngIf="actionDialog==='review_approve' && detail && reviewChecklist.some(c=>!c.pass)">
+      ⚠️ 当前复核清单存在未通过项，提交时后端会再次校验并可能驳回。
+    </div>
+
+    <div class="form-item dialog-form-item">
+      <label>备注 / 意见 <span class="text-gray text-sm">（{{ actionDialog.includes('reject') ? '驳回必填' : '选填' }}）</span></label>
+      <textarea [(ngModel)]="actionForm.comment"
+        [placeholder]="actionDialog.includes('reject') ? '请详细说明驳回原因' : '（可选）'"></textarea>
+    </div>
+
+    <div class="modal-footer">
+      <button class="btn" (click)="closeDialog()">取消</button>
+      <button class="btn btn-primary" (click)="runAction()" [disabled]="submitting || (actionDialog.includes('reject') && !actionForm.comment.trim())">
+        <span *ngIf="submitting" class="spinner" style="width:14px;height:14px;"></span>
+        确认
+      </button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-mask" *ngIf="evidenceDialog" (click.self)="closeDialog()">
+  <div class="modal-box">
+    <h3>➕ 上传证据</h3>
+    <div class="form-item">
+      <label>证据类型 *</label>
+      <select [(ngModel)]="evidenceForm.type">
+        <option value="borrow">设备借用（借用签收单）</option>
+        <option value="return">归还验收（归还清单）</option>
+        <option value="loss">损耗确认（损耗说明）</option>
+      </select>
+    </div>
+    <div class="form-item">
+      <label>证据描述 *</label>
+      <textarea [(ngModel)]="evidenceForm.description"
+        placeholder="请描述证据内容，如：2024-06-20 陈同学签署的借用签收单"></textarea>
+    </div>
+    <div class="form-item">
+      <label>附件文件名（模拟）</label>
+      <input [(ngModel)]="evidenceForm.file_name" placeholder="如：签收单.pdf（选填）" />
+    </div>
+    <div class="modal-footer">
+      <button class="btn" (click)="closeDialog()">取消</button>
+      <button class="btn btn-primary" [disabled]="submitting" (click)="uploadEvidence()">
+        <span *ngIf="submitting" class="spinner" style="width:14px;height:14px;"></span>
+        确认上传
+      </button>
+    </div>
+  </div>
+</div>

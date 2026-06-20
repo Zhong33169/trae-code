@@ -1,0 +1,97 @@
+.page-title { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+.page-title h2 { font-size: 18px; font-weight: 600; color: #222; }
+.page-title .actions { display: flex; gap: 8px; }
+
+.layout { display: grid; grid-template-columns: 210px 1fr 360px; gap: 14px; align-items: start; }
+@media (max-width: 1280px) { .layout { grid-template-columns: 210px 1fr; } .side-panel { grid-column: 1 / -1; } }
+@media (max-width: 768px) { .layout { grid-template-columns: 1fr; } }
+
+.q-nav-item {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 10px 12px; border-radius: 6px; cursor: pointer;
+  color: #555; font-size: 13px; margin-bottom: 2px;
+  transition: background .15s;
+}
+.q-nav-item:hover { background: #f5f7fa; }
+.q-nav-item.active { background: #e6f4ff; color: #1677ff; font-weight: 500; }
+.q-nav-item .count-badge {
+  min-width: 22px; height: 20px; padding: 0 7px; border-radius: 10px;
+  background: #f0f0f0; color: #666; font-size: 11px; display: inline-flex;
+  align-items: center; justify-content: center; font-weight: 600;
+}
+.q-nav-item.active .count-badge { background: #1677ff; color: #fff; }
+
+.stats-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;
+  margin-top: 12px; padding-top: 12px; border-top: 1px dashed #eee;
+}
+.stat-cell { text-align: center; }
+.stat-cell .n { font-size: 20px; font-weight: 700; color: #1677ff; line-height: 1.1; }
+.stat-cell .l { font-size: 11px; color: #999; margin-top: 3px; }
+.stat-cell.warn .n { color: #faad14; }
+.stat-cell.err .n { color: #ff4d4f; }
+.stat-cell.ok .n { color: #52c41a; }
+
+.toolbar {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 10px 12px; background: #fafafa; border-radius: 6px;
+  margin-bottom: 12px; flex-wrap: wrap; gap: 10px;
+}
+.toolbar .left, .toolbar .right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.toolbar input { padding: 6px 10px; border: 1px solid #d9d9d9; border-radius: 5px; font-size: 13px; width: 200px; }
+.toolbar .sel-info { font-size: 12px; color: #1677ff; }
+
+table tbody tr.clickable { cursor: pointer; }
+.row-hl { animation: hl 2s ease; }
+@keyframes hl {
+  0% { background: #fff1b8; }
+  100% { background: transparent; }
+}
+
+.preview-section-title {
+  font-size: 13px; font-weight: 600; color: #333;
+  margin-bottom: 8px; padding-bottom: 6px; border-bottom: 1px solid #f0f0f0;
+  display: flex; justify-content: space-between; align-items: center;
+}
+
+.kv-line { display: flex; font-size: 13px; padding: 4px 0; }
+.kv-line .k { width: 80px; color: #888; flex-shrink: 0; }
+.kv-line .v { color: #333; flex: 1; word-break: break-all; }
+
+.ev-item {
+  border: 1px solid #f0f0f0; border-radius: 6px;
+  padding: 9px 11px; margin-bottom: 8px; font-size: 12px;
+  background: #fafcff;
+}
+.ev-item .ev-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+.ev-item .ev-desc { color: #555; line-height: 1.5; }
+.ev-item .ev-meta { color: #999; font-size: 11px; margin-top: 4px; }
+
+.ev-empty {
+  padding: 18px; text-align: center; color: #bbb; font-size: 12px;
+  border: 1px dashed #eee; border-radius: 6px;
+}
+
+.batch-result-item {
+  padding: 10px 12px; border-radius: 6px; margin-bottom: 8px;
+  display: flex; align-items: center; gap: 10px;
+}
+.batch-result-item.success { background: #f6ffed; border: 1px solid #b7eb8f; }
+.batch-result-item.failed { background: #fff1f0; border: 1px solid #ffa39e; }
+.batch-result-item.retry { background: #fff7e6; border: 1px solid #ffd591; }
+.batch-result-item .br-main { flex: 1; }
+.batch-result-item .br-title { font-weight: 600; font-size: 13px; margin-bottom: 3px; }
+.batch-result-item .br-msg { font-size: 12px; color: #666; line-height: 1.5; }
+.batch-result-item .br-msg.reason { color: #cf1322; margin-top: 4px; }
+
+.pagination { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; font-size: 13px; color: #666; }
+.pagination .pages { display: flex; gap: 4px; }
+.pagination button { padding: 4px 10px; border: 1px solid #d9d9d9; background: #fff; border-radius: 4px; cursor: pointer; }
+.pagination button:disabled { opacity: .4; cursor: not-allowed; }
+.pagination button.active { background: #1677ff; color: #fff; border-color: #1677ff; }
+
+.action-cell { display: flex; gap: 4px; flex-wrap: wrap; }
+
+.select-box-checkbox {
+  width: 16px; height: 16px; cursor: pointer; accent-color: #1677ff;
+}

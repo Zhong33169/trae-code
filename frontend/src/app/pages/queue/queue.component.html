@@ -1,0 +1,260 @@
+<div class="page-title">
+  <h2>器材借用单队列</h2>
+  <div class="actions">
+    <button class="btn" (click)="refreshAll()">🔄 刷新</button>
+    <button class="btn btn-primary" (click)="openCreate()" *ngIf="user?.role==='registrar'">+ 新建借用单</button>
+  </div>
+</div>
+
+<div class="layout">
+  <aside class="card">
+    <div style="font-size:13px;font-weight:600;margin-bottom:8px;color:#555;">📋 队列筛选</div>
+    <div class="q-nav-item" *ngFor="let q of queues"
+         [ngClass]="{active: activeQueue===q.key}" (click)="selectQueue(q.key)">
+      <span>{{ q.label }}</span>
+      <span class="count-badge">{{ statCountForQueue(q.key) }}</span>
+    </div>
+    <div class="stats-grid" *ngIf="stats">
+      <div class="stat-cell">
+        <div class="n">{{ stats.pending_audit }}</div>
+        <div class="l">待审核</div>
+      </div>
+      <div class="stat-cell warn">
+        <div class="n">{{ stats.pending_review }}</div>
+        <div class="l">待复核</div>
+      </div>
+      <div class="stat-cell err">
+        <div class="n">{{ stats.audit_rejected + stats.review_rejected }}</div>
+        <div class="l">待补正</div>
+      </div>
+      <div class="stat-cell ok">
+        <div class="n">{{ stats.archived }}</div>
+        <div class="l">已归档</div>
+      </div>
+    </div>
+  </aside>
+
+  <section class="card">
+    <div class="toolbar">
+      <div class="left">
+        <input type="text" placeholder="🔍 搜索单号/借用人/器材" [(ngModel)]="filters.keyword" (keyup.enter)="loadOrders()" />
+        <button class="btn btn-sm" (click)="loadOrders()">搜索</button>
+      </div>
+      <div class="right">
+        <span class="sel-info" *ngIf="selectedCount">已选 {{ selectedCount }} 条</span>
+        <button class="btn btn-primary btn-sm" (click)="openBatchReview()"
+                *ngIf="user?.role==='reviewer'" [disabled]="selectedCount===0">
+          📦 批量复核归档 ({{ selectedCount }})
+        </button>
+      </div>
+    </div>
+
+    <div style="overflow:auto;">
+      <table *ngIf="orders.length; else empty">
+        <thead>
+          <tr>
+            <th style="width:36px;" *ngIf="user?.role==='reviewer'">
+              <input type="checkbox" class="select-box-checkbox"
+                [indeterminate]="selectedCount>0 && selectedCount<orders.filter(o=>canBatchReview(o)).length"
+                [checked]="selectedCount>0 && selectedCount===orders.filter(o=>canBatchReview(o)).length"
+                (change)="toggleSelectAll()">
+            </th>
+            <th style="width:130px;">单号</th>
+            <th>借用人 / 部门</th>
+            <th>器材 / 数量</th>
+            <th style="width:100px;">状态</th>
+            <th style="width:140px;">关键证据</th>
+            <th style="width:90px;">创建人</th>
+            <th style="width:110px;">预计归还</th>
+            <th style="width:140px;">操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let o of orders" [id]="'row-'+o.id"
+              [ngClass]="{clickable:true}" (click)="preview(o)"
+              [style.background]="previewOrder?.id===o.id?'#f0f7ff':'transparent'">
+            <td (click)="$event.stopPropagation()" *ngIf="user?.role==='reviewer'">
+              <input type="checkbox" class="select-box-checkbox"
+                     [disabled]="!canBatchReview(o)"
+                     [checked]="o.selected" (change)="toggleSelect(o)">
+            </td>
+            <td>
+              <div class="text-bold" style="color:#1677ff;">{{ o.order_no }}</div>
+              <div class="text-sm text-gray">{{ o.created_at?.slice(5,16) }}</div>
+            </td>
+            <td>
+              <div>{{ o.applicant }}</div>
+              <div class="text-sm text-gray">{{ o.department }}</div>
+            </td>
+            <td>
+              <div>{{ o.equipment_name }} <span class="text-gray">× {{ o.quantity }}</span></div>
+              <div class="text-sm text-gray" *ngIf="o.equipment_model">{{ o.equipment_model }}</div>
+            </td>
+            <td><span class="tag" [ngClass]="statusTag(o.status)[1]">{{ statusTag(o.status)[0] }}</span></td>
+            <td>
+              <span class="ev-chip" [ngClass]="hasEvidence(o,'borrow')?'borrow':'empty'">借用 {{ o.borrow_evidence_count||0 }}</span>
+              <span class="ev-chip" [ngClass]="hasEvidence(o,'return')?'return':'empty'">归还 {{ o.return_evidence_count||0 }}</span>
+              <span class="ev-chip" [ngClass]="hasEvidence(o,'loss')?'loss':'empty'" *ngIf="o.loss_evidence_count||o.loss_remark">损耗 {{ o.loss_evidence_count||0 }}</span>
+            </td>
+            <td>{{ o.created_by_name }}</td>
+            <td>{{ o.expected_return_date }}</td>
+            <td class="action-cell" (click)="$event.stopPropagation()">
+              <button class="btn btn-sm" (click)="goDetail(o)">办理</button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <ng-template #empty>
+        <div class="empty">
+          <div style="font-size:36px;margin-bottom:10px;">📭</div>
+          <div>{{ loading ? '加载中...' : '当前队列为空' }}</div>
+        </div>
+      </ng-template>
+    </div>
+
+    <div class="pagination">
+      <span>共 {{ total }} 条，第 {{ page }} 页</span>
+      <div class="pages">
+        <button [disabled]="page<=1" (click)="page--;loadOrders()">上一页</button>
+        <button class="active">{{ page }}</button>
+        <button [disabled]="page*pageSize>=total" (click)="page++;loadOrders()">下一页</button>
+      </div>
+    </div>
+  </section>
+
+  <aside class="card side-panel">
+    <div class="preview-section-title">
+      <span>🔍 详情预览</span>
+      <a class="text-sm" *ngIf="previewOrder" (click)="goDetail(previewOrder)">前往办理 →</a>
+    </div>
+    <div *ngIf="!previewOrder" class="ev-empty">点击左侧行可预览详情</div>
+    <div *ngIf="previewLoading && previewOrder" style="text-align:center;padding:20px;"><span class="spinner"></span></div>
+
+    <div *ngIf="previewOrder && !previewLoading">
+      <div class="flex-between mb-8">
+        <span class="text-bold" style="color:#1677ff;">{{ previewOrder.order_no }}</span>
+        <span class="tag" [ngClass]="statusTag(previewOrder.status)[1]">{{ statusTag(previewOrder.status)[0] }}</span>
+      </div>
+
+      <div class="kv-line"><span class="k">借用人：</span><span class="v">{{ previewOrder.applicant }}</span></div>
+      <div class="kv-line"><span class="k">部门：</span><span class="v">{{ previewOrder.department }}</span></div>
+      <div class="kv-line"><span class="k">器材：</span><span class="v">{{ previewOrder.equipment_name }} × {{ previewOrder.quantity }}</span></div>
+      <div class="kv-line" *ngIf="previewOrder.equipment_model"><span class="k">型号：</span><span class="v">{{ previewOrder.equipment_model }}</span></div>
+      <div class="kv-line"><span class="k">理由：</span><span class="v">{{ previewOrder.borrow_reason }}</span></div>
+      <div class="kv-line"><span class="k">预计归还：</span><span class="v">{{ previewOrder.expected_return_date }}</span></div>
+      <div class="kv-line" *ngIf="previewOrder.actual_return_date"><span class="k">实还日期：</span><span class="v">{{ previewOrder.actual_return_date }}</span></div>
+      <div class="kv-line" *ngIf="previewOrder.loss_remark"><span class="k">损耗：</span><span class="v" style="color:#cf1322;">{{ previewOrder.loss_remark }}</span></div>
+
+      <div class="alert alert-warn mt-12" *ngIf="previewOrder.last_failure_reason">
+        <b>🚨 上次失败原因：</b><br/>{{ previewOrder.last_failure_reason }}
+      </div>
+      <div class="alert alert-error mt-8" *ngIf="previewOrder.audit_comment && previewOrder.status==='audit_rejected'">
+        <b>审核意见：</b> {{ previewOrder.audit_comment }}
+      </div>
+      <div class="alert alert-error mt-8" *ngIf="previewOrder.review_comment && (previewOrder.status==='review_rejected' || previewOrder.last_failure_reason)">
+        <b>复核意见：</b> {{ previewOrder.review_comment }}
+      </div>
+
+      <div class="preview-section-title mt-16">📄 关键证据</div>
+      <div *ngIf="!previewEvidences.length" class="ev-empty">暂无证据</div>
+      <div *ngFor="let e of previewEvidences" class="ev-item">
+        <div class="ev-head">
+          <span class="tag" [ngClass]="evidenceTagClass(e.type)">{{ evidenceTypes[e.type] }}</span>
+          <span class="text-sm text-gray">{{ e.created_at?.slice(5,16) }}</span>
+        </div>
+        <div class="ev-desc">{{ e.description }}</div>
+        <div class="ev-meta" *ngIf="e.file_name">📎 {{ e.file_name }} · 上传：{{ e.uploader_name }}</div>
+      </div>
+    </div>
+  </aside>
+</div>
+
+<div class="modal-mask" *ngIf="batchDialog" (click.self)="batchDialog=false;batchRunning=false">
+  <div class="modal-box" style="width:680px;max-width:95vw;">
+    <h3>📦 批量复核归档</h3>
+    <div class="alert alert-info mb-12" *ngIf="!batchResults.length">
+      已选择 <b>{{ selectedCount }}</b> 条单据执行复核归档。<br/>
+      复核将校验：借用证据、归还验收证据、损耗说明与损耗证据一致性。<br/>
+      下方将逐条显示结果，失败的原因会列明，可点击"进入办理"逐一处理。
+    </div>
+    <div *ngIf="batchRunning" style="text-align:center;padding:30px;"><span class="spinner"></span><div class="text-sm text-gray mt-8">正在处理中...</div></div>
+
+    <div *ngIf="batchResults.length && !batchRunning">
+      <div class="mb-12 flex-between">
+        <span class="text-sm text-gray">
+          共 {{ batchResults.length }} 条 ·
+          <span style="color:#52c41a;">成功 {{ batchResults.filter(r=>r.status==='success').length }}</span> ·
+          <span style="color:#ff4d4f;">失败 {{ batchResults.filter(r=>r.status==='failed').length }}</span> ·
+          <span style="color:#faad14;">需重试 {{ batchResults.filter(r=>r.status==='retry').length }}</span>
+        </span>
+      </div>
+      <div *ngFor="let r of batchResults" class="batch-result-item" [ngClass]="r.status">
+        <span style="font-size:18px;">
+          {{ r.status==='success'?'✅':r.status==='failed'?'❌':'⚠️' }}
+        </span>
+        <div class="br-main">
+          <div class="br-title">
+            <span>{{ r.order?.order_no || ('#'+r.orderId) }}</span>
+            <span class="text-sm text-gray" *ngIf="r.order">｜{{ r.order.applicant }}｜{{ r.order.equipment_name }}×{{ r.order.quantity }}</span>
+          </div>
+          <div class="br-msg">{{ r.message }}</div>
+          <div class="br-msg reason" *ngIf="r.failureReason">💡 失败详情：{{ r.failureReason }}</div>
+        </div>
+        <button *ngIf="r.status!=='success'" class="btn btn-sm btn-primary" (click)="retryFailed(r)">进入办理</button>
+      </div>
+    </div>
+
+    <div class="modal-footer">
+      <button class="btn" (click)="batchDialog=false;batchResults=[];">{{ batchResults.length ? '关闭' : '取消' }}</button>
+      <button class="btn btn-primary" *ngIf="!batchResults.length" [disabled]="batchRunning" (click)="runBatchReview()">开始批量复核</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-mask" *ngIf="createDialog" (click.self)="createDialog=false">
+  <div class="modal-box" style="width:520px;max-width:95vw;">
+    <h3>+ 新建器材借用单</h3>
+    <div class="grid-2">
+      <div class="form-item">
+        <label>借用人 *</label>
+        <input type="text" [(ngModel)]="createForm.applicant" placeholder="姓名">
+      </div>
+      <div class="form-item">
+        <label>所属部门 *</label>
+        <input type="text" [(ngModel)]="createForm.department" placeholder="社团/部门">
+      </div>
+    </div>
+    <div class="grid-2">
+      <div class="form-item">
+        <label>器材名称 *</label>
+        <input type="text" [(ngModel)]="createForm.equipment_name" placeholder="如：篮球">
+      </div>
+      <div class="form-item">
+        <label>器材型号</label>
+        <input type="text" [(ngModel)]="createForm.equipment_model" placeholder="选填">
+      </div>
+    </div>
+    <div class="grid-2">
+      <div class="form-item">
+        <label>数量 *</label>
+        <input type="number" [(ngModel)]="createForm.quantity" min="1">
+      </div>
+      <div class="form-item">
+        <label>预计归还日期 *</label>
+        <input type="date" [(ngModel)]="createForm.expected_return_date">
+      </div>
+    </div>
+    <div class="form-item">
+      <label>借用理由 *</label>
+      <textarea [(ngModel)]="createForm.borrow_reason" placeholder="请说明借用用途、时段等"></textarea>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" (click)="createDialog=false">取消</button>
+      <button class="btn" [disabled]="createLoading" (click)="submitCreate(false)">仅保存草稿</button>
+      <button class="btn btn-primary" [disabled]="createLoading" (click)="submitCreate(true)">
+        <span *ngIf="createLoading" class="spinner" style="width:14px;height:14px;"></span>
+        保存并提交审核
+      </button>
+    </div>
+  </div>
+</div>
