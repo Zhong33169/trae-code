@@ -20,17 +20,21 @@ interface AppState {
 
 const AppContext = createContext<AppState | null>(null);
 
+const isBrowser = typeof window !== "undefined";
+
 export function createAppState(): AppState {
   const [user, setUser] = createSignal<User | null>(null);
   const [token, setTokenSignal] = createSignal<string | null>(
-    localStorage.getItem("token")
+    isBrowser ? localStorage.getItem("token") : null
   );
 
   const setToken = (t: string | null) => {
-    if (t) {
-      localStorage.setItem("token", t);
-    } else {
-      localStorage.removeItem("token");
+    if (isBrowser) {
+      if (t) {
+        localStorage.setItem("token", t);
+      } else {
+        localStorage.removeItem("token");
+      }
     }
     setTokenSignal(t);
   };

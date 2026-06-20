@@ -1,23 +1,15 @@
-import { Router } from "@solidjs/router";
-import { FileRoutes } from "@solidjs/start";
 import { Suspense } from "solid-js";
 import { AppContext, createAppState } from "./lib/store";
 import "./root.css";
 
-export default function Root() {
+export default function Root(props: { children?: any }) {
   const state = createAppState();
 
   return (
     <AppContext.Provider value={state}>
-      <Router
-        root={(props) => (
-          <div class="app-container">
-            <Suspense>{props.children}</Suspense>
-          </div>
-        )}
-      >
-        <FileRoutes />
-      </Router>
+      <div class="app-container">
+        <Suspense>{props.children}</Suspense>
+      </div>
     </AppContext.Provider>
   );
 }

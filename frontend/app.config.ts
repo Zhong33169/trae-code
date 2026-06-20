@@ -6,6 +6,12 @@ export default defineConfig({
     preset: "node-server"
   },
   vite: {
+    resolve: {
+      alias: {
+        "~": "/src",
+        "#start/app": "/src/root.tsx"
+      }
+    },
     server: {
       proxy: {
         "/api": {

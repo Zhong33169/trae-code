@@ -1,4 +1,5 @@
-const API_BASE = "http://localhost:8002";
+const API_BASE = "/api";
+const isBrowser = typeof window !== "undefined";
 
 interface ApiResponse<T> {
   success?: boolean;
@@ -8,11 +9,16 @@ interface ApiResponse<T> {
   [key: string]: any;
 }
 
+function getToken(): string | null {
+  if (!isBrowser) return null;
+  return localStorage.getItem("token");
+}
+
 export async function request<T = any>(
   endpoint: string,
   options: RequestInit = {}
 ): Promise<T> {
-  const token = localStorage.getItem("token");
+  const token = getToken();
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     ...(options.headers as Record<string, string> || {}),
