@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from .database import (
     get_db, init_db, check_timeouts, STATUS_LABELS, NODE_TIME_LIMITS,
     NEXT_STATUS_MAP, REJECT_MAP, ROLE_CLERK, ROLE_SUPERVISOR, ROLE_MANAGER, STATUSES,
+    apply_visibility, get_visible_fields, get_submit_actions, state_machine_transition,
 )
 from .models import (
     LoginRequest, LoginResponse, SchedulingFormCreate, SchedulingFormUpdate,
@@ -65,35 +66,71 @@ def get_node_time_limits():
     conn.close()
     return [dict(r) for r in rows]
 
-@router.get("/forms", response_model=list[SchedulingFormResponse])
+@router.get("/visibility-policy")
+def get_visibility_policy(user: dict = Depends(get_current_user)):
+    return {
+        "role": user["role"],
+        "visible_fields": get_visible_fields(user["role"]),
+        "submit_actions_template": get_submit_actions.__doc__,
+    }
+
+def _build_query(params):
+    query = "SELECT * FROM scheduling_forms WHERE 1=1"
+    args = []
+    if params.get("status"):
+        query += " AND status=?"
+        args.append(params["status"])
+    if params.get("keyword"):
+        kw = f"%{params['keyword']}%"
+        query += " AND (title LIKE ? OR instructor_name LIKE ? OR course_name LIKE ? OR form_no LIKE ?)"
+        args.extend([kw, kw, kw, kw])
+    if params.get("instructor_id"):
+        query += " AND instructor_id=?"
+        args.append(params["instructor_id"])
+    if params.get("training_company"):
+        query += " AND training_company=?"
+        args.append(params["training_company"])
+    query += " ORDER BY updated_at DESC"
+    return query, args
+
+def _enrich_and_filter(row, role):
+    from .database import apply_visibility
+    form_dict = dict(row)
+    form_dict["status_label"] = STATUS_LABELS.get(form_dict["status"], form_dict["status"])
+    form_dict = apply_visibility(form_dict, role)
+    return form_dict
+
+@router.get("/forms")
 def list_forms(
     status: Optional[str] = None,
     keyword: Optional[str] = None,
     timeout_only: bool = False,
+    instructor_id: Optional[str] = None,
+    training_company: Optional[str] = None,
     user: dict = Depends(get_current_user),
 ):
     check_timeouts()
     conn = get_db()
-    query = "SELECT * FROM scheduling_forms WHERE 1=1"
-    params = []
-    if status:
-        query += " AND status=?"
-        params.append(status)
-    if keyword:
-        query += " AND (title LIKE ? OR instructor_name LIKE ? OR course_name LIKE ? OR form_no LIKE ?)"
-        kw = f"%{keyword}%"
-        params.extend([kw, kw, kw, kw])
-
-    query += " ORDER BY updated_at DESC"
-    rows = conn.execute(query, params).fetchall()
+    params = {
+        "status": status,
+        "keyword": keyword,
+        "instructor_id": instructor_id,
+        "training_company": training_company,
+    }
+    query, args = _build_query(params)
+    rows = conn.execute(query, args).fetchall()
     conn.close()
 
-    results = [enrich_form(r) for r in rows]
+    results = [_enrich_and_filter(r, user["role"]) for r in rows]
     if timeout_only:
-        results = [r for r in results if r["is_timeout"]]
-    return results
+        results = [r for r in results if r.get("is_timeout")]
+    return {
+        "items": results,
+        "total": len(results),
+        "filter": params,
+    }
 
-@router.get("/forms/{form_id}", response_model=SchedulingFormResponse)
+@router.get("/forms/{form_id}")
 def get_form(form_id: int, user: dict = Depends(get_current_user)):
     check_timeouts()
     conn = get_db()
@@ -101,7 +138,10 @@ def get_form(form_id: int, user: dict = Depends(get_current_user)):
     conn.close()
     if not row:
         raise HTTPException(status_code=404, detail="排课单不存在")
-    return enrich_form(row)
+    return {
+        "form": _enrich_and_filter(row, user["role"]),
+        "submit_actions": get_submit_actions(user["role"], row["status"]),
+    }
 
 @router.post("/forms", response_model=SchedulingFormResponse)
 def create_form(req: SchedulingFormCreate, user: dict = Depends(get_current_user)):
@@ -174,89 +214,27 @@ def update_form(form_id: int, req: SchedulingFormUpdate, user: dict = Depends(ge
     conn.close()
     return enrich_form(row)
 
-@router.post("/forms/{form_id}/transition", response_model=SchedulingFormResponse)
+@router.post("/forms/{form_id}/transition")
 def transition_status(form_id: int, req: StatusTransition, user: dict = Depends(get_current_user)):
     conn = get_db()
-    row = conn.execute("SELECT * FROM scheduling_forms WHERE id=?", (form_id,)).fetchone()
-    if not row:
-        conn.close()
-        raise HTTPException(status_code=404, detail="排课单不存在")
-
-    current_status = row["status"]
-    role = user["role"]
-
-    if req.action == "reject":
-        if role not in REJECT_MAP or current_status not in REJECT_MAP[role]:
-            conn.close()
-            raise HTTPException(status_code=403, detail=f"当前岗位无权驳回状态为'{STATUS_LABELS.get(current_status, current_status)}'的排课单")
-        new_status = "rejected"
-    elif req.action == "submit":
-        if role not in NEXT_STATUS_MAP or current_status not in NEXT_STATUS_MAP[role]:
-            conn.close()
-            raise HTTPException(status_code=403, detail=f"当前岗位无权提交状态为'{STATUS_LABELS.get(current_status, current_status)}'的排课单")
-        new_status = NEXT_STATUS_MAP[role][current_status]
-    elif req.action == "timeout_handle":
-        if role != ROLE_CLERK or current_status != "timeout_handling":
-            conn.close()
-            raise HTTPException(status_code=403, detail="只有登记员可以处理超时状态的排课单")
-        new_status = "pending_review"
-    elif req.action == "archive":
-        if role != ROLE_MANAGER or current_status != "pending_archive":
-            conn.close()
-            raise HTTPException(status_code=403, detail="只有复核负责人可以归档排课单")
-        new_status = "archived"
-    else:
-        conn.close()
-        raise HTTPException(status_code=400, detail=f"不支持的操作: {req.action}")
-
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    conn.execute(
-        "UPDATE scheduling_forms SET status=?, updated_at=?, current_node_entered_at=? WHERE id=?",
-        (new_status, now, now, form_id),
-    )
-
-    if new_status == "rejected":
-        conn.execute(
-            "UPDATE timeout_records SET status='cancelled' WHERE form_id=? AND status='pending'",
-            (form_id,),
+    try:
+        state_machine_transition(
+            conn, form_id, user["role"], req.action,
+            operator_id=user["id"], remark=req.remark or "",
         )
-
-    _update_linked_status(conn, form_id, new_status)
-
-    conn.execute(
-        """INSERT INTO operation_logs (form_id, operator_id, action, from_status, to_status, remark)
-        VALUES (?, ?, ?, ?, ?, ?)""",
-        (form_id, user["id"], req.action, current_status, new_status, req.remark),
-    )
-    conn.commit()
+        conn.commit()
+    except ValueError as e:
+        conn.close()
+        raise HTTPException(status_code=400, detail=str(e))
 
     row = conn.execute("SELECT * FROM scheduling_forms WHERE id=?", (form_id,)).fetchone()
     conn.close()
-    return enrich_form(row)
+    return {
+        "form": _enrich_and_filter(row, user["role"]),
+        "submit_actions": get_submit_actions(user["role"], row["status"]),
+    }
 
-def _update_linked_status(conn, form_id: int, new_status: str):
-    if new_status == "pending_courseware":
-        conn.execute(
-            "UPDATE scheduling_forms SET courseware_status='pending' WHERE id=?",
-            (form_id,),
-        )
-    elif new_status == "courseware_reviewing":
-        conn.execute(
-            "UPDATE scheduling_forms SET courseware_status='reviewing' WHERE id=?",
-            (form_id,),
-        )
-    elif new_status == "pending_evaluation":
-        conn.execute(
-            "UPDATE scheduling_forms SET evaluation_status='pending' WHERE id=?",
-            (form_id,),
-        )
-    elif new_status == "evaluating":
-        conn.execute(
-            "UPDATE scheduling_forms SET evaluation_status='evaluating' WHERE id=?",
-            (form_id,),
-        )
-
-@router.post("/forms/{form_id}/courseware-review", response_model=SchedulingFormResponse)
+@router.post("/forms/{form_id}/courseware-review")
 def review_courseware(form_id: int, req: CoursewareReview, user: dict = Depends(get_current_user)):
     require_role(user, ROLE_MANAGER)
     conn = get_db()
@@ -268,35 +246,31 @@ def review_courseware(form_id: int, req: CoursewareReview, user: dict = Depends(
         conn.close()
         raise HTTPException(status_code=400, detail="当前状态不允许课件审核")
 
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     conn.execute(
         """INSERT INTO courseware_reviews (form_id, reviewer_id, result, comment)
         VALUES (?, ?, ?, ?)""",
         (form_id, user["id"], req.result, req.comment),
     )
 
-    if req.result == "approved":
-        new_status = "pending_teaching"
-        new_cw_status = "approved"
-    else:
-        new_status = "rejected"
-        new_cw_status = "rejected"
+    try:
+        state_machine_transition(
+            conn, form_id, user["role"], "courseware_review",
+            operator_id=user["id"], result=req.result, comment=req.comment or "",
+        )
+        conn.commit()
+    except ValueError as e:
+        conn.rollback()
+        conn.close()
+        raise HTTPException(status_code=400, detail=str(e))
 
-    conn.execute(
-        "UPDATE scheduling_forms SET status=?, courseware_status=?, updated_at=?, current_node_entered_at=? WHERE id=?",
-        (new_status, new_cw_status, now, now, form_id),
-    )
-    conn.execute(
-        """INSERT INTO operation_logs (form_id, operator_id, action, from_status, to_status, remark)
-        VALUES (?, ?, 'courseware_review', ?, ?, ?)""",
-        (form_id, user["id"], row["status"], new_status, f"课件审核{('通过' if req.result=='approved' else '驳回')}: {req.comment or ''}"),
-    )
-    conn.commit()
     row = conn.execute("SELECT * FROM scheduling_forms WHERE id=?", (form_id,)).fetchone()
     conn.close()
-    return enrich_form(row)
+    return {
+        "form": _enrich_and_filter(row, user["role"]),
+        "submit_actions": get_submit_actions(user["role"], row["status"]),
+    }
 
-@router.post("/forms/{form_id}/evaluation", response_model=SchedulingFormResponse)
+@router.post("/forms/{form_id}/evaluation")
 def create_evaluation(form_id: int, req: EvaluationCreate, user: dict = Depends(get_current_user)):
     require_role(user, ROLE_MANAGER)
     conn = get_db()
@@ -307,30 +281,35 @@ def create_evaluation(form_id: int, req: EvaluationCreate, user: dict = Depends(
     if row["status"] not in ("pending_evaluation", "evaluating"):
         conn.close()
         raise HTTPException(status_code=400, detail="当前状态不允许课后评价")
+    if req.score < 1 or req.score > 100:
+        conn.close()
+        raise HTTPException(status_code=400, detail="评分必须在1-100之间")
 
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     conn.execute(
         """INSERT INTO evaluations (form_id, evaluator_id, score, comment)
         VALUES (?, ?, ?, ?)""",
         (form_id, user["id"], req.score, req.comment),
     )
 
-    new_status = "pending_archive"
-    conn.execute(
-        "UPDATE scheduling_forms SET status=?, evaluation_status='completed', updated_at=?, current_node_entered_at=? WHERE id=?",
-        (new_status, now, now, form_id),
-    )
-    conn.execute(
-        """INSERT INTO operation_logs (form_id, operator_id, action, from_status, to_status, remark)
-        VALUES (?, ?, 'evaluate', ?, ?, ?)""",
-        (form_id, user["id"], row["status"], new_status, f"课后评价: 分数{req.score}, {req.comment or ''}"),
-    )
-    conn.commit()
+    try:
+        state_machine_transition(
+            conn, form_id, user["role"], "evaluate",
+            operator_id=user["id"], score=req.score, comment=req.comment or "",
+        )
+        conn.commit()
+    except ValueError as e:
+        conn.rollback()
+        conn.close()
+        raise HTTPException(status_code=400, detail=str(e))
+
     row = conn.execute("SELECT * FROM scheduling_forms WHERE id=?", (form_id,)).fetchone()
     conn.close()
-    return enrich_form(row)
+    return {
+        "form": _enrich_and_filter(row, user["role"]),
+        "submit_actions": get_submit_actions(user["role"], row["status"]),
+    }
 
-@router.post("/forms/{form_id}/confirm-teaching", response_model=SchedulingFormResponse)
+@router.post("/forms/{form_id}/confirm-teaching")
 def confirm_teaching(form_id: int, user: dict = Depends(get_current_user)):
     require_role(user, ROLE_MANAGER)
     conn = get_db()
@@ -342,54 +321,23 @@ def confirm_teaching(form_id: int, user: dict = Depends(get_current_user)):
         conn.close()
         raise HTTPException(status_code=400, detail="当前状态不允许确认授课完成")
 
-    schedules = conn.execute(
-        "SELECT id FROM instructor_schedules WHERE form_id=? AND status != 'completed'",
-        (form_id,),
-    ).fetchall()
-    for s in schedules:
-        conn.execute(
-            "UPDATE instructor_schedules SET status='completed' WHERE id=?",
-            (s["id"],),
+    try:
+        state_machine_transition(
+            conn, form_id, user["role"], "confirm_teaching",
+            operator_id=user["id"],
         )
+        conn.commit()
+    except ValueError as e:
+        conn.rollback()
+        conn.close()
+        raise HTTPException(status_code=400, detail=str(e))
 
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    new_status = "teaching_completed"
-    conn.execute(
-        "UPDATE scheduling_forms SET status=?, updated_at=?, current_node_entered_at=? WHERE id=?",
-        (new_status, now, now, form_id),
-    )
-
-    schedules_completed = conn.execute(
-        "SELECT COUNT(*) FROM instructor_schedules WHERE form_id=? AND status='completed'",
-        (form_id,),
-    ).fetchone()[0]
-    total_schedules = conn.execute(
-        "SELECT COUNT(*) FROM instructor_schedules WHERE form_id=?",
-        (form_id,),
-    ).fetchone()[0]
-
-    if schedules_completed == total_schedules and total_schedules > 0:
-        eval_status = "pending_evaluation"
-        conn.execute(
-            "UPDATE scheduling_forms SET status=?, evaluation_status=?, updated_at=?, current_node_entered_at=? WHERE id=?",
-            (eval_status, "pending", now, now, form_id),
-        )
-        conn.execute(
-            """INSERT INTO operation_logs (form_id, operator_id, action, from_status, to_status, remark)
-            VALUES (?, ?, 'confirm_teaching', ?, ?, '授课完成，自动进入待评价')""",
-            (form_id, user["id"], "pending_teaching", eval_status),
-        )
-    else:
-        conn.execute(
-            """INSERT INTO operation_logs (form_id, operator_id, action, from_status, to_status, remark)
-            VALUES (?, ?, 'confirm_teaching', ?, ?, '授课完成')""",
-            (form_id, user["id"], "pending_teaching", new_status),
-        )
-
-    conn.commit()
     row = conn.execute("SELECT * FROM scheduling_forms WHERE id=?", (form_id,)).fetchone()
     conn.close()
-    return enrich_form(row)
+    return {
+        "form": _enrich_and_filter(row, user["role"]),
+        "submit_actions": get_submit_actions(user["role"], row["status"]),
+    }
 
 @router.get("/forms/{form_id}/schedules", response_model=list[InstructorScheduleResponse])
 def get_schedules(form_id: int, user: dict = Depends(get_current_user)):
@@ -469,9 +417,12 @@ def get_timeout_records(form_id: int, user: dict = Depends(get_current_user)):
     conn.close()
     return [enrich_timeout(r) for r in rows]
 
-@router.post("/forms/{form_id}/timeout-handle", response_model=TimeoutRecordResponse)
+@router.post("/forms/{form_id}/timeout-handle")
 def handle_timeout(form_id: int, req: TimeoutHandle, user: dict = Depends(get_current_user)):
     require_role(user, ROLE_CLERK)
+    if not req.reason or not req.follow_up:
+        raise HTTPException(status_code=400, detail="超时原因和后续处理记录为必填项")
+
     conn = get_db()
     row = conn.execute("SELECT * FROM scheduling_forms WHERE id=?", (form_id,)).fetchone()
     if not row:
@@ -479,7 +430,6 @@ def handle_timeout(form_id: int, req: TimeoutHandle, user: dict = Depends(get_cu
         raise HTTPException(status_code=404, detail="排课单不存在")
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
     pending_timeouts = conn.execute(
         "SELECT * FROM timeout_records WHERE form_id=? AND status='pending'",
         (form_id,),
@@ -492,24 +442,28 @@ def handle_timeout(form_id: int, req: TimeoutHandle, user: dict = Depends(get_cu
             (req.reason, req.follow_up, user["id"], now, t["id"]),
         )
 
-    conn.execute(
-        "UPDATE scheduling_forms SET status='timeout_handling', updated_at=?, current_node_entered_at=? WHERE id=?",
-        (now, now, form_id),
-    )
-
-    conn.execute(
-        """INSERT INTO operation_logs (form_id, operator_id, action, from_status, to_status, remark)
-        VALUES (?, ?, 'timeout_handle', ?, 'timeout_handling', ?)""",
-        (form_id, user["id"], row["status"], f"超时处理: 原因={req.reason}, 后续处理={req.follow_up}"),
-    )
-    conn.commit()
+    try:
+        state_machine_transition(
+            conn, form_id, user["role"], "timeout_handle",
+            operator_id=user["id"], remark=f"超时处理: 原因={req.reason}, 后续处理={req.follow_up}",
+        )
+        conn.commit()
+    except ValueError as e:
+        conn.rollback()
+        conn.close()
+        raise HTTPException(status_code=400, detail=str(e))
 
     t_row = conn.execute(
         "SELECT * FROM timeout_records WHERE form_id=? AND status='handled' ORDER BY handled_at DESC LIMIT 1",
         (form_id,),
     ).fetchone()
+    form_row = conn.execute("SELECT * FROM scheduling_forms WHERE id=?", (form_id,)).fetchone()
     conn.close()
-    return enrich_timeout(t_row)
+    return {
+        "timeout_record": enrich_timeout(t_row),
+        "form": _enrich_and_filter(form_row, user["role"]),
+        "submit_actions": get_submit_actions(user["role"], form_row["status"]),
+    }
 
 @router.get("/timeout-records", response_model=list[TimeoutRecordResponse])
 def list_timeout_records(user: dict = Depends(get_current_user)):
@@ -548,63 +502,48 @@ def batch_action(req: BatchAction, user: dict = Depends(get_current_user)):
     results = []
     errors = []
     for fid in req.form_ids:
+        conn = get_db()
         try:
-            result = transition_status(
-                fid,
-                StatusTransition(action=req.action, remark=req.remark),
-                user=user,
+            state_machine_transition(
+                conn, fid, user["role"], req.action,
+                operator_id=user["id"], remark=req.remark or "",
             )
-            results.append({"form_id": fid, "status": "success", "new_status": result.status})
+            conn.commit()
+            row = conn.execute("SELECT * FROM scheduling_forms WHERE id=?", (fid,)).fetchone()
+            form_data = _enrich_and_filter(row, user["role"])
+            results.append({
+                "form_id": fid,
+                "status": "success",
+                "new_status": row["status"],
+                "new_status_label": STATUS_LABELS.get(row["status"], row["status"]),
+                "form": form_data,
+            })
         except HTTPException as e:
+            conn.close()
             errors.append({"form_id": fid, "status": "error", "detail": e.detail})
-        except Exception as e:
+        except ValueError as e:
+            conn.rollback()
+            conn.close()
             errors.append({"form_id": fid, "status": "error", "detail": str(e)})
-    return {"success": results, "errors": errors}
+        except Exception as e:
+            conn.rollback()
+            conn.close()
+            errors.append({"form_id": fid, "status": "error", "detail": str(e)})
+        finally:
+            try:
+                conn.close()
+            except:
+                pass
+    return {"success": results, "errors": errors, "total": len(req.form_ids), "success_count": len(results), "error_count": len(errors)}
 
 @router.get("/forms/{form_id}/available-actions")
 def get_available_actions(form_id: int, user: dict = Depends(get_current_user)):
     conn = get_db()
-    row = conn.execute("SELECT * FROM scheduling_forms WHERE id=?", (form_id,)).fetchone()
+    row = conn.execute("SELECT status FROM scheduling_forms WHERE id=?", (form_id,)).fetchone()
     conn.close()
     if not row:
         raise HTTPException(status_code=404, detail="排课单不存在")
-
-    actions = []
-    role = user["role"]
-    current = row["status"]
-
-    if role == ROLE_CLERK:
-        if current in ("draft", "rejected", "timeout_handling"):
-            actions.append({"action": "submit", "label": "提交审核"})
-        if current == "timeout_handling":
-            actions.append({"action": "timeout_handle", "label": "超时处理"})
-    elif role == ROLE_SUPERVISOR:
-        if current in NEXT_STATUS_MAP.get(role, {}):
-            actions.append({"action": "submit", "label": "审核通过"})
-        if current in REJECT_MAP.get(role, []):
-            actions.append({"action": "reject", "label": "驳回"})
-    elif role == ROLE_MANAGER:
-        if current in NEXT_STATUS_MAP.get(role, {}):
-            label_map = {
-                "pending_courseware": "开始课件审核",
-                "courseware_reviewing": "课件审核通过",
-                "pending_teaching": "确认授课完成",
-                "teaching_completed": "进入课后评价",
-                "pending_evaluation": "开始评价",
-                "evaluating": "评价完成",
-                "pending_archive": "归档",
-            }
-            actions.append({"action": "submit", "label": label_map.get(current, "通过")})
-        if current in REJECT_MAP.get(role, []):
-            actions.append({"action": "reject", "label": "驳回"})
-        if current == "pending_courseware":
-            actions.append({"action": "courseware_review_reject", "label": "课件审核驳回"})
-        if current in ("pending_courseware", "courseware_reviewing"):
-            actions.append({"action": "courseware_review", "label": "课件审核"})
-        if current in ("pending_evaluation", "evaluating"):
-            actions.append({"action": "evaluate", "label": "提交评价"})
-
-    return actions
+    return get_submit_actions(user["role"], row["status"])
 
 @router.post("/init-db")
 def init_db_endpoint():

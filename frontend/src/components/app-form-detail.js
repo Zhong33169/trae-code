@@ -1,5 +1,5 @@
 import { LitElement, html, css } from 'lit';
-import { api } from '../services/api.js';
+import { api, extractFormFromResponse, extractActionsFromResponse } from '../services/api.js';
 
 const STATUS_LABELS = {
   draft: '草稿', pending_review: '待审核', reviewing: '审核中',
@@ -264,17 +264,16 @@ class AppFormDetail extends LitElement {
 
   async _loadData() {
     try {
-      const [form, actions, logs, timeouts, schedules, cwReviews, evals] = await Promise.all([
+      const [formResp, logs, timeouts, schedules, cwReviews, evals] = await Promise.all([
         api.getForm(this.formId),
-        api.getAvailableActions(this.formId),
         api.getLogs(this.formId),
         api.getTimeoutRecords(this.formId),
         api.getSchedules(this.formId),
         api.getCoursewareReviews(this.formId),
         api.getEvaluations(this.formId),
       ]);
-      this.form = form;
-      this.actions = actions;
+      this.form = extractFormFromResponse(formResp);
+      this.actions = extractActionsFromResponse(formResp);
       this.logs = logs;
       this.timeoutRecords = timeouts;
       this.schedules = schedules;
@@ -289,8 +288,10 @@ class AppFormDetail extends LitElement {
 
   async _doTransition(action, remark) {
     try {
-      this.form = await api.transitionStatus(this.formId, action, remark);
-      await this._loadData();
+      const resp = await api.transitionStatus(this.formId, action, remark);
+      this.form = extractFormFromResponse(resp);
+      this.actions = extractActionsFromResponse(resp);
+      this.logs = await api.getLogs(this.formId);
       this.success = '操作成功';
     } catch (e) {
       this.error = e.message;
@@ -310,11 +311,14 @@ class AppFormDetail extends LitElement {
       return;
     }
     try {
-      await api.handleTimeout(this.formId, { reason: this.timeoutReason, follow_up: this.timeoutFollowUp });
+      const resp = await api.handleTimeout(this.formId, { reason: this.timeoutReason, follow_up: this.timeoutFollowUp });
+      this.form = extractFormFromResponse(resp);
+      this.actions = extractActionsFromResponse(resp);
       this.showTimeoutDialog = false;
       this.timeoutReason = '';
       this.timeoutFollowUp = '';
-      await this._loadData();
+      this.logs = await api.getLogs(this.formId);
+      this.timeoutRecords = await api.getTimeoutRecords(this.formId);
       this.success = '超时处理成功';
     } catch (e) {
       this.error = e.message;
@@ -323,10 +327,13 @@ class AppFormDetail extends LitElement {
 
   async _doCoursewareReview() {
     try {
-      this.form = await api.reviewCourseware(this.formId, { result: this.cwResult, comment: this.cwComment });
+      const resp = await api.reviewCourseware(this.formId, { result: this.cwResult, comment: this.cwComment });
+      this.form = extractFormFromResponse(resp);
+      this.actions = extractActionsFromResponse(resp);
       this.showCoursewareDialog = false;
       this.cwComment = '';
-      await this._loadData();
+      this.logs = await api.getLogs(this.formId);
+      this.coursewareReviews = await api.getCoursewareReviews(this.formId);
       this.success = '课件审核完成';
     } catch (e) {
       this.error = e.message;
@@ -335,10 +342,13 @@ class AppFormDetail extends LitElement {
 
   async _doEvaluation() {
     try {
-      this.form = await api.createEvaluation(this.formId, { score: this.evalScore, comment: this.evalComment });
+      const resp = await api.createEvaluation(this.formId, { score: this.evalScore, comment: this.evalComment });
+      this.form = extractFormFromResponse(resp);
+      this.actions = extractActionsFromResponse(resp);
       this.showEvaluationDialog = false;
       this.evalComment = '';
-      await this._loadData();
+      this.logs = await api.getLogs(this.formId);
+      this.evaluations = await api.getEvaluations(this.formId);
       this.success = '评价提交成功';
     } catch (e) {
       this.error = e.message;
@@ -348,8 +358,10 @@ class AppFormDetail extends LitElement {
   async _doConfirmTeaching() {
     if (!confirm('确认授课已完成？')) return;
     try {
-      this.form = await api.confirmTeaching(this.formId);
-      await this._loadData();
+      const resp = await api.confirmTeaching(this.formId);
+      this.form = extractFormFromResponse(resp);
+      this.actions = extractActionsFromResponse(resp);
+      this.logs = await api.getLogs(this.formId);
       this.success = '授课确认完成';
     } catch (e) {
       this.error = e.message;
@@ -552,40 +564,41 @@ class AppFormDetail extends LitElement {
   _renderActions() {
     const role = this.user?.role;
     const f = this.form;
+    const actions = this.actions || [];
 
     return html`
       <div class="card">
         <h3>操作</h3>
         <div class="actions-bar">
-          ${this.actions.map(a => {
-            if (a.action === 'submit') {
-              return html`<button class="btn btn-primary" @click=${() => this._doTransition('submit')}>${a.label}</button>`;
-            }
-            if (a.action === 'reject') {
-              return html`<button class="btn btn-danger" @click=${() => { this.showRejectDialog = true; this.error = ''; }}>${a.label}</button>`;
-            }
-            if (a.action === 'courseware_review') {
-              return html`<button class="btn btn-warning" @click=${() => { this.showCoursewareDialog = true; this.error = ''; }}>${a.label}</button>`;
-            }
-            if (a.action === 'evaluate') {
-              return html`<button class="btn btn-success" @click=${() => { this.showEvaluationDialog = true; this.error = ''; }}>${a.label}</button>`;
-            }
-            return html`<button class="btn btn-secondary" @click=${() => this._doTransition(a.action)}>${a.label}</button>`;
+          ${actions.map(a => {
+            let btnClass = 'btn btn-secondary';
+            if (a.action === 'submit' || a.action === 'archive' || a.action === 'confirm_teaching') btnClass = 'btn btn-primary';
+            if (a.action === 'reject' || a.action === 'timeout_handle') btnClass = 'btn btn-danger';
+            if (a.action === 'courseware_review') btnClass = 'btn btn-warning';
+            if (a.action === 'evaluate') btnClass = 'btn btn-success';
+
+            const handler = () => {
+              this.error = '';
+              this.success = '';
+              if (a.action === 'reject') {
+                this.showRejectDialog = true;
+              } else if (a.action === 'timeout_handle') {
+                this.showTimeoutDialog = true;
+              } else if (a.action === 'courseware_review') {
+                this.showCoursewareDialog = true;
+              } else if (a.action === 'evaluate') {
+                this.showEvaluationDialog = true;
+              } else if (a.action === 'confirm_teaching') {
+                this._doConfirmTeaching();
+              } else {
+                this._doTransition(a.action, a.requires_remark ? undefined : '');
+              }
+            };
+
+            return html`<button class="${btnClass}" @click=${handler}>${a.label}</button>`;
           })}
 
-          ${f.is_timeout && role === 'clerk' ? html`
-            <button class="btn btn-danger" @click=${() => { this.showTimeoutDialog = true; this.error = ''; }}>处理超时</button>
-          ` : ''}
-
-          ${f.status === 'pending_teaching' && role === 'manager' ? html`
-            <button class="btn btn-success" @click=${this._doConfirmTeaching}>确认授课完成</button>
-          ` : ''}
-
-          ${f.status === 'pending_archive' && role === 'manager' ? html`
-            <button class="btn btn-primary" @click=${() => this._doTransition('archive')}>归档</button>
-          ` : ''}
-
-          ${this.actions.length === 0 && !(f.is_timeout && role === 'clerk') && f.status !== 'pending_teaching' && f.status !== 'pending_archive'
+          ${actions.length === 0
             ? html`<span style="color:#999;font-size:13px;">当前岗位无可用操作</span>` : ''}
         </div>
       </div>

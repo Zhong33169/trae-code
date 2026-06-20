@@ -17,12 +17,14 @@ class AppFormList extends LitElement {
   static properties = {
     user: { type: Object },
     forms: { type: Array },
+    total: { type: Number },
     statistics: { type: Object },
     filterStatus: { type: String },
     filterKeyword: { type: String },
     showTimeoutOnly: { type: Boolean },
     selectedIds: { type: Array },
     loading: { type: Boolean },
+    lastBatchResult: { type: Object },
   };
 
   static styles = css`
@@ -161,12 +163,14 @@ class AppFormList extends LitElement {
   constructor() {
     super();
     this.forms = [];
+    this.total = 0;
     this.statistics = null;
     this.filterStatus = '';
     this.filterKeyword = '';
     this.showTimeoutOnly = false;
     this.selectedIds = [];
     this.loading = true;
+    this.lastBatchResult = null;
   }
 
   async connectedCallback() {
@@ -176,12 +180,23 @@ class AppFormList extends LitElement {
 
   async _loadData() {
     this.loading = true;
+    this.lastBatchResult = null;
     try {
-      const [forms, stats] = await Promise.all([
-        api.listForms({ status: this.filterStatus || undefined, keyword: this.filterKeyword || undefined, timeout_only: this.showTimeoutOnly }),
+      const queryParams = {};
+      if (this.filterStatus) queryParams.status = this.filterStatus;
+      if (this.filterKeyword) queryParams.keyword = this.filterKeyword;
+      if (this.showTimeoutOnly) queryParams.timeout_only = true;
+
+      const [listResp, stats] = await Promise.all([
+        api.listForms(queryParams),
         api.getStatistics(),
       ]);
-      this.forms = forms;
+      let items = listResp.items || [];
+      if (this.showTimeoutOnly) {
+        items = items.filter(f => f.is_timeout);
+      }
+      this.forms = items;
+      this.total = listResp.total || items.length;
       this.statistics = stats;
     } catch (e) {
       console.error('加载数据失败:', e);
@@ -217,8 +232,21 @@ class AppFormList extends LitElement {
     if (!confirm(`确定要批量${action === 'submit' ? '通过' : '驳回'} ${this.selectedIds.length} 条排课单吗？`)) return;
     try {
       const result = await api.batchAction({ form_ids: this.selectedIds, action });
+
+      if (result && result.success && result.success.length > 0) {
+        const updatedIds = new Set(result.success.map(r => r.form_id));
+        const updatedFormsMap = {};
+        result.success.forEach(r => {
+          if (r.form) updatedFormsMap[r.form_id] = r.form;
+        });
+        this.forms = this.forms.map(f => updatedFormsMap[f.id] || f);
+        this.total = this.forms.length;
+        this.statistics = await api.getStatistics();
+      }
+
       this.selectedIds = [];
-      await this._loadData();
+      this.lastBatchResult = result;
+
       if (result.errors && result.errors.length > 0) {
         alert(`部分操作失败: ${result.errors.map(e => e.detail).join('; ')}`);
       }

@@ -16,13 +16,26 @@ export function clearToken() {
   localStorage.removeItem('scheduling_token');
 }
 
-async function request(method, path, body = null) {
-  const headers = { 'Content-Type': 'application/json' };
-  const params = new URLSearchParams();
+function buildQueryString(params) {
+  const qs = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value === null || value === undefined || value === '') return;
+    if (typeof value === 'boolean') {
+      qs.set(key, value ? 'true' : 'false');
+    } else {
+      qs.set(key, String(value));
+    }
+  });
   if (currentToken) {
-    params.set('token', currentToken);
+    qs.set('token', currentToken);
   }
-  const url = `${API_BASE}${path}${params.toString() ? '?' + params.toString() : ''}`;
+  return qs.toString();
+}
+
+async function request(method, path, body = null, queryParams = {}) {
+  const headers = { 'Content-Type': 'application/json' };
+  const qs = buildQueryString(queryParams);
+  const url = `${API_BASE}${path}${qs ? '?' + qs : ''}`;
 
   const options = { method, headers };
   if (body) {
@@ -39,42 +52,59 @@ async function request(method, path, body = null) {
   return data;
 }
 
+async function requestWithToken(method, path, body = null, queryParams = {}) {
+  if (!currentToken) {
+    throw new Error('未登录或会话已过期');
+  }
+  return request(method, path, body, queryParams);
+}
+
 export const api = {
   login: (username, password) => request('POST', '/auth/login', { username, password }),
-  getMe: () => request('GET', '/auth/me'),
-  getRoles: () => request('GET', '/roles'),
-  getStatuses: () => request('GET', '/statuses'),
-  getNodeTimeLimits: () => request('GET', '/node-time-limits'),
+  getMe: () => requestWithToken('GET', '/auth/me'),
+  getRoles: () => requestWithToken('GET', '/roles'),
+  getStatuses: () => requestWithToken('GET', '/statuses'),
+  getNodeTimeLimits: () => requestWithToken('GET', '/node-time-limits'),
+  getVisibilityPolicy: () => requestWithToken('GET', '/visibility-policy'),
 
-  listForms: (params = {}) => {
-    const qs = new URLSearchParams();
-    if (params.status) qs.set('status', params.status);
-    if (params.keyword) qs.set('keyword', params.keyword);
-    if (params.timeout_only) qs.set('timeout_only', 'true');
-    return request('GET', `/forms?${qs.toString()}`);
-  },
-  getForm: (id) => request('GET', `/forms/${id}`),
-  createForm: (data) => request('POST', '/forms', data),
-  updateForm: (id, data) => request('PUT', `/forms/${id}`, data),
-  transitionStatus: (id, action, remark) => request('POST', `/forms/${id}/transition`, { action, remark }),
-  getAvailableActions: (id) => request('GET', `/forms/${id}/available-actions`),
+  listForms: (params = {}) => requestWithToken('GET', '/forms', null, params),
+  getForm: (id) => requestWithToken('GET', `/forms/${id}`),
+  createForm: (data) => requestWithToken('POST', '/forms', data),
+  updateForm: (id, data) => requestWithToken('PUT', `/forms/${id}`, data),
+  transitionStatus: (id, action, remark) => requestWithToken('POST', `/forms/${id}/transition`, { action, remark }),
+  getAvailableActions: (id) => requestWithToken('GET', `/forms/${id}/available-actions`),
+  getFormSubmitActions: (id) => requestWithToken('GET', `/forms/${id}/submit-actions`),
 
-  reviewCourseware: (id, data) => request('POST', `/forms/${id}/courseware-review`, data),
-  getCoursewareReviews: (id) => request('GET', `/forms/${id}/courseware-reviews`),
-  createEvaluation: (id, data) => request('POST', `/forms/${id}/evaluation`, data),
-  getEvaluations: (id) => request('GET', `/forms/${id}/evaluations`),
-  confirmTeaching: (id) => request('POST', `/forms/${id}/confirm-teaching`),
+  reviewCourseware: (id, data) => requestWithToken('POST', `/forms/${id}/courseware-review`, data),
+  getCoursewareReviews: (id) => requestWithToken('GET', `/forms/${id}/courseware-reviews`),
+  createEvaluation: (id, data) => requestWithToken('POST', `/forms/${id}/evaluation`, data),
+  getEvaluations: (id) => requestWithToken('GET', `/forms/${id}/evaluations`),
+  confirmTeaching: (id) => requestWithToken('POST', `/forms/${id}/confirm-teaching`),
 
-  getSchedules: (id) => request('GET', `/forms/${id}/schedules`),
-  addSchedule: (id, data) => request('POST', `/forms/${id}/schedules`, data),
+  getSchedules: (id) => requestWithToken('GET', `/forms/${id}/schedules`),
+  addSchedule: (id, data) => requestWithToken('POST', `/forms/${id}/schedules`, data),
 
-  getLogs: (id) => request('GET', `/forms/${id}/logs`),
-  getTimeoutRecords: (id) => request('GET', `/forms/${id}/timeout-records`),
-  handleTimeout: (id, data) => request('POST', `/forms/${id}/timeout-handle`, data),
-  listTimeoutRecords: () => request('GET', '/timeout-records'),
+  getLogs: (id) => requestWithToken('GET', `/forms/${id}/logs`),
+  getTimeoutRecords: (id) => requestWithToken('GET', `/forms/${id}/timeout-records`),
+  handleTimeout: (id, data) => requestWithToken('POST', `/forms/${id}/timeout-handle`, data),
+  listTimeoutRecords: () => requestWithToken('GET', '/timeout-records'),
 
-  getStatistics: () => request('GET', '/statistics'),
-  batchAction: (data) => request('POST', '/batch/action', data),
+  getStatistics: () => requestWithToken('GET', '/statistics'),
+  batchAction: (data) => requestWithToken('POST', '/batch/action', data),
 
   initDb: () => request('POST', '/init-db'),
 };
+
+export function extractFormFromResponse(response) {
+  if (!response) return null;
+  if (response.form) return response.form;
+  if (response.id) return response;
+  return response;
+}
+
+export function extractActionsFromResponse(response) {
+  if (!response) return [];
+  if (response.submit_actions) return response.submit_actions;
+  if (Array.isArray(response)) return response;
+  return [];
+}
