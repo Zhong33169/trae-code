@@ -40,6 +40,7 @@ async fn main() -> std::io::Result<()> {
                     .route("/auth/login", web::post().to(handlers::auth::login))
                     .route("/auth/logout", web::post().to(handlers::auth::logout))
                     .route("/auth/me", web::get().to(handlers::auth::get_current_user))
+                    .route("/auth/session", web::get().to(handlers::auth::get_session))
                     .route("/users", web::get().to(handlers::auth::get_all_users))
 
                     .route("/tickets", web::get().to(handlers::tickets::list_tickets))

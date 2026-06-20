@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use uuid::Uuid;
 use crate::models::ApiResponse;
+use crate::db::Database;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthUser {
@@ -40,7 +41,45 @@ impl AuthState {
     }
 }
 
-fn unauthorized_response(message: &str) -> actix_web::Error {
+fn get_source_ip(req: &HttpRequest) -> Option<String> {
+    req.headers()
+        .get("x-forwarded-for")
+        .and_then(|h| h.to_str().ok())
+        .map(|s| s.to_string())
+        .or_else(|| req.headers().get("x-real-ip").and_then(|h| h.to_str().ok()).map(|s| s.to_string()))
+        .or_else(|| req.peer_addr().map(|addr| addr.ip().to_string()))
+}
+
+fn get_user_agent(req: &HttpRequest) -> Option<String> {
+    req.headers()
+        .get("user-agent")
+        .and_then(|h| h.to_str().ok())
+        .map(|s| s.to_string())
+}
+
+fn log_unauthorized(req: &HttpRequest, message: &str, user_id: Option<i64>, db: &web::Data<Database>) {
+    if let Ok(conn) = db.conn.lock() {
+        let path = req.uri().path().to_string();
+        let source_ip = get_source_ip(req);
+        let user_agent = get_user_agent(req);
+        let _ = conn.execute(
+            "INSERT INTO audit_logs (ticket_id, user_id, action, detail, is_failure, failure_reason, batch_id, source_ip, user_agent) VALUES (NULL, ?1, ?2, ?3, 1, ?4, NULL, ?5, ?6)",
+            rusqlite::params![
+                user_id,
+                "unauthorized_access",
+                Some(&format!("访问{}被拒绝", path)),
+                Some(message),
+                source_ip,
+                user_agent,
+            ],
+        );
+    }
+}
+
+fn unauthorized_response(req: &HttpRequest, message: &str, user_id: Option<i64>, db: Option<&web::Data<Database>>) -> actix_web::Error {
+    if let Some(db) = db {
+        log_unauthorized(req, message, user_id, db);
+    }
     let resp = HttpResponse::Unauthorized()
         .content_type("application/json")
         .json(ApiResponse::<()>::error_with_code(401, message));
@@ -53,6 +92,7 @@ impl FromRequest for AuthUser {
 
     fn from_request(req: &HttpRequest, _payload: &mut Payload) -> Self::Future {
         let auth_state = req.app_data::<web::Data<AuthState>>();
+        let db = req.app_data::<web::Data<Database>>();
         let auth_header = req.headers().get("Authorization");
 
         let token = auth_header.and_then(|h| {
@@ -71,10 +111,10 @@ impl FromRequest for AuthUser {
                         return ok(user);
                     }
                 }
-                err(unauthorized_response("无效或已过期的登录凭证，请重新登录"))
+                err(unauthorized_response(req, "无效或已过期的登录凭证，请重新登录", None, db))
             }
             None => {
-                err(unauthorized_response("缺少登录凭证，请先登录"))
+                err(unauthorized_response(req, "缺少登录凭证，请先登录", None, db))
             }
         }
     }

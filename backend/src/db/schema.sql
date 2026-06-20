@@ -55,13 +55,15 @@ CREATE TABLE IF NOT EXISTS ticket_attachments (
 CREATE TABLE IF NOT EXISTS audit_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     ticket_id INTEGER,
-    user_id INTEGER NOT NULL,
+    user_id INTEGER,
     action TEXT NOT NULL,
     detail TEXT,
-    is_failure BOOLEAN DEFAULT 0,
+    is_failure INTEGER DEFAULT 0,
     failure_reason TEXT,
     batch_id INTEGER,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    source_ip TEXT,
+    user_agent TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (ticket_id) REFERENCES complaint_tickets(id),
     FOREIGN KEY (user_id) REFERENCES users(id),
     FOREIGN KEY (batch_id) REFERENCES import_batches(id)

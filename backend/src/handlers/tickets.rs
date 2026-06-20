@@ -36,7 +36,7 @@ fn row_to_ticket(row: &rusqlite::Row) -> rusqlite::Result<ComplaintTicket> {
 
 fn insert_audit_log(conn: &rusqlite::Connection, ticket_id: Option<i64>, user_id: i64, action: &str, detail: Option<&str>, is_failure: bool, failure_reason: Option<&str>) {
     let _ = conn.execute(
-        "INSERT INTO audit_logs (ticket_id, user_id, action, detail, is_failure, failure_reason, batch_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL)",
+        "INSERT INTO audit_logs (ticket_id, user_id, action, detail, is_failure, failure_reason, batch_id, source_ip, user_agent) VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL, NULL, NULL)",
         params![ticket_id, user_id, action, detail, if is_failure { 1 } else { 0 }, failure_reason],
     );
 }

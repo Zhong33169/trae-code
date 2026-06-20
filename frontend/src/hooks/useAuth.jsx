@@ -1,91 +1,137 @@
-import { useState, useEffect, useCallback, createContext, useContext } from 'react'
+import { useState, useEffect, createContext, useContext } from 'react'
 import { authApi } from '../api'
 
 const AuthContext = createContext(null)
 
 export const AuthProvider = ({ children }) => {
   const [currentUser, setCurrentUser] = useState(null)
+  const [session, setSession] = useState(null)
   const [loading, setLoading] = useState(true)
   const [refreshKey, setRefreshKey] = useState(0)
-
-  const simulateLogin = useCallback(async (username, password) => {
-    setLoading(true)
-    try {
-      const result = await authApi.login(username, password)
-      if (result?.token) {
-        localStorage.setItem('token', result.token)
-        setCurrentUser(result.user)
-      }
-    } catch (e) {
-      console.error('登录失败', e)
-      setCurrentUser({
-        id: 1,
-        username: 'registrar1',
-        role: 'registrar',
-        name: '张登记员',
-      })
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+  const [authError, setAuthError] = useState(null)
 
   useEffect(() => {
     const token = localStorage.getItem('token')
     if (token) {
-      loadUser()
+      loadSession()
     } else {
-      simulateLogin('registrar1', '123456')
+      setLoading(false)
+      setCurrentUser(null)
+      setSession(null)
     }
 
     const handleUnauthorized = () => {
-      simulateLogin('registrar1', '123456')
+      localStorage.removeItem('token')
+      setCurrentUser(null)
+      setSession(null)
+      setAuthError('登录已过期，请重新登录')
     }
     window.addEventListener('auth:unauthorized', handleUnauthorized)
     return () => window.removeEventListener('auth:unauthorized', handleUnauthorized)
-  }, [simulateLogin])
+  }, [])
 
-  const loadUser = async () => {
+  const loadSession = async () => {
+    setLoading(true)
+    setAuthError(null)
     try {
-      const user = await authApi.getCurrentUser()
-      setCurrentUser(user)
-      setLoading(false)
+      const sess = await authApi.getSession()
+      if (sess?.user) {
+        setCurrentUser(sess.user)
+        setSession(sess)
+      } else {
+        localStorage.removeItem('token')
+        setCurrentUser(null)
+        setSession(null)
+      }
     } catch (e) {
       localStorage.removeItem('token')
-      await simulateLogin('registrar1', '123456')
+      setCurrentUser(null)
+      setSession(null)
+      setAuthError(e?.message || '会话验证失败，请重新登录')
+    } finally {
+      setLoading(false)
     }
   }
 
-  const switchRole = async (role) => {
-    const roleUsers = {
-      registrar: { id: 1, username: 'registrar1', role: 'registrar', name: '张登记员' },
-      auditor: { id: 2, username: 'auditor1', role: 'auditor', name: '李审核主管' },
-      reviewer: { id: 3, username: 'reviewer1', role: 'reviewer', name: '王复核负责人' },
-    }
-    const user = roleUsers[role]
-    if (user) {
-      try {
-        const result = await authApi.login(user.username, '123456')
-        if (result?.token) {
-          localStorage.setItem('token', result.token)
-          setCurrentUser(result.user)
-          setRefreshKey(k => k + 1)
-          return
-        }
-      } catch (e) {
-        console.warn('角色切换API失败，使用本地模拟', e)
+  const login = async (username, password) => {
+    setLoading(true)
+    setAuthError(null)
+    try {
+      const result = await authApi.login(username, password)
+      if (result?.token) {
+        localStorage.setItem('token', result.token)
+        const sess = await authApi.getSession()
+        setCurrentUser(sess?.user || result.user)
+        setSession(sess)
+        setRefreshKey(k => k + 1)
+        return { success: true }
       }
-      setCurrentUser(user)
+    } catch (e) {
+      setAuthError(e?.message || '登录失败，请检查用户名和密码')
+    } finally {
+      setLoading(false)
+    }
+    return { success: false, error: authError }
+  }
+
+  const switchRole = async (role) => {
+    const roleAccounts = {
+      registrar: { username: 'registrar1', password: '123456' },
+      auditor: { username: 'auditor1', password: '123456' },
+      reviewer: { username: 'reviewer1', password: '123456' },
+    }
+    const account = roleAccounts[role]
+    if (!account) return
+
+    setLoading(true)
+    setAuthError(null)
+    try {
+      const result = await authApi.login(account.username, account.password)
+      if (result?.token) {
+        localStorage.setItem('token', result.token)
+        const sess = await authApi.getSession()
+        setCurrentUser(sess?.user || result.user)
+        setSession(sess)
+        setRefreshKey(k => k + 1)
+        return
+      }
+    } catch (e) {
+      setAuthError(e?.message || '角色切换失败，请重试')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const logout = async () => {
+    try {
+      await authApi.logout()
+    } catch (e) {
+    } finally {
+      localStorage.removeItem('token')
+      setCurrentUser(null)
+      setSession(null)
+      setAuthError(null)
       setRefreshKey(k => k + 1)
     }
   }
 
-  const logout = () => {
-    localStorage.removeItem('token')
-    setCurrentUser(null)
+  const clearAuthError = () => {
+    setAuthError(null)
   }
 
   return (
-    <AuthContext.Provider value={{ currentUser, loading, refreshKey, switchRole, logout }}>
+    <AuthContext.Provider value={{
+      currentUser,
+      session,
+      loading,
+      refreshKey,
+      authError,
+      login,
+      switchRole,
+      logout,
+      loadSession,
+      clearAuthError,
+    }}>
       {children}
     </AuthContext.Provider>
   )

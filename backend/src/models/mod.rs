@@ -124,6 +124,8 @@ pub struct AuditLog {
     pub is_failure: bool,
     pub failure_reason: Option<String>,
     pub batch_id: Option<i64>,
+    pub source_ip: Option<String>,
+    pub user_agent: Option<String>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -221,4 +223,31 @@ pub struct StatusTransition {
     pub to: String,
     pub action: String,
     pub allowed_roles: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AllowedAction {
+    pub key: String,
+    pub label: String,
+    pub description: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionResponse {
+    pub user: User,
+    pub role_label: String,
+    pub allowed_actions: Vec<AllowedAction>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuditLogInsert {
+    pub ticket_id: Option<i64>,
+    pub user_id: Option<i64>,
+    pub action: String,
+    pub detail: Option<String>,
+    pub is_failure: bool,
+    pub failure_reason: Option<String>,
+    pub batch_id: Option<i64>,
+    pub source_ip: Option<String>,
+    pub user_agent: Option<String>,
 }
