@@ -104,7 +104,7 @@ export default function QuoteDetailPage() {
           <div className="font-semibold mb-1">⚠️ 有待你确认的交接</div>
           {pendingHandovers.map(h => (
             <div key={h.id} className="flex items-center gap-2 flex-wrap text-sm mt-1">
-              <span>{h.from_user_name} → {h.to_user_name}：{h.handover_remark}</span>
+              <span>{h.from.user_name} → {h.to.user_name}：{h.handover_remark}</span>
               <button className="btn btn-success btn-xs" onClick={() => confirmHandover(h.id, true)}>确认接收</button>
               <button className="btn btn-danger btn-xs" onClick={() => confirmHandover(h.id, false)}>拒绝</button>
             </div>
@@ -173,7 +173,25 @@ export default function QuoteDetailPage() {
                         </span>
                       )}
                     </div>
-                    {l.remark && <div className="text-sm text-gray-700 mt-1 bg-gray-50 rounded px-2 py-1 border border-gray-100">{l.remark}</div>}
+                    {l.remark && (
+                      <div className="text-sm text-gray-700 mt-1 bg-gray-50 rounded px-2 py-1 border border-gray-100">
+                        {l.remark.includes('【服务经理代处理】') ? (
+                          <>
+                            <span className="inline-block bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded text-xs font-mono mr-1.5 border border-amber-200">
+                              👔 服务经理代处理
+                            </span>
+                            <span dangerouslySetInnerHTML={{
+                              __html: l.remark
+                                .replace(/【服务经理代处理】/g, '')
+                                .replace(/原接收人 ([^，]+)/g, '<span class="text-gray-900 font-medium">原接收人: $1</span>')
+                                .replace(/操作人 ([^，,]+)/g, '<span class="text-gray-900 font-medium">操作人: $1</span>')
+                            }} />
+                          </>
+                        ) : (
+                          l.remark
+                        )}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -189,14 +207,14 @@ export default function QuoteDetailPage() {
                     <div className="flex items-center justify-between flex-wrap gap-2">
                       <div className="flex items-center gap-2 flex-wrap text-sm">
                         <span className={`px-2 py-0.5 rounded text-xs ${h.status === 'confirmed' ? 'bg-green-100 text-green-700' : h.status === 'rejected' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'}`}>
-                          {h.status_display}
+                          {h.status_name}
                         </span>
                         <span>
-                          <b>{h.from_user_name}</b>
-                          <span className="text-xs text-gray-500">（{h.from_user_role} · {h.from_shift}）</span>
+                          <b>{h.from.user_name}</b>
+                          <span className="text-xs text-gray-500">（{h.from.role} · {h.from.shift}）</span>
                           <span className="mx-1.5 text-gray-400">→</span>
-                          <b>{h.to_user_name}</b>
-                          <span className="text-xs text-gray-500">（{h.to_user_role} · {h.to_shift}）</span>
+                          <b>{h.to.user_name}</b>
+                          <span className="text-xs text-gray-500">（{h.to.role} · {h.to.shift}）</span>
                         </span>
                       </div>
                       <div className="text-xs text-gray-500">

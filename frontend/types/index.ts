@@ -57,18 +57,34 @@ export interface OperationLog {
 export interface ShiftHandover {
   id: number;
   quote_id: number;
-  from_user_id: number;
-  from_user_name: string;
-  from_user_role: string;
-  from_shift: string;
-  to_user_id: number;
-  to_user_name: string;
-  to_user_role: string;
-  to_shift: string;
+  quote_no: string;
+  customer_name: string;
+  device_type: string;
+  quote_status: string;
+  quote_status_name: string;
+  is_incoming: boolean;
+  can_process: boolean;
+  manager_proxy: boolean;
+  original_receiver: {
+    user_id: number;
+    user_name: string;
+    role: string;
+    shift: string;
+  };
+  from: {
+    user_name: string;
+    role: string;
+    shift: string;
+  };
+  to: {
+    user_name: string;
+    role: string;
+    shift: string;
+  };
   handover_remark: string;
-  confirmed_at?: string | null;
   status: string;
-  status_display: string;
+  status_name: string;
+  confirmed_at?: string | null;
   created_at: string;
 }
 

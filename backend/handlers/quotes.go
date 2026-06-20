@@ -1,7 +1,9 @@
 package handlers
 
 import (
+	"crypto/rand"
 	"database/sql"
+	"encoding/base64"
 	"fmt"
 	"net/http"
 	"repair-platform/database"
@@ -13,6 +15,13 @@ import (
 
 	"github.com/labstack/echo/v4"
 )
+
+func genQuoteNo() string {
+	b := make([]byte, 4)
+	rand.Read(b)
+	suffix := base64.RawURLEncoding.EncodeToString(b)[:6]
+	return fmt.Sprintf("WX%s%s", time.Now().Format("20060102150405"), suffix)
+}
 
 func addOperationLog(tx *sql.Tx, quoteID int64, operation, oldStatus, newStatus, remark string, user *middleware.UserInfo) error {
 	return addOperationLogWithBatch(tx, quoteID, operation, oldStatus, newStatus, remark, user, "")
@@ -317,6 +326,8 @@ func GetQuote(c echo.Context) error {
 		to_user_id, to_user_name, to_user_role, to_shift, handover_remark, confirmed_at, status, created_at
 		FROM shift_handovers WHERE quote_id = ? ORDER BY id DESC`, id)
 	handovers := make([]map[string]interface{}, 0)
+	currentUser := middleware.GetUser(c)
+	isManager := currentUser.Role == models.RoleServiceManager
 	for handoverRows.Next() {
 		var h models.ShiftHandover
 		var cAt sql.NullTime
@@ -329,20 +340,47 @@ func GetQuote(c echo.Context) error {
 		toRole, _ := models.RoleDisplayNames[h.ToUserRole]
 		fromShift, _ := models.ShiftDisplayNames[h.FromShift]
 		toShift, _ := models.ShiftDisplayNames[h.ToShift]
+
+		isIncoming := h.ToUserID == currentUser.ID
+		canProcess := false
+		managerProxy := false
+		if h.Status == "pending" {
+			if h.ToUserID == currentUser.ID {
+				canProcess = true
+			} else if isManager {
+				canProcess = true
+				managerProxy = true
+			}
+		}
+
+		originalReceiver := map[string]interface{}{
+			"user_id":   h.ToUserID,
+			"user_name": h.ToUserName,
+			"role":      toRole,
+			"shift":     toShift,
+		}
+
 		handovers = append(handovers, map[string]interface{}{
-			"id":              h.ID,
-			"from_user_id":    h.FromUserID,
-			"from_user_name":  h.FromUserName,
-			"from_user_role":  fromRole,
-			"from_shift":      fromShift,
-			"to_user_id":      h.ToUserID,
-			"to_user_name":    h.ToUserName,
-			"to_user_role":    toRole,
-			"to_shift":        toShift,
+			"id":                h.ID,
+			"quote_id":          h.QuoteID,
+			"is_incoming":       isIncoming,
+			"can_process":       canProcess,
+			"manager_proxy":     managerProxy,
+			"original_receiver": originalReceiver,
+			"from": map[string]interface{}{
+				"user_name": h.FromUserName,
+				"role":      fromRole,
+				"shift":     fromShift,
+			},
+			"to": map[string]interface{}{
+				"user_name": h.ToUserName,
+				"role":      toRole,
+				"shift":     toShift,
+			},
 			"handover_remark": h.HandoverRemark,
 			"confirmed_at":    h.ConfirmedAt,
 			"status":          h.Status,
-			"status_display": map[string]string{
+			"status_name": map[string]string{
 				"pending":   "待确认接收",
 				"confirmed": "已确认接收",
 				"rejected":  "已拒绝",
@@ -353,9 +391,8 @@ func GetQuote(c echo.Context) error {
 	handoverRows.Close()
 
 	pendingHandover := make([]map[string]interface{}, 0)
-	user := middleware.GetUser(c)
 	for _, h := range handovers {
-		if h["status"] == "pending" && h["to_user_id"].(int64) == user.ID {
+		if h["status"] == "pending" && h["original_receiver"].(map[string]interface{})["user_id"].(int64) == currentUser.ID {
 			pendingHandover = append(pendingHandover, h)
 		}
 	}
@@ -427,7 +464,7 @@ func CreateQuote(c echo.Context) error {
 	}
 	defer tx.Rollback()
 
-	quoteNo := "WX" + time.Now().Format("20060102150405") + fmt.Sprintf("%02d", user.ID%100)
+	quoteNo := genQuoteNo()
 
 	status := models.StatusDraft
 	if req.EstimateAmount > 0 {

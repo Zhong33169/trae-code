@@ -7,11 +7,21 @@ export default function StatisticsPage() {
   const [data, setData] = useState<any>({});
   const [loading, setLoading] = useState(true);
 
+  const load = async () => {
+    setLoading(true);
+    const r = await apiFetch<any>('/api/statistics');
+    if (r.ok) setData(r.data);
+    setLoading(false);
+  };
+
   useEffect(() => {
-    apiFetch<any>('/api/statistics').then(r => {
-      if (r.ok) setData(r.data);
-      setLoading(false);
-    });
+    load();
+  }, []);
+
+  useEffect(() => {
+    const handler = () => load();
+    window.addEventListener('handover-updated', handler);
+    return () => window.removeEventListener('handover-updated', handler);
   }, []);
 
   if (loading) return <div className="p-10 text-center text-gray-500">加载统计中...</div>;

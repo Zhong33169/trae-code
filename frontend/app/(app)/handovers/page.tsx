@@ -12,6 +12,9 @@ interface Handover {
   customer_name: string;
   device_type: string;
   is_incoming: boolean;
+  can_process: boolean;
+  manager_proxy: boolean;
+  original_receiver: { user_name: string; role: string; shift: string };
   quote_status: string;
   quote_status_name: string;
   status: string;
@@ -26,7 +29,7 @@ interface Handover {
 export default function HandoversPage() {
   const user = getCurrentUser();
   const [handovers, setHandovers] = useState<Handover[]>([]);
-  const [filter, setFilter] = useState<'all' | 'incoming' | 'outgoing'>('incoming');
+  const [filter, setFilter] = useState<'all' | 'incoming' | 'outgoing'>('all');
   const [status, setStatus] = useState<'all' | 'pending' | 'confirmed' | 'rejected'>('pending');
   const [message, setMessage] = useState<{ type: string; text: string } | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
@@ -40,6 +43,12 @@ export default function HandoversPage() {
   }, [status]);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    const handler = () => load();
+    window.addEventListener('handover-updated', handler);
+    return () => window.removeEventListener('handover-updated', handler);
+  }, [load]);
 
   useEffect(() => {
     setSelected(new Set());
@@ -56,8 +65,8 @@ export default function HandoversPage() {
     return true;
   });
 
-  const pendingIncoming = filtered.filter(h => h.is_incoming && h.status === 'pending');
-  const canSelect = (h: Handover) => h.is_incoming && h.status === 'pending';
+  const pendingIncoming = filtered.filter(h => h.can_process);
+  const canSelect = (h: Handover) => h.can_process;
 
   const toggleSelect = (id: number) => {
     const s = new Set(selected);
@@ -95,7 +104,7 @@ export default function HandoversPage() {
   };
 
   const pendingCount = handovers.filter(h => h.status === 'pending').length;
-  const incPending = handovers.filter(h => h.status === 'pending' && h.is_incoming).length;
+  const myProcessCount = handovers.filter(h => h.can_process).length;
 
   return (
     <div>
@@ -115,8 +124,8 @@ export default function HandoversPage() {
           <div className="num text-orange-600">{pendingCount}</div>
         </div>
         <div className="stat-card">
-          <div className="label">需要我确认</div>
-          <div className="num text-red-600">{incPending}</div>
+          <div className="label">需要我处理</div>
+          <div className="num text-red-600">{myProcessCount}</div>
         </div>
         <div className="stat-card">
           <div className="label">已完成接收</div>
@@ -171,7 +180,7 @@ export default function HandoversPage() {
             <thead>
               <tr>
                 <th style={{ width: 38 }}>
-                  {filter === 'incoming' && status === 'pending' && (
+                  {status === 'pending' && (
                     <input type="checkbox"
                       checked={selected.size > 0 && selected.size === pendingIncoming.length}
                       onChange={selectAll} />
@@ -219,6 +228,11 @@ export default function HandoversPage() {
                     <td>
                       <div className="font-medium">{h.to.user_name}</div>
                       <div className="text-xs text-gray-500">{h.to.role} · {h.to.shift}</div>
+                      {h.manager_proxy && h.status === 'pending' && (
+                        <div className="text-xs text-amber-600 mt-0.5">
+                          👔 您可代处理
+                        </div>
+                      )}
                     </td>
                     <td className="text-xs max-w-[260px]"><div className="line-clamp-2">{h.handover_remark}</div></td>
                     <td><span className="text-xs">{h.quote_status_name}</span></td>
@@ -232,10 +246,17 @@ export default function HandoversPage() {
                     <td className="text-xs">{formatDateTime(h.created_at)}</td>
                     <td className="text-xs">{h.confirmed_at ? formatDateTime(h.confirmed_at) : '-'}</td>
                     <td>
-                      {h.status === 'pending' && h.is_incoming && user && h.to.user_name === getCurrentUser()?.real_name ? (
-                        <div className="flex gap-1">
-                          <button className="btn btn-success btn-xs" onClick={() => handleConfirm(h.id, true)}>确认接收</button>
-                          <button className="btn btn-danger btn-xs" onClick={() => handleConfirm(h.id, false)}>拒绝</button>
+                      {h.status === 'pending' && h.can_process ? (
+                        <div className="flex flex-col gap-1">
+                          {h.manager_proxy && (
+                            <span className="text-xs font-mono text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200 w-fit">
+                              👔 经理代处理
+                            </span>
+                          )}
+                          <div className="flex gap-1">
+                            <button className="btn btn-success btn-xs" onClick={() => handleConfirm(h.id, true)}>确认接收</button>
+                            <button className="btn btn-danger btn-xs" onClick={() => handleConfirm(h.id, false)}>拒绝</button>
+                          </div>
                         </div>
                       ) : <Link href={`/quotes/${h.quote_id}`} className="btn btn-xs btn-secondary">查看详情</Link>}
                     </td>

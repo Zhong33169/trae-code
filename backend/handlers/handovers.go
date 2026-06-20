@@ -153,18 +153,34 @@ func ConfirmHandover(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "该交接记录已处理，无法重复确认"})
 	}
 
+	isManager := user.Role == models.RoleServiceManager
+	isReceiver := toUserID == user.ID
+	managerProxy := isManager && !isReceiver
+
 	action := "confirm"
 	if req.Action == "reject" {
 		action = "reject"
 	}
 
+	if action == "reject" && req.Remark == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "拒绝交接必须填写拒绝原因"})
+	}
+
 	var curStatus string
 	database.DB.QueryRow("SELECT status FROM repair_quotes WHERE id = ?", quoteID).Scan(&curStatus)
+	curStatusDisplay, _ := models.StatusDisplayNames[curStatus]
 
 	tx, _ := database.DB.Begin()
 	defer tx.Rollback()
 
 	now := time.Now()
+	actionIdentity := user.RealName + "(" + models.RoleDisplayNames[user.Role] + ")"
+	if managerProxy {
+		actionIdentity += "【服务经理代处理】"
+	}
+
+	originalReceiverInfo := toUserName + "(" + models.RoleDisplayNames[toUserRole] + ")" + models.ShiftDisplayNames[toShift]
+
 	if action == "confirm" {
 		currentToShift := getUserShift(toUserID)
 		tx.Exec(`UPDATE shift_handovers SET status = 'confirmed', confirmed_at = ? WHERE id = ?`, now, handoverID)
@@ -172,25 +188,40 @@ func ConfirmHandover(c echo.Context) error {
 			SET current_handler_id = ?, current_handler = ?, shift = ?, updated_at = ?
 			WHERE id = ?`, toUserID, toUserName, currentToShift, now, quoteID)
 
-		opRemark := "接收方确认交接: " + toUserName + "(" + models.RoleDisplayNames[toUserRole] + ")" + models.ShiftDisplayNames[toShift]
+		opRemark := ""
+		if managerProxy {
+			opRemark = fmt.Sprintf("服务经理代确认交接：原接收人 %s，操作人 %s", originalReceiverInfo, actionIdentity)
+		} else {
+			opRemark = "接收方确认交接: " + originalReceiverInfo
+		}
 		if req.Remark != "" {
 			opRemark += "，确认备注: " + req.Remark
 		}
-		addOperationLog(tx, quoteID, "换班交接确认", curStatus, curStatus, opRemark, user)
+		addOperationLog(tx, quoteID, "换班交接确认", curStatusDisplay, curStatusDisplay, opRemark, user)
 	} else {
 		tx.Exec(`UPDATE shift_handovers SET status = 'rejected', confirmed_at = ? WHERE id = ?`, now, handoverID)
-		opRemark := "接收方拒绝交接: " + toUserName
-		if req.Remark != "" {
-			opRemark += "，拒绝原因: " + req.Remark
+		opRemark := ""
+		if managerProxy {
+			opRemark = fmt.Sprintf("服务经理代拒绝交接：原接收人 %s，操作人 %s，拒绝原因: %s",
+				originalReceiverInfo, actionIdentity, req.Remark)
+		} else {
+			opRemark = "接收方拒绝交接: " + originalReceiverInfo + "，拒绝原因: " + req.Remark
 		}
-		addOperationLog(tx, quoteID, "换班交接被拒绝", curStatus, curStatus, opRemark, user)
+		addOperationLog(tx, quoteID, "换班交接被拒绝", curStatusDisplay, curStatusDisplay, opRemark, user)
 	}
 
 	tx.Commit()
 
 	if action == "confirm" {
 		return c.JSON(http.StatusOK, map[string]interface{}{
-			"message": "交接已确认，处理人已更新为 " + toUserName,
+			"message":       "交接已确认，处理人已更新为 " + toUserName,
+			"manager_proxy": managerProxy,
+			"original_receiver": map[string]interface{}{
+				"id":            toUserID,
+				"name":          toUserName,
+				"role_display":  models.RoleDisplayNames[toUserRole],
+				"shift_display": models.ShiftDisplayNames[toShift],
+			},
 			"new_handler": map[string]interface{}{
 				"id":            toUserID,
 				"name":          toUserName,
@@ -202,7 +233,14 @@ func ConfirmHandover(c echo.Context) error {
 		})
 	}
 	return c.JSON(http.StatusOK, map[string]interface{}{
-		"message": "已拒绝交接，请与交出人协调",
+		"message":       "已拒绝交接，请与交出人协调",
+		"manager_proxy": managerProxy,
+		"original_receiver": map[string]interface{}{
+			"id":            toUserID,
+			"name":          toUserName,
+			"role_display":  models.RoleDisplayNames[toUserRole],
+			"shift_display": models.ShiftDisplayNames[toShift],
+		},
 	})
 }
 
@@ -264,6 +302,24 @@ func GetMyHandovers(c echo.Context) error {
 		toShift, _ := models.ShiftDisplayNames[h.ToShift]
 		qSt, _ := models.StatusDisplayNames[quoteStatus]
 
+		canProcess := false
+		managerProxy := false
+		if h.Status == "pending" {
+			if h.ToUserID == user.ID {
+				canProcess = true
+			} else if isManager {
+				canProcess = true
+				managerProxy = true
+			}
+		}
+
+		originalReceiver := map[string]interface{}{
+			"user_id":   h.ToUserID,
+			"user_name": h.ToUserName,
+			"role":      toRole,
+			"shift":     toShift,
+		}
+
 		list = append(list, map[string]interface{}{
 			"id":                h.ID,
 			"quote_id":          h.QuoteID,
@@ -273,6 +329,9 @@ func GetMyHandovers(c echo.Context) error {
 			"quote_status":      quoteStatus,
 			"quote_status_name": qSt,
 			"is_incoming":       isIncoming,
+			"can_process":       canProcess,
+			"manager_proxy":     managerProxy,
+			"original_receiver": originalReceiver,
 			"from": map[string]interface{}{
 				"user_name": h.FromUserName,
 				"role":      fromRole,
@@ -303,15 +362,17 @@ type BatchConfirmRequest struct {
 }
 
 type BatchResultItem struct {
-	HandoverID int64  `json:"handover_id"`
-	QuoteID    int64  `json:"quote_id,omitempty"`
-	QuoteNo    string `json:"quote_no,omitempty"`
-	Success    bool   `json:"success"`
-	Action     string `json:"action"`
-	Message    string `json:"message"`
-	NewHandler string `json:"new_handler,omitempty"`
-	NewShift   string `json:"new_shift,omitempty"`
-	ErrorCode  string `json:"error_code,omitempty"`
+	HandoverID       int64                  `json:"handover_id"`
+	QuoteID          int64                  `json:"quote_id,omitempty"`
+	QuoteNo          string                 `json:"quote_no,omitempty"`
+	Success          bool                   `json:"success"`
+	Action           string                 `json:"action"`
+	Message          string                 `json:"message"`
+	NewHandler       string                 `json:"new_handler,omitempty"`
+	NewShift         string                 `json:"new_shift,omitempty"`
+	ErrorCode        string                 `json:"error_code,omitempty"`
+	ManagerProxy     bool                   `json:"manager_proxy"`
+	OriginalReceiver map[string]interface{} `json:"original_receiver,omitempty"`
 }
 
 func BatchConfirmHandover(c echo.Context) error {
@@ -386,6 +447,18 @@ func BatchConfirmHandover(c echo.Context) error {
 		isManager := user.Role == models.RoleServiceManager
 		isReceiver := toUserID == user.ID
 
+		database.DB.QueryRow("SELECT real_name, role, shift FROM users WHERE id = ?", toUserID).Scan(&toUserNameDb, &toRoleDb, &toShift)
+		isReceiver = toUserID == user.ID
+		managerProxy := isManager && !isReceiver
+
+		result.ManagerProxy = managerProxy
+		result.OriginalReceiver = map[string]interface{}{
+			"id":            toUserID,
+			"name":          toUserNameDb,
+			"role_display":  models.RoleDisplayNames[toRoleDb],
+			"shift_display": models.ShiftDisplayNames[toShift],
+		}
+
 		if !isReceiver && !isManager {
 			result.Success = false
 			result.Message = fmt.Sprintf("报价单 %s(%s-%s)：权限不足。仅交接接收人本人或服务经理可处理，您不是该交接的接收人",
@@ -430,8 +503,6 @@ func BatchConfirmHandover(c echo.Context) error {
 			continue
 		}
 
-		database.DB.QueryRow("SELECT real_name, role, shift FROM users WHERE id = ?", toUserID).Scan(&toUserNameDb, &toRoleDb, &toShift)
-
 		tx, err := database.DB.Begin()
 		if err != nil {
 			result.Success = false
@@ -455,14 +526,15 @@ func BatchConfirmHandover(c echo.Context) error {
 					WHERE id = ?`, toUserID, toUserNameDb, currentToShift, now, quoteID)
 			}
 			if err == nil {
-				actionIdentityFull := actionIdentity
-				if isManager {
-					actionIdentityFull += "【服务经理代处理】"
+				opRemark := ""
+				originalReceiverInfo := toUserNameDb + "(" + models.RoleDisplayNames[toRoleDb] + ")" + models.ShiftDisplayNames[currentToShift]
+				if managerProxy {
+					opRemark = fmt.Sprintf("批量交接确认[%s] 【服务经理代处理】原接收人 %s，操作人 %s",
+						batchID, originalReceiverInfo, actionIdentity)
+				} else {
+					opRemark = fmt.Sprintf("批量交接确认[%s]：接收人 %s，操作人 %s",
+						batchID, originalReceiverInfo, actionIdentity)
 				}
-				opRemark := fmt.Sprintf("批量交接确认[%s]：接收人 %s(%s)%s，操作人 %s",
-					batchID,
-					toUserNameDb, models.RoleDisplayNames[toRoleDb], models.ShiftDisplayNames[currentToShift],
-					actionIdentityFull)
 				if item.Remark != "" {
 					opRemark += "，备注: " + item.Remark
 				}
@@ -486,12 +558,15 @@ func BatchConfirmHandover(c echo.Context) error {
 		} else {
 			_, err = tx.Exec(`UPDATE shift_handovers SET status = 'rejected', confirmed_at = ? WHERE id = ?`, now, hid)
 			if err == nil {
-				actionIdentityFull := actionIdentity
-				if isManager {
-					actionIdentityFull += "【服务经理代处理】"
+				opRemark := ""
+				originalReceiverInfo := toUserNameDb + "(" + models.RoleDisplayNames[toRoleDb] + ")" + models.ShiftDisplayNames[toShift]
+				if managerProxy {
+					opRemark = fmt.Sprintf("批量交接拒绝[%s] 【服务经理代处理】原接收人 %s，操作人 %s，原因: %s",
+						batchID, originalReceiverInfo, actionIdentity, item.Remark)
+				} else {
+					opRemark = fmt.Sprintf("批量交接拒绝[%s]：接收人 %s，操作人 %s，原因: %s",
+						batchID, originalReceiverInfo, actionIdentity, item.Remark)
 				}
-				opRemark := fmt.Sprintf("批量交接拒绝[%s]：涉及接收人 %s，操作人 %s，原因: %s",
-					batchID, toUserNameDb, actionIdentityFull, item.Remark)
 				err = addOperationLogWithBatch(tx, quoteID, "批量交接被拒绝", curStatusDisplay, curStatusDisplay, opRemark, user, batchID)
 			}
 			if err == nil {
