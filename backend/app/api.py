@@ -77,7 +77,7 @@ STATUS_FLOW = {
 LOADING_FLOW = {
     'load_arrange': {'from': [LoadingStatusChoices.NOT_ARRANGED],
                      'to': LoadingStatusChoices.PENDING_CONFIRM, 'action': ActionChoices.LOAD_ARRANGE},
-    'load_confirm': {'from': [LoadingStatusChoices.PENDING_CONFIRM],
+    'load_confirm': {'from': [LoadingStatusChoices.PENDING_CONFIRM, LoadingStatusChoices.CONFIRMED],
                      'to': LoadingStatusChoices.CONFIRMED, 'action': ActionChoices.LOAD_CONFIRM},
     'load_confirm_loaded': {'from': [LoadingStatusChoices.CONFIRMED],
                             'to': LoadingStatusChoices.LOADED, 'action': ActionChoices.LOAD_CONFIRM},
@@ -253,6 +253,153 @@ def create_audit(booking, audit_type, result, auditor, fail_reason='', remark=''
     )
 
 
+# ================ 统一流转强制校验（角色+状态，后端单一入口）================
+# 所有流转接口（submit/review-pass/.../review-archive/arrange-loading/.../bl-collect）
+# 必须通过本函数，任何绕过都会被 403 拦截。
+# 未来改权限/状态规则，只要改这一处 + STATUS_FLOW / LOADING_FLOW / BL_FLOW 三个字典即可。
+
+def _get_flow_table(action: str):
+    """根据 action 名自动找对应流转表和字段"""
+    if action in STATUS_FLOW:
+        return STATUS_FLOW, 'booking_status'
+    if action in LOADING_FLOW:
+        return LOADING_FLOW, 'loading_status'
+    if action in BL_FLOW:
+        return BL_FLOW, 'bl_status'
+    # 兼容下划线与横杠命名（load_arrange vs loading-arrange 等）
+    aliases = {
+        'submit': (STATUS_FLOW, 'booking_status'),
+        'review-pass': (STATUS_FLOW, 'booking_status'),
+        'review-reject': (STATUS_FLOW, 'booking_status'),
+        'book-confirm': (STATUS_FLOW, 'booking_status'),
+        'book-fail': (STATUS_FLOW, 'booking_status'),
+        'resubmit': (STATUS_FLOW, 'booking_status'),
+        'review-archive': (STATUS_FLOW, 'booking_status'),
+        'loading-arrange': (LOADING_FLOW, 'loading_status'),
+        'loading-confirm': (LOADING_FLOW, 'loading_status'),
+        'loading-fail': (LOADING_FLOW, 'loading_status'),
+        'bl-issue': (BL_FLOW, 'bl_status'),
+        'bl-collect': (BL_FLOW, 'bl_status'),
+    }
+    if action in aliases:
+        return aliases[action]
+    # 再尝试把横杠换成下划线去表里查
+    alt = action.replace('-', '_')
+    if alt in STATUS_FLOW:
+        return STATUS_FLOW, 'booking_status'
+    if alt in LOADING_FLOW:
+        return LOADING_FLOW, 'loading_status'
+    if alt in BL_FLOW:
+        return BL_FLOW, 'bl_status'
+    return None, None
+
+
+def require_action_flow(user, action, booking=None):
+    """
+    统一强制校验：
+    1. 角色是否有权执行 action（查 ROLE_PERMISSIONS）
+    2. booking 当前状态是否允许流转到目标状态（查 STATUS_FLOW/LOADING_FLOW/BL_FLOW）
+    通过: return (True, 目标状态dict: 含 flow/field/to/from)
+    不通过: raise HttpError(403, 中文可读原因)
+    """
+    # --- 步骤 1：角色权限校验 ---
+    if not user or not user.is_authenticated:
+        raise HttpError(401, '未登录，请先登录')
+
+    # create 特殊：registrar/admin 都能建
+    if action == 'create':
+        if user.role not in ('registrar', 'admin'):
+            raise HttpError(403, '只有订舱登记员(registrar)可以发起订舱申请')
+        return True, {'flow': STATUS_FLOW, 'field': 'booking_status',
+                      'from': None, 'to': BookingStatusChoices.DRAFT}
+
+    # edit 特殊：draft/correcting/returned/booking_failed + review_passed（补 SO号/提单号），归属 registrar 或 supervisor
+    if action == 'edit':
+        if user.role not in ('registrar', 'supervisor', 'admin'):
+            raise HttpError(403, '此角色无权编辑订舱申请')
+        if booking and booking.booking_status not in (
+            BookingStatusChoices.DRAFT, BookingStatusChoices.CORRECTING,
+            BookingStatusChoices.RETURNED, BookingStatusChoices.BOOKING_FAILED,
+            BookingStatusChoices.REVIEW_PASSED, BookingStatusChoices.BOOKED,
+        ):
+            raise HttpError(400, f'当前订舱状态【{booking.booking_status_label}】不允许编辑')
+        return True, {}
+
+    # correct 特殊：registrar 才能触发（从 returned / booking_failed -> correcting）
+    if action == 'correct':
+        perms = ROLE_PERMISSIONS.get(user.role, {}).get('allowed_actions', [])
+        if 'correct' not in perms:
+            raise HttpError(403, f"{serialize_user(user).role_label}无权执行此操作：补正资料")
+        if booking and booking.booking_status not in (
+            BookingStatusChoices.RETURNED, BookingStatusChoices.BOOKING_FAILED,
+        ):
+            raise HttpError(400, f'当前状态【{booking.booking_status_label}】不允许开始补正')
+        return True, {'flow': STATUS_FLOW, 'field': 'booking_status',
+                      'from': STATUS_FLOW['correct']['from'],
+                      'to': STATUS_FLOW['correct']['to']}
+
+    # --- 步骤 2：查流转表 ---
+    flow, field_name = _get_flow_table(action)
+    if not flow:
+        # 对于 offline_fill / audit-note 这类不直接改状态的，只查角色权限
+        perms = ROLE_PERMISSIONS.get(user.role, {}).get('allowed_actions', [])
+        perm_key = action.replace('-', '_')
+        if perm_key not in perms and action not in perms:
+            raise HttpError(403, f"{serialize_user(user).role_label}无权执行此操作")
+        return True, {}
+
+    # --- 步骤 3：查 ROLE_PERMISSIONS.allowed_actions ---
+    perm_key = action.replace('-', '_')
+    # 别名映射：接口 path 用横杠命名 vs ROLE_PERMISSIONS 用业务动词命名
+    aliases_map = {
+        'loading_arrange': 'load_arrange',
+        'loading_confirm': 'load_confirm',
+        'loading_fail': 'load_fail',
+    }
+    perm_key = aliases_map.get(perm_key, perm_key)
+    perms = ROLE_PERMISSIONS.get(user.role, {}).get('allowed_actions', [])
+    if perm_key not in perms and action not in perms:
+        raise HttpError(
+            403,
+            f"{serialize_user(user).role_label}无权执行此操作："
+            f"{dict(ActionChoices.choices).get(perm_key, dict(ActionChoices.choices).get(action, action))}"
+        )
+
+    # --- 步骤 4：状态流转合法性 ---
+    if flow and field_name and booking:
+        # 下划线 key 优先（STATUS_FLOW 的 key 是下划线），再走别名映射
+        rule = (flow.get(perm_key)
+                or flow.get(aliases_map.get(perm_key, perm_key))
+                or flow.get(action))
+        if not rule:
+            raise HttpError(400, f'未配置该操作的流转规则: {action}')
+        current_status = getattr(booking, field_name)
+        allowed_from = rule.get('from')
+        if allowed_from is not None and current_status not in allowed_from:
+            field_label_map = {
+                'booking_status': '订舱',
+                'loading_status': '装柜',
+                'bl_status': '提单',
+            }
+            label = field_label_map.get(field_name, field_name)
+            from_labels = ', '.join([
+                dict(BookingStatusChoices.choices if field_name == 'booking_status'
+                     else LoadingStatusChoices.choices if field_name == 'loading_status'
+                     else BlStatusChoices.choices).get(s, s)
+                for s in (allowed_from if isinstance(allowed_from, list) else [allowed_from])
+            ])
+            cur_label = dict(BookingStatusChoices.choices if field_name == 'booking_status'
+                             else LoadingStatusChoices.choices if field_name == 'loading_status'
+                             else BlStatusChoices.choices).get(current_status, current_status)
+            raise HttpError(
+                400,
+                f'【{label}】状态流转不合法：当前为【{cur_label}】，'
+                f'仅允许从【{from_labels}】执行此操作。'
+            )
+        return True, rule
+    return True, {}
+
+
 # ================ Auth API ================
 @api.post('/auth/login', response=LoginOut, tags=['认证'])
 def auth_login(request: HttpRequest, payload: LoginIn):
@@ -324,62 +471,6 @@ def list_bookings(
     return BookingListOut(total=total, items=items)
 
 
-@api.get('/bookings/{booking_id}', response=BookingApplicationOut, tags=['订舱申请'])
-def get_booking(request: HttpRequest, booking_id: int):
-    if not request.user.is_authenticated:
-        return None
-    b = get_object_or_404(BookingApplication, id=booking_id)
-    detect_timeout(b)
-    return booking_to_out(b)
-
-
-@api.post('/bookings', response=BookingApplicationOut, tags=['订舱申请'])
-@transaction.atomic
-def create_booking(request: HttpRequest, payload: BookingApplicationIn):
-    ok, msg = check_action_permission(request.user, 'create')
-    if not ok:
-        raise HttpError(403, msg)
-    dup = BookingApplication.objects.filter(form_no=payload.form_no).first()
-    if dup:
-        raise HttpError(400, f'订舱单号已存在：{payload.form_no}')
-    dup_batch = check_duplicate_batch(payload.batch_no)
-    if dup_batch:
-        raise HttpError(400, f'批次号{payload.batch_no}已存在于订舱单：{", ".join(dup_batch)}，请确认是否重复录入')
-    b = BookingApplication.objects.create(
-        **payload.model_dump(exclude_none=True),
-        booking_status=BookingStatusChoices.DRAFT,
-        loading_status=LoadingStatusChoices.NOT_ARRANGED,
-        bl_status=BlStatusChoices.NOT_ISSUED,
-        submitter=request.user,
-    )
-    log_operation(b, ActionChoices.CREATE, operator=request.user,
-                  to_status=b.booking_status, remark='订舱登记员发起订舱申请')
-    return booking_to_out(b)
-
-
-@api.put('/bookings/{booking_id}', response=BookingApplicationOut, tags=['订舱申请'])
-@transaction.atomic
-def update_booking(request: HttpRequest, booking_id: int, payload: BookingApplicationIn):
-    if not request.user.is_authenticated:
-        raise HttpError(403, '未登录')
-    b = get_object_or_404(BookingApplication, id=booking_id)
-    if b.booking_status not in (BookingStatusChoices.DRAFT, BookingStatusChoices.CORRECTING,
-                                BookingStatusChoices.RETURNED, BookingStatusChoices.BOOKING_FAILED):
-        raise HttpError(400, f'当前状态【{b.booking_status_label}】不允许编辑')
-    if payload.form_no != b.form_no:
-        if BookingApplication.objects.filter(form_no=payload.form_no).exclude(id=b.id).exists():
-            raise HttpError(400, f'订舱单号已存在：{payload.form_no}')
-    if payload.batch_no != b.batch_no:
-        dup = check_duplicate_batch(payload.batch_no, exclude_id=b.id)
-        if dup:
-            raise HttpError(400, f'批次号{payload.batch_no}已存在于订舱单：{", ".join(dup)}，请确认是否重复录入')
-    for k, v in payload.model_dump(exclude_none=True).items():
-        setattr(b, k, v)
-    b.save()
-    detect_timeout(b)
-    return booking_to_out(b)
-
-
 @api.post('/bookings/validate', response=ValidateCheckOut, tags=['订舱申请'])
 def validate_booking(request: HttpRequest, payload: ValidateCheckIn):
     errors = []
@@ -403,16 +494,65 @@ def validate_booking(request: HttpRequest, payload: ValidateCheckIn):
     return ValidateCheckOut(valid=len(errors) == 0, errors=errors, warnings=warnings)
 
 
+@api.get('/bookings/{booking_id}', response=BookingApplicationOut, tags=['订舱申请'])
+def get_booking(request: HttpRequest, booking_id: int):
+    if not request.user.is_authenticated:
+        return None
+    b = get_object_or_404(BookingApplication, id=booking_id)
+    detect_timeout(b)
+    return booking_to_out(b)
+
+
+@api.post('/bookings', response=BookingApplicationOut, tags=['订舱申请'])
+@transaction.atomic
+def create_booking(request: HttpRequest, payload: BookingApplicationIn):
+    # 统一强制：registrar/admin 才能创建
+    require_action_flow(request.user, 'create')
+    dup = BookingApplication.objects.filter(form_no=payload.form_no).first()
+    if dup:
+        raise HttpError(400, f'订舱单号已存在：{payload.form_no}')
+    dup_batch = check_duplicate_batch(payload.batch_no)
+    if dup_batch:
+        raise HttpError(400, f'批次号{payload.batch_no}已存在于订舱单：{", ".join(dup_batch)}，请确认是否重复录入')
+    b = BookingApplication.objects.create(
+        **payload.model_dump(exclude_none=True),
+        booking_status=BookingStatusChoices.DRAFT,
+        loading_status=LoadingStatusChoices.NOT_ARRANGED,
+        bl_status=BlStatusChoices.NOT_ISSUED,
+        submitter=request.user,
+    )
+    log_operation(b, ActionChoices.CREATE, operator=request.user,
+                  to_status=b.booking_status, remark='订舱登记员发起订舱申请')
+    return booking_to_out(b)
+
+
+@api.put('/bookings/{booking_id}', response=BookingApplicationOut, tags=['订舱申请'])
+@transaction.atomic
+def update_booking(request: HttpRequest, booking_id: int, payload: BookingApplicationIn):
+    b = get_object_or_404(BookingApplication, id=booking_id)
+    # 统一强制：角色 + 状态
+    require_action_flow(request.user, 'edit', b)
+    if payload.form_no != b.form_no:
+        if BookingApplication.objects.filter(form_no=payload.form_no).exclude(id=b.id).exists():
+            raise HttpError(400, f'订舱单号已存在：{payload.form_no}')
+    if payload.batch_no != b.batch_no:
+        dup = check_duplicate_batch(payload.batch_no, exclude_id=b.id)
+        if dup:
+            raise HttpError(400, f'批次号{payload.batch_no}已存在于订舱单：{", ".join(dup)}，请确认是否重复录入')
+    for k, v in payload.model_dump(exclude_none=True).items():
+        setattr(b, k, v)
+    b.save()
+    detect_timeout(b)
+    return booking_to_out(b)
+
+
 # ================ Booking status flow ================
 @api.post('/bookings/{booking_id}/submit', response=BookingApplicationOut, tags=['订舱流转'])
 @transaction.atomic
 def submit_booking(request: HttpRequest, booking_id: int, payload: StatusChangeIn):
-    ok, msg = check_action_permission(request.user, 'submit')
-    if not ok:
-        raise HttpError(403, msg)
     b = get_object_or_404(BookingApplication, id=booking_id)
-    if b.booking_status not in STATUS_FLOW['submit']['from']:
-        raise HttpError(400, f'当前状态【{b.booking_status_label}】不允许提交审核')
+    # 统一强制：角色(registrar) + 状态（draft/correcting→pending_review）
+    require_action_flow(request.user, 'submit', b)
     mismatch = check_status_consistency(b)
     if mismatch:
         raise HttpError(400, '状态校验未通过，线上线下状态不一致：' + '；'.join(mismatch))
@@ -433,12 +573,9 @@ def submit_booking(request: HttpRequest, booking_id: int, payload: StatusChangeI
 @api.post('/bookings/{booking_id}/review-pass', response=BookingApplicationOut, tags=['订舱流转'])
 @transaction.atomic
 def review_pass_booking(request: HttpRequest, booking_id: int, payload: StatusChangeIn):
-    ok, msg = check_action_permission(request.user, 'review_pass')
-    if not ok:
-        raise HttpError(403, msg)
     b = get_object_or_404(BookingApplication, id=booking_id)
-    if b.booking_status != BookingStatusChoices.PENDING_REVIEW:
-        raise HttpError(400, f'当前状态【{b.booking_status_label}】不允许审核通过')
+    # 统一强制：角色(supervisor) + 状态(pending_review→review_passed)
+    require_action_flow(request.user, 'review-pass', b)
     old_status = b.booking_status
     b.booking_status = BookingStatusChoices.REVIEW_PASSED
     b.reviewer = request.user
@@ -457,12 +594,9 @@ def review_pass_booking(request: HttpRequest, booking_id: int, payload: StatusCh
 @api.post('/bookings/{booking_id}/review-reject', response=BookingApplicationOut, tags=['订舱流转'])
 @transaction.atomic
 def review_reject_booking(request: HttpRequest, booking_id: int, payload: StatusChangeIn):
-    ok, msg = check_action_permission(request.user, 'review_reject')
-    if not ok:
-        raise HttpError(403, msg)
     b = get_object_or_404(BookingApplication, id=booking_id)
-    if b.booking_status != BookingStatusChoices.PENDING_REVIEW:
-        raise HttpError(400, f'当前状态【{b.booking_status_label}】不允许退回')
+    # 统一强制：角色(supervisor) + 状态(pending_review→returned)
+    require_action_flow(request.user, 'review-reject', b)
     if not payload.fail_reason:
         raise HttpError(400, '请填写退回原因')
     old_status = b.booking_status
@@ -485,12 +619,9 @@ def review_reject_booking(request: HttpRequest, booking_id: int, payload: Status
 @api.post('/bookings/{booking_id}/book-confirm', response=BookingApplicationOut, tags=['订舱流转'])
 @transaction.atomic
 def book_confirm(request: HttpRequest, booking_id: int, payload: StatusChangeIn):
-    ok, msg = check_action_permission(request.user, 'book_confirm')
-    if not ok:
-        raise HttpError(403, msg)
     b = get_object_or_404(BookingApplication, id=booking_id)
-    if b.booking_status != BookingStatusChoices.REVIEW_PASSED:
-        raise HttpError(400, f'当前状态【{b.booking_status_label}】不允许订舱确认')
+    # 统一强制：角色(supervisor) + 状态(review_passed→booked)
+    require_action_flow(request.user, 'book-confirm', b)
     if not b.so_no:
         raise HttpError(400, '订舱确认前请填写SO号')
     old_status = b.booking_status
@@ -508,12 +639,9 @@ def book_confirm(request: HttpRequest, booking_id: int, payload: StatusChangeIn)
 @api.post('/bookings/{booking_id}/book-fail', response=BookingApplicationOut, tags=['订舱流转'])
 @transaction.atomic
 def book_fail(request: HttpRequest, booking_id: int, payload: StatusChangeIn):
-    ok, msg = check_action_permission(request.user, 'book_fail')
-    if not ok:
-        raise HttpError(403, msg)
     b = get_object_or_404(BookingApplication, id=booking_id)
-    if b.booking_status != BookingStatusChoices.REVIEW_PASSED:
-        raise HttpError(400, f'当前状态【{b.booking_status_label}】不允许标为订舱失败')
+    # 统一强制：角色(supervisor) + 状态(review_passed→booking_failed)
+    require_action_flow(request.user, 'book-fail', b)
     if not payload.fail_reason:
         raise HttpError(400, '请填写订舱失败原因')
     old_status = b.booking_status
@@ -534,12 +662,9 @@ def book_fail(request: HttpRequest, booking_id: int, payload: StatusChangeIn):
 @api.post('/bookings/{booking_id}/correct', response=BookingApplicationOut, tags=['订舱流转'])
 @transaction.atomic
 def correct_booking(request: HttpRequest, booking_id: int, payload: StatusChangeIn):
-    ok, msg = check_action_permission(request.user, 'correct')
-    if not ok:
-        raise HttpError(403, msg)
     b = get_object_or_404(BookingApplication, id=booking_id)
-    if b.booking_status not in (BookingStatusChoices.RETURNED, BookingStatusChoices.BOOKING_FAILED):
-        raise HttpError(400, f'当前状态【{b.booking_status_label}】不允许补正')
+    # 统一强制：角色(registrar) + 状态(returned/booking_failed→correcting)
+    require_action_flow(request.user, 'correct', b)
     old_status = b.booking_status
     b.booking_status = BookingStatusChoices.CORRECTING
     b.is_exception = False
@@ -554,12 +679,9 @@ def correct_booking(request: HttpRequest, booking_id: int, payload: StatusChange
 @api.post('/bookings/{booking_id}/resubmit', response=BookingApplicationOut, tags=['订舱流转'])
 @transaction.atomic
 def resubmit_booking(request: HttpRequest, booking_id: int, payload: StatusChangeIn):
-    ok, msg = check_action_permission(request.user, 'resubmit')
-    if not ok:
-        raise HttpError(403, msg)
     b = get_object_or_404(BookingApplication, id=booking_id)
-    if b.booking_status != BookingStatusChoices.CORRECTING:
-        raise HttpError(400, f'当前状态【{b.booking_status_label}】不允许重新提交')
+    # 统一强制：角色(registrar) + 状态(correcting→pending_review)
+    require_action_flow(request.user, 'resubmit', b)
     mismatch = check_status_consistency(b)
     if mismatch:
         raise HttpError(400, '状态校验未通过，线上线下状态不一致：' + '；'.join(mismatch))
@@ -577,12 +699,9 @@ def resubmit_booking(request: HttpRequest, booking_id: int, payload: StatusChang
 @api.post('/bookings/{booking_id}/review-archive', response=BookingApplicationOut, tags=['订舱流转'])
 @transaction.atomic
 def review_archive(request: HttpRequest, booking_id: int, payload: StatusChangeIn):
-    ok, msg = check_action_permission(request.user, 'review_archive')
-    if not ok:
-        raise HttpError(403, msg)
     b = get_object_or_404(BookingApplication, id=booking_id)
-    if b.booking_status != BookingStatusChoices.BOOKED:
-        raise HttpError(400, f'当前状态【{b.booking_status_label}】不允许复核归档（需已订舱）')
+    # 统一强制：角色(reviewer) + 状态(booked→archived) + 提单已回收
+    require_action_flow(request.user, 'review-archive', b)
     if b.bl_status != BlStatusChoices.COLLECTED:
         raise HttpError(400, f'提单状态【{b.bl_status_label}】需为"已回收"才能归档')
     mismatch = check_status_consistency(b)
@@ -608,12 +727,9 @@ def review_archive(request: HttpRequest, booking_id: int, payload: StatusChangeI
 @api.post('/bookings/{booking_id}/loading/arrange', response=BookingApplicationOut, tags=['装柜确认'])
 @transaction.atomic
 def arrange_loading(request: HttpRequest, booking_id: int, payload: StatusChangeIn):
-    ok, msg = check_action_permission(request.user, 'load_arrange')
-    if not ok:
-        raise HttpError(403, msg)
     b = get_object_or_404(BookingApplication, id=booking_id)
-    if b.loading_status != LoadingStatusChoices.NOT_ARRANGED:
-        raise HttpError(400, f'当前装柜状态【{b.loading_status_label}】不允许安排装柜')
+    # 统一强制：角色(registrar) + 装柜状态(not_arranged→pending_confirm)
+    require_action_flow(request.user, 'loading-arrange', b)
     old = b.loading_status
     b.loading_status = LoadingStatusChoices.PENDING_CONFIRM
     b.save()
@@ -626,12 +742,9 @@ def arrange_loading(request: HttpRequest, booking_id: int, payload: StatusChange
 @api.post('/bookings/{booking_id}/loading/confirm', response=BookingApplicationOut, tags=['装柜确认'])
 @transaction.atomic
 def confirm_loading(request: HttpRequest, booking_id: int, payload: StatusChangeIn):
-    ok, msg = check_action_permission(request.user, 'load_confirm')
-    if not ok:
-        raise HttpError(403, msg)
     b = get_object_or_404(BookingApplication, id=booking_id)
-    if b.loading_status not in (LoadingStatusChoices.PENDING_CONFIRM, LoadingStatusChoices.CONFIRMED):
-        raise HttpError(400, f'当前装柜状态【{b.loading_status_label}】不允许确认')
+    # 统一强制：角色(supervisor) + 装柜状态(pending_confirm→confirmed→loaded)
+    require_action_flow(request.user, 'loading-confirm', b)
     old = b.loading_status
     if b.loading_status == LoadingStatusChoices.PENDING_CONFIRM:
         b.loading_status = LoadingStatusChoices.CONFIRMED
@@ -651,12 +764,9 @@ def confirm_loading(request: HttpRequest, booking_id: int, payload: StatusChange
 @api.post('/bookings/{booking_id}/loading/fail', response=BookingApplicationOut, tags=['装柜确认'])
 @transaction.atomic
 def fail_loading(request: HttpRequest, booking_id: int, payload: StatusChangeIn):
-    ok, msg = check_action_permission(request.user, 'load_fail')
-    if not ok:
-        raise HttpError(403, msg)
     b = get_object_or_404(BookingApplication, id=booking_id)
-    if b.loading_status not in (LoadingStatusChoices.PENDING_CONFIRM, LoadingStatusChoices.CONFIRMED):
-        raise HttpError(400, f'当前装柜状态【{b.loading_status_label}】不允许标失败')
+    # 统一强制：角色(supervisor) + 装柜状态(pending/confirmed→load_failed)
+    require_action_flow(request.user, 'loading-fail', b)
     if not payload.fail_reason:
         raise HttpError(400, '请填写装柜失败原因')
     old = b.loading_status
@@ -680,12 +790,9 @@ def fail_loading(request: HttpRequest, booking_id: int, payload: StatusChangeIn)
 @api.post('/bookings/{booking_id}/bl/issue', response=BookingApplicationOut, tags=['提单回收'])
 @transaction.atomic
 def issue_bl(request: HttpRequest, booking_id: int, payload: StatusChangeIn):
-    ok, msg = check_action_permission(request.user, 'bl_issue')
-    if not ok:
-        raise HttpError(403, msg)
     b = get_object_or_404(BookingApplication, id=booking_id)
-    if b.bl_status != BlStatusChoices.NOT_ISSUED:
-        raise HttpError(400, f'当前提单状态【{b.bl_status_label}】不允许出单')
+    # 统一强制：角色(registrar) + 提单状态(not_issued→pending_collect)
+    require_action_flow(request.user, 'bl-issue', b)
     if not b.bl_no:
         raise HttpError(400, '提单号未填写，无法出单')
     old = b.bl_status
@@ -702,12 +809,9 @@ def issue_bl(request: HttpRequest, booking_id: int, payload: StatusChangeIn):
 @api.post('/bookings/{booking_id}/bl/collect', response=BookingApplicationOut, tags=['提单回收'])
 @transaction.atomic
 def collect_bl(request: HttpRequest, booking_id: int, payload: StatusChangeIn):
-    ok, msg = check_action_permission(request.user, 'bl_collect')
-    if not ok:
-        raise HttpError(403, msg)
     b = get_object_or_404(BookingApplication, id=booking_id)
-    if b.bl_status != BlStatusChoices.PENDING_COLLECT:
-        raise HttpError(400, f'当前提单状态【{b.bl_status_label}】不允许回收')
+    # 统一强制：角色(registrar) + 提单状态(pending_collect→collected)
+    require_action_flow(request.user, 'bl-collect', b)
     old = b.bl_status
     b.bl_status = BlStatusChoices.COLLECTED
     b.save()
@@ -723,10 +827,9 @@ def collect_bl(request: HttpRequest, booking_id: int, payload: StatusChangeIn):
 @api.post('/bookings/{booking_id}/offline-fill', response=BookingApplicationOut, tags=['离线台账'])
 @transaction.atomic
 def offline_fill(request: HttpRequest, booking_id: int, payload: OfflineFillIn):
-    ok, msg = check_action_permission(request.user, 'offline_fill')
-    if not ok:
-        raise HttpError(403, msg)
     b = get_object_or_404(BookingApplication, id=booking_id)
+    # 统一强制：所有登录角色均可回填（只要在 ROLE_PERMISSIONS 里包含 offline_fill 即可）
+    require_action_flow(request.user, 'offline-fill', b)
     field_label_map = {
         'offline_booking_status': '离线台账-订舱状态',
         'offline_loading_status': '离线台账-装柜状态',

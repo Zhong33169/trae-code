@@ -260,6 +260,16 @@ def run():
     )
     log_operation(b5, ActionChoices.CREATE, operator=registrar, remark='首次录入')
     log_operation(b5b, ActionChoices.CREATE, operator=registrar, remark='重复录入（测试用）')
+    # 重复批次样例审计：b5b 尝试提交时被系统拦截，留下失败原因可追溯
+    AuditLog.objects.create(
+        booking=b5b, audit_type=AuditLog.AuditTypeChoices.BOOKING,
+        auditor=supervisor, auditor_name=supervisor.real_name,
+        result=AuditLog.ResultChoices.FAIL,
+        fail_reason='重复批次拦截：批次号 BATCH-DUP-2026-999 已在 PK-2026-005 中使用。'
+                    '请确认：(1) 是否同一客户重复下同一批货；(2) 是否不同批次但误写同批次号；'
+                    '(3) 是否前一单有误需要作废后再创建。',
+        remark='系统提交时自动拦截，登记员需核对后处理。',
+    )
 
     # ============ 样例6：状态不一致测试 ============
     print('   [样例6] PK-2026-007 状态不一致单（线上vs离线台账不一致）')

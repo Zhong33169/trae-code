@@ -1,5 +1,5 @@
 import { component$, useStore, useTask$, useVisibleTask$ } from "@builder.io/qwik";
-import { Link } from "@builder.io/qwik-city";
+import { Link, useNavigate } from "@builder.io/qwik-city";
 import type { Booking, ModuleType, EnumItem } from "~/types";
 import { bookingsApi } from "~/api";
 import { useMeta } from "~/store/meta";
@@ -22,6 +22,7 @@ export const BookingList = component$<BookingListProps>(({ module }) => {
   const auth = useAuth();
   const meta = useMeta();
   const mt = moduleTitles[module];
+  const nav = useNavigate();
 
   const state = useStore<any>({
     list: [] as Booking[],
@@ -157,6 +158,15 @@ export const BookingList = component$<BookingListProps>(({ module }) => {
               <div class="text-gray-500">记录总数</div>
               <div class="font-bold text-blue-600">{state.total}</div>
             </div>
+            {module === 'booking' && (auth.user?.role === 'registrar' || auth.user?.role === 'admin') && (
+              <>
+                <div class="h-10 w-px bg-gray-200"></div>
+                <Button variant="primary" size="sm" onClick$={() => nav('/booking/new')}>
+                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" /></svg>
+                  新建订舱申请
+                </Button>
+              </>
+            )}
           </div>
         </div>
       </div>

@@ -143,7 +143,9 @@ export const BookingDetail = component$<BookingDetailProps>(({ module, id }) => 
   const role = auth.user?.role || '';
   const can = (actionRole: string[]) => actionRole.includes(role);
 
-  // 操作按钮配置（只决定 UI 是否渲染，权限实际由后端校验）
+  // 操作按钮配置：UI 仅决定显示，权限实际由后端 ROLE_PERMISSIONS 强制校验（越权返回403）
+  // roles: 哪些角色可见此按钮
+  // condition: 当前状态下是否可执行（空则默认显示，仍由后端二次校验）
   const actions: Array<{
     key: ActionKey;
     label: string;
@@ -153,22 +155,87 @@ export const BookingDetail = component$<BookingDetailProps>(({ module, id }) => 
     isDanger?: boolean;
     condition?: (b: Booking) => boolean;
   }> = [
-    { key: 'edit', label: '编辑基本信息', variant: 'default', roles: ['registrar', 'supervisor', 'admin'] },
-    { key: 'submit', label: '提交审核', variant: 'primary', roles: ['registrar', 'admin'] },
-    { key: 'resubmit', label: '重新提交', variant: 'primary', roles: ['registrar', 'admin'] },
-    { key: 'correct', label: '补正', variant: 'info', roles: ['registrar', 'supervisor', 'admin'] },
-    { key: 'review-pass', label: '审核通过', variant: 'success', roles: ['supervisor', 'admin'] },
-    { key: 'review-reject', label: '审核退回', variant: 'danger', roles: ['supervisor', 'admin'], needFailReason: true },
-    { key: 'book-confirm', label: '订舱确认', variant: 'success', roles: ['supervisor', 'admin'] },
-    { key: 'book-fail', label: '订舱失败', variant: 'danger', roles: ['supervisor', 'admin'], needFailReason: true },
-    { key: 'loading-arrange', label: '安排装柜', variant: 'primary', roles: ['supervisor', 'admin'] },
-    { key: 'loading-confirm', label: '装柜确认', variant: 'success', roles: ['supervisor', 'admin'] },
-    { key: 'loading-fail', label: '装柜失败', variant: 'danger', roles: ['supervisor', 'admin'], needFailReason: true },
-    { key: 'bl-issue', label: '提单出单', variant: 'primary', roles: ['supervisor', 'admin'] },
-    { key: 'bl-collect', label: '提单回收', variant: 'success', roles: ['supervisor', 'admin'] },
-    { key: 'review-archive', label: '复核归档', variant: 'success', roles: ['reviewer', 'admin'] },
-    { key: 'audit-note', label: '添加审计备注', variant: 'warning', roles: ['supervisor', 'reviewer', 'admin'] },
-    { key: 'offline-fill', label: '离线台账回填', variant: 'default', roles: ['registrar', 'supervisor', 'reviewer', 'admin'] },
+    {
+      key: 'edit', label: '编辑基本信息', variant: 'default',
+      roles: ['registrar', 'supervisor', 'admin'],
+      condition: (b: Booking) => ['draft', 'correcting', 'returned', 'booking_failed'].includes(b.booking_status),
+    },
+    {
+      key: 'submit', label: '提交审核', variant: 'primary',
+      roles: ['registrar', 'admin'],
+      condition: (b: Booking) => ['draft', 'correcting'].includes(b.booking_status),
+    },
+    {
+      key: 'resubmit', label: '补正后重新提交', variant: 'primary',
+      roles: ['registrar', 'admin'],
+      condition: (b: Booking) => b.booking_status === 'correcting',
+    },
+    {
+      key: 'correct', label: '开始补正资料', variant: 'info',
+      roles: ['registrar', 'admin'],
+      condition: (b: Booking) => ['returned', 'booking_failed'].includes(b.booking_status),
+    },
+    {
+      key: 'review-pass', label: '审核通过', variant: 'success',
+      roles: ['supervisor', 'admin'],
+      condition: (b: Booking) => b.booking_status === 'pending_review',
+    },
+    {
+      key: 'review-reject', label: '审核退回', variant: 'danger',
+      roles: ['supervisor', 'admin'],
+      needFailReason: true,
+      condition: (b: Booking) => b.booking_status === 'pending_review',
+    },
+    {
+      key: 'book-confirm', label: '订舱确认（SO已下）', variant: 'success',
+      roles: ['supervisor', 'admin'],
+      condition: (b: Booking) => b.booking_status === 'review_passed',
+    },
+    {
+      key: 'book-fail', label: '标为订舱失败', variant: 'danger',
+      roles: ['supervisor', 'admin'],
+      needFailReason: true,
+      condition: (b: Booking) => b.booking_status === 'review_passed',
+    },
+    {
+      key: 'loading-arrange', label: '安排装柜', variant: 'primary',
+      roles: ['registrar', 'admin'],
+      condition: (b: Booking) => b.loading_status === 'not_arranged',
+    },
+    {
+      key: 'loading-confirm', label: '装柜确认/完成装柜', variant: 'success',
+      roles: ['supervisor', 'admin'],
+      condition: (b: Booking) => ['pending_confirm', 'confirmed'].includes(b.loading_status),
+    },
+    {
+      key: 'loading-fail', label: '装柜失败', variant: 'danger',
+      roles: ['supervisor', 'admin'],
+      needFailReason: true,
+      condition: (b: Booking) => ['pending_confirm', 'confirmed'].includes(b.loading_status),
+    },
+    {
+      key: 'bl-issue', label: '提单出单', variant: 'primary',
+      roles: ['registrar', 'admin'],
+      condition: (b: Booking) => b.bl_status === 'not_issued',
+    },
+    {
+      key: 'bl-collect', label: '提单回收', variant: 'success',
+      roles: ['registrar', 'admin'],
+      condition: (b: Booking) => b.bl_status === 'pending_collect',
+    },
+    {
+      key: 'review-archive', label: '复核归档', variant: 'success',
+      roles: ['reviewer', 'admin'],
+      condition: (b: Booking) => b.booking_status === 'booked' && b.bl_status === 'collected',
+    },
+    {
+      key: 'audit-note', label: '添加审计备注', variant: 'warning',
+      roles: ['registrar', 'supervisor', 'reviewer', 'admin'],
+    },
+    {
+      key: 'offline-fill', label: '离线台账回填', variant: 'default',
+      roles: ['registrar', 'supervisor', 'reviewer', 'admin'],
+    },
   ];
 
   const openAction = (key: ActionKey) => {
@@ -355,10 +422,26 @@ export const BookingDetail = component$<BookingDetailProps>(({ module, id }) => 
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" /></svg>
           返回列表
         </Link>
-        <div class="flex items-center gap-2 flex-wrap">
-          {actions
-            .filter((a) => can(a.roles))
-            .map((a) => (
+        <div class="flex items-center gap-2 flex-wrap justify-end max-w-[70%]">
+          {(() => {
+            // 按角色 + 状态条件过滤按钮
+            const filtered = actions.filter(
+              (a) => can(a.roles) && (!a.condition || (b && a.condition(b)))
+            );
+            // 按 variant 分组排列，主操作放前面
+            const order: Record<string, number> = {
+              primary: 1, success: 2, info: 3,
+              warning: 4, default: 5, danger: 6,
+            };
+            filtered.sort((x, y) => (order[x.variant] ?? 9) - (order[y.variant] ?? 9));
+            if (filtered.length === 0) {
+              return (
+                <div class="px-3 py-2 text-xs text-gray-400 bg-gray-50 rounded-lg">
+                  当前角色无可用操作
+                </div>
+              );
+            }
+            return filtered.map((a) => (
               <Button
                 key={a.key}
                 variant={a.variant}
@@ -367,7 +450,8 @@ export const BookingDetail = component$<BookingDetailProps>(({ module, id }) => 
               >
                 {a.label}
               </Button>
-            ))}
+            ));
+          })()}
         </div>
       </div>
 
