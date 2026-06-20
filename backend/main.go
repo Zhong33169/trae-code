@@ -11,6 +11,7 @@ import (
 	"inventory-adjust-system/handlers"
 	"inventory-adjust-system/middleware"
 	"inventory-adjust-system/models"
+	"inventory-adjust-system/services"
 )
 
 func main() {
@@ -28,6 +29,8 @@ func main() {
 	if err := data.SeedData(); err != nil {
 		log.Fatalf("Failed to seed data: %v", err)
 	}
+
+	services.InitRefreshState()
 
 	r := gin.Default()
 

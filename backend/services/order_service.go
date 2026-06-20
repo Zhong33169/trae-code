@@ -3,12 +3,79 @@ package services
 import (
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"gorm.io/gorm"
 	"inventory-adjust-system/db"
 	"inventory-adjust-system/models"
 )
+
+type RefreshMeta struct {
+	RefreshVersion int64     `json:"refresh_version"`
+	LastEvent      string    `json:"last_event"`
+	LastOrderID    int64     `json:"last_order_id"`
+	LastOrderNo    string    `json:"last_order_no"`
+	LastChangedAt  time.Time `json:"last_changed_at"`
+	LastOperator   string    `json:"last_operator"`
+	LastOperatorRole string  `json:"last_operator_role"`
+}
+
+var (
+	refreshState   *RefreshMeta
+	refreshMu      sync.RWMutex
+	refreshOnce    sync.Once
+)
+
+func getRefreshState() *RefreshMeta {
+	refreshMu.RLock()
+	defer refreshMu.RUnlock()
+	return refreshState
+}
+
+func InitRefreshState() {
+	refreshOnce.Do(func() {
+		database := db.GetDB()
+		var log models.OperationLog
+		err := database.Order("create_at DESC").First(&log).Error
+		refreshMu.Lock()
+		defer refreshMu.Unlock()
+		if err == nil && log.ID > 0 {
+			var orderNo string
+			var order models.InventoryAdjustOrder
+			if database.First(&order, log.OrderID).Error == nil {
+				orderNo = order.OrderNo
+			}
+			refreshState = &RefreshMeta{
+				RefreshVersion:   int64(log.ID),
+				LastEvent:        log.Operation,
+				LastOrderID:      log.OrderID,
+				LastOrderNo:      orderNo,
+				LastChangedAt:    log.CreateAt,
+				LastOperator:     log.OperatorName,
+				LastOperatorRole: string(log.OperatorRole),
+			}
+		} else {
+			refreshState = &RefreshMeta{
+				RefreshVersion: 0,
+				LastEvent:      "系统初始化",
+				LastChangedAt:  time.Now(),
+			}
+		}
+	})
+}
+
+func bumpRefresh(event string, orderID int64, orderNo string, operator string, operatorRole models.Role, changedAt time.Time) {
+	refreshMu.Lock()
+	defer refreshMu.Unlock()
+	refreshState.RefreshVersion++
+	refreshState.LastEvent = event
+	refreshState.LastOrderID = orderID
+	refreshState.LastOrderNo = orderNo
+	refreshState.LastChangedAt = changedAt
+	refreshState.LastOperator = operator
+	refreshState.LastOperatorRole = string(operatorRole)
+}
 
 type OrderService struct{}
 
@@ -30,6 +97,7 @@ type OrderListResult struct {
 	Page     int                         `json:"page"`
 	PageSize int                         `json:"page_size"`
 	Groups   map[string]int64            `json:"groups"`
+	RefreshMeta *RefreshMeta             `json:"refresh_meta"`
 }
 
 type SubmitOrderRequest struct {
@@ -135,11 +203,12 @@ func (s *OrderService) GetOrderList(query *OrderQuery, userCtx interface{}) (*Or
 	}
 
 	return &OrderListResult{
-		Total:    total,
-		List:     orders,
-		Page:     query.Page,
-		PageSize: query.PageSize,
-		Groups:   groups,
+		Total:       total,
+		List:        orders,
+		Page:        query.Page,
+		PageSize:    query.PageSize,
+		Groups:      groups,
+		RefreshMeta: getRefreshState(),
 	}, nil
 }
 
@@ -169,11 +238,27 @@ func (s *OrderService) GetOrderDetail(orderID int64) (map[string]interface{}, er
 		return nil, fmt.Errorf("查询操作日志失败: %w", err)
 	}
 
+	var lastEvent map[string]interface{}
+	if len(logs) > 0 {
+		last := logs[0]
+		lastEvent = map[string]interface{}{
+			"operation":     last.Operation,
+			"old_status":    last.OldStatus,
+			"new_status":    last.NewStatus,
+			"operator_name": last.OperatorName,
+			"operator_role": last.OperatorRole,
+			"create_at":     last.CreateAt,
+			"remark":        last.Remark,
+		}
+	}
+
 	return map[string]interface{}{
-		"order":      order,
-		"evidences":  evidences,
-		"supplements": supplements,
-		"logs":       logs,
+		"order":            order,
+		"evidences":        evidences,
+		"supplements":      supplements,
+		"logs":             logs,
+		"last_event":       lastEvent,
+		"refresh_meta":     getRefreshState(),
 	}, nil
 }
 
@@ -249,6 +334,8 @@ func (s *OrderService) SubmitOrder(req *SubmitOrderRequest, userID int64, userNa
 	if err := tx.Commit().Error; err != nil {
 		return nil, fmt.Errorf("提交事务失败: %w", err)
 	}
+
+	bumpRefresh("提交核验", order.ID, order.OrderNo, userName, userRole, order.UpdateAt)
 
 	return &order, nil
 }
@@ -387,6 +474,12 @@ func (s *OrderService) VerifyOrder(req *VerifyOrderRequest, userID int64, userNa
 		return nil, fmt.Errorf("提交事务失败: %w", err)
 	}
 
+	lastOp := "核验通过"
+	if !req.Pass {
+		lastOp = "核验退回"
+	}
+	bumpRefresh(lastOp, order.ID, order.OrderNo, userName, userRole, order.UpdateAt)
+
 	return &order, nil
 }
 
@@ -500,6 +593,12 @@ func (s *OrderService) ReviewOrder(req *ReviewOrderRequest, userID int64, userNa
 		return nil, fmt.Errorf("提交事务失败: %w", err)
 	}
 
+	lastOp := "复核通过"
+	if !req.Pass {
+		lastOp = "复核退回"
+	}
+	bumpRefresh(lastOp, order.ID, order.OrderNo, userName, userRole, order.UpdateAt)
+
 	return &order, nil
 }
 
@@ -567,6 +666,8 @@ func (s *OrderService) ArchiveOrder(req *ArchiveOrderRequest, userID int64, user
 	if err := tx.Commit().Error; err != nil {
 		return nil, fmt.Errorf("提交事务失败: %w", err)
 	}
+
+	bumpRefresh("归档", order.ID, order.OrderNo, userName, userRole, order.UpdateAt)
 
 	return &order, nil
 }
@@ -708,6 +809,9 @@ func (s *OrderService) AddSupplement(req *SupplementRequest, userID int64, userN
 		Remark:       req.Reason + ": " + req.Content,
 	}
 	database.Create(log)
+
+	now := time.Now()
+	bumpRefresh("移动补录-"+supplementTypeText(req.Type), req.OrderID, "", userName, userRole, now)
 
 	return supplement, nil
 }
@@ -864,6 +968,9 @@ func (s *OrderService) AddEvidence(req *AddEvidenceRequest, userID int64, userNa
 	}
 	database.Create(opLog)
 
+	now := time.Now()
+	bumpRefresh("补充证据-"+evidenceTypeText(req.Type), req.OrderID, order.OrderNo, userName, userRole, now)
+
 	return evidence, nil
 }
 
@@ -959,8 +1066,9 @@ func (s *OrderService) GetStatistics() (map[string]interface{}, error) {
 	}
 
 	return map[string]interface{}{
-		"total":          total,
-		"status_stats":   statusStats,
+		"total":           total,
+		"status_stats":    statusStats,
 		"warehouse_stats": warehouseStats,
+		"refresh_meta":    getRefreshState(),
 	}, nil
 }

@@ -104,6 +104,16 @@ export interface OrderDetailResponse {
   evidences: OrderEvidence[];
   supplements: SupplementRecord[];
   logs: OperationLog[];
+  last_event?: {
+    operation: string;
+    old_status: string;
+    new_status: string;
+    operator_name: string;
+    operator_role: string;
+    create_at: string;
+    remark?: string;
+  };
+  refresh_meta?: RefreshMeta;
 }
 
 export interface OrderListResult {
@@ -112,6 +122,17 @@ export interface OrderListResult {
   page: number;
   page_size: number;
   groups: Record<string, number>;
+  refresh_meta?: RefreshMeta;
+}
+
+export interface RefreshMeta {
+  refresh_version: number;
+  last_event: string;
+  last_order_id?: number;
+  last_order_no?: string;
+  last_changed_at: string;
+  last_operator?: string;
+  last_operator_role?: string;
 }
 
 export interface ApiResponse<T = any> {

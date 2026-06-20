@@ -51,6 +51,10 @@ const MainLayout: Component<{ onLogout: () => void }> = (props) => {
   const [statistics, setStatistics] = createSignal<any>(null);
   const [message, setMessage] = createSignal<{ type: 'success' | 'error'; text: string } | null>(null);
   const [refreshTick, setRefreshTick] = createSignal(0);
+  const [refreshMeta, setRefreshMeta] = createSignal<RefreshMeta | null>(null);
+  const [syncedAt, setSyncedAt] = createSignal<Date>(new Date());
+  const [lastFailReason, setLastFailReason] = createSignal<string>('');
+  const [lastFailAt, setLastFailAt] = createSignal<string>('');
 
   const [query, setQuery] = createSignal<OrderQuery>({
     page: 1,
@@ -114,6 +118,10 @@ const MainLayout: Component<{ onLogout: () => void }> = (props) => {
         setOrders(res.data.list);
         setTotal(res.data.total);
         setGroups(res.data.groups);
+        if (res.data.refresh_meta) {
+          setRefreshMeta(res.data.refresh_meta);
+        }
+        setSyncedAt(new Date());
       }
     } finally {
       setLoading(false);
@@ -124,6 +132,9 @@ const MainLayout: Component<{ onLogout: () => void }> = (props) => {
     const res = await getStatistics();
     if (res.code === 200 && res.data) {
       setStatistics(res.data);
+      if (res.data.refresh_meta) {
+        setRefreshMeta(res.data.refresh_meta);
+      }
     }
   };
 
@@ -131,6 +142,9 @@ const MainLayout: Component<{ onLogout: () => void }> = (props) => {
     const res = await getOrderDetail(orderId);
     if (res.code === 200 && res.data) {
       setOrderDetail(res.data);
+      if (res.data.refresh_meta) {
+        setRefreshMeta(res.data.refresh_meta);
+      }
       const updated = res.data.order;
       setSelectedOrder((prev) => {
         if (prev && prev.id === updated.id) return updated;
@@ -142,6 +156,11 @@ const MainLayout: Component<{ onLogout: () => void }> = (props) => {
   const showMessage = (type: 'success' | 'error', text: string) => {
     setMessage({ type, text });
     setTimeout(() => setMessage(null), 3000);
+  };
+
+  const recordFail = (reason: string) => {
+    setLastFailReason(reason);
+    setLastFailAt(new Date().toLocaleString('zh-CN'));
   };
 
   const switchRole = (user: User) => {
@@ -195,7 +214,9 @@ const MainLayout: Component<{ onLogout: () => void }> = (props) => {
       showMessage('success', '提交成功');
       refreshAll();
     } else {
-      showMessage('error', res.details || res.message || '提交失败');
+      const msg = res.details || res.message || '提交失败';
+      recordFail('提交失败: ' + msg);
+      showMessage('error', msg);
     }
   };
 
@@ -205,7 +226,9 @@ const MainLayout: Component<{ onLogout: () => void }> = (props) => {
       showMessage('success', '重新提交成功');
       refreshAll();
     } else {
-      showMessage('error', res.details || res.message || '重新提交失败');
+      const msg = res.details || res.message || '重新提交失败';
+      recordFail('重新提交失败: ' + msg);
+      showMessage('error', msg);
     }
   };
 
@@ -220,7 +243,9 @@ const MainLayout: Component<{ onLogout: () => void }> = (props) => {
       setOpinionForm({ pass: true, opinion: '' });
       refreshAll();
     } else {
-      showMessage('error', res.details || res.message || '核验失败');
+      const msg = res.details || res.message || '核验失败';
+      recordFail('核验失败: ' + msg);
+      showMessage('error', msg);
     }
   };
 
@@ -235,7 +260,9 @@ const MainLayout: Component<{ onLogout: () => void }> = (props) => {
       setOpinionForm({ pass: true, opinion: '' });
       refreshAll();
     } else {
-      showMessage('error', res.details || res.message || '复核失败');
+      const msg = res.details || res.message || '复核失败';
+      recordFail('复核失败: ' + msg);
+      showMessage('error', msg);
     }
   };
 
@@ -245,7 +272,9 @@ const MainLayout: Component<{ onLogout: () => void }> = (props) => {
       showMessage('success', '归档成功');
       refreshAll();
     } else {
-      showMessage('error', res.details || res.message || '归档失败');
+      const msg = res.details || res.message || '归档失败';
+      recordFail('归档失败: ' + msg);
+      showMessage('error', msg);
     }
   };
 
@@ -276,7 +305,9 @@ const MainLayout: Component<{ onLogout: () => void }> = (props) => {
       });
       refreshAll();
     } else {
-      showMessage('error', res.details || res.message || '补录失败');
+      const msg = res.details || res.message || '补录失败';
+      recordFail('补录失败: ' + msg);
+      showMessage('error', msg);
     }
   };
 
@@ -306,7 +337,9 @@ const MainLayout: Component<{ onLogout: () => void }> = (props) => {
       });
       refreshAll();
     } else {
-      showMessage('error', res.details || res.message || '补充证据失败');
+      const msg = res.details || res.message || '补充证据失败';
+      recordFail('补充证据失败: ' + msg);
+      showMessage('error', msg);
     }
   };
 
@@ -324,7 +357,9 @@ const MainLayout: Component<{ onLogout: () => void }> = (props) => {
       setSelectedIds([]);
       refreshAll();
     } else {
-      showMessage('error', res.details || res.message || '批量提交失败');
+      const msg = res.details || res.message || '批量提交失败';
+      recordFail('批量提交失败: ' + msg);
+      showMessage('error', msg);
     }
   };
 
@@ -592,6 +627,69 @@ const MainLayout: Component<{ onLogout: () => void }> = (props) => {
               />
             </div>
           </div>
+
+          <Show when={refreshMeta()}>
+            <div style={{
+              background: '#f6ffed',
+              borderRadius: '8px',
+              padding: '12px 16px',
+              marginBottom: '12px',
+              border: '1px solid #b7eb8f',
+              fontSize: '13px',
+              color: '#389e0d',
+              display: 'flex',
+              gap: '24px',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+            }}>
+              <div>
+                📡 数据版本：<b>v{refreshMeta()!.refresh_version}</b>
+              </div>
+              <div>
+                最近办理：<b>{refreshMeta()!.last_event}</b>
+                <Show when={refreshMeta()!.last_order_no}>
+                  {' '}（{refreshMeta()!.last_order_no}）
+                </Show>
+                <Show when={refreshMeta()!.last_operator}>
+                  {' '}· 操作人：{refreshMeta()!.last_operator}
+                </Show>
+              </div>
+              <div style={{ marginLeft: 'auto', color: '#8c8c8c' }}>
+                🔄 前端同步：{syncedAt().toLocaleTimeString('zh-CN')}
+                <span style={{ marginLeft: '12px' }}>
+                  📝 后端更新：{new Date(refreshMeta()!.last_changed_at).toLocaleString('zh-CN')}
+                </span>
+              </div>
+            </div>
+          </Show>
+
+          <Show when={lastFailReason()}>
+            <div style={{
+              background: '#fff2f0',
+              borderRadius: '8px',
+              padding: '12px 16px',
+              marginBottom: '12px',
+              border: '1px solid #ffccc7',
+              fontSize: '13px',
+              color: '#cf1322',
+            }}>
+              ⚠️ 最近操作失败 <span style={{ color: '#8c8c8c', marginLeft: '8px' }}>({lastFailAt()})</span>：
+              <b style={{ marginLeft: '8px' }}>{lastFailReason()}</b>
+              <button
+                onClick={() => setLastFailReason('')}
+                style={{
+                  marginLeft: '16px',
+                  background: 'none',
+                  border: 'none',
+                  color: '#8c8c8c',
+                  cursor: 'pointer',
+                  fontSize: '12px',
+                }}
+              >
+                清空
+              </button>
+            </div>
+          </Show>
 
           <div style={{
             background: '#fff',
@@ -962,6 +1060,45 @@ const MainLayout: Component<{ onLogout: () => void }> = (props) => {
             </Show>
 
             <Show when={selectedOrder() && orderDetail()}>
+              <Show when={orderDetail()?.last_event}>
+                <div style={{
+                  background: '#e6f7ff',
+                  borderRadius: '8px',
+                  padding: '12px',
+                  marginBottom: '16px',
+                  border: '1px solid #91d5ff',
+                  fontSize: '13px',
+                  color: '#0050b3',
+                }}>
+                  <div style={{ marginBottom: '6px', fontWeight: 500 }}>
+                    📌 最近状态变更
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px' }}>
+                    <div>
+                      操作：<b>{orderDetail()!.last_event!.operation}</b>
+                    </div>
+                    <div>
+                      {statusText[orderDetail()!.last_event!.old_status as OrderStatus] || orderDetail()!.last_event!.old_status}
+                      {' → '}
+                      <b style={{ color: '#1890ff' }}>
+                        {statusText[orderDetail()!.last_event!.new_status as OrderStatus] || orderDetail()!.last_event!.new_status}
+                      </b>
+                    </div>
+                    <div>
+                      操作人：{orderDetail()!.last_event!.operator_name}
+                    </div>
+                    <div style={{ color: '#8c8c8c' }}>
+                      {new Date(orderDetail()!.last_event!.create_at).toLocaleString('zh-CN')}
+                    </div>
+                  </div>
+                  <Show when={orderDetail()!.last_event!.remark}>
+                    <div style={{ marginTop: '6px', color: '#595959' }}>
+                      备注：{orderDetail()!.last_event!.remark}
+                    </div>
+                  </Show>
+                </div>
+              </Show>
+
               <div style={{ marginBottom: '16px' }}>
                 <div style={{
                   fontSize: '13px',
