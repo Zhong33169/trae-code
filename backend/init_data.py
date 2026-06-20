@@ -123,6 +123,33 @@ def run():
         auditor=reviewer, auditor_name=reviewer.real_name,
         result=AuditLog.ResultChoices.PASS, remark='全流程核对通过，归档完成',
     )
+    # === 附件演示：正常单的完整附件 ===
+    Attachment.objects.create(
+        booking=b1, category='booking_doc', file_name='订舱委托书-PK2026001.pdf',
+        file_size=245678, uploader=registrar,
+
+    )
+    Attachment.objects.create(
+        booking=b1, category='packing_list', file_name='装箱单-PK2026001.xlsx',
+        file_size=18932, uploader=registrar,
+
+    )
+    Attachment.objects.create(
+        booking=b1, category='invoice', file_name='商业发票-PK2026001.pdf',
+        file_size=35621, uploader=registrar,
+    )
+    Attachment.objects.create(
+        booking=b1, category='bl_doc', file_name='提单正本-COSU6287654321.pdf',
+        file_size=512048, uploader=registrar,
+    )
+    Attachment.objects.create(
+        booking=b1, category='loading_doc', file_name='装柜照片-20260615.zip',
+        file_size=2845678, uploader=registrar,
+    )
+    log_operation(b1, ActionChoices.UPLOAD_ATTACH, operator=registrar,
+                  remark='上传附件：订舱委托书、装箱单、商业发票')
+    log_operation(b1, ActionChoices.UPLOAD_ATTACH, operator=registrar,
+                  remark='上传附件：提单正本、装柜照片')
 
     # ============ 样例2：缺材料单（待审核） ============
     print('   [样例2] PK-2026-002 缺材料单（待审核，异常标记：缺材料）')
@@ -154,6 +181,14 @@ def run():
         fail_reason='缺失商业发票和装箱单的电子签章版本，审核暂不通过，请订舱登记员补充后重新提交',
         remark='已提醒登记员补材料',
     )
+    # === 附件演示：缺材料单有部分附件，明确缺哪些 ===
+    Attachment.objects.create(
+        booking=b2, category='booking_doc', file_name='订舱委托书-PK2026002.pdf',
+        file_size=198765, uploader=registrar,
+    )
+    # 缺：packing_list（有但未签章）、invoice（有但未签章）- 体现在 exception_note
+    log_operation(b2, ActionChoices.UPLOAD_ATTACH, operator=registrar,
+                  remark='上传附件：订舱委托书（装箱单和商业发票仅扫描件，缺电子签章）')
 
     # ============ 样例3：超时单（订舱失败） ============
     print('   [样例3] PK-2026-003 超时单（订舱失败，办理时限已超期）')
@@ -232,6 +267,14 @@ def run():
         fail_reason='退回：① 缺少非危鉴定书；② 起运港不具体；③ 柜量未注明是否预提。',
         remark='退回单，登记员补正中',
     )
+    # === 附件演示：退回单（有订舱委托书，缺非危鉴定书） ===
+    Attachment.objects.create(
+        booking=b4, category='booking_doc', file_name='订舱委托书-PK2026004.pdf',
+        file_size=215678, uploader=registrar,
+    )
+    # 缺：非危鉴定书（化工品必需）
+    log_operation(b4, ActionChoices.UPLOAD_ATTACH, operator=registrar,
+                  remark='上传附件：订舱委托书（缺非危鉴定书）')
 
     # ============ 样例5：重复批次测试用 ============
     print('   [样例5] PK-2026-005 / PK-2026-006 重复批次测试（同一批次号）')
@@ -260,6 +303,14 @@ def run():
     )
     log_operation(b5, ActionChoices.CREATE, operator=registrar, remark='首次录入')
     log_operation(b5b, ActionChoices.CREATE, operator=registrar, remark='重复录入（测试用）')
+    # === 重复批次完整审计追溯：b5 正常提交，b5b 尝试提交被系统拦截 ===
+    log_operation(b5, ActionChoices.SUBMIT, operator=registrar,
+                  to_status=BookingStatusChoices.PENDING_REVIEW,
+                  remark='首次提交，批次号 BATCH-DUP-2026-999，系统正常受理')
+    # b5b 尝试提交时，后端统一校验 check_duplicate_batch 发现重复，强制拦截
+    log_operation(b5b, ActionChoices.SUBMIT, operator=registrar,
+                  to_status=BookingStatusChoices.DRAFT,  # 状态未变，被拦截
+                  remark='尝试提交时被系统自动拦截：检测到重复批次号')
     # 重复批次样例审计：b5b 尝试提交时被系统拦截，留下失败原因可追溯
     AuditLog.objects.create(
         booking=b5b, audit_type=AuditLog.AuditTypeChoices.BOOKING,
@@ -270,6 +321,26 @@ def run():
                     '(3) 是否前一单有误需要作废后再创建。',
         remark='系统提交时自动拦截，登记员需核对后处理。',
     )
+    # b5 正常通过审核（作为对比）
+    AuditLog.objects.create(
+        booking=b5, audit_type=AuditLog.AuditTypeChoices.BOOKING,
+        auditor=supervisor, auditor_name=supervisor.real_name,
+        result=AuditLog.ResultChoices.PASS,
+        remark='首次录入，批次号唯一，审核通过。',
+    )
+    # === 附件：b5 正常有附件，b5b 重复单也上传了附件 ===
+    Attachment.objects.create(
+        booking=b5, category='booking_doc', file_name='订舱委托书-PK2026005.pdf',
+        file_size=167890, uploader=registrar,
+    )
+    Attachment.objects.create(
+        booking=b5b, category='booking_doc', file_name='订舱委托书-PK2026006（重复）.pdf',
+        file_size=167890, uploader=registrar,
+    )
+    log_operation(b5, ActionChoices.UPLOAD_ATTACH, operator=registrar,
+                  remark='上传附件：订舱委托书（首次录入）')
+    log_operation(b5b, ActionChoices.UPLOAD_ATTACH, operator=registrar,
+                  remark='上传附件：订舱委托书（重复录入，被拦截）')
 
     # ============ 样例6：状态不一致测试 ============
     print('   [样例6] PK-2026-007 状态不一致单（线上vs离线台账不一致）')
@@ -309,6 +380,17 @@ def run():
         operator=registrar, operator_name=registrar.real_name,
         remark='台账显示已装柜（模拟不一致）',
     )
+    # === 附件：状态不一致单 ===
+    Attachment.objects.create(
+        booking=b6, category='booking_doc', file_name='订舱委托书-PK2026007.pdf',
+        file_size=234567, uploader=registrar,
+    )
+    Attachment.objects.create(
+        booking=b6, category='packing_list', file_name='装箱单-PK2026007.xlsx',
+        file_size=21345, uploader=registrar,
+    )
+    log_operation(b6, ActionChoices.UPLOAD_ATTACH, operator=registrar,
+                  remark='上传附件：订舱委托书、装箱单（线上线下状态不一致，待对账）')
 
     # ============ 样例7：在途正常单（装柜中，待提单） ============
     print('   [样例7] PK-2026-008 在途正常单（订舱成功，待装柜确认）')
@@ -347,6 +429,42 @@ def run():
         booking=b7, audit_type=AuditLog.AuditTypeChoices.BOOKING,
         auditor=supervisor, auditor_name=supervisor.real_name,
         result=AuditLog.ResultChoices.PASS, remark='订舱审核通过，SO已下',
+    )
+    # === 完整新建提交+审计追溯：b7 的端到端操作留痕 ===
+    log_operation(b7, ActionChoices.UPLOAD_ATTACH, operator=registrar,
+                  remark='创建时同步上传附件：订舱委托书、装箱单、商业发票')
+    # === 附件：在途单 ===
+    Attachment.objects.create(
+        booking=b7, category='booking_doc', file_name='订舱委托书-PK2026008.pdf',
+        file_size=278901, uploader=registrar,
+    )
+    Attachment.objects.create(
+        booking=b7, category='packing_list', file_name='装箱单-PK2026008.xlsx',
+        file_size=24567, uploader=registrar,
+    )
+    Attachment.objects.create(
+        booking=b7, category='invoice', file_name='商业发票-PK2026008.pdf',
+        file_size=42345, uploader=registrar,
+    )
+    Attachment.objects.create(
+        booking=b7, category='bl_doc', file_name='提单副本-EGLV1234567890.pdf',
+        file_size=456789, uploader=registrar,
+    )
+    # === 完整审计链：订舱+装柜+提单三轮审核 ===
+    AuditLog.objects.create(
+        booking=b7, audit_type=AuditLog.AuditTypeChoices.BOOKING,
+        auditor=supervisor, auditor_name=supervisor.real_name,
+        result=AuditLog.ResultChoices.PASS, remark='订舱审核：资料齐全，SO已确认',
+    )
+    AuditLog.objects.create(
+        booking=b7, audit_type=AuditLog.AuditTypeChoices.LOADING,
+        auditor=supervisor, auditor_name=supervisor.real_name,
+        result=AuditLog.ResultChoices.PASS, remark='装柜审核：已安排工厂装柜，待确认',
+    )
+    AuditLog.objects.create(
+        booking=b7, audit_type=AuditLog.AuditTypeChoices.BL,
+        auditor=registrar, auditor_name=registrar.real_name,
+        result=AuditLog.ResultChoices.PASS, remark='提单审核：提单已出，信息核对无误',
     )
 
     print()

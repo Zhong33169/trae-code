@@ -899,9 +899,8 @@ def upload_attachment(
     file: UploadedFile = File(...),
     category: str = 'other',
 ):
-    ok, msg = check_action_permission(request.user, 'upload_attach')
-    if not ok:
-        raise HttpError(403, msg)
+    # 统一强制：只有在 allowed_actions 中的角色才能上传
+    require_action_flow(request.user, 'upload_attach')
     b = get_object_or_404(BookingApplication, id=booking_id)
     if category not in dict(Attachment.CategoryChoices.choices):
         category = 'other'

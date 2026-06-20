@@ -42,7 +42,6 @@ export default component$(() => {
     validateTimer: null as any,
 
     attachments: [] as Attachment[],
-    showUpload: false,
     uploadCategory: 'booking_doc',
     uploadFile: null as File | null,
     uploadLoading: false,
@@ -50,7 +49,6 @@ export default component$(() => {
     toast: '',
   });
 
-  // 实时校验
   const scheduleValidate = () => {
     if (!s.form.form_no && !s.form.batch_no) return;
     if (s.validateTimer) clearTimeout(s.validateTimer);
@@ -70,7 +68,6 @@ export default component$(() => {
     }, 400);
   };
 
-  // 当前用户必须是 registrar 或 admin
   useVisibleTask$(() => {
     const role = auth.user?.role || '';
     if (role && role !== 'registrar' && role !== 'admin') {
@@ -107,16 +104,88 @@ export default component$(() => {
 
       const res = await bookingsApi.create(payload);
       const id = res.id;
-      s.toast = asDraft ? '草稿保存成功' : '订舱申请创建成功';
-      // 如果已经上传了附件，再创建后重新关联（需要后端支持，暂时提示）
+      s.createdId = id;
+
+      if (s.attachments.length > 0) {
+        for (const att of s.attachments) {
+          if (att._file) {
+            try {
+              await bookingsApi.uploadAttachment(id, att._file, att.category);
+            } catch (e: any) {
+              console.error('附件上传失败：', att.file_name, e);
+            }
+          }
+        }
+      }
+
+      if (!asDraft) {
+        s.toast = '订舱申请创建成功，正在提交审核...';
+        await bookingsApi.submit(id, { remark: '订舱登记员创建并提交审核' });
+        s.toast = '订舱申请已创建并提交审核';
+      } else {
+        s.toast = '草稿保存成功';
+      }
+
       setTimeout(() => {
         nav(`/booking/${id}`);
       }, 600);
     } catch (e: any) {
-      alert('创建失败：' + (e.message || '未知错误'));
+      alert('操作失败：' + (e.message || '未知错误'));
     } finally {
       s.submitting = false;
     }
+  };
+
+  const handleFileSelect = (e: Event) => {
+    const input = e.target as HTMLInputElement;
+    if (input.files && input.files.length > 0) {
+      const file = input.files[0];
+      const maxSize = 20 * 1024 * 1024;
+      if (file.size > maxSize) {
+        alert('文件大小不能超过 20MB');
+        input.value = '';
+        return;
+      }
+      s.uploadFile = file;
+    }
+  };
+
+  const addAttachment = () => {
+    if (!s.uploadFile) {
+      alert('请先选择文件');
+      return;
+    }
+    const att: any = {
+      id: Date.now(),
+      file_name: s.uploadFile.name,
+      file_size: s.uploadFile.size,
+      category: s.uploadCategory,
+      created_at: new Date().toISOString(),
+      _file: s.uploadFile,
+    };
+    s.attachments = [...s.attachments, att];
+    s.uploadFile = null;
+    const input = document.getElementById('file-upload-input') as HTMLInputElement;
+    if (input) input.value = '';
+  };
+
+  const removeAttachment = (index: number) => {
+    s.attachments = s.attachments.filter((_: any, i: number) => i !== index);
+  };
+
+  const formatFileSize = (bytes: number) => {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+  };
+
+  const categoryLabelMap: Record<string, string> = {
+    booking_doc: '订舱单据',
+    packing_list: '装箱单',
+    invoice: '商业发票',
+    bl_doc: '提单文件',
+    loading_doc: '装柜单据',
+    other: '其他',
   };
 
   const hasErrors = s.validation?.errors && s.validation.errors.length > 0;
@@ -130,7 +199,6 @@ export default component$(() => {
         </div>
       )}
 
-      {/* 顶部操作条 */}
       <div class="bg-gradient-to-br from-white to-blue-50/30 rounded-2xl p-6 border border-gray-100 shadow-sm flex-wrap flex items-center justify-between gap-4">
         <div class="flex items-center gap-4">
           <Link href="/booking" class="inline-flex items-center gap-2 px-3 py-2 text-sm text-gray-600 hover:bg-white rounded-xl border border-gray-200 transition-colors">
@@ -155,12 +223,12 @@ export default component$(() => {
             保存为草稿
           </Button>
           <Button variant="primary" onClick$={() => submit(false)} disabled={s.submitting || hasErrors || s.validating}>
-            {s.submitting ? '创建中...' : '创建并提交'}
+            {s.submitting ? '处理中...' : '创建并提交'}
+            <svg class="w-4 h-4 ml-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
           </Button>
         </div>
       </div>
 
-      {/* 校验提示 */}
       {(hasErrors || hasWarnings) && (
         <div class={
           'border rounded-2xl p-5 shadow-sm ' +
@@ -186,12 +254,12 @@ export default component$(() => {
               </h3>
               {hasErrors && (
                 <ul class="list-disc ml-6 space-y-0.5 text-red-700 text-sm">
-                  {s.validation!.errors.map((e, i) => <li key={i}>{e}</li>)}
+                  {s.validation!.errors.map((e: string, i: number) => <li key={i}>{e}</li>)}
                 </ul>
               )}
               {hasWarnings && (
                 <ul class="list-disc ml-6 space-y-0.5 text-amber-700 text-sm">
-                  {s.validation!.warnings.map((w, i) => <li key={i}>{w}</li>)}
+                  {s.validation!.warnings.map((w: string, i: number) => <li key={i}>{w}</li>)}
                 </ul>
               )}
               {s.validating && <div class="text-xs text-gray-500 mt-2">校验中...</div>}
@@ -200,7 +268,6 @@ export default component$(() => {
         </div>
       )}
 
-      {/* 表单主体 */}
       <div class="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm">
         <h2 class="text-base font-semibold text-gray-800 mb-5 flex items-center gap-2">
           <span class="w-1.5 h-5 bg-blue-500 rounded-full"></span>
@@ -210,7 +277,7 @@ export default component$(() => {
           <InputField
             label="订舱单号 *"
             value={s.form.form_no}
-            onChange$={(v) => { s.form.form_no = v; scheduleValidate(); }}
+            onInput$={(v) => { s.form.form_no = v; scheduleValidate(); }}
             placeholder="例如：PK-2026-009"
             required
             hint="建议规则：PK + 年份 + 4位序号"
@@ -218,7 +285,7 @@ export default component$(() => {
           <InputField
             label="批次号 *"
             value={s.form.batch_no}
-            onChange$={(v) => { s.form.batch_no = v; scheduleValidate(); }}
+            onInput$={(v) => { s.form.batch_no = v; scheduleValidate(); }}
             placeholder="例如：BATCH-2026-009"
             required
             hint="⚠️ 相同批次号会被判定为重复录入"
@@ -226,26 +293,26 @@ export default component$(() => {
           <InputField
             label="客户名称 *"
             value={s.form.customer}
-            onChange$={(v) => (s.form.customer = v)}
+            onInput$={(v) => (s.form.customer = v)}
             placeholder="例如：上海华盛进出口贸易有限公司"
             required
           />
           <InputField
             label="货代 / 船公司"
             value={s.form.forwarder}
-            onChange$={(v) => (s.form.forwarder = v)}
+            onInput$={(v) => (s.form.forwarder = v)}
             placeholder="例如：中远海运 / MSC / 马士基"
           />
           <InputField
             label="起运港"
             value={s.form.port_of_loading}
-            onChange$={(v) => (s.form.port_of_loading = v)}
+            onInput$={(v) => (s.form.port_of_loading = v)}
             placeholder="例如：上海 / 深圳 / 宁波"
           />
           <InputField
             label="目的港"
             value={s.form.port_of_discharge}
-            onChange$={(v) => (s.form.port_of_discharge = v)}
+            onInput$={(v) => (s.form.port_of_discharge = v)}
             placeholder="例如：洛杉矶 / 汉堡 / 新加坡"
           />
           <SelectField
@@ -264,13 +331,13 @@ export default component$(() => {
           <InputField
             label="柜量"
             value={s.form.container_qty?.toString() || '1'}
-            onChange$={(v) => (s.form.container_qty = Number(v) || 1)}
+            onInput$={(v) => (s.form.container_qty = Number(v) || 1)}
             type="number"
           />
           <InputField
             label="办理时限"
             value={s.form.deadline}
-            onChange$={(v) => (s.form.deadline = v)}
+            onInput$={(v) => (s.form.deadline = v)}
             type="datetime-local"
             hint="超时后系统自动标记异常"
           />
@@ -284,52 +351,113 @@ export default component$(() => {
           <InputField
             label="货物描述"
             value={s.form.cargo_desc}
-            onChange$={(v) => (s.form.cargo_desc = v)}
+            onInput$={(v) => (s.form.cargo_desc = v)}
             placeholder="例如：电子产品 - 智能手机配件"
             rows={2}
           />
           <InputField
             label="重量（吨）"
             value={s.form.weight?.toString() || '0'}
-            onChange$={(v) => (s.form.weight = Number(v) || 0)}
+            onInput$={(v) => (s.form.weight = Number(v) || 0)}
             type="number"
           />
           <InputField
             label="体积（立方）"
             value={s.form.volume?.toString() || '0'}
-            onChange$={(v) => (s.form.volume = Number(v) || 0)}
+            onInput$={(v) => (s.form.volume = Number(v) || 0)}
             type="number"
           />
           <InputField
             label="预计开船日（ETD）"
             value={s.form.etd}
-            onChange$={(v) => (s.form.etd = v)}
+            onInput$={(v) => (s.form.etd = v)}
             type="date"
           />
           <InputField
             label="预计到港日（ETA）"
             value={s.form.eta}
-            onChange$={(v) => (s.form.eta = v)}
+            onInput$={(v) => (s.form.eta = v)}
             type="date"
           />
           <InputField
             label="船名航次"
             value={s.form.vessel}
-            onChange$={(v) => (s.form.vessel = v)}
+            onInput$={(v) => (s.form.vessel = v)}
             placeholder="例如：COSCO SHIPPING / 045E"
           />
           <InputField
             label="SO号（订舱确认后必填）"
             value={s.form.so_no}
-            onChange$={(v) => (s.form.so_no = v)}
+            onInput$={(v) => (s.form.so_no = v)}
             placeholder="例如：SO-SHA-2026-xxxxx"
           />
           <InputField
             label="提单号（提单出单后填写）"
             value={s.form.bl_no}
-            onChange$={(v) => (s.form.bl_no = v)}
+            onInput$={(v) => (s.form.bl_no = v)}
             placeholder="例如：COSU6xxxxxx"
           />
+        </div>
+
+        <h2 class="text-base font-semibold text-gray-800 mb-5 mt-8 flex items-center gap-2">
+          <span class="w-1.5 h-5 bg-purple-500 rounded-full"></span>
+          附件上传
+        </h2>
+        <div class="border-2 border-dashed border-gray-200 rounded-xl p-5 bg-gray-50/50 space-y-4">
+          {s.attachments.length > 0 && (
+            <div class="space-y-2">
+              {s.attachments.map((att: any, i: number) => (
+                <div key={att.id} class="flex items-center justify-between bg-white rounded-lg p-3 border border-gray-100">
+                  <div class="flex items-center gap-3">
+                    <div class="w-8 h-8 bg-blue-50 rounded-lg flex items-center justify-center text-blue-600">
+                      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                    </div>
+                    <div>
+                      <div class="text-sm font-medium text-gray-800">{att.file_name}</div>
+                      <div class="text-xs text-gray-500">
+                        {formatFileSize(att.file_size)} · {categoryLabelMap[att.category] || att.category}
+                      </div>
+                    </div>
+                  </div>
+                  <Button variant="ghost" size="sm" onClick$={() => removeAttachment(i)}>
+                    <svg class="w-4 h-4 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div class="flex items-end gap-3 flex-wrap">
+            <div class="flex-1 min-w-[200px]">
+              <label class="block text-sm font-medium text-gray-700 mb-1.5">选择文件</label>
+              <input
+                id="file-upload-input"
+                type="file"
+                class="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-blue-50 file:text-blue-600 hover:file:bg-blue-100 transition-colors"
+                onChange$={handleFileSelect}
+              />
+              <div class="text-xs text-gray-400 mt-1">支持 PDF / JPG / PNG / Excel，单个文件 ≤ 20MB</div>
+            </div>
+            <div class="w-40">
+              <SelectField
+            label="文件类型"
+            value={s.uploadCategory}
+            onChange$={(v) => (s.uploadCategory = v)}
+                options={[
+                  { value: 'booking_doc', label: '订舱单据' },
+                  { value: 'packing_list', label: '装箱单' },
+                  { value: 'invoice', label: '商业发票' },
+                  { value: 'bl_doc', label: '提单文件' },
+                  { value: 'loading_doc', label: '装柜单据' },
+                  { value: 'other', label: '其他' },
+                ]}
+              />
+            </div>
+            <Button variant="primary" size="md" onClick$={addAttachment} disabled={!s.uploadFile}>
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" /></svg>
+              添加
+            </Button>
+          </div>
         </div>
 
         <h2 class="text-base font-semibold text-gray-800 mb-5 mt-8 flex items-center gap-2">
@@ -382,7 +510,7 @@ export default component$(() => {
 
         <div class="mt-10 pt-6 border-t border-gray-100 flex items-center justify-between flex-wrap gap-3">
           <div class="text-xs text-gray-400">
-            创建后可在详情页继续上传附件、提交审核、流转状态
+            创建后可在详情页继续上传附件、流转状态
           </div>
           <div class="flex items-center gap-2">
             <Button variant="default" onClick$={() => nav('/booking')} disabled={s.submitting}>
@@ -396,7 +524,7 @@ export default component$(() => {
               onClick$={() => submit(false)}
               disabled={s.submitting || hasErrors || s.validating}
             >
-              {s.submitting ? '创建中...' : '创建并提交'}
+              {s.submitting ? '处理中...' : '创建并提交'}
               <svg class="w-4 h-4 ml-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
             </Button>
           </div>

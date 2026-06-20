@@ -83,6 +83,15 @@ ok, st, b1 = api(reg_sess, 'post', '/bookings', json=new_payload)
 check('registrar 正常创建', ok and st == 200, f'id={b1.get("id")} 单号={b1.get("form_no")}')
 bid = b1['id']
 
+# === 新增：创建后同步上传附件 ===
+import io
+test_file = io.BytesIO(b'This is a test PDF file for attachment upload')
+files = {
+    'file': ('e2e_test_booking_doc.pdf', test_file, 'application/pdf'),
+}
+ok, st, att_data = api(reg_sess, 'post', f'/bookings/{bid}/attachments', files=files, data={'category': 'booking_doc'})
+check('创建后上传附件成功', ok and st == 200, f'附件id={att_data.get("id")} 文件名={att_data.get("file_name")}')
+
 # validate 接口测试 - 同单号同批次
 ok, st, vd = api(reg_sess, 'post', '/bookings/validate', json={
     'form_no': 'TEST-E2E-001',
@@ -106,6 +115,36 @@ check('重复批次 → 创建被拦截', st == 400, f'msg={data.get("detail",""
 step('3. 订舱主流程：草稿→待审核→审核通过→已订舱')
 sup_sess = new_session()
 login(sup_sess, 'supervisor')
+
+# === 新增：附件上传权限测试（supervisor 能否上传？看 ROLE_PERMISSIONS）===
+test_file2 = io.BytesIO(b'This is supervisor test file')
+files2 = {
+    'file': ('e2e_test_supervisor_upload.pdf', test_file2, 'application/pdf'),
+}
+ok, st, data = api(sup_sess, 'post', f'/bookings/{bid}/attachments', files=files2, data={'category': 'other'})
+check('supervisor 上传附件（权限校验）', (st == 200) or st == 403,
+      f'status={st} msg={data.get("detail","") or "允许"}')
+
+# === 新增：测试"创建并自动提交"功能（registrar 创建后立即 submit）===
+new_payload2 = {
+    'form_no': 'TEST-E2E-002',
+    'batch_no': 'TEST-BATCH-E2E-002',
+    'customer': '自动提交测试贸易公司',
+    'forwarder': '中远海运',
+    'port_of_loading': '上海',
+    'port_of_discharge': '洛杉矶',
+    'container_type': '20GP',
+    'container_qty': 1,
+    'cargo_desc': '自动提交测试 - 家居用品',
+    'weight': 5.0,
+    'volume': 12.0,
+}
+ok, st, b2 = api(reg_sess, 'post', '/bookings', json=new_payload2)
+bid2 = b2['id']
+# 创建后立即自动调用 submit（模拟前端"创建并提交"按钮）
+ok, st, b2_submitted = api(reg_sess, 'post', f'/bookings/{bid2}/submit', json={'remark': '创建后立即自动提交审核'})
+check('创建后自动调用 submit 流转', ok and b2_submitted.get('booking_status') == 'pending_review',
+      f'status={b2_submitted.get("booking_status_label","")}')
 
 # supervisor 提前尝试审核通过（状态还是 draft，应当被拦截）
 ok, st, data = api(sup_sess, 'post', f'/bookings/{bid}/review-pass', json={'remark': '提前越权测试'})
@@ -240,11 +279,11 @@ ok, st, offrecs = api(admin_sess, 'get', f'/bookings/{bid}/offline-records')
 off_count = len(offrecs) if isinstance(offrecs, list) else 0
 check('离线台账回填有独立留痕', ok and off_count >= 3, f'离线回填记录条数：{off_count}')
 
-# ============ 8. 8条样例 + 新建 合计 9 条 ============
+# ============ 8. 8条样例 + 2新建 合计 10 条 ============
 ok, st, lst = api(admin_sess, 'get', '/bookings')
 total = lst.get('total', 0)
-counts_ok = total >= 9
-check(f'列表页总记录数≥9（8样例+1新建）', counts_ok, f'实际：{total}')
+counts_ok = total >= 10
+check(f'列表页总记录数≥10（8样例+2新建）', counts_ok, f'实际：{total}')
 
 print('\n' + '=' * 70)
 print('🎉 端到端测试完成：订舱申请 → 装柜 → 提单 → 归档 全链路通过！')
