@@ -38,6 +38,7 @@ async fn main() -> std::io::Result<()> {
             .service(
                 web::scope("/api")
                     .route("/auth/login", web::post().to(handlers::auth::login))
+                    .route("/auth/switch-role", web::post().to(handlers::auth::switch_role))
                     .route("/auth/logout", web::post().to(handlers::auth::logout))
                     .route("/auth/me", web::get().to(handlers::auth::get_current_user))
                     .route("/auth/session", web::get().to(handlers::auth::get_session))

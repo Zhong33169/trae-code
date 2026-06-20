@@ -59,9 +59,67 @@ pub async fn login(
     auth_state: web::Data<AuthState>,
     http_req: HttpRequest,
 ) -> impl Responder {
-    let source_ip = get_source_ip(&http_req);
-    let user_agent = get_user_agent(&http_req);
+    handle_auth_request(&req.into_inner(), None, &db, &auth_state, &http_req, false)
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct SwitchRoleRequest {
+    pub username: String,
+    pub password: String,
+    pub from_user_id: Option<i64>,
+}
+
+pub async fn switch_role(
+    req: web::Json<SwitchRoleRequest>,
+    db: web::Data<Database>,
+    auth_state: web::Data<AuthState>,
+    http_req: HttpRequest,
+) -> impl Responder {
+    let body = req.into_inner();
+    handle_auth_request(
+        &LoginRequest { username: body.username, password: body.password },
+        body.from_user_id,
+        &db,
+        &auth_state,
+        &http_req,
+        true
+    )
+}
+
+fn handle_auth_request(
+    req: &LoginRequest,
+    from_user_id: Option<i64>,
+    db: &web::Data<Database>,
+    auth_state: &web::Data<AuthState>,
+    http_req: &HttpRequest,
+    is_switch_role: bool,
+) -> HttpResponse {
+    let source_ip = get_source_ip(http_req);
+    let user_agent = get_user_agent(http_req);
     let username = req.username.clone();
+
+    let action_success = if is_switch_role { "switch_role_success" } else { "login_success" };
+    let action_failure = if is_switch_role { "switch_role_failure" } else { "login_failure" };
+    let detail_success = if is_switch_role {
+        from_user_id.map(|id| format!("从用户{}切换角色成功", id))
+    } else {
+        Some("登录成功".into())
+    };
+    let detail_failure_nouser = if is_switch_role {
+        Some(format!("切换角色失败：用户名{}不存在", username))
+    } else {
+        Some(format!("用户名{}不存在", username))
+    };
+    let detail_failure_pw = if is_switch_role {
+        Some(format!("切换角色失败：用户{}密码错误", username))
+    } else {
+        Some(format!("用户{}登录失败", username))
+    };
+    let failure_reason = if is_switch_role {
+        "角色切换失败，请检查用户名和密码"
+    } else {
+        "用户名或密码错误"
+    };
 
     let conn = db.conn.lock().unwrap();
     let result = conn.query_row(
@@ -84,7 +142,7 @@ pub async fn login(
             let parsed_hash = match PasswordHash::new(&user.password_hash) {
                 Ok(h) => h,
                 Err(_) => {
-                    insert_audit_log(&conn, None, Some(user.id), "login_failure", Some("密码哈希错误"), true, Some("密码哈希错误"), None, source_ip.as_deref(), user_agent.as_deref());
+                    insert_audit_log(&conn, None, Some(user.id), action_failure, Some("密码哈希错误"), true, Some("密码哈希错误"), None, source_ip.as_deref(), user_agent.as_deref());
                     return HttpResponse::InternalServerError().json(ApiResponse::<()>::error("密码哈希错误"));
                 }
             };
@@ -99,7 +157,7 @@ pub async fn login(
                         name: user.name.clone(),
                     });
 
-                    insert_audit_log(&conn, None, Some(user.id), "login_success", Some("登录成功"), false, None, None, source_ip.as_deref(), user_agent.as_deref());
+                    insert_audit_log(&conn, None, Some(user.id), action_success, detail_success.as_deref(), false, None, None, source_ip.as_deref(), user_agent.as_deref());
 
                     HttpResponse::Ok().json(ApiResponse::success(LoginResponse {
                         token,
@@ -107,14 +165,14 @@ pub async fn login(
                     }))
                 }
                 Err(_) => {
-                    insert_audit_log(&conn, None, Some(user.id), "login_failure", Some(&format!("用户{}登录失败", username)), true, Some("用户名或密码错误"), None, source_ip.as_deref(), user_agent.as_deref());
-                    HttpResponse::Unauthorized().json(ApiResponse::<()>::error_with_code(401, "用户名或密码错误"))
+                    insert_audit_log(&conn, None, Some(user.id), action_failure, detail_failure_pw.as_deref(), true, Some(failure_reason), None, source_ip.as_deref(), user_agent.as_deref());
+                    HttpResponse::Unauthorized().json(ApiResponse::<()>::error_with_code(401, failure_reason))
                 }
             }
         }
         Err(_) => {
-            insert_audit_log(&conn, None, None, "login_failure", Some(&format!("用户名{}不存在", username)), true, Some("用户名或密码错误"), None, source_ip.as_deref(), user_agent.as_deref());
-            HttpResponse::Unauthorized().json(ApiResponse::<()>::error_with_code(401, "用户名或密码错误"))
+            insert_audit_log(&conn, None, None, action_failure, detail_failure_nouser.as_deref(), true, Some(failure_reason), None, source_ip.as_deref(), user_agent.as_deref());
+            HttpResponse::Unauthorized().json(ApiResponse::<()>::error_with_code(401, failure_reason))
         }
     }
 }

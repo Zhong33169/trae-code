@@ -65,6 +65,12 @@ const actionLabels = {
   resubmit_ticket_status_conflict: '补正重提(状态冲突)',
   archive_status_conflict: '归档(状态冲突)',
   create_ticket_failed: '创建工单失败',
+  login_success: '登录成功',
+  login_failure: '登录失败',
+  logout_success: '退出登录',
+  switch_role_success: '角色切换成功',
+  switch_role_failure: '角色切换失败',
+  unauthorized_access: '未授权访问',
 }
 
 const TicketDetail = () => {
@@ -523,7 +529,7 @@ const TicketDetail = () => {
                 auditLogs.map(log => (
                   <div key={log.id} className="audit-log-item">
                     <span className="audit-log-time">{formatDate(log.created_at)}</span>
-                    <span className="audit-log-user">{log.user_name}</span>
+                    <span className="audit-log-user">{log.user_name || (log.user_id ? `用户#${log.user_id}` : '匿名用户')}</span>
                     <span className={`audit-log-action ${log.is_failure ? 'audit-log-failure' : ''}`}>
                       {actionLabels[log.action] || log.action}
                     </span>
@@ -539,6 +545,13 @@ const TicketDetail = () => {
                       <span style={{ color: '#888', fontSize: 11 }}>
                         批次#{log.batch_id}
                       </span>
+                    )}
+                    {(log.source_ip || log.user_agent) && (
+                      <div style={{ marginTop: 4, paddingLeft: 8, borderLeft: '2px solid #e0e0e0', fontSize: 11, color: '#888' }}>
+                        {log.source_ip && <span>来源: {log.source_ip}</span>}
+                        {log.source_ip && log.user_agent && <span style={{ margin: '0 6px' }}>|</span>}
+                        {log.user_agent && <span>UA: {log.user_agent}</span>}
+                      </div>
                     )}
                   </div>
                 ))

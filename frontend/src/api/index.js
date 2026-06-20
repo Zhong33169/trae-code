@@ -37,6 +37,7 @@ api.interceptors.response.use(
 
 export const authApi = {
   login: (username, password) => api.post('/auth/login', { username, password }),
+  switchRole: (username, password, fromUserId) => api.post('/auth/switch-role', { username, password, from_user_id: fromUserId }),
   logout: () => api.post('/auth/logout'),
   getCurrentUser: () => api.get('/auth/me'),
   getSession: () => api.get('/auth/session'),

@@ -67,6 +67,9 @@ export const AuthProvider = ({ children }) => {
         return { success: true }
       }
     } catch (e) {
+      localStorage.removeItem('token')
+      setCurrentUser(null)
+      setSession(null)
       setAuthError(e?.message || '登录失败，请检查用户名和密码')
     } finally {
       setLoading(false)
@@ -85,21 +88,27 @@ export const AuthProvider = ({ children }) => {
 
     setLoading(true)
     setAuthError(null)
+    const oldToken = localStorage.getItem('token')
+    const oldUser = currentUser
     try {
-      const result = await authApi.login(account.username, account.password)
+      const result = await authApi.switchRole(account.username, account.password, oldUser?.id)
       if (result?.token) {
         localStorage.setItem('token', result.token)
         const sess = await authApi.getSession()
         setCurrentUser(sess?.user || result.user)
         setSession(sess)
         setRefreshKey(k => k + 1)
-        return
+        return { success: true }
       }
     } catch (e) {
-      setAuthError(e?.message || '角色切换失败，请重试')
+      localStorage.removeItem('token')
+      setCurrentUser(null)
+      setSession(null)
+      setAuthError(e?.message || '角色切换失败，请重新登录')
     } finally {
       setLoading(false)
     }
+    return { success: false, error: authError }
   }
 
   const logout = async () => {

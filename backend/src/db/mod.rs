@@ -168,6 +168,10 @@ impl Database {
         conn.execute(audit_sql, params![28, None as Option<i64>, 2, "login_success", Some("审核主管登录成功"), 0, None as Option<String>, None as Option<i64>, Some("192.168.1.101"), Some("Mozilla/5.0 (iPhone; CPU iPhone OS 16_0)")])?;
         conn.execute(audit_sql, params![29, None as Option<i64>, None as Option<i64>, "unauthorized_access", Some("访问/api/tickets被拒绝：缺少登录凭证"), 1, Some("缺少登录凭证，请先登录"), None as Option<i64>, Some("10.0.0.50"), Some("curl/7.88.1")])?;
         conn.execute(audit_sql, params![30, None as Option<i64>, None as Option<i64>, "unauthorized_access", Some("访问/api/tickets/1被拒绝：无效登录凭证"), 1, Some("无效或已过期的登录凭证，请重新登录"), None as Option<i64>, Some("10.0.0.51"), Some("PostmanRuntime/7.32.0")])?;
+        conn.execute(audit_sql, params![31, None as Option<i64>, 2, "switch_role_success", Some("从用户1切换角色成功"), 0, None as Option<String>, None as Option<i64>, Some("192.168.1.100"), Some("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)")])?;
+        conn.execute(audit_sql, params![32, None as Option<i64>, 2, "switch_role_failure", Some("切换角色失败：用户auditor1密码错误"), 1, Some("角色切换失败，请检查用户名和密码"), None as Option<i64>, Some("192.168.1.100"), Some("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)")])?;
+        conn.execute(audit_sql, params![33, None as Option<i64>, None as Option<i64>, "switch_role_failure", Some("切换角色失败：用户名unknown不存在"), 1, Some("角色切换失败，请检查用户名和密码"), None as Option<i64>, Some("192.168.1.100"), Some("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)")])?;
+        conn.execute(audit_sql, params![34, None as Option<i64>, 3, "switch_role_success", Some("从用户2切换角色成功"), 0, None as Option<String>, None as Option<i64>, Some("192.168.1.101"), Some("Mozilla/5.0 (iPhone; CPU iPhone OS 16_0)")])?;
 
         Ok(())
     }

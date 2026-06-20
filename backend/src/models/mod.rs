@@ -117,7 +117,7 @@ pub struct TicketAttachment {
 pub struct AuditLog {
     pub id: i64,
     pub ticket_id: Option<i64>,
-    pub user_id: i64,
+    pub user_id: Option<i64>,
     pub user_name: Option<String>,
     pub action: String,
     pub detail: Option<String>,
