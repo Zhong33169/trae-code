@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, IsBoolean, IsNumber, IsOptional, IsIn } from 'class-validator';
+import { IsString, IsNotEmpty, IsBoolean, IsNumber, IsIn, IsOptional } from 'class-validator';
 
 export class GuestConfirmDto {
   @IsString()
@@ -14,6 +14,6 @@ export class GuestConfirmDto {
   confirmed!: boolean;
 
   @IsNumber()
-  @IsOptional()
-  expectedVersion?: number;
+  @IsNotEmpty()
+  expectedVersion!: number;
 }

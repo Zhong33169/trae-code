@@ -1,4 +1,4 @@
-import { IsArray, IsString, IsIn, IsNotEmpty, ArrayNotEmpty, IsOptional, IsObject } from 'class-validator';
+import { IsArray, IsString, IsIn, IsNotEmpty, ArrayNotEmpty, IsObject, IsOptional } from 'class-validator';
 
 export class BatchActionDto {
   @IsArray()
@@ -23,6 +23,6 @@ export class BatchActionDto {
   comment?: string;
 
   @IsObject()
-  @IsOptional()
-  itemVersions?: Record<string, number>;
+  @IsNotEmpty()
+  itemVersions!: Record<string, number>;
 }

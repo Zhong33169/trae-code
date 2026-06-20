@@ -355,6 +355,7 @@ const InvitationDetail = () => {
             materials={invitation.materials || []}
             canUpload={canEdit}
             operatorId={currentUser.id}
+            version={invitation.version}
             onUploaded={fetchData}
           />
         </Card>

@@ -104,10 +104,11 @@ export async function getStats(params?: Record<string, string>) {
   return res.data;
 }
 
-export async function uploadMaterial(id: string, file: File, operatorId: string) {
+export async function uploadMaterial(id: string, file: File, operatorId: string, expectedVersion: number) {
   const formData = new FormData();
   formData.append('file', file);
   formData.append('operatorId', operatorId);
+  formData.append('expectedVersion', String(expectedVersion));
   const res = await client.post(`/invitations/${id}/materials`, formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
   });

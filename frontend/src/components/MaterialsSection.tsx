@@ -9,13 +9,14 @@ interface Props {
   materials: Material[];
   canUpload: boolean;
   operatorId: string;
+  version: number;
   onUploaded: () => void;
 }
 
-const MaterialsSection: React.FC<Props> = ({ invitationId, materials, canUpload, operatorId, onUploaded }) => {
+const MaterialsSection: React.FC<Props> = ({ invitationId, materials, canUpload, operatorId, version, onUploaded }) => {
   const handleUpload = async (file: File) => {
     try {
-      await uploadMaterial(invitationId, file, operatorId);
+      await uploadMaterial(invitationId, file, operatorId, version);
       message.success('上传成功');
       onUploaded();
     } catch {

@@ -212,6 +212,16 @@ export function seed(db: Database.Database) {
       createdAt: now.subtract(8, 'day').format('YYYY-MM-DD HH:mm:ss'),
       updatedAt: now.subtract(3, 'day').format('YYYY-MM-DD HH:mm:ss'),
     },
+    {
+      id: 'conflict-demo-001', title: '【版本冲突演示】产品发布会媒体邀约', mediaType: '网络', eventName: 'Q3产品发布会',
+      eventDate, eventLocation: '深圳湾体育中心', deadline: normalDeadline, status: 'draft',
+      creatorId: 'registrar-001', creatorName: '张登记', reviewerId: null, reviewerName: null,
+      finalReviewerId: null, finalReviewerName: null, reviewComment: null, finalComment: null,
+      guestConfirmed: 0, checkinCompleted: 0, materialsComplete: 0, version: 3,
+      createdAt: now.subtract(2, 'day').format('YYYY-MM-DD HH:mm:ss'),
+      updatedAt: now.subtract(1, 'day').format('YYYY-MM-DD HH:mm:ss'),
+      _auditVersionConflict: true,
+    },
   ];
 
   const transaction = db.transaction(() => {
@@ -384,6 +394,37 @@ export function seed(db: Database.Database) {
           id: uuidv4(), invitationId: invId, operatorId: inv.finalReviewerId, operatorName: inv.finalReviewerName,
           operatorRole: 'final_reviewer', action: 'review', detail: inv.finalComment,
           beforeStatus: 'pending_final', afterStatus: 'archived', createdAt: updatedAt,
+        });
+      } else if (inv._auditVersionConflict) {
+        insertAudit.run({
+          id: uuidv4(), invitationId: invId, operatorId: inv.creatorId, operatorName: inv.creatorName,
+          operatorRole: 'registrar', action: 'create', detail: '创建媒体邀约单',
+          beforeStatus: null, afterStatus: 'draft',
+          createdAt: now.subtract(2, 'day').format('YYYY-MM-DD HH:mm:ss'),
+        });
+        insertAudit.run({
+          id: uuidv4(), invitationId: invId, operatorId: 'registrar-001', operatorName: '张登记',
+          operatorRole: 'registrar', action: 'version_conflict', detail: '提交缺失版本号',
+          beforeStatus: 'draft', afterStatus: 'pending_review',
+          createdAt: now.subtract(1, 'day').format('YYYY-MM-DD HH:mm:ss'),
+        });
+        insertAudit.run({
+          id: uuidv4(), invitationId: invId, operatorId: 'registrar-001', operatorName: '张登记',
+          operatorRole: 'registrar', action: 'version_conflict', detail: '提交版本冲突: 期望v1，当前v3',
+          beforeStatus: 'draft', afterStatus: 'pending_review',
+          createdAt: now.subtract(1, 'day').format('YYYY-MM-DD HH:mm:ss'),
+        });
+        insertAudit.run({
+          id: uuidv4(), invitationId: invId, operatorId: 'registrar-001', operatorName: '张登记',
+          operatorRole: 'registrar', action: 'update', detail: '补正修改: 标题→产品发布会媒体邀约',
+          beforeStatus: 'draft', afterStatus: 'draft',
+          createdAt: now.subtract(1, 'day').format('YYYY-MM-DD HH:mm:ss'),
+        });
+        insertAudit.run({
+          id: uuidv4(), invitationId: invId, operatorId: 'registrar-001', operatorName: '张登记',
+          operatorRole: 'registrar', action: 'update', detail: '补正修改: 活动地点→深圳湾体育中心',
+          beforeStatus: 'draft', afterStatus: 'draft',
+          createdAt: now.subtract(1, 'day').format('YYYY-MM-DD HH:mm:ss'),
         });
       }
     }

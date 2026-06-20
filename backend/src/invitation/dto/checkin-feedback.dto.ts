@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, IsBoolean, IsNumber, IsOptional, IsIn } from 'class-validator';
+import { IsString, IsNotEmpty, IsBoolean, IsNumber, IsIn, IsOptional } from 'class-validator';
 
 export class CheckinFeedbackDto {
   @IsString()
@@ -14,6 +14,6 @@ export class CheckinFeedbackDto {
   completed!: boolean;
 
   @IsNumber()
-  @IsOptional()
-  expectedVersion?: number;
+  @IsNotEmpty()
+  expectedVersion!: number;
 }

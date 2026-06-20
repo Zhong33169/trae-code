@@ -37,7 +37,7 @@ export class InvitationController {
   }
 
   @Put(':id')
-  update(@Param('id') id: string, @Body() dto: UpdateInvitationDto & { operatorId: string; operatorRole: string }) {
+  update(@Param('id') id: string, @Body() dto: UpdateInvitationDto & { operatorId: string; operatorRole: string; expectedVersion: number }) {
     return this.service.update(id, dto);
   }
 
@@ -82,8 +82,9 @@ export class InvitationController {
     @Param('id') id: string,
     @UploadedFile() file: Express.Multer.File,
     @Body('operatorId') operatorId: string,
+    @Body('expectedVersion') expectedVersion: string,
   ) {
-    return this.service.addMaterial(id, file, operatorId);
+    return this.service.addMaterial(id, file, operatorId, parseInt(expectedVersion, 10));
   }
 
   @Post(':id/guest-confirm')

@@ -164,7 +164,7 @@ export class InvitationService {
     return this.findOne(id);
   }
 
-  update(id: string, dto: UpdateInvitationDto & { operatorId: string; operatorRole: string; expectedVersion?: number }) {
+  update(id: string, dto: UpdateInvitationDto & { operatorId: string; operatorRole: string; expectedVersion: number }) {
     const inv = this.getInvitation(id);
     const user = this.getUser(dto.operatorId);
     if (!user) throw new BadRequestException('用户不存在');
@@ -172,7 +172,15 @@ export class InvitationService {
     if (inv.status !== 'draft' && inv.status !== 'review_rejected') {
       throw new BadRequestException('只有草稿或审核退回状态可以修改');
     }
-    if (dto.expectedVersion !== undefined && dto.expectedVersion !== inv.version) {
+    if (dto.expectedVersion === undefined || dto.expectedVersion === null) {
+      this.createAuditLog({
+        invitationId: id, operatorId: dto.operatorId, operatorName: user.name, operatorRole: dto.operatorRole,
+        action: 'version_conflict', detail: '修改缺失版本号',
+        beforeStatus: inv.status, afterStatus: inv.status,
+      });
+      throw new ConflictException('版本冲突：缺失版本号，请刷新后重试');
+    }
+    if (dto.expectedVersion !== inv.version) {
       this.createAuditLog({
         invitationId: id, operatorId: dto.operatorId, operatorName: user.name, operatorRole: dto.operatorRole,
         action: 'version_conflict', detail: `修改版本冲突: 期望v${dto.expectedVersion}，当前v${inv.version}`,
@@ -228,7 +236,15 @@ export class InvitationService {
     if (inv.status !== 'draft' && inv.status !== 'review_rejected') {
       throw new BadRequestException('只有草稿或审核退回状态可以提交');
     }
-    if (dto.expectedVersion !== undefined && dto.expectedVersion !== inv.version) {
+    if (dto.expectedVersion === undefined || dto.expectedVersion === null) {
+      this.createAuditLog({
+        invitationId: id, operatorId: dto.operatorId, operatorName: user.name, operatorRole: dto.operatorRole,
+        action: 'version_conflict', detail: '提交缺失版本号',
+        beforeStatus: inv.status, afterStatus: 'pending_review',
+      });
+      throw new ConflictException('版本冲突：缺失版本号，请刷新后重试');
+    }
+    if (dto.expectedVersion !== inv.version) {
       this.createAuditLog({
         invitationId: id, operatorId: dto.operatorId, operatorName: user.name, operatorRole: dto.operatorRole,
         action: 'version_conflict', detail: `提交版本冲突: 期望v${dto.expectedVersion}，当前v${inv.version}`,
@@ -267,7 +283,15 @@ export class InvitationService {
     if (inv.status !== 'pending_review') throw new BadRequestException('只有待审核状态可以审核');
     if (!dto.guestConfirmed) throw new BadRequestException('嘉宾未确认，无法审核通过');
     if (!inv.materials_complete) throw new BadRequestException('材料不完整，无法审核通过');
-    if (dto.expectedVersion !== undefined && dto.expectedVersion !== inv.version) {
+    if (dto.expectedVersion === undefined || dto.expectedVersion === null) {
+      this.createAuditLog({
+        invitationId: id, operatorId: dto.operatorId, operatorName: user.name, operatorRole: dto.operatorRole,
+        action: 'version_conflict', detail: '审核通过缺失版本号',
+        beforeStatus: inv.status, afterStatus: 'pending_final',
+      });
+      throw new ConflictException('版本冲突：缺失版本号，请刷新后重试');
+    }
+    if (dto.expectedVersion !== inv.version) {
       this.createAuditLog({
         invitationId: id, operatorId: dto.operatorId, operatorName: user.name, operatorRole: dto.operatorRole,
         action: 'version_conflict', detail: `审核通过版本冲突: 期望v${dto.expectedVersion}，当前v${inv.version}`,
@@ -305,7 +329,15 @@ export class InvitationService {
     if (!user) throw new BadRequestException('用户不存在');
     if (dto.operatorRole !== 'reviewer') throw new ForbiddenException('只有审核主管可以退回');
     if (inv.status !== 'pending_review') throw new BadRequestException('只有待审核状态可以退回');
-    if (dto.expectedVersion !== undefined && dto.expectedVersion !== inv.version) {
+    if (dto.expectedVersion === undefined || dto.expectedVersion === null) {
+      this.createAuditLog({
+        invitationId: id, operatorId: dto.operatorId, operatorName: user.name, operatorRole: dto.operatorRole,
+        action: 'version_conflict', detail: '退回缺失版本号',
+        beforeStatus: inv.status, afterStatus: 'review_rejected',
+      });
+      throw new ConflictException('版本冲突：缺失版本号，请刷新后重试');
+    }
+    if (dto.expectedVersion !== inv.version) {
       this.createAuditLog({
         invitationId: id, operatorId: dto.operatorId, operatorName: user.name, operatorRole: dto.operatorRole,
         action: 'version_conflict', detail: `退回版本冲突: 期望v${dto.expectedVersion}，当前v${inv.version}`,
@@ -346,7 +378,15 @@ export class InvitationService {
     if (!inv.guest_confirmed) throw new BadRequestException('嘉宾未确认，无法归档');
     if (!dto.checkinCompleted) throw new BadRequestException('签到未完成，无法归档');
     if (!inv.materials_complete) throw new BadRequestException('材料不完整，无法归档');
-    if (dto.expectedVersion !== undefined && dto.expectedVersion !== inv.version) {
+    if (dto.expectedVersion === undefined || dto.expectedVersion === null) {
+      this.createAuditLog({
+        invitationId: id, operatorId: dto.operatorId, operatorName: user.name, operatorRole: dto.operatorRole,
+        action: 'version_conflict', detail: '复核归档缺失版本号',
+        beforeStatus: inv.status, afterStatus: 'archived',
+      });
+      throw new ConflictException('版本冲突：缺失版本号，请刷新后重试');
+    }
+    if (dto.expectedVersion !== inv.version) {
       this.createAuditLog({
         invitationId: id, operatorId: dto.operatorId, operatorName: user.name, operatorRole: dto.operatorRole,
         action: 'version_conflict', detail: `复核归档版本冲突: 期望v${dto.expectedVersion}，当前v${inv.version}`,
@@ -384,7 +424,15 @@ export class InvitationService {
     if (!user) throw new BadRequestException('用户不存在');
     if (dto.operatorRole !== 'final_reviewer') throw new ForbiddenException('只有复核负责人可以复核退回');
     if (inv.status !== 'pending_final') throw new BadRequestException('只有待复核状态可以复核退回');
-    if (dto.expectedVersion !== undefined && dto.expectedVersion !== inv.version) {
+    if (dto.expectedVersion === undefined || dto.expectedVersion === null) {
+      this.createAuditLog({
+        invitationId: id, operatorId: dto.operatorId, operatorName: user.name, operatorRole: dto.operatorRole,
+        action: 'version_conflict', detail: '复核退回缺失版本号',
+        beforeStatus: inv.status, afterStatus: 'final_rejected',
+      });
+      throw new ConflictException('版本冲突：缺失版本号，请刷新后重试');
+    }
+    if (dto.expectedVersion !== inv.version) {
       this.createAuditLog({
         invitationId: id, operatorId: dto.operatorId, operatorName: user.name, operatorRole: dto.operatorRole,
         action: 'version_conflict', detail: `复核退回版本冲突: 期望v${dto.expectedVersion}，当前v${inv.version}`,
@@ -424,7 +472,15 @@ export class InvitationService {
     if (inv.status !== 'final_rejected') throw new BadRequestException('只有复核退回状态可以重新办理');
     if (!dto.guestConfirmed) throw new BadRequestException('嘉宾未确认，无法重新办理');
     if (!inv.materials_complete) throw new BadRequestException('材料不完整，无法重新办理');
-    if (dto.expectedVersion !== undefined && dto.expectedVersion !== inv.version) {
+    if (dto.expectedVersion === undefined || dto.expectedVersion === null) {
+      this.createAuditLog({
+        invitationId: id, operatorId: dto.operatorId, operatorName: user.name, operatorRole: dto.operatorRole,
+        action: 'version_conflict', detail: '重新办理缺失版本号',
+        beforeStatus: inv.status, afterStatus: 'pending_review',
+      });
+      throw new ConflictException('版本冲突：缺失版本号，请刷新后重试');
+    }
+    if (dto.expectedVersion !== inv.version) {
       this.createAuditLog({
         invitationId: id, operatorId: dto.operatorId, operatorName: user.name, operatorRole: dto.operatorRole,
         action: 'version_conflict', detail: `重新办理版本冲突: 期望v${dto.expectedVersion}，当前v${inv.version}`,
@@ -475,7 +531,15 @@ export class InvitationService {
         let auditDetail = dto.comment || '';
 
         const expectedVersion = dto.itemVersions ? dto.itemVersions[id] : undefined;
-        if (expectedVersion !== undefined && expectedVersion !== inv.version) {
+        if (expectedVersion === undefined || expectedVersion === null) {
+          this.createAuditLog({
+            invitationId: id, operatorId: dto.operatorId, operatorName: user.name, operatorRole: dto.operatorRole,
+            action: 'version_conflict', detail: `批量${dto.action}缺失版本号`,
+            beforeStatus: inv.status, afterStatus: inv.status,
+          });
+          failed.push({ id, reason: '版本冲突：缺失版本号，请刷新后重试' }); continue;
+        }
+        if (expectedVersion !== inv.version) {
           this.createAuditLog({
             invitationId: id, operatorId: dto.operatorId, operatorName: user.name, operatorRole: dto.operatorRole,
             action: 'version_conflict', detail: `批量${dto.action}版本冲突: 期望v${expectedVersion}，当前v${inv.version}`,
@@ -618,10 +682,26 @@ export class InvitationService {
     };
   }
 
-  addMaterial(invitationId: string, file: Express.Multer.File, operatorId: string) {
-    this.getInvitation(invitationId);
+  addMaterial(invitationId: string, file: Express.Multer.File, operatorId: string, expectedVersion: number) {
+    const inv = this.getInvitation(invitationId);
     const user = this.getUser(operatorId);
     if (!user) throw new BadRequestException('用户不存在');
+    if (isNaN(expectedVersion)) {
+      this.createAuditLog({
+        invitationId, operatorId, operatorName: user.name, operatorRole: user.role,
+        action: 'version_conflict', detail: '材料上传缺失版本号',
+        beforeStatus: inv.status, afterStatus: inv.status,
+      });
+      throw new ConflictException('版本冲突：缺失版本号，请刷新后重试');
+    }
+    if (expectedVersion !== inv.version) {
+      this.createAuditLog({
+        invitationId, operatorId, operatorName: user.name, operatorRole: user.role,
+        action: 'version_conflict', detail: `材料上传版本冲突: 期望v${expectedVersion}，当前v${inv.version}`,
+        beforeStatus: inv.status, afterStatus: inv.status,
+      });
+      throw new ConflictException('版本冲突，请刷新后重试');
+    }
 
     const id = uuidv4();
     const category = this.inferCategory(file.originalname);
@@ -640,6 +720,12 @@ export class InvitationService {
 
     this.updateMaterialsComplete(invitationId);
 
+    this.createAuditLog({
+      invitationId, operatorId, operatorName: user.name, operatorRole: user.role,
+      action: 'upload_material', detail: `上传材料: ${file.originalname}`,
+      beforeStatus: inv.status, afterStatus: inv.status,
+    });
+
     return this.findOne(invitationId);
   }
 
@@ -655,7 +741,15 @@ export class InvitationService {
     const user = this.getUser(dto.operatorId);
     if (!user) throw new BadRequestException('用户不存在');
     const opRole = dto.operatorRole || user.role;
-    if (dto.expectedVersion !== undefined && dto.expectedVersion !== inv.version) {
+    if (dto.expectedVersion === undefined || dto.expectedVersion === null) {
+      this.createAuditLog({
+        invitationId, operatorId: dto.operatorId, operatorName: user.name, operatorRole: opRole,
+        action: 'version_conflict', detail: '嘉宾确认缺失版本号',
+        beforeStatus: inv.status, afterStatus: inv.status,
+      });
+      throw new ConflictException('版本冲突：缺失版本号，请刷新后重试');
+    }
+    if (dto.expectedVersion !== inv.version) {
       this.createAuditLog({
         invitationId, operatorId: dto.operatorId, operatorName: user.name, operatorRole: opRole,
         action: 'version_conflict', detail: `嘉宾确认版本冲突: 期望v${dto.expectedVersion}，当前v${inv.version}`,
@@ -691,7 +785,15 @@ export class InvitationService {
     const user = this.getUser(dto.operatorId);
     if (!user) throw new BadRequestException('用户不存在');
     const opRole = dto.operatorRole || user.role;
-    if (dto.expectedVersion !== undefined && dto.expectedVersion !== inv.version) {
+    if (dto.expectedVersion === undefined || dto.expectedVersion === null) {
+      this.createAuditLog({
+        invitationId, operatorId: dto.operatorId, operatorName: user.name, operatorRole: opRole,
+        action: 'version_conflict', detail: '签到反馈缺失版本号',
+        beforeStatus: inv.status, afterStatus: inv.status,
+      });
+      throw new ConflictException('版本冲突：缺失版本号，请刷新后重试');
+    }
+    if (dto.expectedVersion !== inv.version) {
       this.createAuditLog({
         invitationId, operatorId: dto.operatorId, operatorName: user.name, operatorRole: opRole,
         action: 'version_conflict', detail: `签到反馈版本冲突: 期望v${dto.expectedVersion}，当前v${inv.version}`,
