@@ -164,13 +164,21 @@ export class InvitationService {
     return this.findOne(id);
   }
 
-  update(id: string, dto: UpdateInvitationDto & { operatorId: string; operatorRole: string }) {
+  update(id: string, dto: UpdateInvitationDto & { operatorId: string; operatorRole: string; expectedVersion?: number }) {
     const inv = this.getInvitation(id);
     const user = this.getUser(dto.operatorId);
     if (!user) throw new BadRequestException('用户不存在');
     if (dto.operatorRole !== 'registrar') throw new ForbiddenException('只有登记员可以修改邀请单');
     if (inv.status !== 'draft' && inv.status !== 'review_rejected') {
       throw new BadRequestException('只有草稿或审核退回状态可以修改');
+    }
+    if (dto.expectedVersion !== undefined && dto.expectedVersion !== inv.version) {
+      this.createAuditLog({
+        invitationId: id, operatorId: dto.operatorId, operatorName: user.name, operatorRole: dto.operatorRole,
+        action: 'version_conflict', detail: `修改版本冲突: 期望v${dto.expectedVersion}，当前v${inv.version}`,
+        beforeStatus: inv.status, afterStatus: inv.status,
+      });
+      throw new ConflictException('版本冲突，请刷新后重试');
     }
 
     const fields: string[] = [];
@@ -192,7 +200,14 @@ export class InvitationService {
     values.push(id, inv.version);
 
     const result = this.db.prepare(`UPDATE invitation SET ${fields.join(', ')} WHERE id = ? AND version = ?`).run(...values);
-    if (result.changes === 0) throw new ConflictException('版本冲突，请刷新后重试');
+    if (result.changes === 0) {
+      this.createAuditLog({
+        invitationId: id, operatorId: dto.operatorId, operatorName: user.name, operatorRole: dto.operatorRole,
+        action: 'version_conflict', detail: `修改DB版本冲突(乐观锁)`,
+        beforeStatus: inv.status, afterStatus: inv.status,
+      });
+      throw new ConflictException('版本冲突，请刷新后重试');
+    }
 
     if (changedFields.length > 0) {
       this.createAuditLog({
@@ -213,12 +228,27 @@ export class InvitationService {
     if (inv.status !== 'draft' && inv.status !== 'review_rejected') {
       throw new BadRequestException('只有草稿或审核退回状态可以提交');
     }
+    if (dto.expectedVersion !== undefined && dto.expectedVersion !== inv.version) {
+      this.createAuditLog({
+        invitationId: id, operatorId: dto.operatorId, operatorName: user.name, operatorRole: dto.operatorRole,
+        action: 'version_conflict', detail: `提交版本冲突: 期望v${dto.expectedVersion}，当前v${inv.version}`,
+        beforeStatus: inv.status, afterStatus: 'pending_review',
+      });
+      throw new ConflictException('版本冲突，请刷新后重试');
+    }
 
     const result = this.db.prepare(`
       UPDATE invitation SET status = 'pending_review', version = version + 1, updated_at = datetime('now')
       WHERE id = ? AND version = ?
     `).run(id, inv.version);
-    if (result.changes === 0) throw new ConflictException('版本冲突，请刷新后重试');
+    if (result.changes === 0) {
+      this.createAuditLog({
+        invitationId: id, operatorId: dto.operatorId, operatorName: user.name, operatorRole: dto.operatorRole,
+        action: 'version_conflict', detail: `提交DB版本冲突(乐观锁)`,
+        beforeStatus: inv.status, afterStatus: 'pending_review',
+      });
+      throw new ConflictException('版本冲突，请刷新后重试');
+    }
 
     this.createAuditLog({
       invitationId: id, operatorId: dto.operatorId, operatorName: user.name, operatorRole: dto.operatorRole,
@@ -237,13 +267,28 @@ export class InvitationService {
     if (inv.status !== 'pending_review') throw new BadRequestException('只有待审核状态可以审核');
     if (!dto.guestConfirmed) throw new BadRequestException('嘉宾未确认，无法审核通过');
     if (!inv.materials_complete) throw new BadRequestException('材料不完整，无法审核通过');
+    if (dto.expectedVersion !== undefined && dto.expectedVersion !== inv.version) {
+      this.createAuditLog({
+        invitationId: id, operatorId: dto.operatorId, operatorName: user.name, operatorRole: dto.operatorRole,
+        action: 'version_conflict', detail: `审核通过版本冲突: 期望v${dto.expectedVersion}，当前v${inv.version}`,
+        beforeStatus: inv.status, afterStatus: 'pending_final',
+      });
+      throw new ConflictException('版本冲突，请刷新后重试');
+    }
 
     const result = this.db.prepare(`
       UPDATE invitation SET status = 'pending_final', reviewer_id = ?, reviewer_name = ?,
         review_comment = ?, guest_confirmed = ?, version = version + 1, updated_at = datetime('now')
       WHERE id = ? AND version = ?
     `).run(dto.operatorId, user.name, dto.reviewComment, dto.guestConfirmed ? 1 : 0, id, inv.version);
-    if (result.changes === 0) throw new ConflictException('版本冲突，请刷新后重试');
+    if (result.changes === 0) {
+      this.createAuditLog({
+        invitationId: id, operatorId: dto.operatorId, operatorName: user.name, operatorRole: dto.operatorRole,
+        action: 'version_conflict', detail: `审核通过DB版本冲突(乐观锁)`,
+        beforeStatus: inv.status, afterStatus: 'pending_final',
+      });
+      throw new ConflictException('版本冲突，请刷新后重试');
+    }
 
     this.createAuditLog({
       invitationId: id, operatorId: dto.operatorId, operatorName: user.name, operatorRole: dto.operatorRole,
@@ -260,13 +305,28 @@ export class InvitationService {
     if (!user) throw new BadRequestException('用户不存在');
     if (dto.operatorRole !== 'reviewer') throw new ForbiddenException('只有审核主管可以退回');
     if (inv.status !== 'pending_review') throw new BadRequestException('只有待审核状态可以退回');
+    if (dto.expectedVersion !== undefined && dto.expectedVersion !== inv.version) {
+      this.createAuditLog({
+        invitationId: id, operatorId: dto.operatorId, operatorName: user.name, operatorRole: dto.operatorRole,
+        action: 'version_conflict', detail: `退回版本冲突: 期望v${dto.expectedVersion}，当前v${inv.version}`,
+        beforeStatus: inv.status, afterStatus: 'review_rejected',
+      });
+      throw new ConflictException('版本冲突，请刷新后重试');
+    }
 
     const result = this.db.prepare(`
       UPDATE invitation SET status = 'review_rejected', reviewer_id = ?, reviewer_name = ?,
         review_comment = ?, version = version + 1, updated_at = datetime('now')
       WHERE id = ? AND version = ?
     `).run(dto.operatorId, user.name, dto.reviewComment, id, inv.version);
-    if (result.changes === 0) throw new ConflictException('版本冲突，请刷新后重试');
+    if (result.changes === 0) {
+      this.createAuditLog({
+        invitationId: id, operatorId: dto.operatorId, operatorName: user.name, operatorRole: dto.operatorRole,
+        action: 'version_conflict', detail: `退回DB版本冲突(乐观锁)`,
+        beforeStatus: inv.status, afterStatus: 'review_rejected',
+      });
+      throw new ConflictException('版本冲突，请刷新后重试');
+    }
 
     this.createAuditLog({
       invitationId: id, operatorId: dto.operatorId, operatorName: user.name, operatorRole: dto.operatorRole,
@@ -286,13 +346,28 @@ export class InvitationService {
     if (!inv.guest_confirmed) throw new BadRequestException('嘉宾未确认，无法归档');
     if (!dto.checkinCompleted) throw new BadRequestException('签到未完成，无法归档');
     if (!inv.materials_complete) throw new BadRequestException('材料不完整，无法归档');
+    if (dto.expectedVersion !== undefined && dto.expectedVersion !== inv.version) {
+      this.createAuditLog({
+        invitationId: id, operatorId: dto.operatorId, operatorName: user.name, operatorRole: dto.operatorRole,
+        action: 'version_conflict', detail: `复核归档版本冲突: 期望v${dto.expectedVersion}，当前v${inv.version}`,
+        beforeStatus: inv.status, afterStatus: 'archived',
+      });
+      throw new ConflictException('版本冲突，请刷新后重试');
+    }
 
     const result = this.db.prepare(`
       UPDATE invitation SET status = 'archived', final_reviewer_id = ?, final_reviewer_name = ?,
         final_comment = ?, checkin_completed = ?, version = version + 1, updated_at = datetime('now')
       WHERE id = ? AND version = ?
     `).run(dto.operatorId, user.name, dto.finalComment, dto.checkinCompleted ? 1 : 0, id, inv.version);
-    if (result.changes === 0) throw new ConflictException('版本冲突，请刷新后重试');
+    if (result.changes === 0) {
+      this.createAuditLog({
+        invitationId: id, operatorId: dto.operatorId, operatorName: user.name, operatorRole: dto.operatorRole,
+        action: 'version_conflict', detail: `复核归档DB版本冲突(乐观锁)`,
+        beforeStatus: inv.status, afterStatus: 'archived',
+      });
+      throw new ConflictException('版本冲突，请刷新后重试');
+    }
 
     this.createAuditLog({
       invitationId: id, operatorId: dto.operatorId, operatorName: user.name, operatorRole: dto.operatorRole,
@@ -309,13 +384,28 @@ export class InvitationService {
     if (!user) throw new BadRequestException('用户不存在');
     if (dto.operatorRole !== 'final_reviewer') throw new ForbiddenException('只有复核负责人可以复核退回');
     if (inv.status !== 'pending_final') throw new BadRequestException('只有待复核状态可以复核退回');
+    if (dto.expectedVersion !== undefined && dto.expectedVersion !== inv.version) {
+      this.createAuditLog({
+        invitationId: id, operatorId: dto.operatorId, operatorName: user.name, operatorRole: dto.operatorRole,
+        action: 'version_conflict', detail: `复核退回版本冲突: 期望v${dto.expectedVersion}，当前v${inv.version}`,
+        beforeStatus: inv.status, afterStatus: 'final_rejected',
+      });
+      throw new ConflictException('版本冲突，请刷新后重试');
+    }
 
     const result = this.db.prepare(`
       UPDATE invitation SET status = 'final_rejected', final_reviewer_id = ?, final_reviewer_name = ?,
         final_comment = ?, version = version + 1, updated_at = datetime('now')
       WHERE id = ? AND version = ?
     `).run(dto.operatorId, user.name, dto.finalComment, id, inv.version);
-    if (result.changes === 0) throw new ConflictException('版本冲突，请刷新后重试');
+    if (result.changes === 0) {
+      this.createAuditLog({
+        invitationId: id, operatorId: dto.operatorId, operatorName: user.name, operatorRole: dto.operatorRole,
+        action: 'version_conflict', detail: `复核退回DB版本冲突(乐观锁)`,
+        beforeStatus: inv.status, afterStatus: 'final_rejected',
+      });
+      throw new ConflictException('版本冲突，请刷新后重试');
+    }
 
     this.createAuditLog({
       invitationId: id, operatorId: dto.operatorId, operatorName: user.name, operatorRole: dto.operatorRole,
@@ -334,12 +424,27 @@ export class InvitationService {
     if (inv.status !== 'final_rejected') throw new BadRequestException('只有复核退回状态可以重新办理');
     if (!dto.guestConfirmed) throw new BadRequestException('嘉宾未确认，无法重新办理');
     if (!inv.materials_complete) throw new BadRequestException('材料不完整，无法重新办理');
+    if (dto.expectedVersion !== undefined && dto.expectedVersion !== inv.version) {
+      this.createAuditLog({
+        invitationId: id, operatorId: dto.operatorId, operatorName: user.name, operatorRole: dto.operatorRole,
+        action: 'version_conflict', detail: `重新办理版本冲突: 期望v${dto.expectedVersion}，当前v${inv.version}`,
+        beforeStatus: inv.status, afterStatus: 'pending_review',
+      });
+      throw new ConflictException('版本冲突，请刷新后重试');
+    }
 
     const result = this.db.prepare(`
       UPDATE invitation SET status = 'pending_review', version = version + 1, updated_at = datetime('now')
       WHERE id = ? AND version = ?
     `).run(id, inv.version);
-    if (result.changes === 0) throw new ConflictException('版本冲突，请刷新后重试');
+    if (result.changes === 0) {
+      this.createAuditLog({
+        invitationId: id, operatorId: dto.operatorId, operatorName: user.name, operatorRole: dto.operatorRole,
+        action: 'version_conflict', detail: `重新办理DB版本冲突(乐观锁)`,
+        beforeStatus: inv.status, afterStatus: 'pending_review',
+      });
+      throw new ConflictException('版本冲突，请刷新后重试');
+    }
 
     this.createAuditLog({
       invitationId: id, operatorId: dto.operatorId, operatorName: user.name, operatorRole: dto.operatorRole,
@@ -368,6 +473,16 @@ export class InvitationService {
         let updateParams: any[] = [];
         let auditAction = '';
         let auditDetail = dto.comment || '';
+
+        const expectedVersion = dto.itemVersions ? dto.itemVersions[id] : undefined;
+        if (expectedVersion !== undefined && expectedVersion !== inv.version) {
+          this.createAuditLog({
+            invitationId: id, operatorId: dto.operatorId, operatorName: user.name, operatorRole: dto.operatorRole,
+            action: 'version_conflict', detail: `批量${dto.action}版本冲突: 期望v${expectedVersion}，当前v${inv.version}`,
+            beforeStatus: inv.status, afterStatus: afterStatus || inv.status,
+          });
+          failed.push({ id, reason: '版本冲突，请刷新后重试' }); continue;
+        }
 
         if (dto.action === 'approve') {
           if (dto.operatorRole !== 'reviewer') { failed.push({ id, reason: '只有审核主管可以审核通过' }); continue; }
@@ -431,6 +546,11 @@ export class InvitationService {
 
         const result = this.db.prepare(updateSql).run(...updateParams);
         if (result.changes === 0) {
+          this.createAuditLog({
+            invitationId: id, operatorId: dto.operatorId, operatorName: user.name, operatorRole: dto.operatorRole,
+            action: 'version_conflict', detail: `批量${dto.action}DB版本冲突(乐观锁)`,
+            beforeStatus, afterStatus,
+          });
           failed.push({ id, reason: '版本冲突，请刷新后重试' }); continue;
         }
 
@@ -534,15 +654,31 @@ export class InvitationService {
     const inv = this.getInvitation(invitationId);
     const user = this.getUser(dto.operatorId);
     if (!user) throw new BadRequestException('用户不存在');
+    const opRole = dto.operatorRole || user.role;
+    if (dto.expectedVersion !== undefined && dto.expectedVersion !== inv.version) {
+      this.createAuditLog({
+        invitationId, operatorId: dto.operatorId, operatorName: user.name, operatorRole: opRole,
+        action: 'version_conflict', detail: `嘉宾确认版本冲突: 期望v${dto.expectedVersion}，当前v${inv.version}`,
+        beforeStatus: inv.status, afterStatus: inv.status,
+      });
+      throw new ConflictException('版本冲突，请刷新后重试');
+    }
 
     const result = this.db.prepare(`
       UPDATE invitation SET guest_confirmed = ?, version = version + 1, updated_at = datetime('now')
       WHERE id = ? AND version = ?
     `).run(dto.confirmed ? 1 : 0, invitationId, inv.version);
-    if (result.changes === 0) throw new ConflictException('版本冲突，请刷新后重试');
+    if (result.changes === 0) {
+      this.createAuditLog({
+        invitationId, operatorId: dto.operatorId, operatorName: user.name, operatorRole: opRole,
+        action: 'version_conflict', detail: `嘉宾确认DB版本冲突(乐观锁)`,
+        beforeStatus: inv.status, afterStatus: inv.status,
+      });
+      throw new ConflictException('版本冲突，请刷新后重试');
+    }
 
     this.createAuditLog({
-      invitationId, operatorId: dto.operatorId, operatorName: user.name, operatorRole: user.role,
+      invitationId, operatorId: dto.operatorId, operatorName: user.name, operatorRole: opRole,
       action: 'guest_confirm', detail: dto.confirmed ? '嘉宾已确认' : '嘉宾取消确认',
       beforeStatus: inv.status, afterStatus: inv.status,
     });
@@ -554,15 +690,31 @@ export class InvitationService {
     const inv = this.getInvitation(invitationId);
     const user = this.getUser(dto.operatorId);
     if (!user) throw new BadRequestException('用户不存在');
+    const opRole = dto.operatorRole || user.role;
+    if (dto.expectedVersion !== undefined && dto.expectedVersion !== inv.version) {
+      this.createAuditLog({
+        invitationId, operatorId: dto.operatorId, operatorName: user.name, operatorRole: opRole,
+        action: 'version_conflict', detail: `签到反馈版本冲突: 期望v${dto.expectedVersion}，当前v${inv.version}`,
+        beforeStatus: inv.status, afterStatus: inv.status,
+      });
+      throw new ConflictException('版本冲突，请刷新后重试');
+    }
 
     const result = this.db.prepare(`
       UPDATE invitation SET checkin_completed = ?, version = version + 1, updated_at = datetime('now')
       WHERE id = ? AND version = ?
     `).run(dto.completed ? 1 : 0, invitationId, inv.version);
-    if (result.changes === 0) throw new ConflictException('版本冲突，请刷新后重试');
+    if (result.changes === 0) {
+      this.createAuditLog({
+        invitationId, operatorId: dto.operatorId, operatorName: user.name, operatorRole: opRole,
+        action: 'version_conflict', detail: `签到反馈DB版本冲突(乐观锁)`,
+        beforeStatus: inv.status, afterStatus: inv.status,
+      });
+      throw new ConflictException('版本冲突，请刷新后重试');
+    }
 
     this.createAuditLog({
-      invitationId, operatorId: dto.operatorId, operatorName: user.name, operatorRole: user.role,
+      invitationId, operatorId: dto.operatorId, operatorName: user.name, operatorRole: opRole,
       action: 'checkin_feedback', detail: dto.completed ? '签到完成' : '签到未完成',
       beforeStatus: inv.status, afterStatus: inv.status,
     });

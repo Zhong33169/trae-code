@@ -90,15 +90,25 @@ const InvitationList = () => {
     fetchData();
   }, [fetchData]);
 
+  useEffect(() => {
+    const onConflict = () => fetchData();
+    window.addEventListener('version-conflict', onConflict);
+    return () => window.removeEventListener('version-conflict', onConflict);
+  }, [fetchData]);
+
   const handleBatchAction = async (action: string, actionLabel: string, filterStatus?: InvitationStatus) => {
     let targetIds = selectedRowKeys;
+    let targetRows = selectedRows;
     if (filterStatus) {
-      targetIds = selectedRows.filter((r) => r.status === filterStatus).map((r) => r.id);
+      targetRows = selectedRows.filter((r) => r.status === filterStatus);
+      targetIds = targetRows.map((r) => r.id);
     }
     if (targetIds.length === 0) {
       message.warning(filterStatus ? `请先选择状态为"${STATUS_LABEL_MAP[filterStatus]}"的邀约单` : '请先选择邀约单');
       return;
     }
+    const itemVersions: Record<string, number> = {};
+    targetRows.forEach((r) => { itemVersions[r.id] = r.version; });
     Modal.confirm({
       title: `确认${actionLabel}`,
       content: `确定要对选中的 ${targetIds.length} 条记录执行"${actionLabel}"操作吗？`,
@@ -110,6 +120,7 @@ const InvitationList = () => {
             operatorId: currentUser.id,
             operatorRole: currentRole,
             comment: `批量${actionLabel}`,
+            itemVersions,
           });
           message.success(`成功处理 ${result.success?.length ?? 0} 条`);
           if (result.failed?.length > 0) {

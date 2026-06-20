@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, IsIn, IsBoolean } from 'class-validator';
+import { IsString, IsNotEmpty, IsIn, IsBoolean, IsNumber, IsOptional } from 'class-validator';
 
 export class ApproveDto {
   @IsString()
@@ -15,4 +15,8 @@ export class ApproveDto {
 
   @IsBoolean()
   guestConfirmed!: boolean;
+
+  @IsNumber()
+  @IsOptional()
+  expectedVersion?: number;
 }

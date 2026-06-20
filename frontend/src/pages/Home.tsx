@@ -44,6 +44,12 @@ const Home = () => {
     fetchData();
   }, [currentRole]);
 
+  useEffect(() => {
+    const onConflict = () => fetchData();
+    window.addEventListener('version-conflict', onConflict);
+    return () => window.removeEventListener('version-conflict', onConflict);
+  }, [currentRole]);
+
   const fetchData = async () => {
     setLoading(true);
     try {

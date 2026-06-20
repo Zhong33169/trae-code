@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, IsIn } from 'class-validator';
+import { IsString, IsNotEmpty, IsIn, IsNumber, IsOptional } from 'class-validator';
 
 export class ReviewRejectDto {
   @IsString()
@@ -12,4 +12,8 @@ export class ReviewRejectDto {
   @IsString()
   @IsNotEmpty()
   finalComment!: string;
+
+  @IsNumber()
+  @IsOptional()
+  expectedVersion?: number;
 }

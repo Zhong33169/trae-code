@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, IsIn } from 'class-validator';
+import { IsString, IsNotEmpty, IsIn, IsNumber, IsOptional } from 'class-validator';
 
 export class SubmitDto {
   @IsString()
@@ -8,4 +8,8 @@ export class SubmitDto {
   @IsString()
   @IsIn(['registrar', 'reviewer', 'final_reviewer'])
   operatorRole!: string;
+
+  @IsNumber()
+  @IsOptional()
+  expectedVersion?: number;
 }

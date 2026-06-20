@@ -29,8 +29,17 @@ client.interceptors.response.use(
     return response;
   },
   (error) => {
+    const status = error.response?.status;
     const msg = error.response?.data?.message || error.message || '请求失败';
-    message.error(Array.isArray(msg) ? msg.join('; ') : msg);
+    const finalMsg = Array.isArray(msg) ? msg.join('; ') : msg;
+    if (status === 409) {
+      message.warning(`🔄 ${finalMsg} - 数据已被其他操作修改，正在刷新...`);
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('version-conflict'));
+      }, 100);
+    } else {
+      message.error(finalMsg);
+    }
     return Promise.reject(error);
   },
 );

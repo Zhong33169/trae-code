@@ -67,6 +67,12 @@ const InvitationDetail = () => {
     fetchData();
   }, [fetchData]);
 
+  useEffect(() => {
+    const onConflict = () => fetchData();
+    window.addEventListener('version-conflict', onConflict);
+    return () => window.removeEventListener('version-conflict', onConflict);
+  }, [fetchData]);
+
   if (!invitation) {
     return <Spin spinning={loading} className="flex justify-center py-20" />;
   }
@@ -89,7 +95,7 @@ const InvitationDetail = () => {
   const handleAction = async (actionFn: (id: string, data: Record<string, unknown>) => Promise<unknown>, data: Record<string, unknown>, label: string) => {
     setActionLoading(true);
     try {
-      await actionFn(invitation.id, { ...operatorContext, ...data });
+      await actionFn(invitation.id, { ...operatorContext, ...data, expectedVersion: invitation.version });
       message.success(`${label}成功`);
       fetchData();
       setOpinion('');
@@ -104,7 +110,7 @@ const InvitationDetail = () => {
     if (!canEdit) return;
     setActionLoading(true);
     try {
-      await updateInvitation(invitation.id, { ...editFields, ...operatorContext });
+      await updateInvitation(invitation.id, { ...editFields, ...operatorContext, expectedVersion: invitation.version });
       message.success('保存成功');
       fetchData();
     } catch {
@@ -118,7 +124,7 @@ const InvitationDetail = () => {
     if (currentRole !== Role.Reviewer || invitation.status !== InvitationStatus.PendingReview) return;
     setActionLoading(true);
     try {
-      await guestConfirm(invitation.id, { ...operatorContext, confirmed });
+      await guestConfirm(invitation.id, { ...operatorContext, confirmed, expectedVersion: invitation.version });
       message.success(confirmed ? '已确认嘉宾出席' : '已取消嘉宾确认');
       fetchData();
     } catch {
@@ -132,7 +138,7 @@ const InvitationDetail = () => {
     if (currentRole !== Role.FinalReviewer || invitation.status !== InvitationStatus.PendingFinal) return;
     setActionLoading(true);
     try {
-      await checkinFeedback(invitation.id, { ...operatorContext, completed });
+      await checkinFeedback(invitation.id, { ...operatorContext, completed, expectedVersion: invitation.version });
       message.success(completed ? '已确认签到反馈' : '已取消签到确认');
       fetchData();
     } catch {
