@@ -279,11 +279,67 @@ ok, st, offrecs = api(admin_sess, 'get', f'/bookings/{bid}/offline-records')
 off_count = len(offrecs) if isinstance(offrecs, list) else 0
 check('离线台账回填有独立留痕', ok and off_count >= 3, f'离线回填记录条数：{off_count}')
 
-# ============ 8. 8条样例 + 2新建 合计 10 条 ============
+# ============ 7b. 提交失败审计不被回滚（关键验收） ============
+step('7b. 提交失败审计不被回滚（创建后提交被拦截 → 审计可追溯）')
+
+# 创建一个离线台账状态不一致的订舱（draft + 离线台账=pending_review）
+mismatch_payload = {
+    'form_no': 'TEST-MISMATCH-001',
+    'batch_no': 'TEST-BATCH-MISMATCH',
+    'customer': '提交失败测试公司',
+    'forwarder': '测试船公司',
+    'port_of_loading': '上海',
+    'port_of_discharge': '洛杉矶',
+    'container_type': '20GP',
+    'container_qty': 1,
+    'offline_booking_status': 'pending_review',
+    'offline_loading_status': 'not_arranged',
+    'offline_bl_status': 'not_issued',
+}
+ok, st, b_mismatch = api(reg_sess, 'post', '/bookings', json=mismatch_payload)
+bid_mismatch = b_mismatch['id']
+check('创建状态不一致测试单', ok and st == 200, f'id={bid_mismatch}')
+
+# 上传附件（创建成功后附件已存在）
+import io
+test_file3 = io.BytesIO(b'Test file for mismatch booking')
+files3 = {'file': ('mismatch_test.pdf', test_file3, 'application/pdf')}
+ok, st, att3 = api(reg_sess, 'post', f'/bookings/{bid_mismatch}/attachments', files=files3, data={'category': 'booking_doc'})
+check('上传附件到测试单', ok and st == 200, f'附件id={att3.get("id")}')
+
+# 尝试提交（应被拦截，因为离线台账状态不一致）
+ok, st, submit_result = api(reg_sess, 'post', f'/bookings/{bid_mismatch}/submit', json={'remark': '测试提交'})
+check('提交被状态不一致拦截', st == 400, f'status={st} msg={submit_result.get("detail","")[:60]}')
+
+# 关键验收：拦截后的审计记录和操作记录仍然存在（不被回滚）
+ok, st, mismatch_ops = api(admin_sess, 'get', f'/bookings/{bid_mismatch}/operation-logs')
+mismatch_op_count = len(mismatch_ops) if isinstance(mismatch_ops, list) else 0
+has_intercept_op = any('[拦截]' in (op.get('remark', '') or '') for op in (mismatch_ops if isinstance(mismatch_ops, list) else []))
+check('拦截后操作记录不被回滚', mismatch_op_count >= 2 and has_intercept_op,
+      f'操作记录{mismatch_op_count}条 拦截记录={"有" if has_intercept_op else "无"}')
+
+ok, st, mismatch_audits = api(admin_sess, 'get', f'/bookings/{bid_mismatch}/audit-logs')
+mismatch_aud_count = len(mismatch_audits) if isinstance(mismatch_audits, list) else 0
+fail_audits = [a for a in (mismatch_audits if isinstance(mismatch_audits, list) else []) if a.get('result') == 'fail']
+has_fail_audit = len(fail_audits) > 0
+check('拦截后审计记录不被回滚', mismatch_aud_count >= 1 and has_fail_audit,
+      f'审计{mismatch_aud_count}条 失败审计={len(fail_audits)}条')
+
+# 关键验收：附件仍存在（创建成功后上传的不被回滚）
+ok, st, mismatch_atts = api(admin_sess, 'get', f'/bookings/{bid_mismatch}/attachments')
+mismatch_att_count = len(mismatch_atts) if isinstance(mismatch_atts, list) else 0
+check('拦截后附件不被回滚', mismatch_att_count >= 1, f'附件{mismatch_att_count}个')
+
+# 关键验收：状态仍为 draft（业务状态不变）
+ok, st, b_check = api(admin_sess, 'get', f'/bookings/{bid_mismatch}')
+check('拦截后业务状态不变', b_check.get('booking_status') == 'draft',
+      f'状态={b_check.get("booking_status_label","")}')
+
+# ============ 8. 9条样例 + 3新建 合计 12 条 ============
 ok, st, lst = api(admin_sess, 'get', '/bookings')
 total = lst.get('total', 0)
-counts_ok = total >= 10
-check(f'列表页总记录数≥10（8样例+2新建）', counts_ok, f'实际：{total}')
+counts_ok = total >= 12
+check(f'列表页总记录数≥12（9样例+3新建）', counts_ok, f'实际：{total}')
 
 print('\n' + '=' * 70)
 print('🎉 端到端测试完成：订舱申请 → 装柜 → 提单 → 归档 全链路通过！')

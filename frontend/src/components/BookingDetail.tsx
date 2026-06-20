@@ -390,6 +390,8 @@ export const BookingDetail = component$<BookingDetailProps>(({ module, id }) => 
   const b = s.booking;
   const hasValidationError = s.validation && (s.validation.errors?.length > 0 || s.validation.warnings?.length > 0);
   const hasStatusMismatch = b?.status_mismatch && b.status_mismatch.length > 0;
+  const latestFailure = s.audits.find((au: AuditLog) => au.result === 'fail');
+  const hasFailure = !!latestFailure;
 
   if (s.loading) {
     return (
@@ -498,6 +500,39 @@ export const BookingDetail = component$<BookingDetailProps>(({ module, id }) => 
                   <ul class="list-disc ml-6 mt-1 space-y-0.5">
                     {s.validation.warnings.map((w, i) => <li key={i}>{w}</li>)}
                   </ul>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {hasFailure && !b.is_exception && !hasValidationError && !hasStatusMismatch && (
+        <div class="bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-200 rounded-2xl p-5 shadow-sm">
+          <div class="flex items-start gap-4">
+            <div class="w-10 h-10 bg-amber-100 rounded-xl flex items-center justify-center flex-shrink-0">
+              <svg class="w-5 h-5 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+            </div>
+            <div class="flex-1">
+              <div class="flex items-center justify-between">
+                <h3 class="font-bold text-amber-900 text-sm">最近操作被拦截</h3>
+                <span class="text-xs text-amber-500">
+                  {latestFailure.created_at ? new Date(latestFailure.created_at).toLocaleString('zh-CN') : ''}
+                </span>
+              </div>
+              <div class="mt-2 text-amber-800 text-sm">
+                <span class="font-medium">拦截原因：</span>
+                {latestFailure.fail_reason || '未知'}
+              </div>
+              <div class="mt-1 text-amber-600 text-xs">
+                操作人：{latestFailure.auditor_name || '-'} · 审计类型：{latestFailure.audit_type_label || '-'}
+                {latestFailure.remark && <span> · 备注：{latestFailure.remark}</span>}
+              </div>
+              {['draft', 'correcting'].includes(b.booking_status) && (
+                <div class="mt-3 pt-2 border-t border-amber-200">
+                  <span class="text-xs text-amber-700">当前状态仍为「{b.booking_status_label}」，请解决以上问题后重新提交。</span>
                 </div>
               )}
             </div>

@@ -467,6 +467,54 @@ def run():
         result=AuditLog.ResultChoices.PASS, remark='提单审核：提单已出，信息核对无误',
     )
 
+    # ============ 样例8：创建后因离线台账状态不一致提交被拦截（草稿，可追溯附件+失败原因+操作人） ============
+    print('   [样例8] PK-2026-009 创建后提交被拦截（离线台账与线上不一致）')
+    b8 = make_booking(
+        form_no='PK-2026-009', batch_no='BATCH-2026-009',
+        customer='武汉光谷光电科技有限公司', forwarder='阳明海运 YML',
+        port_of_loading='深圳', port_of_discharge='汉堡',
+        container_type='40GP', container_qty=2,
+        cargo_desc='光电元器件 - LED芯片模组', weight=6.2, volume=28.0,
+        etd=today + timedelta(days=5), eta=today + timedelta(days=35),
+        booking_status=BookingStatusChoices.DRAFT,
+        loading_status=LoadingStatusChoices.NOT_ARRANGED,
+        bl_status=BlStatusChoices.NOT_ISSUED,
+        is_exception=False, exception_type=ExceptionTypeChoices.NONE,
+        deadline=now + timedelta(days=4),
+        submitter=registrar,
+        offline_booking_status=BookingStatusChoices.PENDING_REVIEW,
+        offline_loading_status=LoadingStatusChoices.NOT_ARRANGED,
+        offline_bl_status=BlStatusChoices.NOT_ISSUED,
+    )
+    log_operation(b8, ActionChoices.CREATE, operator=registrar, remark='发起订舱申请')
+    log_operation(b8, ActionChoices.UPLOAD_ATTACH, operator=registrar,
+                  remark='创建时上传附件：订舱委托书、装箱单')
+    Attachment.objects.create(
+        booking=b8, category='booking_doc', file_name='订舱委托书-PK2026009.pdf',
+        file_size=198456, uploader=registrar,
+    )
+    Attachment.objects.create(
+        booking=b8, category='packing_list', file_name='装箱单-PK2026009.xlsx',
+        file_size=18345, uploader=registrar,
+    )
+    AuditLog.objects.create(
+        booking=b8, audit_type=AuditLog.AuditTypeChoices.BOOKING,
+        auditor=registrar, auditor_name=registrar.real_name,
+        result=AuditLog.ResultChoices.FAIL,
+        fail_reason='提交被拦截：线上线下状态不一致 — '
+                    '订舱状态不一致：线上【草稿】 vs 离线台账【待审核】',
+        remark='状态不一致拦截，状态未变更。'
+               '操作人：王登记。请先通过离线台账回填对齐线上线下状态，再手动重提。',
+    )
+    OperationLog.objects.create(
+        booking=b8, action=ActionChoices.SUBMIT,
+        operator=registrar, operator_name=registrar.real_name,
+        from_status=BookingStatusChoices.DRAFT,
+        to_status=BookingStatusChoices.DRAFT,
+        remark='[拦截] 提交被拦截：线上线下状态不一致 — '
+               '订舱状态不一致：线上【草稿】 vs 离线台账【待审核】',
+    )
+
     print()
     print('========== 初始化完成 ==========')
     print(f'共创建 {BookingApplication.objects.count()} 条订舱申请：')

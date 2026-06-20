@@ -253,6 +253,31 @@ def create_audit(booking, audit_type, result, auditor, fail_reason='', remark=''
     )
 
 
+def log_failure_permanent(booking, action, operator, from_status, fail_reason, audit_type=None, remark=''):
+    """
+    写入不会被外层 transaction.atomic 回滚的失败审计和操作记录。
+    通过手动 COMMIT 使记录立即持久化，即使外层 raise HttpError 触发回滚也不会丢失。
+    """
+    from django.db import connection
+    audit_t = audit_type or AuditLog.AuditTypeChoices.BOOKING
+    auditor_name = operator.real_name if operator and operator.real_name else (operator.username if operator else '')
+    operator_role = operator.role if operator else ''
+    with connection.cursor() as cur:
+        cur.execute(
+            "INSERT INTO booking_auditlog (booking_id, audit_type, auditor_id, auditor_name, result, fail_reason, remark, created_at) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, datetime('now'))",
+            [booking.id, audit_t, operator.id if operator else None, auditor_name,
+             AuditLog.ResultChoices.FAIL, fail_reason, remark or fail_reason]
+        )
+        cur.execute(
+            "INSERT INTO booking_operationlog (booking_id, action, operator_id, operator_name, role, from_status, to_status, remark, field_changed, old_value, new_value, created_at) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, '', '', '', datetime('now'))",
+            [booking.id, action, operator.id if operator else None, auditor_name,
+             operator_role, from_status, from_status, f'[拦截] {fail_reason}']
+        )
+        connection.connection.commit()
+
+
 # ================ 统一流转强制校验（角色+状态，后端单一入口）================
 # 所有流转接口（submit/review-pass/.../review-archive/arrange-loading/.../bl-collect）
 # 必须通过本函数，任何绕过都会被 403 拦截。
@@ -555,39 +580,27 @@ def submit_booking(request: HttpRequest, booking_id: int, payload: StatusChangeI
     # 统一强制：角色(registrar) + 状态（draft/correcting→pending_review）
     require_action_flow(request.user, 'submit', b)
 
-    # === 重复批次拦截：保持业务状态不变，记录失败审计 ===
+    # === 重复批次拦截：保持业务状态不变，记录不被回滚的失败审计 ===
     dup_batch = check_duplicate_batch(b.batch_no, exclude_id=b.id)
     if dup_batch:
         fail_reason = f'提交被拦截：批次号【{b.batch_no}】已存在于订舱单 {", ".join(dup_batch)}，请确认是否重复录入'
-        create_audit(b, AuditLog.AuditTypeChoices.BOOKING, AuditLog.ResultChoices.FAIL,
-                     request.user, fail_reason=fail_reason,
-                     remark='重复批次拦截，状态未变更')
-        log_operation(b, ActionChoices.SUBMIT, operator=request.user,
-                      from_status=old_status, to_status=old_status,  # 状态保持不变
-                      remark=fail_reason)
+        log_failure_permanent(b, ActionChoices.SUBMIT, request.user, old_status, fail_reason,
+                              remark='重复批次拦截，状态未变更')
         raise HttpError(400, fail_reason)
 
-    # === 线上线下状态不一致拦截：保持业务状态不变，记录失败审计 ===
+    # === 线上线下状态不一致拦截：保持业务状态不变，记录不被回滚的失败审计 ===
     mismatch = check_status_consistency(b)
     if mismatch:
         fail_reason = '提交被拦截：线上线下状态不一致 — ' + '；'.join(mismatch)
-        create_audit(b, AuditLog.AuditTypeChoices.BOOKING, AuditLog.ResultChoices.FAIL,
-                     request.user, fail_reason=fail_reason,
-                     remark='状态不一致拦截，状态未变更')
-        log_operation(b, ActionChoices.SUBMIT, operator=request.user,
-                      from_status=old_status, to_status=old_status,  # 状态保持不变
-                      remark=fail_reason)
+        log_failure_permanent(b, ActionChoices.SUBMIT, request.user, old_status, fail_reason,
+                              remark='状态不一致拦截，状态未变更')
         raise HttpError(400, fail_reason)
 
-    # === 必填字段校验：保持状态不变，记录失败审计 ===
+    # === 必填字段校验：保持状态不变，记录不被回滚的失败审计 ===
     if not b.customer or not b.forwarder:
         fail_reason = '提交被拦截：客户名称和货代/船公司为必填项'
-        create_audit(b, AuditLog.AuditTypeChoices.BOOKING, AuditLog.ResultChoices.FAIL,
-                     request.user, fail_reason=fail_reason,
-                     remark='必填字段缺失，状态未变更')
-        log_operation(b, ActionChoices.SUBMIT, operator=request.user,
-                      from_status=old_status, to_status=old_status,
-                      remark=fail_reason)
+        log_failure_permanent(b, ActionChoices.SUBMIT, request.user, old_status, fail_reason,
+                              remark='必填字段缺失，状态未变更')
         raise HttpError(400, fail_reason)
 
     # === 校验通过，正常提交 ===
@@ -714,12 +727,15 @@ def correct_booking(request: HttpRequest, booking_id: int, payload: StatusChange
 @transaction.atomic
 def resubmit_booking(request: HttpRequest, booking_id: int, payload: StatusChangeIn):
     b = get_object_or_404(BookingApplication, id=booking_id)
+    old_status = b.booking_status
     # 统一强制：角色(registrar) + 状态(correcting→pending_review)
     require_action_flow(request.user, 'resubmit', b)
     mismatch = check_status_consistency(b)
     if mismatch:
-        raise HttpError(400, '状态校验未通过，线上线下状态不一致：' + '；'.join(mismatch))
-    old_status = b.booking_status
+        fail_reason = '重新提交被拦截：线上线下状态不一致 — ' + '；'.join(mismatch)
+        log_failure_permanent(b, ActionChoices.RESUBMIT, request.user, old_status, fail_reason,
+                              remark='状态不一致拦截，补正后重提被拒')
+        raise HttpError(400, fail_reason)
     b.booking_status = BookingStatusChoices.PENDING_REVIEW
     b.submitted_at = timezone.now()
     b.return_reason = ''
@@ -727,6 +743,8 @@ def resubmit_booking(request: HttpRequest, booking_id: int, payload: StatusChang
     log_operation(b, ActionChoices.RESUBMIT, operator=request.user,
                   from_status=old_status, to_status=b.booking_status,
                   remark=payload.remark or '订舱登记员补正后重新提交')
+    create_audit(b, AuditLog.AuditTypeChoices.BOOKING, AuditLog.ResultChoices.PASS,
+                 request.user, remark=payload.remark or '补正后重新提交，资料已补全')
     return booking_to_out(b)
 
 
@@ -734,14 +752,22 @@ def resubmit_booking(request: HttpRequest, booking_id: int, payload: StatusChang
 @transaction.atomic
 def review_archive(request: HttpRequest, booking_id: int, payload: StatusChangeIn):
     b = get_object_or_404(BookingApplication, id=booking_id)
+    old_status = b.booking_status
     # 统一强制：角色(reviewer) + 状态(booked→archived) + 提单已回收
     require_action_flow(request.user, 'review-archive', b)
     if b.bl_status != BlStatusChoices.COLLECTED:
-        raise HttpError(400, f'提单状态【{b.bl_status_label}】需为"已回收"才能归档')
+        fail_reason = f'归档被拦截：提单状态【{b.bl_status_label}】需为"已回收"才能归档'
+        log_failure_permanent(b, ActionChoices.REVIEW_ARCHIVE, request.user, old_status, fail_reason,
+                              audit_type=AuditLog.AuditTypeChoices.FINAL,
+                              remark='提单未回收，归档被拒')
+        raise HttpError(400, fail_reason)
     mismatch = check_status_consistency(b)
     if mismatch:
-        raise HttpError(400, '状态校验未通过，线上线下状态不一致：' + '；'.join(mismatch))
-    old_status = b.booking_status
+        fail_reason = '归档被拦截：线上线下状态不一致 — ' + '；'.join(mismatch)
+        log_failure_permanent(b, ActionChoices.REVIEW_ARCHIVE, request.user, old_status, fail_reason,
+                              audit_type=AuditLog.AuditTypeChoices.FINAL,
+                              remark='状态不一致拦截，归档被拒')
+        raise HttpError(400, fail_reason)
     b.booking_status = BookingStatusChoices.ARCHIVED
     b.bl_status = BlStatusChoices.ARCHIVED
     b.archivist = request.user

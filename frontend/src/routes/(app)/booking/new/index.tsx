@@ -121,6 +121,7 @@ export default component$(() => {
       }
 
       let submitted = false;
+      let submitFailReason = '';
       if (!asDraft) {
         s.toast = '订舱申请创建成功，正在提交审核...';
         try {
@@ -130,7 +131,8 @@ export default component$(() => {
             : '订舱申请已创建并提交审核';
           submitted = true;
         } catch (submitErr: any) {
-          s.toast = '订舱申请创建成功，但提交审核失败：' + (submitErr.message || '请在详情页手动提交');
+          submitFailReason = submitErr.message || '未知原因';
+          s.toast = '订舱申请创建成功，但提交审核被拦截';
           submitted = false;
         }
       } else {
@@ -140,7 +142,15 @@ export default component$(() => {
       }
 
       setTimeout(() => {
-        nav(`/booking/${id}${submitted ? '' : ''}`);
+        if (!asDraft && !submitted && submitFailReason) {
+          alert(
+            '订舱申请已创建（状态：草稿），但提交审核被拦截。\n\n' +
+            '拦截原因：' + submitFailReason + '\n\n' +
+            '附件已上传' + (uploadedCount > 0 ? `（${uploadedCount} 个）` : '（无）') + '，失败原因和操作记录已写入审计日志。\n\n' +
+            '请前往详情页查看失败原因，解决问题后点击【提交审核】按钮手动重提。'
+          );
+        }
+        nav(`/booking/${id}`);
       }, 800);
     } catch (e: any) {
       alert('操作失败：' + (e.message || '未知错误'));
