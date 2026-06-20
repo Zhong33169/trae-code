@@ -176,9 +176,10 @@ npm run dev
 ### 认证接口
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| POST | `/login` | 登录获取token |
-| GET | `/me` | 获取当前用户信息 |
-| GET | `/health` | 健康检查 |
+| POST | `/api/login` | 登录获取token |
+| GET | `/api/me` | 获取当前用户信息 |
+| GET | `/api/health` | 健康检查 |
+| POST | `/api/refresh-overdue` | 刷新超时状态 |
 
 ### 账单接口
 | 方法 | 路径 | 说明 |

@@ -1,4 +1,3 @@
-const API_BASE = "/api";
 const isBrowser = typeof window !== "undefined";
 
 interface ApiResponse<T> {
@@ -29,7 +28,7 @@ export async function request<T = any>(
   }
 
   try {
-    const response = await fetch(`${API_BASE}${endpoint}`, {
+    const response = await fetch(endpoint, {
       ...options,
       headers,
       credentials: "include",
@@ -39,7 +38,7 @@ export async function request<T = any>(
 
     if (!response.ok) {
       const error = data?.detail || data;
-      if (typeof error === "object" && error.message) {
+      if (typeof error === "object" && error !== null && error.message) {
         throw new Error(error.message);
       }
       throw new Error(
@@ -59,12 +58,12 @@ export async function request<T = any>(
 
 export const api = {
   login: (username: string, password: string) =>
-    request("/login", {
+    request("/api/login", {
       method: "POST",
       body: JSON.stringify({ username, password }),
     }),
 
-  getMe: () => request("/me"),
+  getMe: () => request("/api/me"),
 
   getBills: (params?: Record<string, any>) => {
     const query = new URLSearchParams(params || {}).toString();
@@ -110,9 +109,13 @@ export const api = {
       body: JSON.stringify(data),
     }),
 
+  getMeterReadings: (billId: number) =>
+    request(`/api/meter-readings/${billId}`),
+
   generateBill: (id: number) =>
     request(`/api/bills/${id}/generate-bill`, {
       method: "POST",
+      body: JSON.stringify({}),
     }),
 
   addPayment: (data: any) =>
@@ -128,9 +131,9 @@ export const api = {
     }),
 
   refreshOverdue: () =>
-    request("/refresh-overdue", {
+    request("/api/refresh-overdue", {
       method: "POST",
     }),
 
-  health: () => request("/health"),
+  health: () => request("/api/health"),
 };

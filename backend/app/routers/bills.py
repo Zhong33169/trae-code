@@ -4,7 +4,7 @@ from litestar import Router, get, post, put, delete, Request, patch
 from litestar.di import Provide
 from litestar.exceptions import HTTPException
 from litestar.status_codes import HTTP_200_OK
-from sqlalchemy import func, or_
+from sqlalchemy import func, or_, case
 from sqlalchemy.orm import Session
 
 from ..database import get_db
@@ -117,30 +117,30 @@ def _enrich_bill_response(db, bill: EnergyBill, user: User) -> EnergyBillRespons
 
 
 def _calculate_stats(db) -> BillStats:
-    stats = db.query(
+    status_counts = db.query(
         func.count(EnergyBill.id).label("total_count"),
-        func.sum(func.case((EnergyBill.status == BillStatus.DRAFT, 1), else_=0)).label("draft_count"),
-        func.sum(func.case((EnergyBill.status == BillStatus.PENDING_AUDIT, 1), else_=0)).label("pending_audit_count"),
-        func.sum(func.case((or_(EnergyBill.status == BillStatus.REJECTED, EnergyBill.status == BillStatus.REVIEW_REJECTED), 1), else_=0)).label("rejected_count"),
-        func.sum(func.case((EnergyBill.status == BillStatus.AUDITED, 1), else_=0)).label("audited_count"),
-        func.sum(func.case((EnergyBill.status == BillStatus.PENDING_REVIEW, 1), else_=0)).label("pending_review_count"),
-        func.sum(func.case((EnergyBill.status == BillStatus.REVIEW_REJECTED, 1), else_=0)).label("review_rejected_count"),
-        func.sum(func.case((EnergyBill.status == BillStatus.ARCHIVED, 1), else_=0)).label("archived_count"),
-        func.sum(func.case((EnergyBill.is_overdue == True, 1), else_=0)).label("overdue_count"),
-        func.sum(EnergyBill.total_amount).label("total_amount")
+        func.sum(case((EnergyBill.status == BillStatus.DRAFT, 1), else_=0)).label("draft_count"),
+        func.sum(case((EnergyBill.status == BillStatus.PENDING_AUDIT, 1), else_=0)).label("pending_audit_count"),
+        func.sum(case((EnergyBill.status == BillStatus.REJECTED, 1), else_=0)).label("rejected_count"),
+        func.sum(case((EnergyBill.status == BillStatus.AUDITED, 1), else_=0)).label("audited_count"),
+        func.sum(case((EnergyBill.status == BillStatus.PENDING_REVIEW, 1), else_=0)).label("pending_review_count"),
+        func.sum(case((EnergyBill.status == BillStatus.REVIEW_REJECTED, 1), else_=0)).label("review_rejected_count"),
+        func.sum(case((EnergyBill.status == BillStatus.ARCHIVED, 1), else_=0)).label("archived_count"),
+        func.sum(case((EnergyBill.is_overdue == True, 1), else_=0)).label("overdue_count"),
+        func.coalesce(func.sum(EnergyBill.total_amount), 0).label("total_amount")
     ).first()
 
     return BillStats(
-        total_count=stats.total_count or 0,
-        draft_count=stats.draft_count or 0,
-        pending_audit_count=stats.pending_audit_count or 0,
-        rejected_count=stats.rejected_count or 0,
-        audited_count=stats.audited_count or 0,
-        pending_review_count=stats.pending_review_count or 0,
-        review_rejected_count=stats.review_rejected_count or 0,
-        archived_count=stats.archived_count or 0,
-        overdue_count=stats.overdue_count or 0,
-        total_amount=stats.total_amount or 0
+        total_count=status_counts.total_count or 0,
+        draft_count=status_counts.draft_count or 0,
+        pending_audit_count=status_counts.pending_audit_count or 0,
+        rejected_count=status_counts.rejected_count or 0,
+        audited_count=status_counts.audited_count or 0,
+        pending_review_count=status_counts.pending_review_count or 0,
+        review_rejected_count=status_counts.review_rejected_count or 0,
+        archived_count=status_counts.archived_count or 0,
+        overdue_count=status_counts.overdue_count or 0,
+        total_amount=status_counts.total_amount or 0
     )
 
 
@@ -330,6 +330,12 @@ async def perform_bill_action(bill_id: int, data: BillAction, request: Request, 
             detail={"code": 404, "message": f"账单不存在: {bill_id}"}
         )
 
+    if data.action in ("audit_reject", "review_reject") and not data.anomaly_reason:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": 400, "message": "驳回操作必须填写异常原因", "required_field": "anomaly_reason"}
+        )
+
     bill, result = transition_bill_status(
         db, bill, data.action, user,
         anomaly_reason=data.anomaly_reason,
@@ -339,12 +345,16 @@ async def perform_bill_action(bill_id: int, data: BillAction, request: Request, 
     if not result["success"]:
         raise HTTPException(status_code=400, detail=result)
 
+    db.refresh(bill)
+    enriched = _enrich_bill_response(db, bill, user)
+
     return {
         **result,
         "bill_id": bill.id,
         "bill_no": bill.bill_no,
         "current_status": bill.status.value,
-        "current_node": bill.current_node.value
+        "current_node": bill.current_node.value,
+        "bill": enriched.model_dump(mode="json") if hasattr(enriched, "model_dump") else enriched
     }
 
 

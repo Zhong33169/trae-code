@@ -26,11 +26,12 @@ def get_password_hash(password: str) -> str:
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     to_encode = data.copy()
+    now = datetime.utcnow()
     if expires_delta:
-        expire = datetime.utcnow() + expires_delta
+        expire = now + expires_delta
     else:
-        expire = datetime.utcnow() + timedelta(hours=ACCESS_TOKEN_EXPIRE_HOURS)
-    to_encode.update({"exp": expire})
+        expire = now + timedelta(hours=ACCESS_TOKEN_EXPIRE_HOURS)
+    to_encode.update({"exp": expire, "iat": now})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
@@ -51,14 +52,18 @@ def get_user_from_token(token: str) -> Optional[User]:
 
 
 async def retrieve_user_handler(token: Token, connection) -> Optional[User]:
-    return get_user_from_token(token.token)
+    username = token.sub
+    db = next(get_db())
+    user = db.query(User).filter(User.username == username).first()
+    db.close()
+    return user
 
 
 jwt_auth = JWTAuth[User](
     retrieve_user_handler=retrieve_user_handler,
     token_secret=SECRET_KEY,
     algorithm=ALGORITHM,
-    exclude=["/schema", "/login", "/health"],
+    exclude=["/schema", "/api/login", "/api/health"],
 )
 
 

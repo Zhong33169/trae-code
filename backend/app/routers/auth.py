@@ -75,6 +75,6 @@ async def refresh_overdue(request: Request, db: Session = Provide(get_db)) -> di
 
 
 auth_router = Router(
-    path="/",
+    path="/api",
     route_handlers=[login, get_current_user, health_check, refresh_overdue]
 )
