@@ -42,3 +42,12 @@ def init_db() -> None:
     db_path = settings.DATABASE_PATH
     db_path.parent.mkdir(parents=True, exist_ok=True)
     Base.metadata.create_all(bind=engine)
+
+    db = SessionLocal()
+    try:
+        from .models import User
+        if db.query(User).count() == 0:
+            from .seed import seed_data
+            seed_data()
+    finally:
+        db.close()

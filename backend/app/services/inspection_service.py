@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional, List, Dict, Any, Tuple
+from typing import Optional, List, Dict, Any, Tuple, Union
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
@@ -16,7 +16,7 @@ from ..schemas import (
     FaultReportCreate, RecoveryConfirmCreate, StatisticsResponse,
     InspectionOrderListItem, InspectionOrderDetail, OperationRecord as OpRecordSchema,
     RiskLevelChange as RiskChangeSchema, FaultReport as FaultReportSchema,
-    QueueItem, ApiResponse
+    RecoveryConfirm as RecoveryConfirmSchema, QueueItem, ApiResponse
 )
 
 
@@ -72,7 +72,7 @@ def _validate_submission(
     order: InspectionOrder,
     current_user_id: int,
     expected_role: UserRole,
-    expected_status: InspectionStatus,
+    expected_status: Union[InspectionStatus, List[InspectionStatus]],
     version: int,
     required_evidences: Optional[List[str]] = None,
 ) -> None:
@@ -82,9 +82,11 @@ def _validate_submission(
             "version_conflict"
         )
 
-    if order.status != expected_status:
+    expected_list = expected_status if isinstance(expected_status, list) else [expected_status]
+    if order.status not in expected_list:
+        expected_vals = ", ".join(s.value for s in expected_list)
         raise ValidationError(
-            f"状态冲突：当前状态为 {order.status.value}，预期状态为 {expected_status.value}",
+            f"状态冲突：当前状态为 {order.status.value}，预期状态为 {expected_vals}",
             "status_conflict"
         )
 
@@ -288,6 +290,25 @@ def get_inspection_order_detail(db: Session, order_id: int) -> Optional[Inspecti
             resolution=fr.resolution,
         ))
 
+    recovery_records = db.query(RecoveryConfirm).filter(
+        RecoveryConfirm.inspection_order_id == order_id
+    ).order_by(RecoveryConfirm.confirmed_at.desc()).all()
+
+    recovery_schemas = []
+    for rc in recovery_records:
+        confirmer = get_user(db, rc.confirmed_by)
+        recovery_schemas.append(RecoveryConfirmSchema(
+            id=rc.id,
+            fault_report_id=rc.fault_report_id,
+            inspection_order_id=rc.inspection_order_id,
+            confirmation_remark=rc.confirmation_remark,
+            is_successful=rc.is_successful,
+            evidence_path=rc.evidence_path,
+            confirmed_by=rc.confirmed_by,
+            confirmed_by_name=confirmer.name if confirmer else None,
+            confirmed_at=rc.confirmed_at,
+        ))
+
     return InspectionOrderDetail(
         **list_item.model_dump(),
         appearance_check=order.appearance_check,
@@ -305,6 +326,7 @@ def get_inspection_order_detail(db: Session, order_id: int) -> Optional[Inspecti
         operation_records=op_schemas,
         risk_changes=risk_schemas,
         fault_reports=fault_schemas,
+        recovery_confirms=recovery_schemas,
     )
 
 
@@ -404,10 +426,24 @@ def handle_inspection(
         _validate_submission(
             db, order, handler_id,
             expected_role=UserRole.HANDLER,
-            expected_status=InspectionStatus.PENDING_HANDLING,
+            expected_status=[
+                InspectionStatus.PENDING_HANDLING,
+                InspectionStatus.IN_PROGRESS,
+                InspectionStatus.RETURNED,
+            ],
             version=data.version,
             required_evidences=None,
         )
+
+        for check_field in ['appearance_check', 'function_check', 'safety_check', 'maintenance_check']:
+            check_value = getattr(data, check_field)
+            evidence_field = check_field.replace('_check', '_evidence')
+            evidence_value = getattr(data, evidence_field, None)
+            if check_value is False and not evidence_value:
+                raise ValidationError(
+                    f"检查项 {check_field} 不通过时必须提供证据（{evidence_field}）",
+                    "missing_evidence"
+                )
 
         if data.new_risk_level and data.new_risk_level != original_risk:
             if not data.risk_change_reason:
@@ -624,8 +660,19 @@ def change_risk_level(
         return None, "巡检单不存在"
 
     original_risk = order.risk_level
+    original_status = order.status
 
     try:
+        user = db.query(User).filter(User.id == operator_id).first()
+        if not user:
+            raise ValidationError("操作人不存在", "user_not_found")
+
+        if user.role not in (UserRole.HANDLER, UserRole.REVIEWER):
+            raise ValidationError(
+                f"角色不匹配：当前角色为 {user.role.value}，需要 handler 或 reviewer 角色",
+                "role_mismatch"
+            )
+
         if order.version != data.version:
             raise ValidationError(
                 f"版本冲突：当前版本为 {order.version}，您提交的版本为 {data.version}",
@@ -661,7 +708,18 @@ def change_risk_level(
         return get_inspection_order_detail(db, order.id), None
 
     except ValidationError as e:
-        db.rollback()
+        _add_operation_record(
+            db, order, operator_id, OperationType.HANDLE,
+            from_status=original_status,
+            to_status=original_status,
+            from_risk=original_risk,
+            to_risk=original_risk,
+            opinion="风险变更失败",
+            result=e.message,
+            remark=f"错误类型: {e.error_type}",
+            version=order.version,
+        )
+        db.commit()
         return None, e.message
     except Exception as e:
         db.rollback()
@@ -679,7 +737,19 @@ def create_fault_report(
     if not order:
         return None, "巡检单不存在"
 
+    original_status = order.status
+    original_risk = order.risk_level
+
     try:
+        user = db.query(User).filter(User.id == reporter_id).first()
+        if not user:
+            raise ValidationError("报告人不存在", "user_not_found")
+        if user.role not in (UserRole.INSPECTOR, UserRole.HANDLER):
+            raise ValidationError(
+                f"角色不匹配：当前角色为 {user.role.value}，需要 inspector 或 handler 角色",
+                "role_mismatch"
+            )
+
         fault = FaultReport(
             inspection_order_id=data.inspection_order_id,
             fault_description=data.fault_description,
@@ -697,10 +767,11 @@ def create_fault_report(
         )
 
         if data.fault_level == RiskLevel.HIGH and order.risk_level != RiskLevel.HIGH:
+            original_risk = order.risk_level
             risk_change = RiskLevelChange(
                 inspection_order_id=order.id,
                 operator_id=reporter_id,
-                from_level=order.risk_level,
+                from_level=original_risk,
                 to_level=RiskLevel.HIGH,
                 reason=f"因故障报修自动升级：{data.fault_description}",
             )
@@ -710,7 +781,7 @@ def create_fault_report(
 
             _add_operation_record(
                 db, order, reporter_id, OperationType.RISK_UPGRADE,
-                from_risk=RiskLevel.MEDIUM if order.risk_level == RiskLevel.MEDIUM else RiskLevel.LOW,
+                from_risk=original_risk,
                 to_risk=RiskLevel.HIGH,
                 opinion="故障报修自动升级",
                 result="风险等级自动升级为高风险",
@@ -731,6 +802,20 @@ def create_fault_report(
             is_resolved=fault.is_resolved,
         ), None
 
+    except ValidationError as e:
+        _add_operation_record(
+            db, order, reporter_id, OperationType.REPORT_FAULT,
+            from_status=original_status,
+            to_status=original_status,
+            from_risk=original_risk,
+            to_risk=original_risk,
+            opinion="故障报修失败",
+            result=e.message,
+            remark=f"错误类型: {e.error_type}",
+            version=order.version,
+        )
+        db.commit()
+        return None, e.message
     except Exception as e:
         db.rollback()
         return None, str(e)
@@ -740,7 +825,7 @@ def confirm_recovery(
     db: Session,
     data: RecoveryConfirmCreate,
     confirmer_id: int,
-) -> Tuple[Optional[RecoveryConfirm], Optional[str]]:
+) -> Tuple[Optional[RecoveryConfirmSchema], Optional[str]]:
     fault = db.query(FaultReport).filter(
         FaultReport.id == data.fault_report_id
     ).first()
@@ -750,35 +835,76 @@ def confirm_recovery(
     if fault.is_resolved:
         return None, "该故障已确认恢复"
 
+    order = db.query(InspectionOrder).filter(
+        InspectionOrder.id == (data.inspection_order_id or fault.inspection_order_id)
+    ).first()
+    if not order:
+        return None, "巡检单不存在"
+
+    original_status = order.status
+
     try:
+        user = db.query(User).filter(User.id == confirmer_id).first()
+        if not user:
+            raise ValidationError("确认人不存在", "user_not_found")
+        if user.role not in (UserRole.HANDLER, UserRole.REVIEWER):
+            raise ValidationError(
+                f"角色不匹配：当前角色为 {user.role.value}，需要 handler 或 reviewer 角色",
+                "role_mismatch"
+            )
+
         confirm = RecoveryConfirm(
             fault_report_id=data.fault_report_id,
+            inspection_order_id=order.id,
             confirmed_by=confirmer_id,
             confirmation_remark=data.confirmation_remark,
             evidence_path=data.evidence_path,
             is_successful=data.is_successful,
         )
         db.add(confirm)
+        db.flush()
 
         fault.is_resolved = True
         fault.resolved_by = confirmer_id
         fault.resolved_at = datetime.utcnow()
         fault.resolution = data.confirmation_remark
 
-        order = db.query(InspectionOrder).filter(
-            InspectionOrder.id == fault.inspection_order_id
-        ).first()
-        if order:
-            _add_operation_record(
-                db, order, confirmer_id, OperationType.CONFIRM_RECOVERY,
-                opinion=data.confirmation_remark,
-                result="恢复确认完成" if data.is_successful else "恢复确认失败",
-                version=order.version,
-            )
+        _add_operation_record(
+            db, order, confirmer_id, OperationType.CONFIRM_RECOVERY,
+            from_status=original_status,
+            to_status=original_status,
+            opinion=data.confirmation_remark,
+            result="恢复确认完成" if data.is_successful else "恢复确认失败",
+            version=order.version,
+        )
 
         db.commit()
-        return confirm, None
 
+        confirmer = get_user(db, confirmer_id)
+        return RecoveryConfirmSchema(
+            id=confirm.id,
+            fault_report_id=confirm.fault_report_id,
+            inspection_order_id=confirm.inspection_order_id,
+            confirmation_remark=confirm.confirmation_remark,
+            is_successful=confirm.is_successful,
+            evidence_path=confirm.evidence_path,
+            confirmed_by=confirm.confirmed_by,
+            confirmed_by_name=confirmer.name if confirmer else None,
+            confirmed_at=confirm.confirmed_at,
+        ), None
+
+    except ValidationError as e:
+        _add_operation_record(
+            db, order, confirmer_id, OperationType.CONFIRM_RECOVERY,
+            from_status=original_status,
+            to_status=original_status,
+            opinion="恢复确认失败",
+            result=e.message,
+            remark=f"错误类型: {e.error_type}",
+            version=order.version,
+        )
+        db.commit()
+        return None, e.message
     except Exception as e:
         db.rollback()
         return None, str(e)

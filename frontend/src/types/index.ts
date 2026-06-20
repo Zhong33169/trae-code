@@ -1,139 +1,178 @@
+// ============================================================
+// Equipment Inspection Frontend Type Definitions
+// Fully aligned with backend: backend/app/schemas.py & models.py
+// ============================================================
+
+// Enum definitions matching backend Python Enums (value = snake_case strings)
 export type UserRole = "inspector" | "handler" | "reviewer";
 
 export type InspectionStatus =
-  | "DRAFT"
-  | "PENDING_HANDLING"
-  | "IN_PROGRESS"
-  | "PENDING_REVIEW"
-  | "RETURNED"
-  | "ARCHIVED";
+  | "draft"
+  | "pending_handling"
+  | "in_progress"
+  | "pending_review"
+  | "returned"
+  | "archived";
 
-export type RiskLevel = "LOW" | "MEDIUM" | "HIGH";
+export type RiskLevel = "low" | "medium" | "high";
 
 export type InspectionResult =
-  | "NORMAL"
-  | "ABNORMAL"
-  | "MISSING_EVIDENCE"
-  | "OVERDUE"
-  | "STATUS_CONFLICT";
+  | "normal"
+  | "abnormal"
+  | "missing_evidence"
+  | "overdue"
+  | "returned"
+  | "status_conflict";
 
 export type OperationType =
-  | "INITIATE"
-  | "HANDLE"
-  | "REVIEW"
-  | "RETURN"
-  | "RISK_CHANGE"
-  | "FAULT_REPORT"
-  | "RECOVERY_CONFIRM"
-  | "VALIDATION_FAILED";
+  | "initiate"
+  | "assign"
+  | "handle"
+  | "submit"
+  | "review"
+  | "return"
+  | "archive"
+  | "risk_upgrade"
+  | "risk_downgrade"
+  | "report_fault"
+  | "confirm_recovery";
 
+// ========= User =========
 export interface User {
   id: number;
   username: string;
-  real_name: string;
+  name: string;
+  real_name: string; // alias for convenience (same as name)
   role: UserRole;
+  created_at: string;
 }
 
+// ========= Equipment =========
 export interface Equipment {
   id: number;
   code: string;
   name: string;
-  model: string;
   location: string;
+  model: string; // alias of specification
+  specification: string;
   last_inspection_date: string | null;
 }
 
-export interface InspectionEvidence {
-  id: number;
-  type: string;
-  description: string;
-  file_url: string | null;
-  uploaded_at: string;
-}
-
+// ========= Operation Record =========
 export interface OperationRecord {
   id: number;
-  operator_name: string;
-  operator_role: UserRole;
+  inspection_order_id: number;
+  operator_id: number;
+  operator_name: string | null;
   operation_type: OperationType;
   from_status: InspectionStatus | null;
   to_status: InspectionStatus | null;
+  from_risk_level: RiskLevel | null;
+  to_risk_level: RiskLevel | null;
   opinion: string | null;
-  created_at: string;
-  details: string | null;
+  result: string | null;
+  remark: string | null;
+  version: number | null;
+  operated_at: string;
 }
 
+// ========= Risk Level Change =========
 export interface RiskLevelChange {
   id: number;
+  inspection_order_id: number;
+  operator_id: number;
+  operator_name: string | null;
   from_level: RiskLevel;
   to_level: RiskLevel;
   reason: string;
-  changed_by_name: string;
-  created_at: string;
+  changed_at: string;
 }
 
+// ========= Fault Report =========
 export interface FaultReport {
   id: number;
-  description: string;
-  reported_by_name: string;
-  created_at: string;
+  inspection_order_id: number;
+  fault_description: string;
+  fault_level: RiskLevel;
+  reported_by: number;
+  reported_by_name: string | null;
+  reported_at: string;
+  is_resolved: boolean;
+  resolved_by: number | null;
+  resolved_at: string | null;
+  resolution: string | null;
 }
 
+// ========= Recovery Confirm =========
 export interface RecoveryConfirm {
   id: number;
-  description: string;
-  confirmed_by_name: string;
-  created_at: string;
+  fault_report_id: number;
+  inspection_order_id: number | null;
+  confirmation_remark: string;
+  is_successful: boolean;
+  evidence_path: string | null;
+  confirmed_by: number;
+  confirmed_by_name: string | null;
+  confirmed_at: string;
 }
 
+// ========= Inspection Order List Item =========
 export interface InspectionOrderListItem {
   id: number;
   order_no: string;
-  equipment_code: string;
+  equipment_id: number;
   equipment_name: string;
+  equipment_code: string;
   equipment_location: string;
+  initiator_id: number;
   initiator_name: string;
+  current_handler_id: number | null;
   current_handler_name: string | null;
   status: InspectionStatus;
   risk_level: RiskLevel;
   inspection_result: InspectionResult | null;
+  inspection_date: string;
+  due_date: string | null;
+  last_handler_opinion: string | null;
+  last_handler_result: string | null;
+  handler_opinion: string | null;
+  handler_result: string | null;
+  reviewer_opinion: string | null;
+  reviewer_result: string | null;
+  version: number;
   created_at: string;
-  due_date: string;
+  updated_at: string;
   is_overdue: boolean;
   has_fault: boolean;
 }
 
-export interface InspectionOrderDetail {
-  id: number;
-  order_no: string;
-  equipment: Equipment;
-  initiator_name: string;
-  current_handler_name: string | null;
-  status: InspectionStatus;
-  risk_level: RiskLevel;
-  inspection_result: InspectionResult | null;
-  check_basic_safety: boolean | null;
-  check_running_condition: boolean | null;
-  check_emergency_stop: boolean | null;
-  check_maintenance_record: boolean | null;
-  check_environment: boolean | null;
-  check_result: string | null;
-  handler_opinion: string | null;
-  reviewer_opinion: string | null;
-  created_at: string;
-  submitted_at: string | null;
-  due_date: string;
-  version: number;
-  is_overdue: boolean;
-  evidences: InspectionEvidence[];
+// ========= Inspection Order Detail =========
+export interface InspectionOrderDetail extends InspectionOrderListItem {
+  // Per-check-item fields (4 check items)
+  appearance_check: boolean | null;
+  appearance_evidence: string | null;
+  appearance_remark: string | null;
+
+  function_check: boolean | null;
+  function_evidence: string | null;
+  function_remark: string | null;
+
+  safety_check: boolean | null;
+  safety_evidence: string | null;
+  safety_remark: string | null;
+
+  maintenance_check: boolean | null;
+  maintenance_evidence: string | null;
+  maintenance_remark: string | null;
+
+  // Collections
   operation_records: OperationRecord[];
-  risk_level_changes: RiskLevelChange[];
+  risk_changes: RiskLevelChange[];
   fault_reports: FaultReport[];
   recovery_confirms: RecoveryConfirm[];
-  last_opinion: string | null;
-  last_result: InspectionResult | null;
 }
 
+// ========= Statistics =========
 export interface StatisticsResponse {
   total: number;
   draft: number;
@@ -153,6 +192,7 @@ export interface StatisticsResponse {
   by_location: Record<string, number>;
 }
 
+// ========= Queue Item =========
 export interface QueueItem {
   id: number;
   order_no: string;
@@ -160,65 +200,107 @@ export interface QueueItem {
   equipment_location: string;
   status: InspectionStatus;
   risk_level: RiskLevel;
-  created_at: string;
+  current_handler_name: string | null;
   updated_at: string;
   action_required: string;
 }
 
+// ========= Generic API Response =========
 export interface ApiResponse<T> {
   success: boolean;
   message: string;
-  data: T;
+  data: T | null;
 }
 
+// ========= Request Bodies =========
+
+// Handle (办理)
 export interface InspectionOrderHandleRequest {
-  handler_id: number;
-  handler_role: UserRole;
   version: number;
-  check_basic_safety: boolean;
-  check_running_condition: boolean;
-  check_emergency_stop: boolean;
-  check_maintenance_record: boolean;
-  check_environment: boolean;
-  inspection_result: InspectionResult;
   handler_opinion: string;
-  evidences: Array<{ type: string; description: string }>;
+  handler_result: string;
+  new_risk_level?: RiskLevel | null;
+  risk_change_reason?: string | null;
+
+  appearance_check?: boolean | null;
+  appearance_evidence?: string | null;
+  appearance_remark?: string | null;
+
+  function_check?: boolean | null;
+  function_evidence?: string | null;
+  function_remark?: string | null;
+
+  safety_check?: boolean | null;
+  safety_evidence?: string | null;
+  safety_remark?: string | null;
+
+  maintenance_check?: boolean | null;
+  maintenance_evidence?: string | null;
+  maintenance_remark?: string | null;
 }
 
+// Review (复核)
 export interface InspectionOrderReviewRequest {
-  reviewer_id: number;
-  reviewer_role: UserRole;
   version: number;
-  inspection_result: InspectionResult;
   reviewer_opinion: string;
+  reviewer_result: string;
+  is_approved: boolean;
 }
 
+// Return (退回补正)
 export interface InspectionOrderReturnRequest {
-  reviewer_id: number;
-  reviewer_role: UserRole;
   version: number;
-  return_reason: string;
+  opinion: string;
 }
 
+// Change Risk Level
 export interface RiskLevelChangeRequest {
-  operator_id: number;
-  operator_role: UserRole;
   version: number;
   new_risk_level: RiskLevel;
   reason: string;
 }
 
-export interface FaultReportRequest {
-  inspection_order_id: number;
-  reporter_id: number;
-  reporter_role: UserRole;
-  description: string;
-  is_high_risk: boolean;
+// Submit Validation
+export interface InspectionOrderSubmitValidateRequest {
+  current_user_id: number;
+  expected_role: UserRole;
+  expected_status: InspectionStatus;
+  version: number;
+  required_evidences?: string[] | null;
 }
 
-export interface RecoveryConfirmRequest {
+// Create Fault Report
+export interface FaultReportCreateRequest {
   inspection_order_id: number;
-  confirmer_id: number;
-  confirmer_role: UserRole;
-  description: string;
+  fault_description: string;
+  fault_level: RiskLevel;
+}
+
+// Recovery Confirm
+export interface RecoveryConfirmCreateRequest {
+  fault_report_id: number;
+  inspection_order_id?: number | null;
+  confirmation_remark: string;
+  is_successful?: boolean;
+  evidence_path?: string | null;
+}
+
+// Initiate new inspection order
+export interface InspectionOrderInitiateRequest {
+  equipment_id: number;
+  inspection_date: string;
+  due_date?: string | null;
+  risk_level?: RiskLevel;
+  appearance_check: boolean | null;
+  appearance_evidence?: string | null;
+  appearance_remark?: string | null;
+  function_check: boolean | null;
+  function_evidence?: string | null;
+  function_remark?: string | null;
+  safety_check: boolean | null;
+  safety_evidence?: string | null;
+  safety_remark?: string | null;
+  maintenance_check: boolean | null;
+  maintenance_evidence?: string | null;
+  maintenance_remark?: string | null;
 }

@@ -381,11 +381,13 @@ class RecoveryConfirmBase(BaseModel):
 
 class RecoveryConfirmCreate(RecoveryConfirmBase):
     fault_report_id: int
+    inspection_order_id: Optional[int] = Field(None, description="巡检单ID（可选）")
 
 
 class RecoveryConfirm(RecoveryConfirmBase):
     id: int
     fault_report_id: int
+    inspection_order_id: Optional[int] = None
     confirmed_by: int
     confirmed_by_name: Optional[str] = None
     confirmed_at: datetime
@@ -442,6 +444,7 @@ class InspectionOrderDetail(InspectionOrderListItem):
     operation_records: List[OperationRecord] = []
     risk_changes: List[RiskLevelChange] = []
     fault_reports: List[FaultReport] = []
+    recovery_confirms: List[RecoveryConfirm] = []
 
 
 class StatisticsResponse(BaseModel):

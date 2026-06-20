@@ -190,6 +190,7 @@ async def list_users(
             "id": u.id,
             "username": u.username,
             "name": u.name,
+            "real_name": u.name,
             "role": u.role.value,
             "created_at": u.created_at,
         }
@@ -210,6 +211,7 @@ async def list_equipments(
             "code": eq.code,
             "name": eq.name,
             "location": eq.location,
+            "model": eq.specification,
             "specification": eq.specification,
             "last_inspection_date": eq.last_inspection_date,
         }

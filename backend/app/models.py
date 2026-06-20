@@ -220,6 +220,8 @@ class RecoveryConfirm(Base):
     fault_report_id = Column(Integer, ForeignKey("fault_reports.id"), nullable=False)
     fault_report = relationship("FaultReport", back_populates="recovery_confirm")
 
+    inspection_order_id = Column(Integer, ForeignKey("inspection_orders.id"), nullable=True)
+
     confirmed_by = Column(Integer, ForeignKey("users.id"), nullable=False)
     confirmed_at = Column(DateTime, default=datetime.utcnow)
     confirmation_remark = Column(Text)
