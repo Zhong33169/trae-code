@@ -1,0 +1,7 @@
+node_modules/
+.nitro/
+.output/
+.env.local
+*.log
+.vinxi/
+dist/

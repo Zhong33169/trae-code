@@ -1,0 +1,23 @@
+{
+  "name": "credit-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vinxi dev --port 3004",
+    "build": "vinxi build",
+    "start": "vinxi start --port 3004"
+  },
+  "dependencies": {
+    "@solidjs/router": "^0.15.1",
+    "@solidjs/start": "^1.0.10",
+    "solid-js": "^1.9.2",
+    "vinxi": "^0.4.3"
+  },
+  "devDependencies": {
+    "vite": "^5.4.10"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

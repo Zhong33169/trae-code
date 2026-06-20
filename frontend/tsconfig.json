@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": false,
+    "jsx": "preserve",
+    "jsxImportSource": "solid-js",
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "types": ["@solidjs/start/env"]
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx", "app.config.ts", "vite.config.ts"],
+}
