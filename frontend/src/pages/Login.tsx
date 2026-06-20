@@ -28,10 +28,10 @@ export default function Login() {
 
   const handleQuickLogin = async (role: Role) => {
     const account = DEMO_ACCOUNTS[role]
-    setUsername(role)
+    setUsername(account.username)
     setPassword(account.password)
     setSubmitting(true)
-    const ok = await login(role, account.password)
+    const ok = await login(account.username, account.password)
     setSubmitting(false)
     if (ok) navigate('/workspace')
   }

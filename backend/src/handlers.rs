@@ -9,14 +9,40 @@ use crate::errors::AppError;
 
 type Db = web::Data<Mutex<Connection>>;
 
+fn current_handler_for_status(status: &str) -> &str {
+    match status {
+        "pending_review" => "reviewer",
+        "pending_archive" => "archivist",
+        "rejected_for_correction" => "registrar",
+        "rejected_for_review" => "reviewer",
+        "archived" => "archivist",
+        _ => "registrar",
+    }
+}
+
+fn action_label(action: &str) -> &str {
+    match action {
+        "create" => "创建预约单",
+        "correct" => "补正预约单",
+        "review_approve" => "审核通过",
+        "review_reject" => "审核退回",
+        "archive_approve" => "复核归档",
+        "archive_reject" => "复核退回",
+        "add_evidence" => "添加证据",
+        _ => action,
+    }
+}
+
 fn row_to_appointment(row: &rusqlite::Row) -> rusqlite::Result<Appointment> {
+    let status: String = row.get("status")?;
     Ok(Appointment {
         id: row.get("id")?,
         visitor_name: row.get("visitor_name")?,
         visitor_phone: row.get("visitor_phone")?,
         visitor_id_number: row.get("visitor_id_number")?,
         exhibition_name: row.get("exhibition_name")?,
-        status: row.get("status")?,
+        current_handler_role: current_handler_for_status(&status).to_string(),
+        status,
         version: row.get("version")?,
         created_by: row.get("created_by")?,
         updated_by: row.get("updated_by")?,
@@ -26,8 +52,9 @@ fn row_to_appointment(row: &rusqlite::Row) -> rusqlite::Result<Appointment> {
 }
 
 fn row_to_evidence(row: &rusqlite::Row) -> rusqlite::Result<Evidence> {
+    let id: i64 = row.get("id")?;
     Ok(Evidence {
-        id: row.get("id")?,
+        id: id.to_string(),
         appointment_id: row.get("appointment_id")?,
         evidence_type: row.get("type")?,
         content: row.get("content")?,
@@ -37,8 +64,9 @@ fn row_to_evidence(row: &rusqlite::Row) -> rusqlite::Result<Evidence> {
 }
 
 fn row_to_operation_log(row: &rusqlite::Row) -> rusqlite::Result<OperationLog> {
+    let id: i64 = row.get("id")?;
     Ok(OperationLog {
-        id: row.get("id")?,
+        id: id.to_string(),
         appointment_id: row.get("appointment_id")?,
         action: row.get("action")?,
         operator: row.get("operator")?,
@@ -58,6 +86,21 @@ fn get_evidence_for_appointment(conn: &Connection, apt_id: &str) -> Vec<Evidence
         .collect()
 }
 
+fn group_evidence(all: Vec<Evidence>) -> EvidenceGroup {
+    let mut reservation = Vec::new();
+    let mut check_in = Vec::new();
+    let mut data_recovery = Vec::new();
+    for e in all {
+        match e.evidence_type.as_str() {
+            "reservation" => reservation.push(e),
+            "check_in" => check_in.push(e),
+            "data_recovery" => data_recovery.push(e),
+            _ => {}
+        }
+    }
+    EvidenceGroup { reservation, check_in, data_recovery }
+}
+
 fn get_logs_for_appointment(conn: &Connection, apt_id: &str) -> Vec<OperationLog> {
     let mut stmt = conn.prepare(
         "SELECT id, appointment_id, action, operator, operator_role, detail, timestamp FROM operation_logs WHERE appointment_id = ?1 ORDER BY id"
@@ -66,6 +109,35 @@ fn get_logs_for_appointment(conn: &Connection, apt_id: &str) -> Vec<OperationLog
         .unwrap()
         .filter_map(|r| r.ok())
         .collect()
+}
+
+fn build_version_history(logs: &[OperationLog]) -> Vec<VersionRecord> {
+    let mut history = Vec::new();
+    let mut current_version = 1;
+    for log in logs {
+        if log.action == "create" {
+            history.push(VersionRecord {
+                version: 1,
+                action: action_label(&log.action).to_string(),
+                operator: log.operator.clone(),
+                operator_role: log.operator_role.clone(),
+                timestamp: log.timestamp.clone(),
+                changes: log.detail.clone(),
+            });
+            current_version = 1;
+        } else if log.action.starts_with("review_") || log.action.starts_with("archive_") || log.action == "correct" {
+            current_version += 1;
+            history.push(VersionRecord {
+                version: current_version,
+                action: action_label(&log.action).to_string(),
+                operator: log.operator.clone(),
+                operator_role: log.operator_role.clone(),
+                timestamp: log.timestamp.clone(),
+                changes: log.detail.clone(),
+            });
+        }
+    }
+    history
 }
 
 fn insert_operation_log(
@@ -108,8 +180,11 @@ pub async fn login(db: Db, body: web::Json<LoginRequest>) -> Result<HttpResponse
                 .map_err(|e| AppError::InternalError(e.to_string()))?;
             Ok(HttpResponse::Ok().json(LoginResponse {
                 token,
-                role,
-                display_name,
+                user: LoginResponseUser {
+                    username: username.clone(),
+                    role,
+                    display_name,
+                },
             }))
         }
         Err(_) => Err(AppError::Unauthorized("用户名或密码错误".into())),
@@ -143,47 +218,51 @@ pub async fn list_appointments(
     let _ = claims;
     let conn = db.lock().unwrap();
     let page = query.page.unwrap_or(1).max(1);
-    let page_size = query.page_size.unwrap_or(10).max(1).min(100);
+    let page_size = query.page_size.unwrap_or(50).max(1).min(200);
     let offset = (page - 1) * page_size;
 
-    let (total, items) = if let Some(ref status) = query.status {
-        let total: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM appointments WHERE status = ?1",
-                rusqlite::params![status],
-                |row| row.get(0),
-            )
-            .unwrap_or(0);
-        let mut stmt = conn.prepare(
-            "SELECT id, visitor_name, visitor_phone, visitor_id_number, exhibition_name, status, version, created_by, updated_by, created_at, updated_at FROM appointments WHERE status = ?1 ORDER BY created_at DESC LIMIT ?2 OFFSET ?3"
-        ).map_err(|e| AppError::InternalError(e.to_string()))?;
-        let items: Vec<Appointment> = stmt
-            .query_map(rusqlite::params![status, page_size, offset], row_to_appointment)
-            .unwrap()
-            .filter_map(|r| r.ok())
-            .collect();
-        (total, items)
-    } else {
-        let total: i64 = conn
-            .query_row("SELECT COUNT(*) FROM appointments", [], |row| row.get(0))
-            .unwrap_or(0);
-        let mut stmt = conn.prepare(
-            "SELECT id, visitor_name, visitor_phone, visitor_id_number, exhibition_name, status, version, created_by, updated_by, created_at, updated_at FROM appointments ORDER BY created_at DESC LIMIT ?1 OFFSET ?2"
-        ).map_err(|e| AppError::InternalError(e.to_string()))?;
-        let items: Vec<Appointment> = stmt
-            .query_map(rusqlite::params![page_size, offset], row_to_appointment)
-            .unwrap()
-            .filter_map(|r| r.ok())
-            .collect();
-        (total, items)
+    let items: Vec<Appointment> = match (&query.status, &query.keyword) {
+        (Some(status), Some(keyword)) if !keyword.is_empty() => {
+            let kw = format!("%{}%", keyword);
+            let mut stmt = conn.prepare(
+                "SELECT id, visitor_name, visitor_phone, visitor_id_number, exhibition_name, status, version, created_by, updated_by, created_at, updated_at FROM appointments WHERE status = ?1 AND (visitor_name LIKE ?2 OR visitor_phone LIKE ?2 OR visitor_id_number LIKE ?2) ORDER BY created_at DESC LIMIT ?3 OFFSET ?4"
+            ).map_err(|e| AppError::InternalError(e.to_string()))?;
+            stmt.query_map(rusqlite::params![status, kw, page_size, offset], row_to_appointment)
+                .unwrap()
+                .filter_map(|r| r.ok())
+                .collect()
+        }
+        (Some(status), _) => {
+            let mut stmt = conn.prepare(
+                "SELECT id, visitor_name, visitor_phone, visitor_id_number, exhibition_name, status, version, created_by, updated_by, created_at, updated_at FROM appointments WHERE status = ?1 ORDER BY created_at DESC LIMIT ?2 OFFSET ?3"
+            ).map_err(|e| AppError::InternalError(e.to_string()))?;
+            stmt.query_map(rusqlite::params![status, page_size, offset], row_to_appointment)
+                .unwrap()
+                .filter_map(|r| r.ok())
+                .collect()
+        }
+        (None, Some(keyword)) if !keyword.is_empty() => {
+            let kw = format!("%{}%", keyword);
+            let mut stmt = conn.prepare(
+                "SELECT id, visitor_name, visitor_phone, visitor_id_number, exhibition_name, status, version, created_by, updated_by, created_at, updated_at FROM appointments WHERE visitor_name LIKE ?1 OR visitor_phone LIKE ?1 OR visitor_id_number LIKE ?1 ORDER BY created_at DESC LIMIT ?2 OFFSET ?3"
+            ).map_err(|e| AppError::InternalError(e.to_string()))?;
+            stmt.query_map(rusqlite::params![kw, page_size, offset], row_to_appointment)
+                .unwrap()
+                .filter_map(|r| r.ok())
+                .collect()
+        }
+        _ => {
+            let mut stmt = conn.prepare(
+                "SELECT id, visitor_name, visitor_phone, visitor_id_number, exhibition_name, status, version, created_by, updated_by, created_at, updated_at FROM appointments ORDER BY created_at DESC LIMIT ?1 OFFSET ?2"
+            ).map_err(|e| AppError::InternalError(e.to_string()))?;
+            stmt.query_map(rusqlite::params![page_size, offset], row_to_appointment)
+                .unwrap()
+                .filter_map(|r| r.ok())
+                .collect()
+        }
     };
 
-    Ok(HttpResponse::Ok().json(AppointmentListResponse {
-        items,
-        total,
-        page,
-        page_size,
-    }))
+    Ok(HttpResponse::Ok().json(items))
 }
 
 pub async fn get_appointment(
@@ -203,15 +282,18 @@ pub async fn get_appointment(
         )
         .map_err(|_| AppError::NotFound("预约单不存在".into()))?;
 
-    let evidence = get_evidence_for_appointment(&conn, &id);
+    let all_evidence = get_evidence_for_appointment(&conn, &id);
+    let evidence = group_evidence(all_evidence);
     let operation_logs = get_logs_for_appointment(&conn, &id);
+    let version_history = build_version_history(&operation_logs);
 
     Ok(HttpResponse::Ok().json(AppointmentDetail {
-        id: appointment.id,
+        id: appointment.id.clone(),
         visitor_name: appointment.visitor_name,
         visitor_phone: appointment.visitor_phone,
         visitor_id_number: appointment.visitor_id_number,
         exhibition_name: appointment.exhibition_name,
+        current_handler_role: appointment.current_handler_role,
         status: appointment.status,
         version: appointment.version,
         created_by: appointment.created_by,
@@ -219,6 +301,7 @@ pub async fn get_appointment(
         created_at: appointment.created_at,
         updated_at: appointment.updated_at,
         evidence,
+        version_history,
         operation_logs,
     }))
 }
@@ -407,7 +490,7 @@ pub async fn archive_appointment(
     let detail_text;
 
     match body.action.as_str() {
-        "approve" => {
+        "approve" | "archive" => {
             validate_evidence(&evidence)?;
             new_status = "archived";
             action = "archive_approve";
@@ -420,7 +503,7 @@ pub async fn archive_appointment(
         }
         _ => {
             return Err(AppError::BadRequest(
-                "归档操作必须是 approve 或 reject".into(),
+                "归档操作必须是 archive 或 reject".into(),
             ));
         }
     };
@@ -456,17 +539,17 @@ pub async fn batch_review(
     let conn = db.lock().unwrap();
     let mut results = Vec::new();
 
-    for item in &body.items {
-        let result = process_single_review(&conn, &claims, item);
+    for id in &body.ids {
+        let result = process_single_review(&conn, &claims, id, &body.action, body.comment.as_deref());
         match result {
             Ok(_) => results.push(BatchResultItem {
-                id: item.id.clone(),
+                id: id.clone(),
                 success: true,
                 error: None,
                 error_code: None,
             }),
             Err(e) => results.push(BatchResultItem {
-                id: item.id.clone(),
+                id: id.clone(),
                 success: false,
                 error: Some(e.to_string()),
                 error_code: Some(e.error_code().to_string()),
@@ -474,34 +557,35 @@ pub async fn batch_review(
         }
     }
 
-    Ok(HttpResponse::Ok().json(BatchResult { results }))
+    Ok(HttpResponse::Ok().json(results))
 }
 
 fn process_single_review(
     conn: &Connection,
     claims: &AuthClaims,
-    item: &BatchReviewItem,
+    id: &str,
+    action: &str,
+    comment: Option<&str>,
 ) -> Result<(), AppError> {
     let appointment = conn
         .query_row(
             "SELECT id, visitor_name, visitor_phone, visitor_id_number, exhibition_name, status, version, created_by, updated_by, created_at, updated_at FROM appointments WHERE id = ?1",
-            rusqlite::params![item.id],
+            rusqlite::params![id],
             row_to_appointment,
         )
         .map_err(|_| AppError::NotFound("预约单不存在".into()))?;
 
     validate_status(&["pending_review", "rejected_for_review"], &appointment.status)?;
-    validate_version(item.version, appointment.version)?;
 
-    let evidence = get_evidence_for_appointment(conn, &item.id);
+    let evidence = get_evidence_for_appointment(conn, id);
 
-    let (new_status, action, detail_text) = match item.action.as_str() {
+    let (new_status, action_name, detail_text) = match action {
         "approve" => {
             validate_evidence(&evidence)?;
-            ("pending_archive", "review_approve", item.detail.as_deref().unwrap_or("审核通过"))
+            ("pending_archive", "review_approve", comment.unwrap_or("批量审核通过"))
         }
         "reject" => {
-            ("rejected_for_correction", "review_reject", item.detail.as_deref().unwrap_or("审核退回"))
+            ("rejected_for_correction", "review_reject", comment.unwrap_or("批量审核退回"))
         }
         _ => return Err(AppError::BadRequest("审核操作必须是 approve 或 reject".into())),
     };
@@ -511,10 +595,10 @@ fn process_single_review(
 
     conn.execute(
         "UPDATE appointments SET status = ?1, version = ?2, updated_by = ?3, updated_at = ?4 WHERE id = ?5",
-        rusqlite::params![new_status, new_version, claims.sub, now, item.id],
+        rusqlite::params![new_status, new_version, claims.sub, now, id],
     ).map_err(|e| AppError::InternalError(e.to_string()))?;
 
-    insert_operation_log(conn, &item.id, action, &claims.sub, &claims.role, detail_text);
+    insert_operation_log(conn, id, action_name, &claims.sub, &claims.role, detail_text);
     Ok(())
 }
 
@@ -528,17 +612,17 @@ pub async fn batch_archive(
     let conn = db.lock().unwrap();
     let mut results = Vec::new();
 
-    for item in &body.items {
-        let result = process_single_archive(&conn, &claims, item);
+    for id in &body.ids {
+        let result = process_single_archive(&conn, &claims, id, &body.action, body.comment.as_deref());
         match result {
             Ok(_) => results.push(BatchResultItem {
-                id: item.id.clone(),
+                id: id.clone(),
                 success: true,
                 error: None,
                 error_code: None,
             }),
             Err(e) => results.push(BatchResultItem {
-                id: item.id.clone(),
+                id: id.clone(),
                 success: false,
                 error: Some(e.to_string()),
                 error_code: Some(e.error_code().to_string()),
@@ -546,36 +630,37 @@ pub async fn batch_archive(
         }
     }
 
-    Ok(HttpResponse::Ok().json(BatchResult { results }))
+    Ok(HttpResponse::Ok().json(results))
 }
 
 fn process_single_archive(
     conn: &Connection,
     claims: &AuthClaims,
-    item: &BatchArchiveItem,
+    id: &str,
+    action: &str,
+    comment: Option<&str>,
 ) -> Result<(), AppError> {
     let appointment = conn
         .query_row(
             "SELECT id, visitor_name, visitor_phone, visitor_id_number, exhibition_name, status, version, created_by, updated_by, created_at, updated_at FROM appointments WHERE id = ?1",
-            rusqlite::params![item.id],
+            rusqlite::params![id],
             row_to_appointment,
         )
         .map_err(|_| AppError::NotFound("预约单不存在".into()))?;
 
     validate_status(&["pending_archive"], &appointment.status)?;
-    validate_version(item.version, appointment.version)?;
 
-    let evidence = get_evidence_for_appointment(conn, &item.id);
+    let evidence = get_evidence_for_appointment(conn, id);
 
-    let (new_status, action, detail_text) = match item.action.as_str() {
-        "approve" => {
+    let (new_status, action_name, detail_text) = match action {
+        "approve" | "archive" => {
             validate_evidence(&evidence)?;
-            ("archived", "archive_approve", item.detail.as_deref().unwrap_or("归档完成"))
+            ("archived", "archive_approve", comment.unwrap_or("批量归档完成"))
         }
         "reject" => {
-            ("rejected_for_review", "archive_reject", item.detail.as_deref().unwrap_or("复核退回"))
+            ("rejected_for_review", "archive_reject", comment.unwrap_or("批量复核退回"))
         }
-        _ => return Err(AppError::BadRequest("归档操作必须是 approve 或 reject".into())),
+        _ => return Err(AppError::BadRequest("归档操作必须是 archive 或 reject".into())),
     };
 
     let now = chrono::Utc::now().to_rfc3339();
@@ -583,10 +668,10 @@ fn process_single_archive(
 
     conn.execute(
         "UPDATE appointments SET status = ?1, version = ?2, updated_by = ?3, updated_at = ?4 WHERE id = ?5",
-        rusqlite::params![new_status, new_version, claims.sub, now, item.id],
+        rusqlite::params![new_status, new_version, claims.sub, now, id],
     ).map_err(|e| AppError::InternalError(e.to_string()))?;
 
-    insert_operation_log(conn, &item.id, action, &claims.sub, &claims.role, detail_text);
+    insert_operation_log(conn, id, action_name, &claims.sub, &claims.role, detail_text);
     Ok(())
 }
 

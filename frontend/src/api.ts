@@ -68,28 +68,28 @@ export async function correctAppointment(id: string, data: {
   })
 }
 
-export async function reviewAppointment(id: string, data: { action: 'approve' | 'reject'; version: number }) {
+export async function reviewAppointment(id: string, data: { action: 'approve' | 'reject'; version: number; detail?: string }) {
   return request<Appointment>(`/appointments/${id}/review`, {
-    method: 'POST',
+    method: 'PUT',
     body: JSON.stringify(data),
   })
 }
 
-export async function archiveAppointment(id: string, data: { action: 'archive' | 'reject'; version: number }) {
+export async function archiveAppointment(id: string, data: { action: 'archive' | 'reject'; version: number; detail?: string }) {
   return request<Appointment>(`/appointments/${id}/archive`, {
-    method: 'POST',
+    method: 'PUT',
     body: JSON.stringify(data),
   })
 }
 
-export async function batchReview(data: { ids: string[]; action: 'approve' | 'reject' }) {
+export async function batchReview(data: { ids: string[]; action: 'approve' | 'reject'; comment?: string }) {
   return request<BatchResult[]>('/appointments/batch-review', {
     method: 'POST',
     body: JSON.stringify(data),
   })
 }
 
-export async function batchArchive(data: { ids: string[]; action: 'archive' | 'reject' }) {
+export async function batchArchive(data: { ids: string[]; action: 'archive' | 'reject'; comment?: string }) {
   return request<BatchResult[]>('/appointments/batch-archive', {
     method: 'POST',
     body: JSON.stringify(data),

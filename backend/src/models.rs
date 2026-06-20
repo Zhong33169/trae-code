@@ -18,11 +18,29 @@ pub struct Appointment {
     pub visitor_id_number: String,
     pub exhibition_name: String,
     pub status: String,
+    pub current_handler_role: String,
     pub version: i64,
     pub created_by: String,
     pub updated_by: String,
     pub created_at: String,
     pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct EvidenceGroup {
+    pub reservation: Vec<Evidence>,
+    pub check_in: Vec<Evidence>,
+    pub data_recovery: Vec<Evidence>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VersionRecord {
+    pub version: i64,
+    pub action: String,
+    pub operator: String,
+    pub operator_role: String,
+    pub timestamp: String,
+    pub changes: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -33,18 +51,20 @@ pub struct AppointmentDetail {
     pub visitor_id_number: String,
     pub exhibition_name: String,
     pub status: String,
+    pub current_handler_role: String,
     pub version: i64,
     pub created_by: String,
     pub updated_by: String,
     pub created_at: String,
     pub updated_at: String,
-    pub evidence: Vec<Evidence>,
+    pub evidence: EvidenceGroup,
+    pub version_history: Vec<VersionRecord>,
     pub operation_logs: Vec<OperationLog>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Evidence {
-    pub id: i64,
+    pub id: String,
     pub appointment_id: String,
     #[serde(rename = "type")]
     pub evidence_type: String,
@@ -55,7 +75,7 @@ pub struct Evidence {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OperationLog {
-    pub id: i64,
+    pub id: String,
     pub appointment_id: String,
     pub action: String,
     pub operator: String,
@@ -71,10 +91,16 @@ pub struct LoginRequest {
 }
 
 #[derive(Debug, Serialize)]
-pub struct LoginResponse {
-    pub token: String,
+pub struct LoginResponseUser {
+    pub username: String,
     pub role: String,
     pub display_name: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct LoginResponse {
+    pub token: String,
+    pub user: LoginResponseUser,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -124,33 +150,16 @@ pub struct CreateEvidenceRequest {
 
 #[derive(Debug, Deserialize)]
 pub struct BatchReviewRequest {
-    pub items: Vec<BatchReviewItem>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct BatchReviewItem {
-    pub id: String,
-    pub version: i64,
+    pub ids: Vec<String>,
     pub action: String,
-    pub detail: Option<String>,
+    pub comment: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct BatchArchiveRequest {
-    pub items: Vec<BatchArchiveItem>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct BatchArchiveItem {
-    pub id: String,
-    pub version: i64,
+    pub ids: Vec<String>,
     pub action: String,
-    pub detail: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct BatchResult {
-    pub results: Vec<BatchResultItem>,
+    pub comment: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -164,14 +173,6 @@ pub struct BatchResultItem {
 }
 
 #[derive(Debug, Serialize)]
-pub struct AppointmentListResponse {
-    pub items: Vec<Appointment>,
-    pub total: i64,
-    pub page: i64,
-    pub page_size: i64,
-}
-
-#[derive(Debug, Serialize)]
 pub struct UserInfo {
     pub username: String,
     pub role: String,
@@ -181,6 +182,7 @@ pub struct UserInfo {
 #[derive(Debug, Deserialize)]
 pub struct AppointmentQuery {
     pub status: Option<String>,
+    pub keyword: Option<String>,
     pub page: Option<i64>,
     pub page_size: Option<i64>,
 }

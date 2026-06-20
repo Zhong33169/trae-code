@@ -122,24 +122,32 @@ fn seed_data(conn: &Connection) -> Result<(), rusqlite::Error> {
         rusqlite::params![now],
     )?;
 
-    for (apt_id, action, operator, operator_role, detail) in [
-        ("APT-0001", "create", "registrar1", "registrar", "创建预约单"),
-        ("APT-0002", "create", "registrar1", "registrar", "创建预约单"),
-        ("APT-0003", "create", "registrar1", "registrar", "创建预约单"),
-        ("APT-0004", "create", "registrar1", "registrar", "创建预约单"),
-        ("APT-0004", "review_approve", "reviewer1", "reviewer", "审核通过"),
-        ("APT-0004", "archive_approve", "archivist1", "archivist", "归档完成"),
-        ("APT-0005", "create", "registrar1", "registrar", "创建预约单"),
-        ("APT-0006", "create", "registrar1", "registrar", "创建预约单"),
-        ("APT-0006", "review_reject", "reviewer1", "reviewer", "信息有误，请补正"),
-        ("APT-0007", "create", "registrar1", "registrar", "创建预约单"),
-        ("APT-0007", "review_approve", "reviewer1", "reviewer", "审核通过"),
-        ("APT-0008", "create", "registrar1", "registrar", "创建预约单"),
-        ("APT-0008", "review_approve", "reviewer1", "reviewer", "审核通过"),
+    let log_timestamp = |offset_sec: i64| -> String {
+        chrono::DateTime::parse_from_rfc3339(now)
+            .unwrap()
+            .checked_add_signed(chrono::Duration::seconds(offset_sec))
+            .unwrap()
+            .to_rfc3339()
+    };
+
+    for (apt_id, action, operator, operator_role, detail, offset) in [
+        ("APT-0001", "create", "registrar1", "registrar", "创建预约单", 0),
+        ("APT-0002", "create", "registrar1", "registrar", "创建预约单", 10),
+        ("APT-0003", "create", "registrar1", "registrar", "创建预约单", 20),
+        ("APT-0004", "create", "registrar1", "registrar", "创建预约单", 30),
+        ("APT-0004", "review_approve", "reviewer1", "reviewer", "审核通过", 40),
+        ("APT-0004", "archive_approve", "archivist1", "archivist", "归档完成", 50),
+        ("APT-0005", "create", "registrar1", "registrar", "创建预约单", 60),
+        ("APT-0006", "create", "registrar1", "registrar", "创建预约单", 70),
+        ("APT-0006", "review_reject", "reviewer1", "reviewer", "信息有误，请补正", 80),
+        ("APT-0007", "create", "registrar1", "registrar", "创建预约单", 90),
+        ("APT-0007", "review_approve", "reviewer1", "reviewer", "审核通过", 100),
+        ("APT-0008", "create", "registrar1", "registrar", "创建预约单", 110),
+        ("APT-0008", "review_approve", "reviewer1", "reviewer", "审核通过", 120),
     ] {
         conn.execute(
             "INSERT INTO operation_logs (appointment_id, action, operator, operator_role, detail, timestamp) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            rusqlite::params![apt_id, action, operator, operator_role, detail, now],
+            rusqlite::params![apt_id, action, operator, operator_role, detail, log_timestamp(offset)],
         )?;
     }
 

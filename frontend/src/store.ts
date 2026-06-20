@@ -9,10 +9,10 @@ const ROLE_DEFAULT_FILTER: Record<Role, AppointmentStatus> = {
   archivist: 'pending_archive',
 }
 
-const DEMO_ACCOUNTS: Record<string, { password: string; role: Role; display_name: string }> = {
-  registrar: { password: 'registrar123', role: 'registrar', display_name: '登记员' },
-  reviewer: { password: 'reviewer123', role: 'reviewer', display_name: '审核主管' },
-  archivist: { password: 'archivist123', role: 'archivist', display_name: '复核负责人' },
+const DEMO_ACCOUNTS: Record<Role, { username: string; password: string; role: Role; display_name: string }> = {
+  registrar: { username: 'registrar1', password: '123456', role: 'registrar', display_name: '登记员-张三' },
+  reviewer: { username: 'reviewer1', password: '123456', role: 'reviewer', display_name: '审核主管-李四' },
+  archivist: { username: 'archivist1', password: '123456', role: 'archivist', display_name: '复核负责人-王五' },
 }
 
 interface Toast {
@@ -132,7 +132,7 @@ export const useStore = create<Store>((set, get) => ({
   switchRole: async (role) => {
     const account = DEMO_ACCOUNTS[role]
     if (!account) return false
-    return get().login(role, account.password)
+    return get().login(account.username, account.password)
   },
 
   setFilter: (partial) => {
