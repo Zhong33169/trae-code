@@ -5,6 +5,18 @@ export interface ApiOptions {
   headers?: Record<string, string>
 }
 
+let toastShown: Record<number, number> = {}
+
+const showOnceToast = (msg: string, key: number) => {
+  const now = Date.now()
+  if (toastShown[key] && now - toastShown[key] < 2000) return
+  toastShown[key] = now
+  if (typeof window !== 'undefined') {
+    const ev = new CustomEvent('api-toast', { detail: msg })
+    window.dispatchEvent(ev)
+  }
+}
+
 export const useApi = () => {
   const config = useRuntimeConfig()
   const authStore = useAuthStore()
@@ -33,6 +45,12 @@ export const useApi = () => {
         if (!path.includes('/auth/login')) {
           navigateTo('/login')
         }
+      }
+      if (e?.status === 403) {
+        showOnceToast('🚫 ' + (e?.data?.error || '权限不足，无操作权限'), 403)
+      }
+      if (e?.status === 409) {
+        showOnceToast('⚠️ ' + (e?.data?.error || '版本冲突，请刷新后重试'), 409)
       }
       const msg = e?.data?.error || e?.message || '请求失败'
       throw new Error(msg)

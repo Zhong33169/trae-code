@@ -176,3 +176,30 @@ type NewsClue struct {
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
 }
+
+func (c *NewsClue) CanView(userID string, userRole Role) bool {
+	switch userRole {
+	case RoleReviewer:
+		return true
+	case RoleAuditor:
+		return c.AuditorID == "" || c.AuditorID == userID ||
+			c.Status == StatusSubmitted || c.Status == StatusReSubmit
+	case RoleRegistrar:
+		return c.RegistrarID == userID
+	default:
+		return false
+	}
+}
+
+func (c *NewsClue) IsHandler(userID string, userRole Role) bool {
+	switch userRole {
+	case RoleReviewer:
+		return true
+	case RoleAuditor:
+		return c.AuditorID == userID
+	case RoleRegistrar:
+		return c.RegistrarID == userID
+	default:
+		return false
+	}
+}

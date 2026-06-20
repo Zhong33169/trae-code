@@ -322,9 +322,10 @@ const availableActions = computed(() => {
   const role = authStore.role
   const ver = data.value.version
   const isOwner = data.value.registrarID === authStore.user?.id
-  const auditorAssigned = data.value.auditorID && (data.value.auditorID === authStore.user?.id || role === 'auditor')
+  const isAuditorHandler = !data.value.auditorID || data.value.auditorID === authStore.user?.id
+  const isReviewer = role === 'reviewer'
 
-  // 登记员操作
+  // 登记员操作：仅本人登记的单据可操作
   if (role === 'registrar' && isOwner) {
     if (s === 'draft') list.push({ key: 'submit', label: '提交线索', icon: '📤', cls: 'btn-primary', confirmCls: 'btn-primary', ver })
     if (['returned', 'lack_evidence'].includes(s)) {
@@ -342,28 +343,26 @@ const availableActions = computed(() => {
     }
   }
 
-  // 审核主管操作
+  // 审核主管操作：仅分派给本人或未分派的可办理
   if (role === 'auditor') {
     if (['submitted', 'resubmitted'].includes(s)) list.push({ key: 'assign', label: '核实分派', icon: '📋', cls: 'btn-primary', ver })
-    if (s === 'assigned') {
-      if (auditorAssigned) {
-        list.push({ key: 'start_verify', label: '开始核实', icon: '🔍', cls: 'btn-info', ver })
-        list.push({ key: 'lack_evidence', label: '标记缺证据', icon: '⚠️', cls: 'btn-warning', ver })
-        list.push({ key: 'return_correct', label: '退回补正', icon: '↩️', cls: 'btn-danger', ver })
-      }
+    if (s === 'assigned' && isAuditorHandler) {
+      list.push({ key: 'start_verify', label: '开始核实', icon: '🔍', cls: 'btn-info', ver })
+      list.push({ key: 'lack_evidence', label: '标记缺证据', icon: '⚠️', cls: 'btn-warning', ver })
+      list.push({ key: 'return_correct', label: '退回补正', icon: '↩️', cls: 'btn-danger', ver })
     }
-    if (s === 'verifying') {
+    if (s === 'verifying' && isAuditorHandler) {
       list.push({ key: 'lack_evidence', label: '标记缺证据', icon: '⚠️', cls: 'btn-warning', ver })
       list.push({ key: 'return_correct', label: '退回补正', icon: '↩️', cls: 'btn-danger', ver })
       list.push({ key: 'submit_review', label: '完成核实并提交复核归档', icon: '✅', cls: 'btn-success', ver })
     }
-    if (s === 'lack_evidence') {
+    if (s === 'lack_evidence' && isAuditorHandler) {
       list.push({ key: 'return_correct', label: '退回补正', icon: '↩️', cls: 'btn-danger', ver })
     }
   }
 
-  // 复核负责人
-  if (role === 'reviewer') {
+  // 复核负责人：全部可见可操作
+  if (isReviewer) {
     if (s === 'verifying') list.push({ key: 'archive', label: '复核归档', icon: '📦', cls: 'btn-success', ver })
     if (['assigned', 'verifying'].includes(s)) list.push({ key: 'mark_overdue', label: '标记逾期', icon: '⏰', cls: 'btn-danger', ver })
     list.push({ key: 'mark_conflict', label: '标记状态冲突', icon: '💥', cls: 'btn-warning', ver })

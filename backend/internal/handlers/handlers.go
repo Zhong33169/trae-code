@@ -65,11 +65,11 @@ func ListUsers(c *fiber.Ctx) error {
 func addLog(tx *gorm.DB, clueID, operatorID, operatorName, operatorRole, action, fromStatus, toStatus, comment, rejectReason, reviewOpinion string, vb, va int) error {
 	log := models.OperationLog{
 		ID:            uuid.New().String(),
+		Action:        action,
 		ClueID:        clueID,
 		OperatorID:    operatorID,
 		OperatorName:  operatorName,
 		OperatorRole:  operatorRole,
-		Action:        action,
 		FromStatus:    fromStatus,
 		ToStatus:      toStatus,
 		Comment:       comment,
@@ -79,6 +79,17 @@ func addLog(tx *gorm.DB, clueID, operatorID, operatorName, operatorRole, action,
 		VersionAfter:  va,
 	}
 	return tx.Create(&log).Error
+}
+
+func addDenyLog(clueID, operatorID, operatorName, operatorRole, action, reason string, version int) {
+	_ = addLog(db.DB, clueID, operatorID, operatorName, operatorRole, "❌ "+action, "", "", reason, "", "", version, version)
+}
+
+func deny(c *fiber.Ctx, clue *models.NewsClue, userID, realName, role, action, reason string, statusCode int) error {
+	if clue != nil {
+		addDenyLog(clue.ID, userID, realName, role, action, reason, clue.Version)
+	}
+	return c.Status(statusCode).JSON(fiber.Map{"error": reason})
 }
 
 type CreateClueReq struct {
@@ -231,6 +242,7 @@ func roleRelatedStatuses(role string) []string {
 
 func GetClue(c *fiber.Ctx) error {
 	id := c.Params("id")
+	userID, _, realName, role := middleware.GetCurrentUser(c)
 	var clue models.NewsClue
 	err := db.DB.Preload("Evidences").
 		Preload("Operations", func(db *gorm.DB) *gorm.DB {
@@ -245,6 +257,9 @@ func GetClue(c *fiber.Ctx) error {
 			return c.Status(404).JSON(fiber.Map{"error": "线索单不存在"})
 		}
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+	}
+	if !clue.CanView(userID, models.Role(role)) {
+		return deny(c, &clue, userID, realName, role, "查看详情", "无权限查看该线索单详情", 403)
 	}
 	clue.StatusLabel = clue.Status.Label()
 	return c.JSON(clue)
@@ -272,7 +287,11 @@ func AssignClue(c *fiber.Ctx) error {
 	if err := db.DB.First(&clue, "id = ?", id).Error; err != nil {
 		return c.Status(404).JSON(fiber.Map{"error": "线索单不存在"})
 	}
+	if !clue.CanView(userID, models.Role(role)) {
+		return deny(c, &clue, userID, realName, role, "核实分派", "无权限操作该线索单", 403)
+	}
 	if err := middleware.CheckVersion(clue.Version, req.Version); err != nil {
+		addDenyLog(clue.ID, userID, realName, role, "核实分派", err.Error(), clue.Version)
 		return c.Status(409).JSON(fiber.Map{"error": err.Error(), "currentVersion": clue.Version})
 	}
 	if clue.Status != models.StatusSubmitted && clue.Status != models.StatusReSubmit {
@@ -347,7 +366,14 @@ func ProcessClue(c *fiber.Ctx) error {
 	if err := db.DB.First(&clue, "id = ?", id).Error; err != nil {
 		return c.Status(404).JSON(fiber.Map{"error": "线索单不存在"})
 	}
+	if !clue.CanView(userID, models.Role(role)) {
+		return deny(c, &clue, userID, realName, role, req.Action, "无权限操作该线索单", 403)
+	}
+	if !clue.IsHandler(userID, models.Role(role)) {
+		return deny(c, &clue, userID, realName, role, req.Action, "您不是该线索单的当前处理人，无权办理", 403)
+	}
 	if err := middleware.CheckVersion(clue.Version, req.Version); err != nil {
+		addDenyLog(clue.ID, userID, realName, role, req.Action, err.Error(), clue.Version)
 		return c.Status(409).JSON(fiber.Map{"error": err.Error(), "currentVersion": clue.Version})
 	}
 
@@ -357,89 +383,78 @@ func ProcessClue(c *fiber.Ctx) error {
 	actionName := req.Action
 	newVersion := clue.Version + 1
 
+	fail := func(reason string, code int) error {
+		tx.Rollback()
+		realAct := actionName
+		if realAct == "" {
+			realAct = req.Action
+		}
+		return deny(c, &clue, userID, realName, role, realAct, reason, code)
+	}
+
 	switch models.Role(role) {
 	case models.RoleAuditor:
-		if clue.AuditorID != "" && clue.AuditorID != userID {
-			// 允许审核主管之间交叉处理，但分派状态下需本人
-			if clue.Status == models.StatusAssigned || clue.Status == models.StatusVerifying {
-				// 放行，团队内部可代处理
-			}
-		}
 		switch req.Action {
 		case "start_verify":
 			if clue.Status != models.StatusAssigned {
-				tx.Rollback()
-				return c.Status(400).JSON(fiber.Map{"error": "当前状态不能开始核实"})
+				return fail("当前状态不能开始核实", 400)
 			}
 			newStatus = models.StatusVerifying
 			actionName = "开始核实"
 		case "lack_evidence":
 			if clue.Status != models.StatusAssigned && clue.Status != models.StatusVerifying {
-				tx.Rollback()
-				return c.Status(400).JSON(fiber.Map{"error": "当前状态不能标记缺证据"})
+				return fail("当前状态不能标记缺证据", 400)
 			}
 			if req.RejectReason == "" {
-				tx.Rollback()
-				return c.Status(400).JSON(fiber.Map{"error": "缺证据需说明缺少哪些材料"})
+				return fail("缺证据需说明缺少哪些材料", 400)
 			}
 			newStatus = models.StatusLackEvidence
 			actionName = "标记缺证据"
 		case "return_correct":
 			if clue.Status != models.StatusAssigned && clue.Status != models.StatusVerifying && clue.Status != models.StatusLackEvidence {
-				tx.Rollback()
-				return c.Status(400).JSON(fiber.Map{"error": "当前状态不能退回补正"})
+				return fail("当前状态不能退回补正", 400)
 			}
 			if req.RejectReason == "" {
-				tx.Rollback()
-				return c.Status(400).JSON(fiber.Map{"error": "退回补正必须填写驳回原因"})
+				return fail("退回补正必须填写驳回原因", 400)
 			}
 			newStatus = models.StatusReturned
 			actionName = "退回补正"
 		case "submit_review":
 			if clue.Status != models.StatusVerifying {
-				tx.Rollback()
-				return c.Status(400).JSON(fiber.Map{"error": "当前状态不能提交复核归档"})
+				return fail("当前状态不能提交复核归档", 400)
 			}
 			if req.Comment == "" {
-				tx.Rollback()
-				return c.Status(400).JSON(fiber.Map{"error": "请填写核实结论作为复核意见基础"})
+				return fail("请填写核实结论作为复核意见基础", 400)
 			}
 			now := time.Now()
 			clue.VerifiedAt = &now
 			clue.VerifyComment = req.Comment
-			newStatus = models.StatusVerifying // 保持为核实中，由复核负责人归档
-			actionName = "核实完成，提交复核归档"
 			newStatus = models.StatusVerifying
-			// 实际上可以保持状态，但最后更新人写入
+			actionName = "核实完成，提交复核归档"
 		default:
-			tx.Rollback()
-			return c.Status(400).JSON(fiber.Map{"error": "未知审核操作"})
+			return fail("未知审核操作", 400)
 		}
 
 	case models.RoleRegistrar:
 		switch req.Action {
 		case "submit":
 			if clue.Status != models.StatusDraft && clue.Status != models.StatusReturned && clue.Status != models.StatusLackEvidence && clue.Status != models.StatusAppealReject {
-				tx.Rollback()
-				return c.Status(400).JSON(fiber.Map{"error": "当前状态不能提交"})
+				return fail("当前状态不能提交", 400)
 			}
-			// 提交必须至少有 1 条证据（原有+新增）
 			var cnt int64
 			tx.Model(&models.Evidence{}).Where("clue_id = ?", clue.ID).Count(&cnt)
 			if cnt+int64(len(req.ExtraEvidences)) < 1 {
-				tx.Rollback()
-				return c.Status(400).JSON(fiber.Map{"error": "提交必须至少上传 1 份证据材料"})
+				return fail("提交必须至少上传 1 份证据材料", 400)
 			}
 			now := time.Now()
 			clue.SubmittedAt = &now
-			if clue.Status == models.StatusReturned || clue.Status == models.StatusLackEvidence {
+			if clue.Status == models.StatusReturned || clue.Status == models.StatusLackEvidence || clue.Status == models.StatusAppealReject {
 				newStatus = models.StatusReSubmit
 				actionName = "补正后再次提交"
 			} else {
 				newStatus = models.StatusSubmitted
 				actionName = "提交线索"
 			}
-			// 新增证据
 			for _, e := range req.ExtraEvidences {
 				ev := models.Evidence{
 					ID:         uuid.New().String(),
@@ -450,32 +465,27 @@ func ProcessClue(c *fiber.Ctx) error {
 					UploaderID: userID,
 				}
 				if err := tx.Create(&ev).Error; err != nil {
-					tx.Rollback()
-					return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+					return fail(err.Error(), 500)
 				}
 			}
 		case "save_draft":
 			if clue.Status != models.StatusDraft {
-				tx.Rollback()
-				return c.Status(400).JSON(fiber.Map{"error": "仅草稿可保存编辑"})
+				return fail("仅草稿可保存编辑", 400)
 			}
 			newStatus = models.StatusDraft
 			actionName = "编辑草稿"
 		default:
-			tx.Rollback()
-			return c.Status(400).JSON(fiber.Map{"error": "未知登记员操作"})
+			return fail("未知登记员操作", 400)
 		}
 
 	case models.RoleReviewer:
 		switch req.Action {
 		case "archive":
 			if clue.Status != models.StatusVerifying {
-				tx.Rollback()
-				return c.Status(400).JSON(fiber.Map{"error": "仅核实完成的线索单可归档"})
+				return fail("仅核实完成的线索单可归档", 400)
 			}
 			if req.ArchiveResult == "" {
-				tx.Rollback()
-				return c.Status(400).JSON(fiber.Map{"error": "请填写复核归档结论"})
+				return fail("请填写复核归档结论", 400)
 			}
 			now := time.Now()
 			clue.ArchivedAt = &now
@@ -484,8 +494,7 @@ func ProcessClue(c *fiber.Ctx) error {
 			actionName = "复核归档"
 		case "mark_overdue":
 			if clue.Status != models.StatusAssigned && clue.Status != models.StatusVerifying {
-				tx.Rollback()
-				return c.Status(400).JSON(fiber.Map{"error": "仅处理中单据可标记逾期"})
+				return fail("仅处理中单据可标记逾期", 400)
 			}
 			newStatus = models.StatusOverdue
 			actionName = "标记逾期"
@@ -493,12 +502,10 @@ func ProcessClue(c *fiber.Ctx) error {
 			newStatus = models.StatusConflict
 			actionName = "标记状态冲突"
 		default:
-			tx.Rollback()
-			return c.Status(400).JSON(fiber.Map{"error": "未知复核操作"})
+			return fail("未知复核操作", 400)
 		}
 	default:
-		tx.Rollback()
-		return c.Status(403).JSON(fiber.Map{"error": "未知角色"})
+		return fail("未知角色", 403)
 	}
 
 	clue.Status = newStatus
@@ -544,22 +551,26 @@ func SubmitAppeal(c *fiber.Ctx) error {
 	if err := db.DB.First(&clue, "id = ?", id).Error; err != nil {
 		return c.Status(404).JSON(fiber.Map{"error": "线索单不存在"})
 	}
+	if !clue.CanView(userID, models.Role(role)) {
+		return deny(c, &clue, userID, realName, role, "提交异常申诉", "无权限操作该线索单", 403)
+	}
+	if !clue.IsHandler(userID, models.Role(role)) {
+		return deny(c, &clue, userID, realName, role, "提交异常申诉", "仅线索登记人本人可发起申诉", 403)
+	}
 	if err := middleware.CheckVersion(clue.Version, req.Version); err != nil {
+		addDenyLog(clue.ID, userID, realName, role, "提交异常申诉", err.Error(), clue.Version)
 		return c.Status(409).JSON(fiber.Map{"error": err.Error(), "currentVersion": clue.Version})
 	}
-	// 可发起申诉的状态
 	allowed := map[models.ClueStatus]bool{
 		models.StatusReturned:     true,
 		models.StatusLackEvidence: true,
 		models.StatusOverdue:      true,
 		models.StatusConflict:     true,
 		models.StatusArchived:     true,
+		models.StatusAppealReject: true,
 	}
 	if !allowed[clue.Status] {
-		return c.Status(400).JSON(fiber.Map{"error": "当前状态不可发起异常申诉", "currentStatus": clue.Status.Label()})
-	}
-	if clue.RegistrarID != userID {
-		return c.Status(403).JSON(fiber.Map{"error": "仅线索登记人本人可发起申诉"})
+		return deny(c, &clue, userID, realName, role, "提交异常申诉", "当前状态不可发起异常申诉", 400)
 	}
 	tx := db.DB.Begin()
 	oldStatus := clue.Status.String()
@@ -620,102 +631,72 @@ func ReviewAppeal(c *fiber.Ctx) error {
 	if err := db.DB.First(&clue, "id = ?", id).Error; err != nil {
 		return c.Status(404).JSON(fiber.Map{"error": "线索单不存在"})
 	}
+	if !clue.CanView(userID, models.Role(role)) {
+		return deny(c, &clue, userID, realName, role, "申诉复核", "无权限操作该线索单", 403)
+	}
 	if err := middleware.CheckVersion(clue.Version, req.Version); err != nil {
+		addDenyLog(clue.ID, userID, realName, role, "申诉复核", err.Error(), clue.Version)
 		return c.Status(409).JSON(fiber.Map{"error": err.Error(), "currentVersion": clue.Version})
 	}
 	if clue.Status != models.StatusAppealed {
-		return c.Status(400).JSON(fiber.Map{"error": "当前状态不是申诉中"})
+		return deny(c, &clue, userID, realName, role, "申诉复核", "当前状态不是申诉中，无法复核", 400)
 	}
 	tx := db.DB.Begin()
 	oldStatus := clue.Status.String()
 	newVersion := clue.Version + 1
 	now := time.Now()
-	// 找到最近的申诉记录
 	var appeal models.AppealRecord
 	if err := tx.Where("clue_id = ? AND status = ?", clue.ID, "pending").Order("created_at DESC").First(&appeal).Error; err != nil {
 		tx.Rollback()
-		return c.Status(400).JSON(fiber.Map{"error": "未找到待处理申诉记录"})
+		return deny(c, &clue, userID, realName, role, "申诉复核", "未找到待处理申诉记录", 400)
+	}
+	fail := func(reason string, code int) error {
+		tx.Rollback()
+		return deny(c, &clue, userID, realName, role, "申诉复核", reason, code)
 	}
 	appeal.ReviewerID = userID
 	appeal.ReviewerName = realName
 	appeal.ReviewOpinion = req.ReviewOpinion
 	appeal.RejectReason = req.RejectReason
 	appeal.ReviewedAt = &now
+	var actionName string
 
 	switch req.Action {
 	case "accept":
 		appeal.Status = "accepted"
-		// 申诉受理后，流转到补正重提，由登记员补充材料后再次提交
 		clue.Status = models.StatusAppealAccept
 		clue.LastResult = "申诉已受理，等待补正重提"
-		actionName := "受理申诉"
-		if err := tx.Save(&appeal).Error; err != nil {
-			tx.Rollback()
-			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
-		}
-		clue.Version = newVersion
-		clue.LastHandlerID = userID
-		clue.LastHandlerName = realName
-		clue.LastOpinion = req.ReviewOpinion
-		if err := tx.Save(&clue).Error; err != nil {
-			tx.Rollback()
-			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
-		}
-		if err := addLog(tx, clue.ID, userID, realName, role, actionName, oldStatus, string(models.StatusAppealAccept), req.ReviewOpinion, req.RejectReason, req.ReviewOpinion, req.Version, newVersion); err != nil {
-			tx.Rollback()
-			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
-		}
+		actionName = "受理申诉"
 	case "reject":
 		if req.RejectReason == "" {
-			tx.Rollback()
-			return c.Status(400).JSON(fiber.Map{"error": "驳回申诉需填写驳回原因"})
+			return fail("驳回申诉需填写驳回原因", 400)
 		}
 		appeal.Status = "rejected"
 		clue.Status = models.StatusAppealReject
 		clue.LastResult = "申诉已驳回"
-		actionName := "驳回申诉"
-		if err := tx.Save(&appeal).Error; err != nil {
-			tx.Rollback()
-			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
-		}
-		clue.Version = newVersion
-		clue.LastHandlerID = userID
-		clue.LastHandlerName = realName
-		clue.LastOpinion = req.ReviewOpinion
-		if err := tx.Save(&clue).Error; err != nil {
-			tx.Rollback()
-			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
-		}
-		if err := addLog(tx, clue.ID, userID, realName, role, actionName, oldStatus, string(models.StatusAppealReject), req.ReviewOpinion, req.RejectReason, req.ReviewOpinion, req.Version, newVersion); err != nil {
-			tx.Rollback()
-			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
-		}
+		actionName = "驳回申诉"
 	case "resubmit_auto":
-		// 申诉受理且由登记员通过操作提交后流转（模拟再次提交，实际应该由登记员走ProcessClue提交）
 		appeal.Status = "accepted"
 		appeal.ResubmittedAt = &now
 		clue.Status = models.StatusReSubmit
 		clue.LastResult = "申诉通过，补正重提"
-		actionName := "申诉受理并转入补正重提"
-		if err := tx.Save(&appeal).Error; err != nil {
-			tx.Rollback()
-			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
-		}
-		clue.Version = newVersion
-		clue.LastHandlerID = userID
-		clue.LastHandlerName = realName
-		clue.LastOpinion = req.ReviewOpinion
-		if err := tx.Save(&clue).Error; err != nil {
-			tx.Rollback()
-			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
-		}
-		if err := addLog(tx, clue.ID, userID, realName, role, actionName, oldStatus, string(models.StatusReSubmit), req.ReviewOpinion, "", req.ReviewOpinion, req.Version, newVersion); err != nil {
-			tx.Rollback()
-			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
-		}
+		actionName = "申诉受理并转入补正重提"
 	default:
-		tx.Rollback()
-		return c.Status(400).JSON(fiber.Map{"error": "未知申诉处理操作"})
+		return fail("未知申诉处理操作", 400)
+	}
+
+	if err := tx.Save(&appeal).Error; err != nil {
+		return fail(err.Error(), 500)
+	}
+	clue.Version = newVersion
+	clue.LastHandlerID = userID
+	clue.LastHandlerName = realName
+	clue.LastOpinion = req.ReviewOpinion
+	if err := tx.Save(&clue).Error; err != nil {
+		return fail(err.Error(), 500)
+	}
+	if err := addLog(tx, clue.ID, userID, realName, role, actionName, oldStatus, clue.Status.String(), req.ReviewOpinion, req.RejectReason, req.ReviewOpinion, req.Version, newVersion); err != nil {
+		return fail(err.Error(), 500)
 	}
 	tx.Commit()
 	clue.StatusLabel = clue.Status.Label()
@@ -737,21 +718,28 @@ func ResubmitAfterAppeal(c *fiber.Ctx) error {
 	if err := db.DB.First(&clue, "id = ?", id).Error; err != nil {
 		return c.Status(404).JSON(fiber.Map{"error": "线索单不存在"})
 	}
+	if !clue.CanView(userID, models.Role(role)) {
+		return deny(c, &clue, userID, realName, role, "申诉补正重提", "无权限操作该线索单", 403)
+	}
+	if !clue.IsHandler(userID, models.Role(role)) {
+		return deny(c, &clue, userID, realName, role, "申诉补正重提", "仅线索登记人本人可操作", 403)
+	}
 	if err := middleware.CheckVersion(clue.Version, req.Version); err != nil {
+		addDenyLog(clue.ID, userID, realName, role, "申诉补正重提", err.Error(), clue.Version)
 		return c.Status(409).JSON(fiber.Map{"error": err.Error(), "currentVersion": clue.Version})
 	}
 	if clue.Status != models.StatusAppealAccept {
-		return c.Status(400).JSON(fiber.Map{"error": "当前状态不可执行该操作"})
-	}
-	if clue.RegistrarID != userID {
-		return c.Status(403).JSON(fiber.Map{"error": "仅线索登记人本人可操作"})
+		return deny(c, &clue, userID, realName, role, "申诉补正重提", "当前状态不可执行该操作", 400)
 	}
 	tx := db.DB.Begin()
+	fail := func(reason string, code int) error {
+		tx.Rollback()
+		return deny(c, &clue, userID, realName, role, "申诉补正重提", reason, code)
+	}
 	var cnt int64
 	tx.Model(&models.Evidence{}).Where("clue_id = ?", clue.ID).Count(&cnt)
 	if cnt+int64(len(req.ExtraEvidences)) < 1 {
-		tx.Rollback()
-		return c.Status(400).JSON(fiber.Map{"error": "至少需提供 1 份证据材料"})
+		return fail("至少需提供 1 份证据材料", 400)
 	}
 	oldStatus := clue.Status.String()
 	newVersion := clue.Version + 1
@@ -766,11 +754,9 @@ func ResubmitAfterAppeal(c *fiber.Ctx) error {
 			UploaderID: userID,
 		}
 		if err := tx.Create(&ev).Error; err != nil {
-			tx.Rollback()
-			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+			return fail(err.Error(), 500)
 		}
 	}
-	// 更新申诉记录
 	var appeal models.AppealRecord
 	if err := tx.Where("clue_id = ? AND status = ?", clue.ID, "accepted").Order("created_at DESC").First(&appeal).Error; err == nil {
 		appeal.ResubmittedAt = &now
@@ -784,12 +770,10 @@ func ResubmitAfterAppeal(c *fiber.Ctx) error {
 	clue.LastResult = "申诉补正后再次提交"
 	clue.SubmittedAt = &now
 	if err := tx.Save(&clue).Error; err != nil {
-		tx.Rollback()
-		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+		return fail(err.Error(), 500)
 	}
 	if err := addLog(tx, clue.ID, userID, realName, role, "申诉补正重提", oldStatus, string(models.StatusReSubmit), req.Comment, "", "", req.Version, newVersion); err != nil {
-		tx.Rollback()
-		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+		return fail(err.Error(), 500)
 	}
 	tx.Commit()
 	clue.StatusLabel = clue.Status.Label()
@@ -798,6 +782,17 @@ func ResubmitAfterAppeal(c *fiber.Ctx) error {
 
 func ListOperations(c *fiber.Ctx) error {
 	id := c.Params("id")
+	userID, _, realName, role := middleware.GetCurrentUser(c)
+	var clue models.NewsClue
+	if err := db.DB.First(&clue, "id = ?", id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return c.Status(404).JSON(fiber.Map{"error": "线索单不存在"})
+		}
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+	}
+	if !clue.CanView(userID, models.Role(role)) {
+		return deny(c, &clue, userID, realName, role, "查看操作流水", "无权限查看该线索单操作流水", 403)
+	}
 	var logs []models.OperationLog
 	if err := db.DB.Where("clue_id = ?", id).Order("created_at ASC").Find(&logs).Error; err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})

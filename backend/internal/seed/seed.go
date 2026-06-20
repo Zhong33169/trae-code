@@ -61,6 +61,8 @@ func Seed() {
 	db.DB.Create(&clue1)
 	addEvidences(clue1.ID, reg1.ID, 3)
 	addFlowLogsNormal(clue1, reg1, aud1, rev1)
+	addLog2(clue1.ID, aud2.ID, aud2.RealName, string(aud2.Role), "❌ 非当前处理人拦截", "", "", "赵审核越权尝试重新分派非本人办理的已归档单据，被系统拦截", "", "", 5, 5)
+	addLog2(clue1.ID, reg2.ID, reg2.RealName, string(reg2.Role), "❌ 越权查看被拒", "", "", "李录入尝试查看非本人登记的已归档线索单详情，被系统拦截", "", "", 5, 5)
 	db.DB.Model(&clue1).Update("version", 5)
 
 	// 2. 缺证据的线索单
@@ -84,6 +86,7 @@ func Seed() {
 	addLog2(clue2.ID, reg2.ID, reg2.RealName, string(reg2.Role), "登记并提交线索", "", string(models.StatusSubmitted), "", "", "", 0, 1)
 	addLog2(clue2.ID, aud2.ID, aud2.RealName, string(aud2.Role), "核实分派", string(models.StatusSubmitted), string(models.StatusAssigned), "分派给赵审核处理", "", "", 1, 2)
 	addLog2(clue2.ID, aud2.ID, aud2.RealName, string(aud2.Role), "标记缺证据", string(models.StatusAssigned), string(models.StatusLackEvidence), "需补充：1.现场照片 2.购买凭证/消费记录 3.具体过期时间", "缺少现场照片和实物证据", "", 2, 3)
+	addLog2(clue2.ID, reg2.ID, reg2.RealName, string(reg2.Role), "❌ 证据缺失拦截", "", "", "李录入在零证据情况下尝试提交线索单，被系统拦截（需至少 1 份证据）", "", "", 3, 3)
 	db.DB.Model(&clue2).Update("version", 3)
 
 	// 3. 已逾期的线索单
@@ -188,6 +191,8 @@ func Seed() {
 	addLog2(clue6.ID, aud1.ID, aud1.RealName, string(aud1.Role), "核实分派", string(models.StatusSubmitted), string(models.StatusAssigned), "分派张主管", "", "", 1, 2)
 	addLog2(clue6.ID, aud1.ID, aud1.RealName, string(aud1.Role), "开始核实", string(models.StatusAssigned), string(models.StatusVerifying), "开始现场核实", "", "", 2, 3)
 	addLog2(clue6.ID, rev1.ID, rev1.RealName, string(rev1.Role), "标记状态冲突", string(models.StatusVerifying), string(models.StatusConflict), "审核系统出现多人交叉修改，需复核负责人介入厘清责任并重新分派处理", "", "", 3, 4)
+	addLog2(clue6.ID, aud2.ID, aud2.RealName, string(aud2.Role), "❌ 版本冲突拦截", "", "", "赵审核在携带过期版本(v2) 尝试修改已被张主管更新为v3的线索单，系统返回409并保留原状态", "", "", 4, 4)
+	addLog2(clue6.ID, aud1.ID, aud1.RealName, string(aud1.Role), "❌ 非当前处理人拦截", "", "", "张主管尝试在已标记为状态冲突的单据上继续办理，被系统拦截（需复核负责人先裁决）", "", "", 4, 4)
 	db.DB.Model(&clue6).Update("version", 4)
 
 	// 7. 补正重提（登记员补正后再次提交的样例）
