@@ -452,15 +452,6 @@ const InvitationDetail = () => {
                   重新办理
                 </Button>
               )}
-              {canReprocess && (
-                <Button
-                  danger
-                  loading={actionLoading}
-                  onClick={handleReject}
-                >
-                  退回补正
-                </Button>
-              )}
               <Button onClick={() => navigate('/invitations')}>返回列表</Button>
             </div>
           </div>

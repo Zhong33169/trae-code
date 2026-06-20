@@ -7,7 +7,7 @@ export class BatchActionDto {
   ids!: string[];
 
   @IsString()
-  @IsIn(['approve', 'reject', 'review', 'review-reject'])
+  @IsIn(['approve', 'reject', 'review', 'review-reject', 'reprocess'])
   action!: string;
 
   @IsString()

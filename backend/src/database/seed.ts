@@ -202,6 +202,16 @@ export function seed(db: Database.Database) {
       createdAt: now.subtract(2, 'day').format('YYYY-MM-DD HH:mm:ss'),
       updatedAt: now.subtract(1, 'day').format('YYYY-MM-DD HH:mm:ss'),
     },
+    {
+      id: uuidv4(), title: '【复核退回-待重办】春季媒体见面会邀约', mediaType: '报纸', eventName: '春季媒体见面会',
+      eventDate, eventLocation: '广州白天鹅宾馆', deadline: normalDeadline, status: 'final_rejected',
+      creatorId: 'registrar-001', creatorName: '张登记', reviewerId: 'reviewer-001', reviewerName: '李审核',
+      finalReviewerId: 'final-reviewer-001', finalReviewerName: '王复核',
+      reviewComment: '审核通过', finalComment: '嘉宾确认信息有误，请核实后重新办理',
+      guestConfirmed: 1, checkinCompleted: 0, materialsComplete: 1, version: 4,
+      createdAt: now.subtract(8, 'day').format('YYYY-MM-DD HH:mm:ss'),
+      updatedAt: now.subtract(3, 'day').format('YYYY-MM-DD HH:mm:ss'),
+    },
   ];
 
   const transaction = db.transaction(() => {

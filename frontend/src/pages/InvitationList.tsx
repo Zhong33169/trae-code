@@ -62,8 +62,12 @@ const InvitationList = () => {
   const [loading, setLoading] = useState(false);
   const [params, setParams] = useState<Record<string, unknown>>({ page: 1, pageSize: 10, role: currentRole, operatorId: currentUser.id });
   const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([]);
+  const [selectedRows, setSelectedRows] = useState<Invitation[]>([]);
 
   const statusOptions = getRoleStatusOptions(currentRole);
+
+  const selectedFinalRejectedCount = selectedRows.filter((r) => r.status === InvitationStatus.FinalRejected).length;
+  const selectedPendingReviewCount = selectedRows.filter((r) => r.status === InvitationStatus.PendingReview).length;
 
   useEffect(() => {
     setParams((prev) => ({ ...prev, role: currentRole, operatorId: currentUser.id, page: 1 }));
@@ -86,18 +90,22 @@ const InvitationList = () => {
     fetchData();
   }, [fetchData]);
 
-  const handleBatchAction = async (action: string, actionLabel: string) => {
-    if (selectedRowKeys.length === 0) {
-      message.warning('请先选择邀约单');
+  const handleBatchAction = async (action: string, actionLabel: string, filterStatus?: InvitationStatus) => {
+    let targetIds = selectedRowKeys;
+    if (filterStatus) {
+      targetIds = selectedRows.filter((r) => r.status === filterStatus).map((r) => r.id);
+    }
+    if (targetIds.length === 0) {
+      message.warning(filterStatus ? `请先选择状态为"${STATUS_LABEL_MAP[filterStatus]}"的邀约单` : '请先选择邀约单');
       return;
     }
     Modal.confirm({
       title: `确认${actionLabel}`,
-      content: `确定要对选中的 ${selectedRowKeys.length} 条记录执行"${actionLabel}"操作吗？`,
+      content: `确定要对选中的 ${targetIds.length} 条记录执行"${actionLabel}"操作吗？`,
       onOk: async () => {
         try {
           const result = await batchAction({
-            ids: selectedRowKeys,
+            ids: targetIds,
             action,
             operatorId: currentUser.id,
             operatorRole: currentRole,
@@ -119,6 +127,7 @@ const InvitationList = () => {
             });
           }
           setSelectedRowKeys([]);
+          setSelectedRows([]);
           fetchData();
         } catch {
           // handled by interceptor
@@ -209,7 +218,19 @@ const InvitationList = () => {
         columns={columns}
         dataSource={data}
         loading={loading}
-        rowSelection={{ selectedRowKeys, onChange: (keys) => setSelectedRowKeys(keys as string[]) }}
+        rowSelection={{
+        selectedRowKeys,
+        onChange: (keys, rows) => {
+          setSelectedRowKeys(keys as string[]);
+          setSelectedRows(rows as Invitation[]);
+        },
+        getCheckboxProps: (record) => {
+          const isReprocessContext = currentRole === Role.Reviewer;
+          return {
+            disabled: isReprocessContext && record.status !== InvitationStatus.FinalRejected && record.status !== InvitationStatus.PendingReview,
+          };
+        },
+      }}
         pagination={{
           current: params.page as number,
           pageSize: params.pageSize as number,
@@ -225,14 +246,14 @@ const InvitationList = () => {
           <span>已选择 {selectedRowKeys.length} 项</span>
           {currentRole === Role.Reviewer && (
             <>
-              <Button type="primary" onClick={() => handleBatchAction('approve', '批量通过')}>
-                批量通过
+              <Button type="primary" onClick={() => handleBatchAction('approve', '批量通过')} disabled={selectedPendingReviewCount === 0}>
+                批量通过{selectedPendingReviewCount > 0 ? ` (${selectedPendingReviewCount})` : ''}
               </Button>
-              <Button danger onClick={() => handleBatchAction('reject', '批量退回')}>
+              <Button danger onClick={() => handleBatchAction('reject', '批量退回', InvitationStatus.PendingReview)}>
                 批量退回
               </Button>
-              <Button onClick={() => handleBatchAction('reprocess', '批量重新办理')}>
-                批量重新办理
+              <Button onClick={() => handleBatchAction('reprocess', '批量重新办理', InvitationStatus.FinalRejected)} disabled={selectedFinalRejectedCount === 0}>
+                批量重新办理{selectedFinalRejectedCount > 0 ? ` (${selectedFinalRejectedCount})` : ''}
               </Button>
             </>
           )}
@@ -246,7 +267,7 @@ const InvitationList = () => {
               </Button>
             </>
           )}
-          <Button onClick={() => setSelectedRowKeys([])}>取消选择</Button>
+          <Button onClick={() => { setSelectedRowKeys([]); setSelectedRows([]); }}>取消选择</Button>
         </div>
       )}
     </div>

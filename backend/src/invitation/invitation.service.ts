@@ -354,7 +354,7 @@ export class InvitationService {
     const user = this.getUser(dto.operatorId);
     if (!user) throw new BadRequestException('用户不存在');
 
-    const success: string[] = [];
+    const success: { id: string; beforeStatus: string; afterStatus: string }[] = [];
     const failed: { id: string; reason: string }[] = [];
 
     for (const id of dto.ids) {
@@ -362,90 +362,85 @@ export class InvitationService {
         const inv = this.getInvitation(id);
         if (!inv) { failed.push({ id, reason: '邀请单不存在' }); continue; }
 
+        let beforeStatus = inv.status;
+        let afterStatus = '';
+        let updateSql = '';
+        let updateParams: any[] = [];
+        let auditAction = '';
+        let auditDetail = dto.comment || '';
+
         if (dto.action === 'approve') {
           if (dto.operatorRole !== 'reviewer') { failed.push({ id, reason: '只有审核主管可以审核通过' }); continue; }
           if (inv.status !== 'pending_review') { failed.push({ id, reason: '状态不是待审核' }); continue; }
           if (!inv.guest_confirmed) { failed.push({ id, reason: '嘉宾未确认' }); continue; }
           if (!inv.materials_complete) { failed.push({ id, reason: '材料不完整' }); continue; }
-
-          this.db.prepare(`
-            UPDATE invitation SET status = 'pending_final', reviewer_id = ?, reviewer_name = ?,
-              review_comment = ?, version = version + 1, updated_at = datetime('now')
-            WHERE id = ? AND version = ?
-          `).run(dto.operatorId, user.name, dto.comment || '批量审核通过', id, inv.version);
-
-          this.createAuditLog({
-            invitationId: id, operatorId: dto.operatorId, operatorName: user.name, operatorRole: dto.operatorRole,
-            action: 'approve', detail: dto.comment || '批量审核通过',
-            beforeStatus: inv.status, afterStatus: 'pending_final',
-          });
+          afterStatus = 'pending_final';
+          auditAction = 'approve';
+          if (!auditDetail) auditDetail = '批量审核通过';
+          updateSql = `UPDATE invitation SET status = 'pending_final', reviewer_id = ?, reviewer_name = ?,
+            review_comment = ?, version = version + 1, updated_at = datetime('now')
+            WHERE id = ? AND version = ?`;
+          updateParams = [dto.operatorId, user.name, auditDetail, id, inv.version];
         } else if (dto.action === 'reject') {
           if (dto.operatorRole !== 'reviewer') { failed.push({ id, reason: '只有审核主管可以退回' }); continue; }
           if (inv.status !== 'pending_review') { failed.push({ id, reason: '状态不是待审核' }); continue; }
-
-          this.db.prepare(`
-            UPDATE invitation SET status = 'review_rejected', reviewer_id = ?, reviewer_name = ?,
-              review_comment = ?, version = version + 1, updated_at = datetime('now')
-            WHERE id = ? AND version = ?
-          `).run(dto.operatorId, user.name, dto.comment || '批量退回', id, inv.version);
-
-          this.createAuditLog({
-            invitationId: id, operatorId: dto.operatorId, operatorName: user.name, operatorRole: dto.operatorRole,
-            action: 'reject', detail: dto.comment || '批量退回',
-            beforeStatus: inv.status, afterStatus: 'review_rejected',
-          });
+          afterStatus = 'review_rejected';
+          auditAction = 'reject';
+          if (!auditDetail) auditDetail = '批量退回';
+          updateSql = `UPDATE invitation SET status = 'review_rejected', reviewer_id = ?, reviewer_name = ?,
+            review_comment = ?, version = version + 1, updated_at = datetime('now')
+            WHERE id = ? AND version = ?`;
+          updateParams = [dto.operatorId, user.name, auditDetail, id, inv.version];
         } else if (dto.action === 'review') {
           if (dto.operatorRole !== 'final_reviewer') { failed.push({ id, reason: '只有复核负责人可以复核归档' }); continue; }
           if (inv.status !== 'pending_final') { failed.push({ id, reason: '状态不是待复核' }); continue; }
           if (!inv.guest_confirmed) { failed.push({ id, reason: '嘉宾未确认' }); continue; }
           if (!inv.checkin_completed) { failed.push({ id, reason: '签到未完成' }); continue; }
           if (!inv.materials_complete) { failed.push({ id, reason: '材料不完整' }); continue; }
-
-          this.db.prepare(`
-            UPDATE invitation SET status = 'archived', final_reviewer_id = ?, final_reviewer_name = ?,
-              final_comment = ?, version = version + 1, updated_at = datetime('now')
-            WHERE id = ? AND version = ?
-          `).run(dto.operatorId, user.name, dto.comment || '批量复核归档', id, inv.version);
-
-          this.createAuditLog({
-            invitationId: id, operatorId: dto.operatorId, operatorName: user.name, operatorRole: dto.operatorRole,
-            action: 'review', detail: dto.comment || '批量复核归档',
-            beforeStatus: inv.status, afterStatus: 'archived',
-          });
+          afterStatus = 'archived';
+          auditAction = 'review';
+          if (!auditDetail) auditDetail = '批量复核归档';
+          updateSql = `UPDATE invitation SET status = 'archived', final_reviewer_id = ?, final_reviewer_name = ?,
+            final_comment = ?, version = version + 1, updated_at = datetime('now')
+            WHERE id = ? AND version = ?`;
+          updateParams = [dto.operatorId, user.name, auditDetail, id, inv.version];
         } else if (dto.action === 'review-reject') {
           if (dto.operatorRole !== 'final_reviewer') { failed.push({ id, reason: '只有复核负责人可以复核退回' }); continue; }
           if (inv.status !== 'pending_final') { failed.push({ id, reason: '状态不是待复核' }); continue; }
-
-          this.db.prepare(`
-            UPDATE invitation SET status = 'final_rejected', final_reviewer_id = ?, final_reviewer_name = ?,
-              final_comment = ?, version = version + 1, updated_at = datetime('now')
-            WHERE id = ? AND version = ?
-          `).run(dto.operatorId, user.name, dto.comment || '批量复核退回', id, inv.version);
-
-          this.createAuditLog({
-            invitationId: id, operatorId: dto.operatorId, operatorName: user.name, operatorRole: dto.operatorRole,
-            action: 'review-reject', detail: dto.comment || '批量复核退回',
-            beforeStatus: inv.status, afterStatus: 'final_rejected',
-          });
+          afterStatus = 'final_rejected';
+          auditAction = 'review-reject';
+          if (!auditDetail) auditDetail = '批量复核退回';
+          updateSql = `UPDATE invitation SET status = 'final_rejected', final_reviewer_id = ?, final_reviewer_name = ?,
+            final_comment = ?, version = version + 1, updated_at = datetime('now')
+            WHERE id = ? AND version = ?`;
+          updateParams = [dto.operatorId, user.name, auditDetail, id, inv.version];
         } else if (dto.action === 'reprocess') {
           if (dto.operatorRole !== 'reviewer') { failed.push({ id, reason: '只有审核主管可以重新办理' }); continue; }
           if (inv.status !== 'final_rejected') { failed.push({ id, reason: '状态不是复核退回' }); continue; }
           if (!inv.guest_confirmed) { failed.push({ id, reason: '嘉宾未确认' }); continue; }
           if (!inv.materials_complete) { failed.push({ id, reason: '材料不完整' }); continue; }
-
-          this.db.prepare(`
-            UPDATE invitation SET status = 'pending_review', version = version + 1, updated_at = datetime('now')
-            WHERE id = ? AND version = ?
-          `).run(id, inv.version);
-
-          this.createAuditLog({
-            invitationId: id, operatorId: dto.operatorId, operatorName: user.name, operatorRole: dto.operatorRole,
-            action: 'reprocess', detail: dto.comment || '批量重新办理',
-            beforeStatus: inv.status, afterStatus: 'pending_review',
-          });
+          afterStatus = 'pending_review';
+          auditAction = 'reprocess';
+          if (!auditDetail) auditDetail = '批量重新办理';
+          updateSql = `UPDATE invitation SET status = 'pending_review', version = version + 1, updated_at = datetime('now')
+            WHERE id = ? AND version = ?`;
+          updateParams = [id, inv.version];
+        } else {
+          failed.push({ id, reason: `不支持的操作: ${dto.action}` }); continue;
         }
 
-        success.push(id);
+        const result = this.db.prepare(updateSql).run(...updateParams);
+        if (result.changes === 0) {
+          failed.push({ id, reason: '版本冲突，请刷新后重试' }); continue;
+        }
+
+        this.createAuditLog({
+          invitationId: id, operatorId: dto.operatorId, operatorName: user.name, operatorRole: dto.operatorRole,
+          action: auditAction, detail: auditDetail,
+          beforeStatus, afterStatus,
+        });
+
+        success.push({ id, beforeStatus, afterStatus });
       } catch (e: any) {
         failed.push({ id, reason: e.message || '操作失败' });
       }
