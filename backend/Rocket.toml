@@ -1,0 +1,12 @@
+[default]
+address = "127.0.0.1"
+port = 8003
+workers = 4
+ident = "SCF-Backend"
+
+[default.limits]
+json = "10MB"
+form = "10MB"
+
+[default.databases]
+scf_db = { url = "scf_platform.db" }
