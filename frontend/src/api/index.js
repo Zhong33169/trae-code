@@ -20,7 +20,7 @@ api.interceptors.response.use(
     if (response.data && response.data.code === 0) {
       return response.data.data
     }
-    return Promise.reject(response.data || { message: '请求失败' })
+    return Promise.reject({ message: response.data?.message || '请求失败', code: response.data?.code || 1 })
   },
   (error) => {
     if (error.response?.status === 401) {
@@ -29,8 +29,9 @@ api.interceptors.response.use(
         window.dispatchEvent(new CustomEvent('auth:unauthorized'))
       }
     }
-    const message = error.response?.data?.message || error.message || '网络错误'
-    return Promise.reject({ message, ...error.response?.data })
+    const respData = error.response?.data || {}
+    const message = respData.message || error.message || '网络错误'
+    return Promise.reject({ message, code: respData.code || error.response?.status || 0, data: respData.data })
   }
 )
 

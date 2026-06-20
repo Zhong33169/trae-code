@@ -72,16 +72,31 @@ const Nav = () => {
 }
 
 const AppContent = () => {
+  const { loading, currentUser, refreshKey } = useAuth()
+
+  if (loading || !currentUser) {
+    return (
+      <div className="app">
+        <header className="header">
+          <h1>📋 投诉工单管理系统</h1>
+        </header>
+        <main className="main">
+          <div className="empty">正在登录，请稍候...</div>
+        </main>
+      </div>
+    )
+  }
+
   return (
     <div className="app">
       <Header />
       <Nav />
       <main className="main">
         <Routes>
-          <Route path="/" element={<TicketList />} />
-          <Route path="/tickets/:id" element={<TicketDetail />} />
-          <Route path="/create" element={<CreateTicket />} />
-          <Route path="/import" element={<ImportPage />} />
+          <Route path="/" element={<TicketList key={refreshKey} />} />
+          <Route path="/tickets/:id" element={<TicketDetail key={refreshKey} />} />
+          <Route path="/create" element={<CreateTicket key={refreshKey} />} />
+          <Route path="/import" element={<ImportPage key={refreshKey} />} />
         </Routes>
       </main>
     </div>

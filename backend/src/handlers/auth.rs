@@ -47,10 +47,10 @@ pub async fn login(
                         user,
                     }))
                 }
-                Err(_) => HttpResponse::Unauthorized().json(ApiResponse::<()>::error("用户名或密码错误")),
+                Err(_) => HttpResponse::Unauthorized().json(ApiResponse::<()>::error_with_code(401, "用户名或密码错误")),
             }
         }
-        Err(_) => HttpResponse::Unauthorized().json(ApiResponse::<()>::error("用户名或密码错误")),
+        Err(_) => HttpResponse::Unauthorized().json(ApiResponse::<()>::error_with_code(401, "用户名或密码错误")),
     }
 }
 

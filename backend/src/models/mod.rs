@@ -205,6 +205,14 @@ impl<T> ApiResponse<T> {
             data: None,
         }
     }
+
+    pub fn error_with_code(code: i32, message: &str) -> Self {
+        ApiResponse {
+            code,
+            message: message.to_string(),
+            data: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

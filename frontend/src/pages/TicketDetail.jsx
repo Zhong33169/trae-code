@@ -142,8 +142,13 @@ const TicketDetail = () => {
   }
 
   const handleError = (e, action) => {
-    const msg = e?.message || e?.failure_reason || (action + '失败')
-    setErrorMsg(action + '失败：' + msg)
+    const msg = e?.message || (action + '失败')
+    const code = e?.code
+    let prefix = action + '失败'
+    if (code === 401) prefix = '登录已过期'
+    else if (code === 403) prefix = '无权操作'
+    else if (code === 409) prefix = '状态冲突'
+    setErrorMsg(prefix + '：' + msg)
     loadData()
   }
 

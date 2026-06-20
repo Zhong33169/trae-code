@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Mutex;
 use uuid::Uuid;
+use crate::models::ApiResponse;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthUser {
@@ -39,6 +40,13 @@ impl AuthState {
     }
 }
 
+fn unauthorized_response(message: &str) -> actix_web::Error {
+    let resp = HttpResponse::Unauthorized()
+        .content_type("application/json")
+        .json(ApiResponse::<()>::error_with_code(401, message));
+    actix_web::error::InternalError::from_response("", resp).into()
+}
+
 impl FromRequest for AuthUser {
     type Error = actix_web::Error;
     type Future = Ready<Result<Self, Self::Error>>;
@@ -63,14 +71,10 @@ impl FromRequest for AuthUser {
                         return ok(user);
                     }
                 }
-                err(actix_web::error::ErrorUnauthorized(
-                    serde_json::json!({"code": 401, "message": "无效或已过期的登录凭证，请重新登录", "data": null}).to_string()
-                ))
+                err(unauthorized_response("无效或已过期的登录凭证，请重新登录"))
             }
             None => {
-                err(actix_web::error::ErrorUnauthorized(
-                    serde_json::json!({"code": 401, "message": "缺少登录凭证，请先登录", "data": null}).to_string()
-                ))
+                err(unauthorized_response("缺少登录凭证，请先登录"))
             }
         }
     }
@@ -80,11 +84,10 @@ pub fn require_role(user: &AuthUser, allowed_roles: &[&str]) -> Result<(), HttpR
     if allowed_roles.contains(&user.role.as_str()) {
         Ok(())
     } else {
-        Err(HttpResponse::Forbidden().json(serde_json::json!({
-            "code": 403,
-            "message": format!("权限不足：{}角色无法执行此操作", role_label(&user.role)),
-            "data": null
-        })))
+        Err(HttpResponse::Forbidden()
+            .json(ApiResponse::<()>::error_with_code(403, &format!(
+                "权限不足：{}角色无法执行此操作", role_label(&user.role)
+            ))))
     }
 }
 

@@ -36,7 +36,7 @@ fn row_to_ticket(row: &rusqlite::Row) -> rusqlite::Result<ComplaintTicket> {
 
 fn insert_audit_log(conn: &rusqlite::Connection, ticket_id: Option<i64>, user_id: i64, action: &str, detail: Option<&str>, is_failure: bool, failure_reason: Option<&str>) {
     let _ = conn.execute(
-        "INSERT INTO audit_logs (ticket_id, user_id, action, detail, is_failure, failure_reason) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        "INSERT INTO audit_logs (ticket_id, user_id, action, detail, is_failure, failure_reason, batch_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL)",
         params![ticket_id, user_id, action, detail, if is_failure { 1 } else { 0 }, failure_reason],
     );
 }
@@ -272,7 +272,7 @@ pub async fn update_ticket(
     if current_status != "draft" && current_status != "returned" {
         add_audit_log(&db, Some(ticket_id), auth_user.user_id, "update_ticket_status_conflict", None, true,
             Some(&format!("工单状态为{}，仅草稿或退回状态可编辑", current_status)));
-        return HttpResponse::BadRequest().json(ApiResponse::<()>::error(
+        return HttpResponse::BadRequest().json(ApiResponse::<()>::error_with_code(409,
             &format!("状态冲突：工单当前为{}状态，仅草稿或退回补正状态可编辑", current_status)));
     }
 
@@ -344,7 +344,7 @@ pub async fn start_process(
     if current_status != "pending_audit" {
         add_audit_log(&db, Some(ticket_id), auth_user.user_id, "start_process_status_conflict", None, true,
             Some(&format!("工单状态为{}，仅待审核状态可开始办理", current_status)));
-        return HttpResponse::BadRequest().json(ApiResponse::<()>::error(
+        return HttpResponse::BadRequest().json(ApiResponse::<()>::error_with_code(409,
             &format!("状态冲突：工单当前为{}状态，仅待审核状态可开始办理", current_status)));
     }
 
@@ -390,7 +390,7 @@ pub async fn submit_review(
     if current_status != "processing" {
         add_audit_log(&db, Some(ticket_id), auth_user.user_id, "submit_review_status_conflict", None, true,
             Some(&format!("工单状态为{}，仅办理中状态可提交复核", current_status)));
-        return HttpResponse::BadRequest().json(ApiResponse::<()>::error(
+        return HttpResponse::BadRequest().json(ApiResponse::<()>::error_with_code(409,
             &format!("状态冲突：工单当前为{}状态，仅办理中状态可提交复核", current_status)));
     }
 
@@ -431,7 +431,7 @@ pub async fn return_ticket(
     if !allowed {
         add_audit_log(&db, Some(ticket_id), auth_user.user_id, "return_ticket_forbidden", None, true,
             Some(&format!("{}({})无权退回工单，仅审核主管或复核负责人可操作", auth_user.name, role_label(&auth_user.role))));
-        return HttpResponse::Forbidden().json(ApiResponse::<()>::error(
+        return HttpResponse::Forbidden().json(ApiResponse::<()>::error_with_code(403,
             &format!("权限不足：{}角色无法退回工单", role_label(&auth_user.role))));
     }
 
@@ -449,7 +449,7 @@ pub async fn return_ticket(
     if !status_allowed {
         add_audit_log(&db, Some(ticket_id), auth_user.user_id, "return_ticket_status_conflict", None, true,
             Some(&format!("{}尝试退回，但工单状态为{}，当前角色无法退回此状态", auth_user.name, current_status)));
-        return HttpResponse::BadRequest().json(ApiResponse::<()>::error(
+        return HttpResponse::BadRequest().json(ApiResponse::<()>::error_with_code(409,
             &format!("状态冲突：工单当前为{}状态，{}无法退回", current_status, role_label(&auth_user.role))));
     }
 
@@ -500,7 +500,7 @@ pub async fn resubmit_ticket(
     if current_status != "returned" && current_status != "draft" {
         add_audit_log(&db, Some(ticket_id), auth_user.user_id, "resubmit_ticket_status_conflict", None, true,
             Some(&format!("工单状态为{}，仅退回或草稿状态可重新提交", current_status)));
-        return HttpResponse::BadRequest().json(ApiResponse::<()>::error(
+        return HttpResponse::BadRequest().json(ApiResponse::<()>::error_with_code(409,
             &format!("状态冲突：工单当前为{}状态，仅退回或草稿状态可重新提交", current_status)));
     }
 
@@ -553,7 +553,7 @@ pub async fn archive_ticket(
     if current_status != "pending_review" {
         add_audit_log(&db, Some(ticket_id), auth_user.user_id, "archive_status_conflict", None, true,
             Some(&format!("工单状态为{}，仅待复核状态可归档", current_status)));
-        return HttpResponse::BadRequest().json(ApiResponse::<()>::error(
+        return HttpResponse::BadRequest().json(ApiResponse::<()>::error_with_code(409,
             &format!("状态冲突：工单当前为{}状态，仅待复核状态可归档", current_status)));
     }
 
