@@ -80,12 +80,18 @@ async function loadUsers() {
 
 async function changeStatus(newStatus, extra = {}) {
   try {
-    await updateCareRecordStatus(record.value.id, { status: newStatus, ...extra })
-    showMsg(`状态已更新为 ${statusMap[newStatus]}`, 'success')
+    const res = await updateCareRecordStatus(record.value.id, { status: newStatus, ...extra })
+    const extraMsg = []
+    if (res.data?.nurse_name) extraMsg.push(`经办护士: ${res.data.nurse_name}`)
+    if (res.data?.reviewer_name) extraMsg.push(`复核人: ${res.data.reviewer_name}`)
+    const extraInfo = extraMsg.length ? ` (${extraMsg.join('，')})` : ''
+    showMsg(`状态已更新为 ${statusMap[newStatus]}${extraInfo}`, 'success')
     loadRecord()
     userStore.refreshCareList()
+    return true
   } catch (e) {
     showMsg(e.response?.data?.error || '状态更新失败', 'danger')
+    return false
   }
 }
 
@@ -94,13 +100,15 @@ function openNurseDialog() {
   showNurseDialog.value = true
 }
 
-function handleSelectNurse() {
+async function handleSelectNurse() {
   if (!selectedNurseId.value) {
     showMsg('请选择经办护士', 'warning')
     return
   }
-  changeStatus('processing', { nurse_id: selectedNurseId.value })
-  showNurseDialog.value = false
+  const ok = await changeStatus('processing', { nurse_id: selectedNurseId.value })
+  if (ok) {
+    showNurseDialog.value = false
+  }
 }
 
 function openReviewerDialog() {
@@ -108,23 +116,27 @@ function openReviewerDialog() {
   showReviewerDialog.value = true
 }
 
-function handleSelectReviewer() {
+async function handleSelectReviewer() {
   if (!selectedReviewerId.value) {
     showMsg('请选择复核人', 'warning')
     return
   }
-  changeStatus('reviewing', { reviewer_id: selectedReviewerId.value })
-  showReviewerDialog.value = false
+  const ok = await changeStatus('reviewing', { reviewer_id: selectedReviewerId.value })
+  if (ok) {
+    showReviewerDialog.value = false
+  }
 }
 
-function handleReturn() {
+async function handleReturn() {
   if (!returnReason.value.trim()) {
     showMsg('请填写退回原因', 'warning')
     return
   }
-  changeStatus('returned', { return_reason: returnReason.value })
-  showReturnDialog.value = false
-  returnReason.value = ''
+  const ok = await changeStatus('returned', { return_reason: returnReason.value })
+  if (ok) {
+    showReturnDialog.value = false
+    returnReason.value = ''
+  }
 }
 
 async function handleAddMedication() {

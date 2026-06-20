@@ -41,10 +41,10 @@ router.get('/', (req, res) => {
     sql += ` AND cr.doctor_id = ?`;
     params.push(userId);
   } else if (role === 'nurse' && userId) {
-    sql += ` AND cr.nurse_id = ?`;
+    sql += ` AND (cr.nurse_id = ? OR cr.nurse_id IS NULL)`;
     params.push(userId);
   } else if (role === 'reviewer' && userId) {
-    sql += ` AND cr.reviewer_id = ?`;
+    sql += ` AND (cr.reviewer_id = ? OR cr.reviewer_id IS NULL)`;
     params.push(userId);
   }
 
@@ -169,7 +169,14 @@ router.put('/:id/status', requireRole('doctor', 'nurse', 'reviewer', 'admin'), (
   const { id } = req.params;
   const { status, return_reason, nurse_id, reviewer_id } = req.body;
 
-  const current = db.prepare('SELECT * FROM care_records WHERE id = ?').get(id);
+  const current = db.prepare(`
+    SELECT cr.*, d.name as doctor_name, n.name as nurse_name, r.name as reviewer_name
+    FROM care_records cr
+    LEFT JOIN users d ON cr.doctor_id = d.id
+    LEFT JOIN users n ON cr.nurse_id = n.id
+    LEFT JOIN users r ON cr.reviewer_id = r.id
+    WHERE cr.id = ?
+  `).get(id);
   if (!current) {
     return res.status(404).json({ error: '护理单不存在' });
   }
@@ -201,21 +208,45 @@ router.put('/:id/status', requireRole('doctor', 'nurse', 'reviewer', 'admin'), (
   }
 
   const updates = { status };
+  let nurseInfo = null;
+  let reviewerInfo = null;
 
   if (status === 'processing') {
-    if (!nurse_id && req.user.role === 'nurse') {
-      updates.nurse_id = req.user.id;
+    let finalNurseId = null;
+    if (req.user.role === 'nurse') {
+      finalNurseId = req.user.id;
     } else if (nurse_id) {
-      updates.nurse_id = nurse_id;
+      finalNurseId = parseInt(nurse_id);
     }
+    if (!finalNurseId) {
+      auditLog(id, 'status_change_failed', current.status, status, '缺少经办护士', '进入办理状态必须指定经办护士', req);
+      return res.status(400).json({ error: '进入办理状态必须选择经办护士' });
+    }
+    nurseInfo = db.prepare('SELECT id, name FROM users WHERE id = ? AND role = ?').get(finalNurseId, 'nurse');
+    if (!nurseInfo) {
+      auditLog(id, 'status_change_failed', current.status, status, '经办护士不存在', `指定的 nurse_id=${finalNurseId} 不是有效护士`, req);
+      return res.status(400).json({ error: '选择的经办护士无效' });
+    }
+    updates.nurse_id = finalNurseId;
   }
 
   if (status === 'reviewing') {
-    if (!reviewer_id && req.user.role === 'reviewer') {
-      updates.reviewer_id = req.user.id;
+    let finalReviewerId = null;
+    if (req.user.role === 'reviewer') {
+      finalReviewerId = req.user.id;
     } else if (reviewer_id) {
-      updates.reviewer_id = reviewer_id;
+      finalReviewerId = parseInt(reviewer_id);
     }
+    if (!finalReviewerId) {
+      auditLog(id, 'status_change_failed', current.status, status, '缺少复核人', '进入复核状态必须指定复核人', req);
+      return res.status(400).json({ error: '进入复核状态必须选择复核人' });
+    }
+    reviewerInfo = db.prepare('SELECT id, name FROM users WHERE id = ? AND role = ?').get(finalReviewerId, 'reviewer');
+    if (!reviewerInfo) {
+      auditLog(id, 'status_change_failed', current.status, status, '复核人不存在', `指定的 reviewer_id=${finalReviewerId} 不是有效复核员`, req);
+      return res.status(400).json({ error: '选择的复核人无效' });
+    }
+    updates.reviewer_id = finalReviewerId;
   }
 
   if (status === 'returned' && return_reason) {
@@ -232,26 +263,46 @@ router.put('/:id/status', requireRole('doctor', 'nurse', 'reviewer', 'admin'), (
   const newInfo = { status };
   if (updates.nurse_id) {
     oldInfo.nurse_id = current.nurse_id;
+    oldInfo.nurse_name = current.nurse_name;
     newInfo.nurse_id = updates.nurse_id;
+    newInfo.nurse_name = nurseInfo.name;
   }
   if (updates.reviewer_id) {
     oldInfo.reviewer_id = current.reviewer_id;
+    oldInfo.reviewer_name = current.reviewer_name;
     newInfo.reviewer_id = updates.reviewer_id;
+    newInfo.reviewer_name = reviewerInfo.name;
   }
 
   let detail = `状态从 ${current.status} 变更为 ${status}`;
-  if (updates.nurse_id) detail += `，经办护士: ${updates.nurse_id}`;
-  if (updates.reviewer_id) detail += `，复核人: ${updates.reviewer_id}`;
+  if (nurseInfo) detail += `，经办护士: ${nurseInfo.name}`;
+  if (reviewerInfo) detail += `，复核人: ${reviewerInfo.name}`;
   if (status === 'returned' && return_reason) detail += `，退回原因: ${return_reason}`;
 
   auditLog(id, 'status_change', oldInfo, newInfo, return_reason, detail, req);
 
-  if (status === 'returned' || status === 'overdue') {
-    auditLog(id, `${status}_recorded`, null, null, return_reason || '超时未处理',
-      status === 'returned' ? `护理单被退回: ${return_reason}` : '护理单超时未处理', req);
+  if (status === 'returned') {
+    const responsible = [];
+    if (current.nurse_name) responsible.push(`经办护士: ${current.nurse_name}`);
+    if (current.reviewer_name) responsible.push(`复核人: ${current.reviewer_name}`);
+    const responsibleStr = responsible.length ? responsible.join('、') : '暂无责任人';
+    auditLog(id, 'returned_recorded', null, null, return_reason || '未填写',
+      `护理单被退回: ${return_reason}，责任人: ${responsibleStr}`, req);
+  }
+  if (status === 'overdue') {
+    const responsible = [];
+    if (current.nurse_name) responsible.push(`经办护士: ${current.nurse_name}`);
+    if (current.reviewer_name) responsible.push(`复核人: ${current.reviewer_name}`);
+    const responsibleStr = responsible.length ? responsible.join('、') : '暂无责任人';
+    auditLog(id, 'overdue_recorded', null, null, '超时未处理',
+      `护理单超时未处理，责任人: ${responsibleStr}`, req);
   }
 
-  res.json({ message: '状态已更新' });
+  res.json({
+    message: '状态已更新',
+    nurse_name: nurseInfo ? nurseInfo.name : current.nurse_name,
+    reviewer_name: reviewerInfo ? reviewerInfo.name : current.reviewer_name
+  });
 });
 
 router.put('/:id', requireRole('doctor', 'nurse', 'admin'), (req, res) => {

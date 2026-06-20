@@ -132,7 +132,7 @@ function seedData() {
   // 住院同意书 - 初始版（被驳回）
   insertAttachment.run(3, '住院同意书_初版.jpg', '.jpg', 51200, 'consent_form', 1, 'initial', 'rejected', 4, 6, daysAgo(6), '文件模糊无法辨认，签字位置错误，请重新上传清晰扫描件', null, null, daysAgo(8));
   // 住院同意书 - 补传版（替换初版，待审核）
-  insertAttachment.run(3, '住院同意书_补传版.pdf', '.pdf', 90112, 'consent_form', 1, 'resubmit', 'pending', 4, null, null, null, '原文件被驳回，重新上传清晰扫描件', 2, daysAgo(5));
+  insertAttachment.run(3, '住院同意书_补传版.pdf', '.pdf', 90112, 'consent_form', 1, 'resubmit', 'pending', 4, null, null, null, '原文件被驳回，重新上传清晰扫描件', 10, daysAgo(5));
   // 血常规
   insertAttachment.run(3, '血常规报告.pdf', '.pdf', 143360, 'lab_result', 0, 'initial', 'approved', 4, 6, daysAgo(7), null, null, null, daysAgo(8));
   // 治疗记录 - 初始版（被驳回）
@@ -221,7 +221,7 @@ function seedData() {
 
   // ===== #1 豆豆 - 完整流程
   insertAudit.run(1, 'create', 1, '张医生', 'doctor', null, '{"pet_name":"豆豆","status":"initiated"}', null, '张医生创建住院护理单', daysAgo(7, 10));
-  insertAudit.run(1, 'status_change', 1, '张医生', 'doctor', '{"status":"initiated"}', '{"status":"processing","nurse_id":3}', null, '张医生将护理单分配给王护士开始办理，经办护士: 王护士', daysAgo(7, 11));
+  insertAudit.run(1, 'status_change', 1, '张医生', 'doctor', '{"status":"initiated","nurse_id":null,"nurse_name":null}', '{"status":"processing","nurse_id":3,"nurse_name":"王护士"}', null, '张医生将护理单分配给王护士开始办理，经办护士: 王护士', daysAgo(7, 11));
   insertAudit.run(1, 'upload_attachment', 1, '张医生', 'doctor', null, '{"file_name":"入院登记表.pdf","upload_type":"initial"}', null, '张医生上传附件: 入院登记表.pdf (初始上传)', daysAgo(7, 11));
   insertAudit.run(1, 'upload_attachment', 1, '张医生', 'doctor', null, '{"file_name":"住院同意书.pdf","upload_type":"initial"}', null, '张医生上传附件: 住院同意书.pdf (初始上传)', daysAgo(7, 11));
   insertAudit.run(1, 'approve_attachment', 5, '陈主任', 'reviewer', '{"status":"pending"}', '{"status":"approved"}', null, '陈主任审核通过附件: 入院登记表.pdf', daysAgo(6, 9));
@@ -232,13 +232,24 @@ function seedData() {
   insertAudit.run(1, 'approve_attachment', 5, '陈主任', 'reviewer', '{"status":"pending"}', '{"status":"approved"}', null, '陈主任审核通过附件: X光片.png', daysAgo(5, 10));
   insertAudit.run(1, 'upload_attachment', 3, '王护士', 'nurse', null, '{"file_name":"术后护理记录.pdf","upload_type":"initial"}', null, '王护士上传附件: 术后护理记录.pdf (初始上传)', daysAgo(3, 16));
   insertAudit.run(1, 'approve_attachment', 5, '陈主任', 'reviewer', '{"status":"pending"}', '{"status":"approved"}', null, '陈主任审核通过附件: 术后护理记录.pdf', daysAgo(2, 10));
-  insertAudit.run(1, 'status_change', 3, '王护士', 'nurse', '{"status":"processing"}', '{"status":"reviewing","reviewer_id":5}', null, '王护士提交护理单进入复核，复核人: 陈主任', daysAgo(2, 15));
+  insertAudit.run(1, 'status_change', 3, '王护士', 'nurse', '{"status":"processing","reviewer_id":null,"reviewer_name":null}', '{"status":"reviewing","reviewer_id":5,"reviewer_name":"陈主任"}', null, '王护士提交护理单进入复核，复核人: 陈主任', daysAgo(2, 15));
   insertAudit.run(1, 'create_discharge', 1, '张医生', 'doctor', null, '{"discharge_date":"2026-06-20"}', null, '张医生创建出院确认', daysAgo(2, 16));
   insertAudit.run(1, 'discharge_confirmed', 5, '陈主任', 'reviewer', '{"status":"pending"}', '{"status":"confirmed"}', null, '陈主任确认出院，护理单归档', daysAgo(1, 10));
 
+  // ===== #2 咪咪 - 复核中
+  insertAudit.run(2, 'create', 1, '张医生', 'doctor', null, '{"pet_name":"咪咪","status":"initiated"}', null, '张医生创建住院护理单', daysAgo(5, 8));
+  insertAudit.run(2, 'status_change', 1, '张医生', 'doctor', '{"status":"initiated","nurse_id":null,"nurse_name":null}', '{"status":"processing","nurse_id":3,"nurse_name":"王护士"}', null, '张医生将护理单分配给王护士开始办理，经办护士: 王护士', daysAgo(5, 9));
+  insertAudit.run(2, 'upload_attachment', 1, '张医生', 'doctor', null, '{"file_name":"入院登记表.pdf","upload_type":"initial"}', null, '张医生上传附件: 入院登记表.pdf (初始上传)', daysAgo(5, 9));
+  insertAudit.run(2, 'upload_attachment', 1, '张医生', 'doctor', null, '{"file_name":"住院同意书.pdf","upload_type":"initial"}', null, '张医生上传附件: 住院同意书.pdf (初始上传)', daysAgo(5, 9));
+  insertAudit.run(2, 'upload_attachment', 3, '王护士', 'nurse', null, '{"file_name":"血常规报告.pdf","upload_type":"initial"}', null, '王护士上传附件: 血常规报告.pdf (初始上传)', daysAgo(4, 10));
+  insertAudit.run(2, 'approve_attachment', 5, '陈主任', 'reviewer', '{"status":"pending"}', '{"status":"approved"}', null, '陈主任审核通过附件: 入院登记表.pdf', daysAgo(4, 14));
+  insertAudit.run(2, 'approve_attachment', 5, '陈主任', 'reviewer', '{"status":"pending"}', '{"status":"approved"}', null, '陈主任审核通过附件: 住院同意书.pdf', daysAgo(4, 14));
+  insertAudit.run(2, 'approve_attachment', 5, '陈主任', 'reviewer', '{"status":"pending"}', '{"status":"approved"}', null, '陈主任审核通过附件: 血常规报告.pdf', daysAgo(3, 10));
+  insertAudit.run(2, 'status_change', 3, '王护士', 'nurse', '{"status":"processing","reviewer_id":null,"reviewer_name":null}', '{"status":"reviewing","reviewer_id":5,"reviewer_name":"陈主任"}', null, '王护士提交护理单进入复核，复核人: 陈主任', daysAgo(2, 10));
+
   // ===== #3 旺财 - 退回样例（完整补正痕迹）
   insertAudit.run(3, 'create', 2, '李医生', 'doctor', null, '{"pet_name":"旺财","status":"initiated"}', null, '李医生创建住院护理单', daysAgo(10, 9));
-  insertAudit.run(3, 'status_change', 2, '李医生', 'doctor', '{"status":"initiated"}', '{"status":"processing","nurse_id":4}', null, '李医生将护理单分配给刘护士开始办理，经办护士: 刘护士', daysAgo(10, 10));
+  insertAudit.run(3, 'status_change', 2, '李医生', 'doctor', '{"status":"initiated","nurse_id":null,"nurse_name":null}', '{"status":"processing","nurse_id":4,"nurse_name":"刘护士"}', null, '李医生将护理单分配给刘护士开始办理，经办护士: 刘护士', daysAgo(10, 10));
   insertAudit.run(3, 'upload_attachment', 2, '李医生', 'doctor', null, '{"file_name":"入院登记表.pdf","upload_type":"initial"}', null, '李医生上传附件: 入院登记表.pdf (初始上传)', daysAgo(9, 10));
   insertAudit.run(3, 'upload_attachment', 4, '刘护士', 'nurse', null, '{"file_name":"住院同意书_初版.jpg","upload_type":"initial"}', null, '刘护士上传附件: 住院同意书_初版.jpg (初始上传)', daysAgo(8, 14));
   insertAudit.run(3, 'upload_attachment', 4, '刘护士', 'nurse', null, '{"file_name":"血常规报告.pdf","upload_type":"initial"}', null, '刘护士上传附件: 血常规报告.pdf (初始上传)', daysAgo(8, 15));
@@ -247,16 +258,16 @@ function seedData() {
   insertAudit.run(3, 'approve_attachment', 6, '赵主任', 'reviewer', '{"status":"pending"}', '{"status":"approved"}', null, '赵主任审核通过附件: 血常规报告.pdf', daysAgo(7, 9));
   insertAudit.run(3, 'approve_attachment', 6, '赵主任', 'reviewer', '{"status":"pending"}', '{"status":"approved"}', null, '赵主任审核通过附件: 生化报告.pdf', daysAgo(7, 9));
   insertAudit.run(3, 'reject_attachment', 6, '赵主任', 'reviewer', '{"status":"pending"}', '{"status":"rejected"}', '文件模糊无法辨认，签字位置错误，请重新上传清晰扫描件', '赵主任驳回附件: 住院同意书_初版.jpg，原因: 文件模糊无法辨认，签字位置错误，请重新上传清晰扫描件', daysAgo(6, 11));
-  insertAudit.run(3, 'upload_attachment', 4, '刘护士', 'nurse', '{"replaced_file":"住院同意书_初版.jpg","replaced_id":2}', '{"file_name":"住院同意书_补传版.pdf","upload_type":"resubmit"}', '原文件被驳回，重新上传清晰扫描件', '刘护士重新提交补传附件: 住院同意书_补传版.pdf (重新提交)，替换原附件 #2 (住院同意书_初版.jpg)，原附件驳回原因: 文件模糊无法辨认，签字位置错误，请重新上传清晰扫描件', daysAgo(5, 10));
+  insertAudit.run(3, 'upload_attachment', 4, '刘护士', 'nurse', '{"replaced_id":10,"replaced_file_name":"住院同意书_初版.jpg"}', '{"file_name":"住院同意书_补传版.pdf","upload_type":"resubmit","replaced_attachment_id":10}', '原文件被驳回，重新上传清晰扫描件', '刘护士重新提交补传附件: 住院同意书_补传版.pdf (重新提交)，替换原附件 #10 (住院同意书_初版.jpg)，原附件驳回原因: 文件模糊无法辨认，签字位置错误，请重新上传清晰扫描件', daysAgo(5, 10));
   insertAudit.run(3, 'upload_attachment', 4, '刘护士', 'nurse', null, '{"file_name":"治疗记录_第1版.pdf","upload_type":"initial"}', null, '刘护士上传附件: 治疗记录_第1版.pdf (初始上传)', daysAgo(7, 16));
   insertAudit.run(3, 'reject_attachment', 6, '赵主任', 'reviewer', '{"status":"pending"}', '{"status":"rejected"}', '治疗记录缺少每日体温记录、用药时间和护理人员签字', '赵主任驳回附件: 治疗记录_第1版.pdf，原因: 治疗记录缺少每日体温记录、用药时间和护理人员签字', daysAgo(6, 15));
-  insertAudit.run(3, 'status_change', 4, '刘护士', 'nurse', '{"status":"processing"}', '{"status":"reviewing","reviewer_id":6}', null, '刘护士提交护理单进入复核，复核人: 赵主任', daysAgo(4, 10));
+  insertAudit.run(3, 'status_change', 4, '刘护士', 'nurse', '{"status":"processing","reviewer_id":null,"reviewer_name":null}', '{"status":"reviewing","reviewer_id":6,"reviewer_name":"赵主任"}', null, '刘护士提交护理单进入复核，复核人: 赵主任', daysAgo(4, 10));
   insertAudit.run(3, 'status_change', 6, '赵主任', 'reviewer', '{"status":"reviewing"}', '{"status":"returned","return_reason":"住院同意书被驳回，治疗记录不完整，需补正后重新提交"}', '住院同意书被驳回，治疗记录不完整，需补正后重新提交', '赵主任将护理单退回办理护士刘护士，退回原因: 住院同意书被驳回，治疗记录不完整，需补正后重新提交', daysAgo(2, 14));
-  insertAudit.run(3, 'returned_recorded', 6, '赵主任', 'reviewer', null, null, '住院同意书被驳回，治疗记录不完整，需补正后重新提交', '护理单被退回，责任人: 刘护士（经办护士），退回人: 赵主任（复核员），退回原因: 住院同意书被驳回，治疗记录不完整', daysAgo(2, 14));
+  insertAudit.run(3, 'returned_recorded', 6, '赵主任', 'reviewer', null, null, '住院同意书被驳回，治疗记录不完整，需补正后重新提交', '护理单被退回，责任人: 经办护士刘护士、复核人赵主任，退回原因: 住院同意书被驳回，治疗记录不完整，需补正后重新提交', daysAgo(2, 14));
 
   // ===== #4 球球 - 超时样例
   insertAudit.run(4, 'create', 1, '张医生', 'doctor', null, '{"pet_name":"球球","status":"initiated"}', null, '张医生创建住院护理单', daysAgo(14, 8));
-  insertAudit.run(4, 'status_change', 1, '张医生', 'doctor', '{"status":"initiated"}', '{"status":"processing","nurse_id":3}', null, '张医生将护理单分配给王护士开始办理，经办护士: 王护士', daysAgo(14, 9));
+  insertAudit.run(4, 'status_change', 1, '张医生', 'doctor', '{"status":"initiated","nurse_id":null,"nurse_name":null}', '{"status":"processing","nurse_id":3,"nurse_name":"王护士"}', null, '张医生将护理单分配给王护士开始办理，经办护士: 王护士', daysAgo(14, 9));
   insertAudit.run(4, 'upload_attachment', 1, '张医生', 'doctor', null, '{"file_name":"入院登记表.pdf","upload_type":"initial"}', null, '张医生上传附件: 入院登记表.pdf (初始上传)', daysAgo(14, 9));
   insertAudit.run(4, 'upload_attachment', 1, '张医生', 'doctor', null, '{"file_name":"住院同意书.pdf","upload_type":"initial"}', null, '张医生上传附件: 住院同意书.pdf (初始上传)', daysAgo(14, 9));
   insertAudit.run(4, 'upload_attachment', 3, '王护士', 'nurse', null, '{"file_name":"生化全套_第1版.pdf","upload_type":"initial"}', null, '王护士上传附件: 生化全套_第1版.pdf (初始上传)', daysAgo(12, 10));
@@ -267,7 +278,7 @@ function seedData() {
 
   // ===== #5 皮皮 - 办理中
   insertAudit.run(5, 'create', 2, '李医生', 'doctor', null, '{"pet_name":"皮皮","status":"initiated"}', null, '李医生创建住院护理单', daysAgo(3, 10));
-  insertAudit.run(5, 'status_change', 2, '李医生', 'doctor', '{"status":"initiated"}', '{"status":"processing","nurse_id":4}', null, '李医生将护理单分配给刘护士开始办理，经办护士: 刘护士', daysAgo(3, 11));
+  insertAudit.run(5, 'status_change', 2, '李医生', 'doctor', '{"status":"initiated","nurse_id":null,"nurse_name":null}', '{"status":"processing","nurse_id":4,"nurse_name":"刘护士"}', null, '李医生将护理单分配给刘护士开始办理，经办护士: 刘护士', daysAgo(3, 11));
   insertAudit.run(5, 'upload_attachment', 2, '李医生', 'doctor', null, '{"file_name":"入院登记表.pdf","upload_type":"initial"}', null, '李医生上传附件: 入院登记表.pdf (初始上传)', daysAgo(3, 11));
   insertAudit.run(5, 'upload_attachment', 2, '李医生', 'doctor', null, '{"file_name":"住院同意书.pdf","upload_type":"initial"}', null, '李医生上传附件: 住院同意书.pdf (初始上传)', daysAgo(3, 11));
   insertAudit.run(5, 'supplement_attachment', 4, '刘护士', 'nurse', null, '{"upload_type":"supplement"}', '住院2天后出真菌培养结果', '附件补传标记: 真菌培养报告_补传.pdf, 原因: 住院2天后出真菌培养结果', daysAgo(1, 14));
@@ -279,14 +290,14 @@ function seedData() {
 
   // ===== #7 大黄 - 办理中
   insertAudit.run(7, 'create', 2, '李医生', 'doctor', null, '{"pet_name":"大黄","status":"initiated"}', null, '李医生创建住院护理单', daysAgo(5, 9));
-  insertAudit.run(7, 'status_change', 2, '李医生', 'doctor', '{"status":"initiated"}', '{"status":"processing","nurse_id":3}', null, '李医生将护理单分配给王护士开始办理，经办护士: 王护士', daysAgo(5, 10));
+  insertAudit.run(7, 'status_change', 2, '李医生', 'doctor', '{"status":"initiated","nurse_id":null,"nurse_name":null}', '{"status":"processing","nurse_id":3,"nurse_name":"王护士"}', null, '李医生将护理单分配给王护士开始办理，经办护士: 王护士', daysAgo(5, 10));
   insertAudit.run(7, 'upload_attachment', 2, '李医生', 'doctor', null, '{"file_name":"入院登记表.pdf","upload_type":"initial"}', null, '李医生上传附件: 入院登记表.pdf (初始上传)', daysAgo(5, 10));
   insertAudit.run(7, 'upload_attachment', 2, '李医生', 'doctor', null, '{"file_name":"住院同意书.pdf","upload_type":"initial"}', null, '李医生上传附件: 住院同意书.pdf (初始上传)', daysAgo(5, 10));
   insertAudit.run(7, 'upload_attachment', 3, '王护士', 'nurse', null, '{"file_name":"血钙检测报告.pdf","upload_type":"initial"}', null, '王护士上传附件: 血钙检测报告.pdf (初始上传)', daysAgo(4, 14));
 
   // ===== #8 花花 - 复核中
   insertAudit.run(8, 'create', 1, '张医生', 'doctor', null, '{"pet_name":"花花","status":"initiated"}', null, '张医生创建住院护理单', daysAgo(8, 9));
-  insertAudit.run(8, 'status_change', 1, '张医生', 'doctor', '{"status":"initiated"}', '{"status":"processing","nurse_id":4}', null, '张医生将护理单分配给刘护士开始办理，经办护士: 刘护士', daysAgo(8, 10));
+  insertAudit.run(8, 'status_change', 1, '张医生', 'doctor', '{"status":"initiated","nurse_id":null,"nurse_name":null}', '{"status":"processing","nurse_id":4,"nurse_name":"刘护士"}', null, '张医生将护理单分配给刘护士开始办理，经办护士: 刘护士', daysAgo(8, 10));
   insertAudit.run(8, 'upload_attachment', 1, '张医生', 'doctor', null, '{"file_name":"入院登记表.pdf","upload_type":"initial"}', null, '张医生上传附件: 入院登记表.pdf (初始上传)', daysAgo(8, 10));
   insertAudit.run(8, 'upload_attachment', 1, '张医生', 'doctor', null, '{"file_name":"住院同意书.pdf","upload_type":"initial"}', null, '张医生上传附件: 住院同意书.pdf (初始上传)', daysAgo(8, 10));
   insertAudit.run(8, 'approve_attachment', 6, '赵主任', 'reviewer', '{"status":"pending"}', '{"status":"approved"}', null, '赵主任审核通过附件: 入院登记表.pdf', daysAgo(7, 9));
@@ -297,7 +308,7 @@ function seedData() {
   insertAudit.run(8, 'upload_attachment', 4, '刘护士', 'nurse', null, '{"file_name":"腹水分析报告_补传.pdf","upload_type":"supplement"}', '入院后第2天采集腹水送检', '刘护士补传附件: 腹水分析报告_补传.pdf (补传)', daysAgo(6, 15));
   insertAudit.run(8, 'upload_attachment', 4, '刘护士', 'nurse', null, '{"file_name":"治疗记录.pdf","upload_type":"initial"}', null, '刘护士上传附件: 治疗记录.pdf (初始上传)', daysAgo(6, 16));
   insertAudit.run(8, 'approve_attachment', 6, '赵主任', 'reviewer', '{"status":"pending"}', '{"status":"approved"}', null, '赵主任审核通过附件: 治疗记录.pdf', daysAgo(5, 11));
-  insertAudit.run(8, 'status_change', 4, '刘护士', 'nurse', '{"status":"processing"}', '{"status":"reviewing","reviewer_id":6}', null, '刘护士提交护理单进入复核，复核人: 赵主任', daysAgo(2, 10));
+  insertAudit.run(8, 'status_change', 4, '刘护士', 'nurse', '{"status":"processing","reviewer_id":null,"reviewer_name":null}', '{"status":"reviewing","reviewer_id":6,"reviewer_name":"赵主任"}', null, '刘护士提交护理单进入复核，复核人: 赵主任', daysAgo(2, 10));
 
   console.log('演示数据初始化完成');
   console.log('\n用户列表:');
