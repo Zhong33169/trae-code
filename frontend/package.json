@@ -1,0 +1,22 @@
+{
+  "name": "news-clue-frontend",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "nuxt build",
+    "dev": "nuxt dev --port 3002",
+    "generate": "nuxt generate",
+    "preview": "nuxt preview --port 3002",
+    "postinstall": "nuxt prepare"
+  },
+  "devDependencies": {
+    "nuxt": "3.10.3",
+    "vue": "3.4.21",
+    "vue-router": "4.3.0"
+  },
+  "dependencies": {
+    "@pinia/nuxt": "0.5.1",
+    "@pinia-plugin-persistedstate/nuxt": "1.2.1",
+    "pinia": "2.1.7"
+  }
+}
