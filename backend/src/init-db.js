@@ -134,6 +134,14 @@ function seedData() {
     daysAgo(4), daysAgo(3)
   );
 
+  // #12 豆豆 - 办理中（必传附件被驳回无补传，批量提交复核会失败）
+  insertCareRecord.run(
+    '豆豆', '犬', '柯基', '周易', '18600012222', daysAgo(3),
+    '椎间盘突出', '保守治疗+止痛', 'processing', 'urgent', 'C区', 'C-02',
+    1, 3, null, futureDays(4), null,
+    daysAgo(3), daysAgo(2)
+  );
+
   const insertAttachment = db.prepare(`
     INSERT INTO attachments (care_record_id, file_name, file_type, file_size, category, is_required, upload_type, status, uploaded_by, reviewed_by, reviewed_at, reject_reason, supplement_reason, replaced_attachment_id, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -204,6 +212,12 @@ function seedData() {
   insertAttachment.run(11, '住院同意书.pdf', '.pdf', 82944, 'consent_form', 1, 'initial', 'approved', 2, 5, daysAgo(3), null, null, null, daysAgo(4));
   insertAttachment.run(11, '血常规报告.pdf', '.pdf', 138240, 'lab_result', 0, 'initial', 'approved', 4, 5, daysAgo(2), null, null, null, daysAgo(3));
 
+  // #12 豆豆 - 办理中（必传附件被驳回，无补传，批量提交复核会失败）
+  insertAttachment.run(12, '入院登记表.pdf', '.pdf', 101376, 'admission_form', 1, 'initial', 'approved', 1, 5, daysAgo(2), null, null, null, daysAgo(3));
+  insertAttachment.run(12, '住院同意书_初版.jpg', '.jpg', 215040, 'consent_form', 1, 'initial', 'rejected', 3, 6, daysAgo(2), '文件只拍了半页，签字不在视野内，请重新上传完整扫描件', null, null, daysAgo(3));
+  insertAttachment.run(12, 'MRI影像_初版.dcm', '.dcm', 2097152, 'imaging', 1, 'initial', 'rejected', 3, 6, daysAgo(2), '影像序列不完整，缺少T2加权横断位，请重新导出完整DICOM', null, null, daysAgo(2));
+  insertAttachment.run(12, '疼痛评估表.pdf', '.pdf', 57344, 'treatment_record', 0, 'initial', 'approved', 3, 5, daysAgo(2), null, null, null, daysAgo(2));
+
   const insertMedication = db.prepare(`
     INSERT INTO medication_records (care_record_id, medicine_name, dosage, route, frequency, start_time, end_time, administered_by, notes, status, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -252,6 +266,10 @@ function seedData() {
 
   // #11 橘子
   insertMedication.run(11, '减重处方粮', '按体重的2%', '口服', '每日2次', daysAgo(4), null, 4, '控制体重', 'active', daysAgo(4));
+
+  // #12 豆豆
+  insertMedication.run(12, '美洛昔康', '0.1mg/kg', '口服', '每日1次', daysAgo(3), null, 3, '止痛', 'active', daysAgo(3));
+  insertMedication.run(12, '甲钴胺', '250mcg', '口服', '每日1次', daysAgo(3), null, 3, '营养神经', 'active', daysAgo(3));
 
   const insertDischarge = db.prepare(`
     INSERT INTO discharge_confirmations (care_record_id, discharge_date, discharge_summary, follow_up, condition_at_discharge, discharged_by, confirmed_by, status, created_at, confirmed_at)
@@ -377,6 +395,18 @@ function seedData() {
   insertAudit.run(11, 'approve_attachment', 5, '陈主任', 'reviewer', '{"status":"pending"}', '{"status":"approved"}', null, '陈主任审核通过附件: 入院登记表.pdf', daysAgo(3, 16));
   insertAudit.run(11, 'approve_attachment', 5, '陈主任', 'reviewer', '{"status":"pending"}', '{"status":"approved"}', null, '陈主任审核通过附件: 住院同意书.pdf', daysAgo(3, 16));
   insertAudit.run(11, 'approve_attachment', 5, '陈主任', 'reviewer', '{"status":"pending"}', '{"status":"approved"}', null, '陈主任审核通过附件: 血常规报告.pdf', daysAgo(2, 10));
+
+  // ===== #12 豆豆 - 办理中（必传附件被驳回无补传，批量提交复核失败样例）
+  insertAudit.run(12, 'create', 1, '张医生', 'doctor', null, '{"pet_name":"豆豆","status":"initiated"}', null, '张医生创建住院护理单（柯基椎间盘突出）', daysAgo(3, 8));
+  insertAudit.run(12, 'status_change', 1, '张医生', 'doctor', '{"status":"initiated","nurse_id":null,"nurse_name":null}', '{"status":"processing","nurse_id":3,"nurse_name":"王护士"}', null, '张医生将护理单分配给王护士开始办理，经办护士: 王护士', daysAgo(3, 9));
+  insertAudit.run(12, 'upload_attachment', 1, '张医生', 'doctor', null, '{"file_name":"入院登记表.pdf","upload_type":"initial"}', null, '张医生上传附件: 入院登记表.pdf (初始上传)', daysAgo(3, 9));
+  insertAudit.run(12, 'upload_attachment', 3, '王护士', 'nurse', null, '{"file_name":"住院同意书_初版.jpg","upload_type":"initial"}', null, '王护士上传附件: 住院同意书_初版.jpg (初始上传)', daysAgo(3, 15));
+  insertAudit.run(12, 'upload_attachment', 3, '王护士', 'nurse', null, '{"file_name":"MRI影像_初版.dcm","upload_type":"initial"}', null, '王护士上传附件: MRI影像_初版.dcm (初始上传)', daysAgo(2, 9));
+  insertAudit.run(12, 'upload_attachment', 3, '王护士', 'nurse', null, '{"file_name":"疼痛评估表.pdf","upload_type":"initial"}', null, '王护士上传附件: 疼痛评估表.pdf (初始上传)', daysAgo(2, 10));
+  insertAudit.run(12, 'approve_attachment', 5, '陈主任', 'reviewer', '{"status":"pending"}', '{"status":"approved"}', null, '陈主任审核通过附件: 入院登记表.pdf', daysAgo(3, 16));
+  insertAudit.run(12, 'approve_attachment', 5, '陈主任', 'reviewer', '{"status":"pending"}', '{"status":"approved"}', null, '陈主任审核通过附件: 疼痛评估表.pdf', daysAgo(2, 16));
+  insertAudit.run(12, 'reject_attachment', 6, '赵主任', 'reviewer', '{"status":"pending"}', '{"status":"rejected"}', '文件只拍了半页，签字不在视野内，请重新上传完整扫描件', '赵主任驳回附件: 住院同意书_初版.jpg，原因: 文件只拍了半页，签字不在视野内，请重新上传完整扫描件', daysAgo(2, 11));
+  insertAudit.run(12, 'reject_attachment', 6, '赵主任', 'reviewer', '{"status":"pending"}', '{"status":"rejected"}', '影像序列不完整，缺少T2加权横断位，请重新导出完整DICOM', '赵主任驳回附件: MRI影像_初版.dcm，原因: 影像序列不完整，缺少T2加权横断位，请重新导出完整DICOM', daysAgo(1, 15));
 
   console.log('演示数据初始化完成');
   console.log('\n用户列表:');

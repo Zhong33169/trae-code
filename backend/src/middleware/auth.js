@@ -4,13 +4,14 @@ export function requireRole(...roles) {
   return (req, res, next) => {
     const role = req.headers['x-user-role'];
     const userId = req.headers['x-user-id'];
+    const userName = req.headers['x-user-name'];
     if (!role || !userId) {
       return res.status(401).json({ error: '缺少用户角色或ID' });
     }
     if (!roles.includes(role) && role !== 'admin') {
       return res.status(403).json({ error: `角色 ${role} 无权执行此操作` });
     }
-    req.user = { id: parseInt(userId), role };
+    req.user = { id: parseInt(userId), role, name: userName || '' };
     next();
   };
 }

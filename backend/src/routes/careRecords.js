@@ -78,7 +78,7 @@ router.get('/stats/summary', (req, res) => {
 
 router.put('/batch-status', requireRole('doctor', 'nurse', 'reviewer', 'admin'), (req, res) => {
   const db = getDB();
-  const { ids, status, nurse_id, reviewer_id, return_reason } = req.body;
+  const { ids, status, nurse_id, reviewer_id, return_reason, remark } = req.body;
 
   if (!Array.isArray(ids) || ids.length === 0) {
     return res.status(400).json({ error: '请选择至少一条护理单' });
@@ -114,12 +114,16 @@ router.put('/batch-status', requireRole('doctor', 'nurse', 'reviewer', 'admin'),
     reviewerInfo = db.prepare('SELECT id, name FROM users WHERE id = ? AND role = ?').get(parseInt(reviewer_id), 'reviewer');
   }
 
+  const operatorName = req.user.name;
+  const operatorRole = req.user.role;
+  const remarkStr = remark ? `，操作备注: ${remark}` : '';
+
   const results = [];
   const successIds = [];
 
   for (const rawId of ids) {
     const id = parseInt(rawId);
-    const result = { id, success: false, message: '' };
+    const result = { id, success: false, message: '', responsible: '' };
 
     const current = db.prepare(`
       SELECT cr.*, d.name as doctor_name, n.name as nurse_name, r.name as reviewer_name
@@ -132,14 +136,26 @@ router.put('/batch-status', requireRole('doctor', 'nurse', 'reviewer', 'admin'),
 
     if (!current) {
       result.message = '护理单不存在';
+      result.responsible = '-';
+      auditLog(id, 'batch_status_failed', null, null, '批量操作-护理单不存在', `${result.message}${remarkStr}`, req);
       results.push(result);
       continue;
     }
 
+    const responsibleArr = [];
+    if (current.doctor_name) responsibleArr.push(`医生: ${current.doctor_name}`);
+    if (current.nurse_name) responsibleArr.push(`护士: ${current.nurse_name}`);
+    if (current.reviewer_name) responsibleArr.push(`复核: ${current.reviewer_name}`);
+    const currentResponsible = responsibleArr.length ? responsibleArr.join('、') : '暂无责任人';
+    result.responsible = currentResponsible;
+
     const allowed = transitions[current.status] || [];
     if (!allowed.includes(status) && req.user.role !== 'admin') {
       result.message = `当前状态 ${current.status} 不允许转为 ${status}`;
-      auditLog(id, 'batch_status_failed', current.status, status, '批量操作-状态不允许', result.message, req);
+      auditLog(id, 'batch_status_failed',
+        { status: current.status, responsible: currentResponsible },
+        { status, operator: operatorName },
+        '批量操作-状态不允许', `${result.message}，当前责任人: ${currentResponsible}${remarkStr}`, req);
       results.push(result);
       continue;
     }
@@ -148,25 +164,31 @@ router.put('/batch-status', requireRole('doctor', 'nurse', 'reviewer', 'admin'),
       let finalNurseId = null;
       let finalNurseName = null;
       if (req.user.role === 'nurse') {
-        finalNurseId = req.user.id;
-        finalNurseName = req.user.name;
+        const self = db.prepare('SELECT id, name FROM users WHERE id = ? AND role = ?').get(req.user.id, 'nurse');
+        if (self) { finalNurseId = self.id; finalNurseName = self.name; }
       } else if (nurseInfo) {
         finalNurseId = nurseInfo.id;
         finalNurseName = nurseInfo.name;
       }
       if (!finalNurseId) {
         result.message = '缺少经办护士，请选择护士';
-        auditLog(id, 'batch_status_failed', current.status, status, '批量操作-缺少经办护士', result.message, req);
+        auditLog(id, 'batch_status_failed',
+          { status: current.status, responsible: currentResponsible },
+          { status: 'processing' },
+          '批量操作-缺少经办护士', `${result.message}，当前责任人: ${currentResponsible}${remarkStr}`, req);
         results.push(result);
         continue;
       }
 
-      const missingRequired = db.prepare(
-        "SELECT COUNT(*) as cnt FROM attachments WHERE care_record_id = ? AND is_required = 1 AND status = 'pending'"
+      const notApprovedRequired = db.prepare(
+        "SELECT COUNT(*) as cnt FROM attachments WHERE care_record_id = ? AND is_required = 1 AND status != 'approved'"
       ).get(id);
-      if (missingRequired.cnt > 0) {
-        result.message = `有 ${missingRequired.cnt} 个必传附件未审核，无法开始办理`;
-        auditLog(id, 'batch_status_failed', current.status, status, '批量操作-必传附件未审核', result.message, req);
+      if (notApprovedRequired.cnt > 0) {
+        result.message = `有 ${notApprovedRequired.cnt} 个必传附件未审核通过，无法开始办理`;
+        auditLog(id, 'batch_status_failed',
+          { status: current.status, responsible: currentResponsible },
+          { status: 'processing', nurse_name: finalNurseName },
+          '批量操作-必传附件未审核通过', `${result.message}，当前责任人: ${currentResponsible}${remarkStr}`, req);
         results.push(result);
         continue;
       }
@@ -174,15 +196,17 @@ router.put('/batch-status', requireRole('doctor', 'nurse', 'reviewer', 'admin'),
       const updates = { status, nurse_id: finalNurseId, updated_at: new Date().toISOString(), id };
       db.prepare('UPDATE care_records SET status = @status, nurse_id = @nurse_id, updated_at = @updated_at WHERE id = @id').run(updates);
 
-      const detail = `批量操作: 状态从 ${current.status} 变更为 processing，经办护士: ${finalNurseName}`;
+      const newResponsible = `医生: ${current.doctor_name || '-'}、护士: ${finalNurseName}`;
+      const detail = `批量办理: 状态从 ${current.status} 变更为 processing，经办护士: ${finalNurseName}，操作人: ${operatorName}${remarkStr}`;
       auditLog(id, 'batch_status_change',
-        { status: current.status, nurse_id: current.nurse_id, nurse_name: current.nurse_name },
-        { status: 'processing', nurse_id: finalNurseId, nurse_name: finalNurseName },
-        null, detail, req);
+        { status: current.status, responsible: currentResponsible, nurse_id: current.nurse_id, nurse_name: current.nurse_name },
+        { status: 'processing', responsible: newResponsible, nurse_id: finalNurseId, nurse_name: finalNurseName },
+        remark || null, detail, req);
 
       result.success = true;
       result.message = `已分配给 ${finalNurseName} 开始办理`;
       result.nurse_name = finalNurseName;
+      result.responsible = newResponsible;
       successIds.push(id);
     }
 
@@ -190,15 +214,18 @@ router.put('/batch-status', requireRole('doctor', 'nurse', 'reviewer', 'admin'),
       let finalReviewerId = null;
       let finalReviewerName = null;
       if (req.user.role === 'reviewer') {
-        finalReviewerId = req.user.id;
-        finalReviewerName = req.user.name;
+        const self = db.prepare('SELECT id, name FROM users WHERE id = ? AND role = ?').get(req.user.id, 'reviewer');
+        if (self) { finalReviewerId = self.id; finalReviewerName = self.name; }
       } else if (reviewerInfo) {
         finalReviewerId = reviewerInfo.id;
         finalReviewerName = reviewerInfo.name;
       }
       if (!finalReviewerId) {
         result.message = '缺少复核人，请选择复核员';
-        auditLog(id, 'batch_status_failed', current.status, status, '批量操作-缺少复核人', result.message, req);
+        auditLog(id, 'batch_status_failed',
+          { status: current.status, responsible: currentResponsible },
+          { status: 'reviewing' },
+          '批量操作-缺少复核人', `${result.message}，当前责任人: ${currentResponsible}${remarkStr}`, req);
         results.push(result);
         continue;
       }
@@ -208,7 +235,10 @@ router.put('/batch-status', requireRole('doctor', 'nurse', 'reviewer', 'admin'),
       ).get(id);
       if (rejectedRequired.cnt > 0) {
         result.message = `有 ${rejectedRequired.cnt} 个必传附件被驳回，需补正后才能提交复核`;
-        auditLog(id, 'batch_status_failed', current.status, status, '批量操作-必传附件被驳回', result.message, req);
+        auditLog(id, 'batch_status_failed',
+          { status: current.status, responsible: currentResponsible },
+          { status: 'reviewing', reviewer_name: finalReviewerName },
+          '批量操作-必传附件被驳回', `${result.message}，当前责任人: ${currentResponsible}${remarkStr}`, req);
         results.push(result);
         continue;
       }
@@ -216,22 +246,27 @@ router.put('/batch-status', requireRole('doctor', 'nurse', 'reviewer', 'admin'),
       const updates = { status, reviewer_id: finalReviewerId, updated_at: new Date().toISOString(), id };
       db.prepare('UPDATE care_records SET status = @status, reviewer_id = @reviewer_id, updated_at = @updated_at WHERE id = @id').run(updates);
 
-      const detail = `批量操作: 状态从 ${current.status} 变更为 reviewing，复核人: ${finalReviewerName}`;
+      const newResponsible = `医生: ${current.doctor_name || '-'}、护士: ${current.nurse_name || '-'}、复核: ${finalReviewerName}`;
+      const detail = `批量提交复核: 状态从 ${current.status} 变更为 reviewing，复核人: ${finalReviewerName}，操作人: ${operatorName}${remarkStr}`;
       auditLog(id, 'batch_status_change',
-        { status: current.status, reviewer_id: current.reviewer_id, reviewer_name: current.reviewer_name },
-        { status: 'reviewing', reviewer_id: finalReviewerId, reviewer_name: finalReviewerName },
-        null, detail, req);
+        { status: current.status, responsible: currentResponsible, reviewer_id: current.reviewer_id, reviewer_name: current.reviewer_name },
+        { status: 'reviewing', responsible: newResponsible, reviewer_id: finalReviewerId, reviewer_name: finalReviewerName },
+        remark || null, detail, req);
 
       result.success = true;
       result.message = `已提交 ${finalReviewerName} 复核`;
       result.reviewer_name = finalReviewerName;
+      result.responsible = newResponsible;
       successIds.push(id);
     }
 
     if (status === 'returned') {
       if (!return_reason || !return_reason.trim()) {
         result.message = '退回必须填写原因';
-        auditLog(id, 'batch_status_failed', current.status, status, '批量操作-缺少退回原因', result.message, req);
+        auditLog(id, 'batch_status_failed',
+          { status: current.status, responsible: currentResponsible },
+          { status: 'returned' },
+          '批量操作-缺少退回原因', `${result.message}，当前责任人: ${currentResponsible}${remarkStr}`, req);
         results.push(result);
         continue;
       }
@@ -244,31 +279,45 @@ router.put('/batch-status', requireRole('doctor', 'nurse', 'reviewer', 'admin'),
       if (current.reviewer_name) responsible.push(`复核人: ${current.reviewer_name}`);
       const responsibleStr = responsible.length ? responsible.join('、') : '暂无责任人';
 
-      const detail = `批量操作: 状态从 ${current.status} 变更为 returned，退回原因: ${return_reason}，责任人: ${responsibleStr}`;
+      const newResponsible = `退回责任人: ${responsibleStr}`;
+      const detail = `批量退回: 状态从 ${current.status} 变更为 returned，退回原因: ${return_reason}，退回责任人: ${responsibleStr}，操作人: ${operatorName}${remarkStr}`;
       auditLog(id, 'batch_status_change',
-        { status: current.status },
-        { status: 'returned', return_reason },
+        { status: current.status, responsible: currentResponsible },
+        { status: 'returned', responsible: newResponsible, return_reason },
         return_reason, detail, req);
-      auditLog(id, 'returned_recorded', null, null, return_reason,
-        `批量退回，责任人: ${responsibleStr}，退回原因: ${return_reason}`, req);
+      auditLog(id, 'returned_recorded',
+        { responsible: currentResponsible },
+        { responsible: newResponsible, operator: operatorName },
+        return_reason,
+        `批量退回，退回人: ${operatorName} (${operatorRole})，责任人: ${responsibleStr}，退回原因: ${return_reason}${remarkStr}`, req);
 
       result.success = true;
       result.message = `已退回，责任人: ${responsibleStr}`;
+      result.responsible = newResponsible;
       successIds.push(id);
     }
 
     if (status === 'archived') {
+      let archiverName = operatorName;
+      if (req.user.role === 'reviewer') {
+        const self = db.prepare('SELECT name FROM users WHERE id = ? AND role = ?').get(req.user.id, 'reviewer');
+        if (self) archiverName = self.name;
+      }
+
       const updates = { status, updated_at: new Date().toISOString(), id };
       db.prepare('UPDATE care_records SET status = @status, updated_at = @updated_at WHERE id = @id').run(updates);
 
-      const detail = `批量操作: 状态从 ${current.status} 变更为 archived`;
+      const newResponsible = `归档操作人: ${archiverName}`;
+      const detail = `批量归档: 状态从 ${current.status} 变更为 archived，归档操作人: ${archiverName}${remarkStr}`;
       auditLog(id, 'batch_status_change',
-        { status: current.status },
-        { status: 'archived' },
-        null, detail, req);
+        { status: current.status, responsible: currentResponsible },
+        { status: 'archived', responsible: newResponsible },
+        remark || null, detail, req);
 
       result.success = true;
-      result.message = '已归档';
+      result.message = `已归档 (操作人: ${archiverName})`;
+      result.responsible = newResponsible;
+      result.archiver_name = archiverName;
       successIds.push(id);
     }
 
@@ -279,6 +328,8 @@ router.put('/batch-status', requireRole('doctor', 'nurse', 'reviewer', 'admin'),
     total: ids.length,
     success_count: successIds.length,
     fail_count: ids.length - successIds.length,
+    operator: operatorName,
+    remark,
     results
   });
 });

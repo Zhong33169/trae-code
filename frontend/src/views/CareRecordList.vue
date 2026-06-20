@@ -20,6 +20,7 @@ const showBatchDialog = ref(false)
 const batchNurseId = ref(null)
 const batchReviewerId = ref(null)
 const batchReturnReason = ref('')
+const batchRemark = ref('')
 const batchResult = ref(null)
 const showBatchResult = ref(false)
 const batchSubmitting = ref(false)
@@ -106,6 +107,7 @@ function openBatchDialog() {
   batchNurseId.value = null
   batchReviewerId.value = null
   batchReturnReason.value = ''
+  batchRemark.value = ''
   batchResult.value = null
   showBatchDialog.value = true
 }
@@ -125,6 +127,7 @@ async function submitBatch() {
     if (batchAction.value === 'processing' && batchNurseId.value) payload.nurse_id = batchNurseId.value
     if (batchAction.value === 'reviewing' && batchReviewerId.value) payload.reviewer_id = batchReviewerId.value
     if (batchAction.value === 'returned') payload.return_reason = batchReturnReason.value
+    if (batchRemark.value.trim()) payload.remark = batchRemark.value.trim()
 
     const res = await batchUpdateStatus(payload)
     batchResult.value = res.data
@@ -252,8 +255,23 @@ watch(filterKeyword, () => {
     </div>
 
     <div v-if="showBatchDialog" class="dialog-overlay" @click.self="showBatchDialog = false">
-      <div class="dialog-box" style="min-width:420px">
+      <div class="dialog-box" style="min-width:440px">
         <h3>批量操作 ({{ selectedIds.length }} 条)</h3>
+        <div style="background:#e8f0fe;border-radius:8px;padding:10px;margin-bottom:12px;font-size:13px;color:#1a73e8">
+          <strong>操作人:</strong> {{ userStore.user?.name }} ({{ userStore.roleLabel }})
+          <span v-if="batchAction === 'processing'" style="margin-left:12px">
+            <strong>结果责任人:</strong> {{ userStore.role === 'nurse' ? userStore.user.name : (batchNurseId ? nurses.find(n=>n.id==batchNurseId)?.name : '待选择') + ' (护士)' }}
+          </span>
+          <span v-if="batchAction === 'reviewing'" style="margin-left:12px">
+            <strong>结果责任人:</strong> {{ userStore.role === 'reviewer' ? userStore.user.name : (batchReviewerId ? reviewers.find(r=>r.id==batchReviewerId)?.name : '待选择') + ' (复核员)' }}
+          </span>
+          <span v-if="batchAction === 'returned'" style="margin-left:12px">
+            <strong>退回人:</strong> {{ userStore.user?.name }} (将记录经办护士/复核人为责任人)
+          </span>
+          <span v-if="batchAction === 'archived'" style="margin-left:12px">
+            <strong>归档人:</strong> {{ userStore.user?.name }}
+          </span>
+        </div>
         <div class="form-group">
           <label>操作类型 *</label>
           <select v-model="batchAction">
@@ -287,6 +305,10 @@ watch(filterKeyword, () => {
           <label>退回原因 *</label>
           <textarea v-model="batchReturnReason" rows="3" placeholder="请填写退回原因"></textarea>
         </div>
+        <div class="form-group">
+          <label>操作备注</label>
+          <textarea v-model="batchRemark" rows="2" placeholder="可选，填写本次批量操作说明，将写入审计日志"></textarea>
+        </div>
         <div style="display:flex;gap:8px;justify-content:flex-end">
           <button class="btn btn-outline" @click="showBatchDialog = false">取消</button>
           <button class="btn btn-primary" :disabled="!batchAction || batchSubmitting" @click="submitBatch">
@@ -297,16 +319,18 @@ watch(filterKeyword, () => {
     </div>
 
     <div v-if="showBatchResult" class="dialog-overlay" @click.self="showBatchResult = false">
-      <div class="dialog-box" style="min-width:500px;max-height:80vh;overflow-y:auto">
+      <div class="dialog-box" style="min-width:620px;max-height:80vh;overflow-y:auto">
         <h3>批量操作结果</h3>
         <div v-if="batchResult" style="margin-bottom:12px">
-          <p>总计: {{ batchResult.total }} 条 | 成功: <span style="color:#1e8e3e">{{ batchResult.success_count }}</span> | 失败: <span style="color:#c5221f">{{ batchResult.fail_count }}</span></p>
+          <p style="margin:4px 0">总计: {{ batchResult.total }} 条 | 成功: <span style="color:#1e8e3e;font-weight:bold">{{ batchResult.success_count }}</span> | 失败: <span style="color:#c5221f;font-weight:bold">{{ batchResult.fail_count }}</span></p>
+          <p style="margin:4px 0;font-size:13px;color:#666">操作人: {{ batchResult.operator }}<span v-if="batchResult.remark"> | 操作备注: {{ batchResult.remark }}</span></p>
         </div>
         <table v-if="batchResult" style="width:100%;font-size:13px">
           <thead>
             <tr>
-              <th>编号</th>
-              <th>结果</th>
+              <th style="width:50px">编号</th>
+              <th style="width:50px">结果</th>
+              <th style="min-width:180px">责任人</th>
               <th>说明</th>
             </tr>
           </thead>
@@ -314,6 +338,7 @@ watch(filterKeyword, () => {
             <tr v-for="r in batchResult.results" :key="r.id" :style="{background: r.success ? '#f0fdf4' : '#fef2f2'}">
               <td>#{{ r.id }}</td>
               <td><span :style="{color: r.success ? '#1e8e3e' : '#c5221f', fontWeight:'bold'}">{{ r.success ? '成功' : '失败' }}</span></td>
+              <td style="font-size:12px;color:#555">{{ r.responsible }}</td>
               <td>{{ r.message }}</td>
             </tr>
           </tbody>
