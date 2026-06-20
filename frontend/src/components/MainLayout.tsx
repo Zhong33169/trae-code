@@ -602,32 +602,36 @@ const MainLayout: Component<{ onLogout: () => void }> = (props) => {
             gap: '16px',
             flexWrap: 'wrap',
           }}>
-            {statistics && [
-              { label: '待提交', value: statistics.status_stats?.pending_submit || 0, color: '#faad14' },
-              { label: '已退回', value: statistics.status_stats?.returned || 0, color: '#ff4d4f' },
-              { label: '重新提交', value: statistics.status_stats?.resubmitted || 0, color: '#1890ff' },
-              { label: '待核验', value: statistics.status_stats?.pending_verify || 0, color: '#fa8c16' },
-              { label: '核验通过', value: statistics.status_stats?.verify_passed || 0, color: '#52c41a' },
-              { label: '待复核', value: statistics.status_stats?.pending_review || 0, color: '#722ed1' },
-              { label: '复核通过', value: statistics.status_stats?.review_passed || 0, color: '#13c2c2' },
-              { label: '已归档', value: statistics.status_stats?.archived || 0, color: '#8c8c8c' },
-            ].map((item) => (
-              <div key={item.label} style={{
-                flex: 1,
-                minWidth: '100px',
-                padding: '12px',
-                background: '#fafafa',
-                borderRadius: '8px',
-                borderLeft: `4px solid ${item.color}`,
-              }}>
-                <div style={{ fontSize: '12px', color: '#8c8c8c', marginBottom: '4px' }}>
-                  {item.label}
+            {(() => {
+              const stats = statistics();
+              if (!stats) return null;
+              return [
+                { label: '待提交', value: stats.status_stats?.pending_submit || 0, color: '#faad14' },
+                { label: '已退回', value: stats.status_stats?.returned || 0, color: '#ff4d4f' },
+                { label: '重新提交', value: stats.status_stats?.resubmitted || 0, color: '#1890ff' },
+                { label: '待核验', value: stats.status_stats?.pending_verify || 0, color: '#fa8c16' },
+                { label: '核验通过', value: stats.status_stats?.verify_passed || 0, color: '#52c41a' },
+                { label: '待复核', value: stats.status_stats?.pending_review || 0, color: '#722ed1' },
+                { label: '复核通过', value: stats.status_stats?.review_passed || 0, color: '#13c2c2' },
+                { label: '已归档', value: stats.status_stats?.archived || 0, color: '#8c8c8c' },
+              ].map((item) => (
+                <div key={item.label} style={{
+                  flex: 1,
+                  minWidth: '100px',
+                  padding: '12px',
+                  background: '#fafafa',
+                  borderRadius: '8px',
+                  borderLeft: `4px solid ${item.color}`,
+                }}>
+                  <div style={{ fontSize: '12px', color: '#8c8c8c', marginBottom: '4px' }}>
+                    {item.label}
+                  </div>
+                  <div style={{ fontSize: '22px', fontWeight: 600, color: item.color }}>
+                    {item.value}
+                  </div>
                 </div>
-                <div style={{ fontSize: '22px', fontWeight: 600, color: item.color }}>
-                  {item.value}
-                </div>
-              </div>
-            ))}
+              ));
+            })()}
           </div>
 
           <div style={{

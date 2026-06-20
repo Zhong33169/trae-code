@@ -217,6 +217,7 @@ IA20260601010 | 待核验 | 李库管 | 有登记证据 | **可核验**：王主
 - `POST /api/orders/review` - 复核（运营经理）
 - `POST /api/orders/archive` - 归档（运营经理）
 - `POST /api/orders/supplement` - 补录（所有角色，按角色限制）
+- `POST /api/orders/evidence` - 补充证据（所有角色，按角色+状态限制类型）
 - `POST /api/orders/batch-submit` - 批量提交（库管员）
 
 ### 请求头
