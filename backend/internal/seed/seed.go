@@ -254,7 +254,49 @@ func Seed() {
 	db.DB.Create(&appeal8)
 	db.DB.Model(&clue8).Update("version", 5)
 
-	log.Println("样例线索单填充完成，共 8 条，覆盖正常/缺证据/逾期/退回补正/申诉中/申诉已受理/状态冲突/补正重提 8 种情形")
+	// 9. 申诉被驳回（登记员对缺证据不满申诉 → 复核驳回，需进一步补正）
+	clue9 := createClue(
+		"某小区物业公司擅自提高物业费被集体投诉",
+		"业主反映阳光花园小区物业公司未召开业主大会擅自将物业费从1.8元涨到2.5元，且服务质量下降，已有30多户业主拒缴物业费表示抗议。",
+		reg2, &aud2, nil,
+		models.StatusAppealReject,
+		"",
+	)
+	clue9.SubmittedAt = ptr(now.Add(-120 * time.Hour))
+	clue9.AssignedAt = ptr(now.Add(-118 * time.Hour))
+	clue9.DueAt = ptr(now.Add(24 * time.Hour))
+	clue9.LastHandlerID = rev1.ID
+	clue9.LastHandlerName = rev1.RealName
+	clue9.LastOpinion = "申诉理由不充分，驳回申诉，需按要求补充证据"
+	clue9.LastResult = "申诉已驳回，请补充物业合同原件及涨价公示照片等关键证据"
+	db.DB.Create(&clue9)
+	addEvidences(clue9.ID, reg2.ID, 2)
+	addLog2(clue9.ID, reg2.ID, reg2.RealName, string(reg2.Role), "登记并提交线索", "", string(models.StatusSubmitted), "", "", "", 0, 1)
+	addLog2(clue9.ID, aud2.ID, aud2.RealName, string(aud2.Role), "核实分派", string(models.StatusSubmitted), string(models.StatusAssigned), "分派赵审核处理，重点核实物业涨价程序合法性", "", "", 1, 2)
+	addLog2(clue9.ID, aud2.ID, aud2.RealName, string(aud2.Role), "标记缺证据", string(models.StatusAssigned), string(models.StatusLackEvidence), "需补充：1.物业合同原件 2.涨价公示照片 3.业主大会决议记录", "缺少关键证据，无法确认涨价是否违法", "", 2, 3)
+	addLog2(clue9.ID, reg2.ID, reg2.RealName, string(reg2.Role), "提交异常申诉", string(models.StatusLackEvidence), string(models.StatusAppealed), "登记员认为已提供20位业主签字证明，且物业涨价是既成事实，无需更多材料即可立案查处。", "", "", 3, 4)
+	addLog2(clue9.ID, rev1.ID, rev1.RealName, string(rev1.Role), "驳回申诉", string(models.StatusAppealed), string(models.StatusAppealReject), "申诉理由不成立。根据《物业管理条例》，物业涨价必须经业主大会双过半同意，登记员需补充物业合同原件及涨价公示等关键书证，20位业主签字不能替代法定程序。请补充后可再次提交。", "缺少物业合同、涨价公示等核心书证，仅凭业主签字不足以立案", "申诉理由不成立，需补充法定书证", 4, 5)
+	db.DB.Model(&clue9).Update("version", 5)
+
+	appeal9 := models.AppealRecord{
+		ID:              uuid.New().String(),
+		ClueID:          clue9.ID,
+		AppellantID:     reg2.ID,
+		AppellantName:   reg2.RealName,
+		Reason:          "登记员认为已提供20位业主签字证明，且物业涨价是既成事实，无需更多材料即可立案查处。",
+		Status:          "rejected",
+		ReviewerID:      rev1.ID,
+		ReviewerName:    rev1.RealName,
+		ReviewOpinion:   "申诉理由不成立。根据《物业管理条例》，物业涨价必须经业主大会双过半同意，登记员需补充物业合同原件及涨价公示等关键书证，20位业主签字不能替代法定程序。请补充后可再次提交。",
+		RejectReason:    "缺少物业合同、涨价公示等核心书证，仅凭业主签字不足以立案",
+		OriginalStatus:  string(models.StatusLackEvidence),
+	}
+	appeal9.CreatedAt = now.Add(-40 * time.Hour)
+	rvwAt9 := now.Add(-12 * time.Hour)
+	appeal9.ReviewedAt = &rvwAt9
+	db.DB.Create(&appeal9)
+
+	log.Println("样例线索单填充完成，共 9 条，覆盖正常/缺证据/逾期/退回补正/申诉中/申诉已受理/申诉已驳回/状态冲突/补正重提 9 种情形")
 }
 
 func ptr(t time.Time) *time.Time { return &t }

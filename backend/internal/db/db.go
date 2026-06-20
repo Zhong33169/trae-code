@@ -13,21 +13,22 @@ var DB *gorm.DB
 
 func Init(dbPath string) error {
 	var err error
-	dsn := dbPath + "?_journal=WAL&_timeout=5000&_busy_timeout=5000"
+	dsn := dbPath + "?_journal=WAL&_timeout=10000&_busy_timeout=10000&_txlock=immediate"
 	DB, err = gorm.Open(sqlite.Open(dsn), &gorm.Config{
 		PrepareStmt:            true,
-		SkipDefaultTransaction: true,
+		SkipDefaultTransaction: false,
 	})
 	if err != nil {
 		return err
 	}
 	sqlDB, err := DB.DB()
 	if err == nil {
-		sqlDB.SetMaxOpenConns(1)
-		sqlDB.SetMaxIdleConns(1)
+		sqlDB.SetMaxOpenConns(5)
+		sqlDB.SetMaxIdleConns(3)
 		sqlDB.SetConnMaxLifetime(time.Hour)
+		sqlDB.SetConnMaxIdleTime(10 * time.Minute)
 	}
-	log.Println("SQLite 已连接 (WAL模式):", dbPath)
+	log.Println("SQLite 已连接 (WAL模式+IMMEDIATE锁):", dbPath)
 
 	err = DB.AutoMigrate(
 		&models.User{},

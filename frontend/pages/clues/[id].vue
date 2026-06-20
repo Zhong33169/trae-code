@@ -331,8 +331,11 @@ const availableActions = computed(() => {
       list.push({ key: 'submit', label: '补正材料后再次提交', icon: '🔁', cls: 'btn-primary', ver })
       list.push({ key: 'appeal', label: '发起异常申诉', icon: '⚖️', cls: 'btn-warning', ver })
     }
-    if (['overdue', 'status_conflict', 'archived'].includes(s)) {
+    if (['overdue', 'status_conflict', 'archived', 'appeal_rejected'].includes(s)) {
       list.push({ key: 'appeal', label: '发起异常申诉', icon: '⚖️', cls: 'btn-warning', ver })
+    }
+    if (s === 'appeal_rejected') {
+      list.push({ key: 'submit', label: '按驳回意见补正后重提', icon: '🔁', cls: 'btn-primary', ver })
     }
     if (s === 'appeal_accepted') {
       list.push({ key: 'resubmit_after_appeal', label: '申诉受理后补正重提', icon: '🔁', cls: 'btn-primary', ver })
@@ -458,7 +461,14 @@ const submitAction = async () => {
     currentAction.value = null
     await loadData()
   } catch (e: any) {
-    showToast('❌ ' + (e.message || '操作失败'))
+    const msg = e.message || '操作失败'
+    showToast('❌ ' + msg)
+    if (msg.includes('版本') || msg.includes('冲突') || msg.includes('version')) {
+      setTimeout(async () => {
+        showToast('🔄 检测到版本冲突，正在刷新最新数据...')
+        await loadData()
+      }, 1200)
+    }
   } finally {
     processing.value = false
   }

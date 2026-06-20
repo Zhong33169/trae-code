@@ -62,7 +62,7 @@ func ListUsers(c *fiber.Ctx) error {
 	return c.JSON(users)
 }
 
-func addLog(clueID, operatorID, operatorName, operatorRole, action, fromStatus, toStatus, comment, rejectReason, reviewOpinion string, vb, va int) error {
+func addLog(tx *gorm.DB, clueID, operatorID, operatorName, operatorRole, action, fromStatus, toStatus, comment, rejectReason, reviewOpinion string, vb, va int) error {
 	log := models.OperationLog{
 		ID:            uuid.New().String(),
 		ClueID:        clueID,
@@ -78,7 +78,7 @@ func addLog(clueID, operatorID, operatorName, operatorRole, action, fromStatus, 
 		VersionBefore: vb,
 		VersionAfter:  va,
 	}
-	return db.DB.Create(&log).Error
+	return tx.Create(&log).Error
 }
 
 type CreateClueReq struct {
@@ -162,7 +162,7 @@ func CreateClue(c *fiber.Ctx) error {
 		action = "登记并提交线索"
 		toStatus = string(models.StatusSubmitted)
 	}
-	if err := addLog(clue.ID, userID, realName, role, action, "", toStatus, "", "", "", 0, 1); err != nil {
+	if err := addLog(tx, clue.ID, userID, realName, role, action, "", toStatus, "", "", "", 0, 1); err != nil {
 		tx.Rollback()
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
@@ -314,7 +314,7 @@ func AssignClue(c *fiber.Ctx) error {
 		tx.Rollback()
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
-	if err := addLog(clue.ID, userID, realName, role, "核实分派", oldStatus, string(models.StatusAssigned), req.Comment, "", "", req.Version, newVersion); err != nil {
+	if err := addLog(tx, clue.ID, userID, realName, role, "核实分派", oldStatus, string(models.StatusAssigned), req.Comment, "", "", req.Version, newVersion); err != nil {
 		tx.Rollback()
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
@@ -419,7 +419,7 @@ func ProcessClue(c *fiber.Ctx) error {
 	case models.RoleRegistrar:
 		switch req.Action {
 		case "submit":
-			if clue.Status != models.StatusDraft && clue.Status != models.StatusReturned && clue.Status != models.StatusLackEvidence {
+			if clue.Status != models.StatusDraft && clue.Status != models.StatusReturned && clue.Status != models.StatusLackEvidence && clue.Status != models.StatusAppealReject {
 				tx.Rollback()
 				return c.Status(400).JSON(fiber.Map{"error": "当前状态不能提交"})
 			}
@@ -512,7 +512,7 @@ func ProcessClue(c *fiber.Ctx) error {
 		tx.Rollback()
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
-	if err := addLog(clue.ID, userID, realName, role, actionName, oldStatus, newStatus.String(),
+	if err := addLog(tx, clue.ID, userID, realName, role, actionName, oldStatus, newStatus.String(),
 		req.Comment, req.RejectReason, "", req.Version, newVersion); err != nil {
 		tx.Rollback()
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
@@ -587,7 +587,7 @@ func SubmitAppeal(c *fiber.Ctx) error {
 		tx.Rollback()
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
-	if err := addLog(clue.ID, userID, realName, role, "提交异常申诉", oldStatus, string(models.StatusAppealed), req.Reason, "", "", req.Version, newVersion); err != nil {
+	if err := addLog(tx, clue.ID, userID, realName, role, "提交异常申诉", oldStatus, string(models.StatusAppealed), req.Reason, "", "", req.Version, newVersion); err != nil {
 		tx.Rollback()
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
@@ -661,7 +661,7 @@ func ReviewAppeal(c *fiber.Ctx) error {
 			tx.Rollback()
 			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 		}
-		if err := addLog(clue.ID, userID, realName, role, actionName, oldStatus, string(models.StatusAppealAccept), req.ReviewOpinion, req.RejectReason, req.ReviewOpinion, req.Version, newVersion); err != nil {
+		if err := addLog(tx, clue.ID, userID, realName, role, actionName, oldStatus, string(models.StatusAppealAccept), req.ReviewOpinion, req.RejectReason, req.ReviewOpinion, req.Version, newVersion); err != nil {
 			tx.Rollback()
 			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 		}
@@ -686,7 +686,7 @@ func ReviewAppeal(c *fiber.Ctx) error {
 			tx.Rollback()
 			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 		}
-		if err := addLog(clue.ID, userID, realName, role, actionName, oldStatus, string(models.StatusAppealReject), req.ReviewOpinion, req.RejectReason, req.ReviewOpinion, req.Version, newVersion); err != nil {
+		if err := addLog(tx, clue.ID, userID, realName, role, actionName, oldStatus, string(models.StatusAppealReject), req.ReviewOpinion, req.RejectReason, req.ReviewOpinion, req.Version, newVersion); err != nil {
 			tx.Rollback()
 			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 		}
@@ -709,7 +709,7 @@ func ReviewAppeal(c *fiber.Ctx) error {
 			tx.Rollback()
 			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 		}
-		if err := addLog(clue.ID, userID, realName, role, actionName, oldStatus, string(models.StatusReSubmit), req.ReviewOpinion, "", req.ReviewOpinion, req.Version, newVersion); err != nil {
+		if err := addLog(tx, clue.ID, userID, realName, role, actionName, oldStatus, string(models.StatusReSubmit), req.ReviewOpinion, "", req.ReviewOpinion, req.Version, newVersion); err != nil {
 			tx.Rollback()
 			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 		}
@@ -746,12 +746,13 @@ func ResubmitAfterAppeal(c *fiber.Ctx) error {
 	if clue.RegistrarID != userID {
 		return c.Status(403).JSON(fiber.Map{"error": "仅线索登记人本人可操作"})
 	}
+	tx := db.DB.Begin()
 	var cnt int64
-	db.DB.Model(&models.Evidence{}).Where("clue_id = ?", clue.ID).Count(&cnt)
+	tx.Model(&models.Evidence{}).Where("clue_id = ?", clue.ID).Count(&cnt)
 	if cnt+int64(len(req.ExtraEvidences)) < 1 {
+		tx.Rollback()
 		return c.Status(400).JSON(fiber.Map{"error": "至少需提供 1 份证据材料"})
 	}
-	tx := db.DB.Begin()
 	oldStatus := clue.Status.String()
 	newVersion := clue.Version + 1
 	now := time.Now()
@@ -786,7 +787,7 @@ func ResubmitAfterAppeal(c *fiber.Ctx) error {
 		tx.Rollback()
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
-	if err := addLog(clue.ID, userID, realName, role, "申诉补正重提", oldStatus, string(models.StatusReSubmit), req.Comment, "", "", req.Version, newVersion); err != nil {
+	if err := addLog(tx, clue.ID, userID, realName, role, "申诉补正重提", oldStatus, string(models.StatusReSubmit), req.Comment, "", "", req.Version, newVersion); err != nil {
 		tx.Rollback()
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}

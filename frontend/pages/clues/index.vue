@@ -3,6 +3,10 @@
     <div class="page-header">
       <h2 class="page-title">📋 线索单管理</h2>
       <div>
+        <span class="text-sm text-muted" style="margin-right:12px;">
+          当前角色：<span class="badge-role" :class="`badge-${authStore.role}`">{{ authStore.roleLabel }}</span>
+          <span style="margin-left:6px;">· {{ roleScopeTip }}</span>
+        </span>
         <button v-if="authStore.isRegistrar" class="btn btn-primary" @click="navigateTo('/clues/new')">➕ 新建线索单</button>
         &nbsp;
         <button class="btn btn-sm" @click="loadList">🔄 刷新</button>
@@ -150,5 +154,17 @@ const lastRoleLabel = (item: any) => {
   return '线索登记员'
 }
 
-onMounted(loadList)
+const roleScopeTip = computed(() => {
+  if (authStore.isRegistrar) return '仅查看您登记的线索单'
+  if (authStore.isAuditor) return '查看分派给您的及待分派队列'
+  if (authStore.isReviewer) return '查看全部线索单'
+  return ''
+})
+
+onMounted(() => {
+  loadList()
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) loadList()
+  })
+})
 </script>
