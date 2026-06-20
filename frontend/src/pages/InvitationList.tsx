@@ -40,7 +40,7 @@ function getRoleStatusOptions(role: Role) {
   }
   if (role === Role.Reviewer) {
     return STATUS_OPTIONS.filter((o) =>
-      ['', InvitationStatus.PendingReview, InvitationStatus.ReviewRejected, InvitationStatus.FinalRejected].includes(o.value as InvitationStatus),
+      ['', InvitationStatus.PendingReview, InvitationStatus.ReviewRejected, InvitationStatus.FinalRejected, InvitationStatus.Archived].includes(o.value as InvitationStatus),
     );
   }
   return STATUS_OPTIONS.filter((o) =>
@@ -230,6 +230,9 @@ const InvitationList = () => {
               </Button>
               <Button danger onClick={() => handleBatchAction('reject', '批量退回')}>
                 批量退回
+              </Button>
+              <Button onClick={() => handleBatchAction('reprocess', '批量重新办理')}>
+                批量重新办理
               </Button>
             </>
           )}

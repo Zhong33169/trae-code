@@ -71,6 +71,7 @@ export class InvitationService {
     const page = parseInt(query.page || '1', 10);
     const pageSize = parseInt(query.pageSize || '10', 10);
     const offset = (page - 1) * pageSize;
+    const now = dayjs();
 
     let where = 'WHERE 1=1';
     const params: any[] = [];
@@ -78,6 +79,15 @@ export class InvitationService {
     if (query.status) {
       where += ' AND status = ?';
       params.push(query.status);
+    }
+    if (query.urgency) {
+      if (query.urgency === 'overdue') {
+        where += " AND deadline <= datetime('now')";
+      } else if (query.urgency === 'urgent') {
+        where += " AND deadline > datetime('now') AND deadline <= datetime('now', '+72 hours')";
+      } else if (query.urgency === 'normal') {
+        where += " AND deadline > datetime('now', '+72 hours')";
+      }
     }
     if (query.keyword) {
       where += ' AND (title LIKE ? OR event_name LIKE ? OR creator_name LIKE ?)';
@@ -89,8 +99,8 @@ export class InvitationService {
         where += ' AND creator_id = ?';
         params.push(query.operatorId);
       } else if (query.role === 'reviewer') {
-        where += ' AND status IN (?, ?)';
-        params.push('pending_review', 'review_rejected');
+        where += ' AND status IN (?, ?, ?)';
+        params.push('pending_review', 'review_rejected', 'final_rejected');
       } else if (query.role === 'final_reviewer') {
         where += ' AND status IN (?, ?)';
         params.push('pending_final', 'final_rejected');
@@ -156,6 +166,8 @@ export class InvitationService {
 
   update(id: string, dto: UpdateInvitationDto & { operatorId: string; operatorRole: string }) {
     const inv = this.getInvitation(id);
+    const user = this.getUser(dto.operatorId);
+    if (!user) throw new BadRequestException('用户不存在');
     if (dto.operatorRole !== 'registrar') throw new ForbiddenException('只有登记员可以修改邀请单');
     if (inv.status !== 'draft' && inv.status !== 'review_rejected') {
       throw new BadRequestException('只有草稿或审核退回状态可以修改');
@@ -163,23 +175,32 @@ export class InvitationService {
 
     const fields: string[] = [];
     const values: any[] = [];
+    const changedFields: string[] = [];
 
-    if (dto.title !== undefined) { fields.push('title = ?'); values.push(dto.title); }
-    if (dto.mediaType !== undefined) { fields.push('media_type = ?'); values.push(dto.mediaType); }
-    if (dto.eventName !== undefined) { fields.push('event_name = ?'); values.push(dto.eventName); }
-    if (dto.eventDate !== undefined) { fields.push('event_date = ?'); values.push(dto.eventDate); }
-    if (dto.eventLocation !== undefined) { fields.push('event_location = ?'); values.push(dto.eventLocation); }
-    if (dto.deadline !== undefined) { fields.push('deadline = ?'); values.push(dto.deadline); }
+    if (dto.title !== undefined) { fields.push('title = ?'); values.push(dto.title); changedFields.push(`标题→${dto.title}`); }
+    if (dto.mediaType !== undefined) { fields.push('media_type = ?'); values.push(dto.mediaType); changedFields.push(`媒体类型→${dto.mediaType}`); }
+    if (dto.eventName !== undefined) { fields.push('event_name = ?'); values.push(dto.eventName); changedFields.push(`活动名称→${dto.eventName}`); }
+    if (dto.eventDate !== undefined) { fields.push('event_date = ?'); values.push(dto.eventDate); changedFields.push(`活动日期→${dto.eventDate}`); }
+    if (dto.eventLocation !== undefined) { fields.push('event_location = ?'); values.push(dto.eventLocation); changedFields.push(`活动地点→${dto.eventLocation}`); }
+    if (dto.deadline !== undefined) { fields.push('deadline = ?'); values.push(dto.deadline); changedFields.push(`截止时间→${dto.deadline}`); }
     if (dto.guestConfirmed !== undefined) { fields.push('guest_confirmed = ?'); values.push(dto.guestConfirmed ? 1 : 0); }
     if (dto.checkinCompleted !== undefined) { fields.push('checkin_completed = ?'); values.push(dto.checkinCompleted ? 1 : 0); }
 
     if (fields.length === 0) return this.findOne(id);
 
     fields.push('version = version + 1', "updated_at = datetime('now')");
-    values.push(inv.version, id);
+    values.push(id, inv.version);
 
     const result = this.db.prepare(`UPDATE invitation SET ${fields.join(', ')} WHERE id = ? AND version = ?`).run(...values);
     if (result.changes === 0) throw new ConflictException('版本冲突，请刷新后重试');
+
+    if (changedFields.length > 0) {
+      this.createAuditLog({
+        invitationId: id, operatorId: dto.operatorId, operatorName: user.name, operatorRole: dto.operatorRole,
+        action: 'update', detail: inv.status === 'review_rejected' ? `补正修改: ${changedFields.join(', ')}` : `修改: ${changedFields.join(', ')}`,
+        beforeStatus: inv.status, afterStatus: inv.status,
+      });
+    }
 
     return this.findOne(id);
   }
@@ -305,6 +326,30 @@ export class InvitationService {
     return this.findOne(id);
   }
 
+  reprocess(id: string, dto: ApproveDto) {
+    const inv = this.getInvitation(id);
+    const user = this.getUser(dto.operatorId);
+    if (!user) throw new BadRequestException('用户不存在');
+    if (dto.operatorRole !== 'reviewer') throw new ForbiddenException('只有审核主管可以重新办理');
+    if (inv.status !== 'final_rejected') throw new BadRequestException('只有复核退回状态可以重新办理');
+    if (!dto.guestConfirmed) throw new BadRequestException('嘉宾未确认，无法重新办理');
+    if (!inv.materials_complete) throw new BadRequestException('材料不完整，无法重新办理');
+
+    const result = this.db.prepare(`
+      UPDATE invitation SET status = 'pending_review', version = version + 1, updated_at = datetime('now')
+      WHERE id = ? AND version = ?
+    `).run(id, inv.version);
+    if (result.changes === 0) throw new ConflictException('版本冲突，请刷新后重试');
+
+    this.createAuditLog({
+      invitationId: id, operatorId: dto.operatorId, operatorName: user.name, operatorRole: dto.operatorRole,
+      action: 'reprocess', detail: dto.reviewComment || '复核退回后重新办理',
+      beforeStatus: inv.status, afterStatus: 'pending_review',
+    });
+
+    return this.findOne(id);
+  }
+
   batchAction(dto: BatchActionDto) {
     const user = this.getUser(dto.operatorId);
     if (!user) throw new BadRequestException('用户不存在');
@@ -382,6 +427,22 @@ export class InvitationService {
             action: 'review-reject', detail: dto.comment || '批量复核退回',
             beforeStatus: inv.status, afterStatus: 'final_rejected',
           });
+        } else if (dto.action === 'reprocess') {
+          if (dto.operatorRole !== 'reviewer') { failed.push({ id, reason: '只有审核主管可以重新办理' }); continue; }
+          if (inv.status !== 'final_rejected') { failed.push({ id, reason: '状态不是复核退回' }); continue; }
+          if (!inv.guest_confirmed) { failed.push({ id, reason: '嘉宾未确认' }); continue; }
+          if (!inv.materials_complete) { failed.push({ id, reason: '材料不完整' }); continue; }
+
+          this.db.prepare(`
+            UPDATE invitation SET status = 'pending_review', version = version + 1, updated_at = datetime('now')
+            WHERE id = ? AND version = ?
+          `).run(id, inv.version);
+
+          this.createAuditLog({
+            invitationId: id, operatorId: dto.operatorId, operatorName: user.name, operatorRole: dto.operatorRole,
+            action: 'reprocess', detail: dto.comment || '批量重新办理',
+            beforeStatus: inv.status, afterStatus: 'pending_review',
+          });
         }
 
         success.push(id);
@@ -402,7 +463,7 @@ export class InvitationService {
         baseQuery += ' WHERE creator_id = ?';
         params.push(operatorId);
       } else if (role === 'reviewer') {
-        baseQuery += " WHERE status IN ('pending_review', 'review_rejected')";
+        baseQuery += " WHERE status IN ('pending_review', 'review_rejected', 'final_rejected')";
       } else if (role === 'final_reviewer') {
         baseQuery += " WHERE status IN ('pending_final', 'final_rejected')";
       }
@@ -417,7 +478,7 @@ export class InvitationService {
         urgencyBase += ' WHERE creator_id = ?';
         urgencyParams.push(operatorId);
       } else if (role === 'reviewer') {
-        urgencyBase += " WHERE status IN ('pending_review', 'review_rejected')";
+        urgencyBase += " WHERE status IN ('pending_review', 'review_rejected', 'final_rejected')";
       } else if (role === 'final_reviewer') {
         urgencyBase += " WHERE status IN ('pending_final', 'final_rejected')";
       }

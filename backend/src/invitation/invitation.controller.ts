@@ -66,6 +66,11 @@ export class InvitationController {
     return this.service.reviewReject(id, dto);
   }
 
+  @Post(':id/reprocess')
+  reprocess(@Param('id') id: string, @Body() dto: ApproveDto) {
+    return this.service.reprocess(id, dto);
+  }
+
   @Post('batch')
   batchAction(@Body() dto: BatchActionDto) {
     return this.service.batchAction(dto);

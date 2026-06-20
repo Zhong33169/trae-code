@@ -80,6 +80,11 @@ export async function reviewRejectInvitation(id: string, data: Record<string, un
   return res.data;
 }
 
+export async function reprocessInvitation(id: string, data: Record<string, unknown>) {
+  const res = await client.post(`/invitations/${id}/reprocess`, data);
+  return res.data;
+}
+
 export async function batchAction(data: Record<string, unknown>) {
   const res = await client.post('/invitations/batch', data);
   return res.data;

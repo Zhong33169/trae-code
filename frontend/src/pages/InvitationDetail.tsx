@@ -9,6 +9,7 @@ import {
   rejectInvitation,
   reviewInvitation,
   reviewRejectInvitation,
+  reprocessInvitation,
   guestConfirm,
   checkinFeedback,
   getAuditLogs,
@@ -199,6 +200,22 @@ const InvitationDetail = () => {
       return;
     }
     handleAction(reviewRejectInvitation, { finalComment: opinion.trim() }, '退回审核');
+  };
+
+  const handleReprocess = () => {
+    if (!opinion.trim()) {
+      message.warning('请输入处理意见');
+      return;
+    }
+    if (!invitation?.guestConfirmed) {
+      message.warning('嘉宾未确认，无法重新办理');
+      return;
+    }
+    if (!invitation?.materialsComplete) {
+      message.warning('材料不完整，无法重新办理');
+      return;
+    }
+    handleAction(reprocessInvitation, { reviewComment: opinion.trim(), guestConfirmed: invitation.guestConfirmed }, '重新办理');
   };
 
   const canApprove = invitation.status === InvitationStatus.PendingReview && currentRole === Role.Reviewer;
@@ -429,15 +446,19 @@ const InvitationDetail = () => {
                 <Button
                   type="primary"
                   loading={actionLoading}
-                  onClick={() => {
-                    if (!opinion.trim()) {
-                      message.warning('请输入处理意见');
-                      return;
-                    }
-                    handleAction(submitInvitation, {}, '重新办理');
-                  }}
+                  onClick={handleReprocess}
+                  disabled={!invitation.guestConfirmed || !invitation.materialsComplete}
                 >
                   重新办理
+                </Button>
+              )}
+              {canReprocess && (
+                <Button
+                  danger
+                  loading={actionLoading}
+                  onClick={handleReject}
+                >
+                  退回补正
                 </Button>
               )}
               <Button onClick={() => navigate('/invitations')}>返回列表</Button>

@@ -47,34 +47,16 @@ const Home = () => {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [statsData, invitationsData] = await Promise.all([
+      const [statsData, overdueData, urgentData, normalData] = await Promise.all([
         getStats({ role: currentRole, operatorId: currentUser.id }),
-        getInvitations({ page: 1, pageSize: 100, role: currentRole, operatorId: currentUser.id }),
+        getInvitations({ page: 1, pageSize: 20, urgency: 'overdue', role: currentRole, operatorId: currentUser.id }),
+        getInvitations({ page: 1, pageSize: 20, urgency: 'urgent', role: currentRole, operatorId: currentUser.id }),
+        getInvitations({ page: 1, pageSize: 20, urgency: 'normal', role: currentRole, operatorId: currentUser.id }),
       ]);
       setStats(statsData);
-
-      let filtered = invitationsData.items;
-      if (currentRole === Role.Registrar) {
-        filtered = filtered.filter(
-          (i: Invitation) => i.status === InvitationStatus.Draft || i.status === InvitationStatus.ReviewRejected,
-        );
-      } else if (currentRole === Role.Reviewer) {
-        filtered = filtered.filter(
-          (i: Invitation) => i.status === InvitationStatus.PendingReview || i.status === InvitationStatus.FinalRejected,
-        );
-      } else if (currentRole === Role.FinalReviewer) {
-        filtered = filtered.filter(
-          (i: Invitation) => i.status === InvitationStatus.PendingFinal,
-        );
-      }
-
-      const overdue = filtered.filter((i: Invitation) => getUrgencyFromDeadline(i.deadline) === UrgencyLevel.Overdue);
-      const urgent = filtered.filter((i: Invitation) => getUrgencyFromDeadline(i.deadline) === UrgencyLevel.Urgent);
-      const normal = filtered.filter((i: Invitation) => getUrgencyFromDeadline(i.deadline) === UrgencyLevel.Normal);
-
-      setOverdueItems(overdue);
-      setUrgentItems(urgent);
-      setNormalItems(normal);
+      setOverdueItems(overdueData.items || []);
+      setUrgentItems(urgentData.items || []);
+      setNormalItems(normalData.items || []);
     } catch {
       // error handled by interceptor
     } finally {
@@ -95,7 +77,7 @@ const Home = () => {
   ];
 
   const renderItem = (item: Invitation, bgColor?: string) => {
-    const urgency = getUrgencyFromDeadline(item.deadline);
+    const urgency = item.urgency;
     return (
       <div
         key={item.id}
