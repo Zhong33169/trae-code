@@ -551,14 +551,46 @@ def update_booking(request: HttpRequest, booking_id: int, payload: BookingApplic
 @transaction.atomic
 def submit_booking(request: HttpRequest, booking_id: int, payload: StatusChangeIn):
     b = get_object_or_404(BookingApplication, id=booking_id)
+    old_status = b.booking_status
     # 统一强制：角色(registrar) + 状态（draft/correcting→pending_review）
     require_action_flow(request.user, 'submit', b)
+
+    # === 重复批次拦截：保持业务状态不变，记录失败审计 ===
+    dup_batch = check_duplicate_batch(b.batch_no, exclude_id=b.id)
+    if dup_batch:
+        fail_reason = f'提交被拦截：批次号【{b.batch_no}】已存在于订舱单 {", ".join(dup_batch)}，请确认是否重复录入'
+        create_audit(b, AuditLog.AuditTypeChoices.BOOKING, AuditLog.ResultChoices.FAIL,
+                     request.user, fail_reason=fail_reason,
+                     remark='重复批次拦截，状态未变更')
+        log_operation(b, ActionChoices.SUBMIT, operator=request.user,
+                      from_status=old_status, to_status=old_status,  # 状态保持不变
+                      remark=fail_reason)
+        raise HttpError(400, fail_reason)
+
+    # === 线上线下状态不一致拦截：保持业务状态不变，记录失败审计 ===
     mismatch = check_status_consistency(b)
     if mismatch:
-        raise HttpError(400, '状态校验未通过，线上线下状态不一致：' + '；'.join(mismatch))
+        fail_reason = '提交被拦截：线上线下状态不一致 — ' + '；'.join(mismatch)
+        create_audit(b, AuditLog.AuditTypeChoices.BOOKING, AuditLog.ResultChoices.FAIL,
+                     request.user, fail_reason=fail_reason,
+                     remark='状态不一致拦截，状态未变更')
+        log_operation(b, ActionChoices.SUBMIT, operator=request.user,
+                      from_status=old_status, to_status=old_status,  # 状态保持不变
+                      remark=fail_reason)
+        raise HttpError(400, fail_reason)
+
+    # === 必填字段校验：保持状态不变，记录失败审计 ===
     if not b.customer or not b.forwarder:
-        raise HttpError(400, '客户名称和货代/船公司为必填项')
-    old_status = b.booking_status
+        fail_reason = '提交被拦截：客户名称和货代/船公司为必填项'
+        create_audit(b, AuditLog.AuditTypeChoices.BOOKING, AuditLog.ResultChoices.FAIL,
+                     request.user, fail_reason=fail_reason,
+                     remark='必填字段缺失，状态未变更')
+        log_operation(b, ActionChoices.SUBMIT, operator=request.user,
+                      from_status=old_status, to_status=old_status,
+                      remark=fail_reason)
+        raise HttpError(400, fail_reason)
+
+    # === 校验通过，正常提交 ===
     b.booking_status = STATUS_FLOW['submit']['to']
     b.submitted_at = timezone.now()
     if not b.submitter:
@@ -567,6 +599,8 @@ def submit_booking(request: HttpRequest, booking_id: int, payload: StatusChangeI
     log_operation(b, ActionChoices.SUBMIT, operator=request.user,
                   from_status=old_status, to_status=b.booking_status,
                   remark=payload.remark or '订舱登记员提交审核')
+    create_audit(b, AuditLog.AuditTypeChoices.BOOKING, AuditLog.ResultChoices.PASS,
+                 request.user, remark=payload.remark or '订舱登记员提交审核，资料齐全')
     return booking_to_out(b)
 
 
