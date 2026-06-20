@@ -28,6 +28,16 @@ func addOperationLogWithBatch(tx *sql.Tx, quoteID int64, operation, oldStatus, n
 	return err
 }
 
+func addOperationLogStandalone(quoteID int64, operation, oldStatus, newStatus, remark string, user *middleware.UserInfo, batchID string) error {
+	shift := getUserShift(user.ID)
+	_, err := database.DB.Exec(
+		`INSERT INTO operation_logs (quote_id, operation, old_status, new_status, operator_id, operator_name, operator_role, operator_shift, batch_id, remark)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		quoteID, operation, oldStatus, newStatus, user.ID, user.RealName, user.Role, shift, batchID, remark,
+	)
+	return err
+}
+
 func checkRoleAllowed(userRole string, allowedRoles []string) bool {
 	for _, r := range allowedRoles {
 		if userRole == r {

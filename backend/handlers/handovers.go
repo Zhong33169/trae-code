@@ -210,19 +210,34 @@ func GetMyHandovers(c echo.Context) error {
 	user := middleware.GetUser(c)
 	status := c.QueryParam("status")
 
-	query := `SELECT h.id, h.quote_id, h.from_user_id, h.from_user_name, h.from_user_role, h.from_shift,
+	isManager := user.Role == models.RoleServiceManager
+
+	var query string
+	var args []interface{}
+
+	if isManager {
+		query = `SELECT h.id, h.quote_id, h.from_user_id, h.from_user_name, h.from_user_role, h.from_shift,
+		h.to_user_id, h.to_user_name, h.to_user_role, h.to_shift, h.handover_remark,
+		h.confirmed_at, h.status, h.created_at,
+		q.quote_no, q.customer_name, q.device_type, q.status as quote_status
+		FROM shift_handovers h LEFT JOIN repair_quotes q ON h.quote_id = q.id
+		WHERE 1=1`
+		args = []interface{}{}
+	} else {
+		query = `SELECT h.id, h.quote_id, h.from_user_id, h.from_user_name, h.from_user_role, h.from_shift,
 		h.to_user_id, h.to_user_name, h.to_user_role, h.to_shift, h.handover_remark,
 		h.confirmed_at, h.status, h.created_at,
 		q.quote_no, q.customer_name, q.device_type, q.status as quote_status
 		FROM shift_handovers h LEFT JOIN repair_quotes q ON h.quote_id = q.id
 		WHERE (h.from_user_id = ? OR h.to_user_id = ?)`
-	args := []interface{}{user.ID, user.ID}
+		args = []interface{}{user.ID, user.ID}
+	}
 
 	if status != "" && status != "all" {
 		query += " AND h.status = ?"
 		args = append(args, status)
 	}
-	query += " ORDER BY h.id DESC LIMIT 100"
+	query += " ORDER BY h.id DESC LIMIT 200"
 
 	rows, err := database.DB.Query(query, args...)
 	if err != nil {
@@ -242,7 +257,7 @@ func GetMyHandovers(c echo.Context) error {
 		if cAt.Valid {
 			h.ConfirmedAt = &cAt.Time
 		}
-		isMine := h.ToUserID == user.ID
+		isIncoming := h.ToUserID == user.ID
 		fromRole, _ := models.RoleDisplayNames[h.FromUserRole]
 		toRole, _ := models.RoleDisplayNames[h.ToUserRole]
 		fromShift, _ := models.ShiftDisplayNames[h.FromShift]
@@ -257,7 +272,7 @@ func GetMyHandovers(c echo.Context) error {
 			"device_type":       deviceType,
 			"quote_status":      quoteStatus,
 			"quote_status_name": qSt,
-			"is_incoming":       isMine,
+			"is_incoming":       isIncoming,
 			"from": map[string]interface{}{
 				"user_name": h.FromUserName,
 				"role":      fromRole,
@@ -360,9 +375,13 @@ func BatchConfirmHandover(c echo.Context) error {
 		}
 
 		result.QuoteID = quoteID
-		var quoteNo, customerName, deviceType string
+		var quoteNo, customerName, deviceType, curStatus string
 		database.DB.QueryRow("SELECT quote_no, customer_name, device_type FROM repair_quotes WHERE id = ?", quoteID).Scan(&quoteNo, &customerName, &deviceType)
 		result.QuoteNo = quoteNo
+		database.DB.QueryRow("SELECT status FROM repair_quotes WHERE id = ?", quoteID).Scan(&curStatus)
+		curStatusDisplay, _ := models.StatusDisplayNames[curStatus]
+
+		actionIdentity := user.RealName + "(" + models.RoleDisplayNames[user.Role] + ")"
 
 		isManager := user.Role == models.RoleServiceManager
 		isReceiver := toUserID == user.ID
@@ -372,6 +391,9 @@ func BatchConfirmHandover(c echo.Context) error {
 			result.Message = fmt.Sprintf("报价单 %s(%s-%s)：权限不足。仅交接接收人本人或服务经理可处理，您不是该交接的接收人",
 				quoteNo, customerName, deviceType)
 			result.ErrorCode = "PERMISSION_DENIED"
+			remark := fmt.Sprintf("批量交接处理失败[%s] 错误码:%s 报价单:%s 操作人:%s 原因:权限不足，不是接收人也不是经理",
+				batchID, result.ErrorCode, quoteNo, actionIdentity)
+			addOperationLogStandalone(quoteID, "批量交接失败", curStatusDisplay, curStatusDisplay, remark, user, batchID)
 			results = append(results, result)
 			failCount++
 			continue
@@ -388,6 +410,9 @@ func BatchConfirmHandover(c echo.Context) error {
 			result.Message = fmt.Sprintf("报价单 %s：该交接已处理过，当前状态为 %s，无法重复处理",
 				quoteNo, statusDisplay[status])
 			result.ErrorCode = "ALREADY_PROCESSED"
+			remark := fmt.Sprintf("批量交接处理失败[%s] 错误码:%s 报价单:%s 操作人:%s 原因:交接已处理(状态:%s)",
+				batchID, result.ErrorCode, quoteNo, actionIdentity, statusDisplay[status])
+			addOperationLogStandalone(quoteID, "批量交接失败", curStatusDisplay, curStatusDisplay, remark, user, batchID)
 			results = append(results, result)
 			failCount++
 			continue
@@ -397,6 +422,9 @@ func BatchConfirmHandover(c echo.Context) error {
 			result.Success = false
 			result.Message = fmt.Sprintf("报价单 %s：拒绝交接必须填写拒绝原因，请补充说明后重试", quoteNo)
 			result.ErrorCode = "REJECT_REASON_REQUIRED"
+			remark := fmt.Sprintf("批量交接处理失败[%s] 错误码:%s 报价单:%s 操作人:%s 原因:拒绝操作未填写原因",
+				batchID, result.ErrorCode, quoteNo, actionIdentity)
+			addOperationLogStandalone(quoteID, "批量交接失败", curStatusDisplay, curStatusDisplay, remark, user, batchID)
 			results = append(results, result)
 			failCount++
 			continue
@@ -404,15 +432,14 @@ func BatchConfirmHandover(c echo.Context) error {
 
 		database.DB.QueryRow("SELECT real_name, role, shift FROM users WHERE id = ?", toUserID).Scan(&toUserNameDb, &toRoleDb, &toShift)
 
-		var curStatus string
-		database.DB.QueryRow("SELECT status FROM repair_quotes WHERE id = ?", quoteID).Scan(&curStatus)
-		curStatusDisplay, _ := models.StatusDisplayNames[curStatus]
-
 		tx, err := database.DB.Begin()
 		if err != nil {
 			result.Success = false
 			result.Message = "启动事务失败"
 			result.ErrorCode = "TX_ERROR"
+			remark := fmt.Sprintf("批量交接处理失败[%s] 错误码:%s 报价单:%s 操作人:%s 原因:事务启动失败:%s",
+				batchID, result.ErrorCode, quoteNo, actionIdentity, err.Error())
+			addOperationLogStandalone(quoteID, "批量交接失败", curStatusDisplay, curStatusDisplay, remark, user, batchID)
 			results = append(results, result)
 			failCount++
 			continue
@@ -428,14 +455,14 @@ func BatchConfirmHandover(c echo.Context) error {
 					WHERE id = ?`, toUserID, toUserNameDb, currentToShift, now, quoteID)
 			}
 			if err == nil {
-				actionIdentity := user.RealName + "(" + models.RoleDisplayNames[user.Role] + ")"
+				actionIdentityFull := actionIdentity
 				if isManager {
-					actionIdentity += "【服务经理代处理】"
+					actionIdentityFull += "【服务经理代处理】"
 				}
 				opRemark := fmt.Sprintf("批量交接确认[%s]：接收人 %s(%s)%s，操作人 %s",
 					batchID,
 					toUserNameDb, models.RoleDisplayNames[toRoleDb], models.ShiftDisplayNames[currentToShift],
-					actionIdentity)
+					actionIdentityFull)
 				if item.Remark != "" {
 					opRemark += "，备注: " + item.Remark
 				}
@@ -452,16 +479,19 @@ func BatchConfirmHandover(c echo.Context) error {
 				result.Success = false
 				result.Message = fmt.Sprintf("报价单 %s：接收处理失败: %s", quoteNo, err.Error())
 				result.ErrorCode = "PROCESS_ERROR"
+				remark := fmt.Sprintf("批量交接处理失败[%s] 错误码:%s 报价单:%s 操作人:%s 原因:处理执行失败:%s",
+					batchID, result.ErrorCode, quoteNo, actionIdentity, err.Error())
+				addOperationLogStandalone(quoteID, "批量交接失败", curStatusDisplay, curStatusDisplay, remark, user, batchID)
 			}
 		} else {
 			_, err = tx.Exec(`UPDATE shift_handovers SET status = 'rejected', confirmed_at = ? WHERE id = ?`, now, hid)
 			if err == nil {
-				actionIdentity := user.RealName + "(" + models.RoleDisplayNames[user.Role] + ")"
+				actionIdentityFull := actionIdentity
 				if isManager {
-					actionIdentity += "【服务经理代处理】"
+					actionIdentityFull += "【服务经理代处理】"
 				}
 				opRemark := fmt.Sprintf("批量交接拒绝[%s]：涉及接收人 %s，操作人 %s，原因: %s",
-					batchID, toUserNameDb, actionIdentity, item.Remark)
+					batchID, toUserNameDb, actionIdentityFull, item.Remark)
 				err = addOperationLogWithBatch(tx, quoteID, "批量交接被拒绝", curStatusDisplay, curStatusDisplay, opRemark, user, batchID)
 			}
 			if err == nil {
@@ -473,6 +503,9 @@ func BatchConfirmHandover(c echo.Context) error {
 				result.Success = false
 				result.Message = fmt.Sprintf("报价单 %s：拒绝处理失败: %s", quoteNo, err.Error())
 				result.ErrorCode = "PROCESS_ERROR"
+				remark := fmt.Sprintf("批量交接处理失败[%s] 错误码:%s 报价单:%s 操作人:%s 原因:处理执行失败:%s",
+					batchID, result.ErrorCode, quoteNo, actionIdentity, err.Error())
+				addOperationLogStandalone(quoteID, "批量交接失败", curStatusDisplay, curStatusDisplay, remark, user, batchID)
 			}
 		}
 
@@ -481,6 +514,9 @@ func BatchConfirmHandover(c echo.Context) error {
 				result.Success = false
 				result.Message = fmt.Sprintf("报价单 %s：提交事务失败: %s", quoteNo, err.Error())
 				result.ErrorCode = "COMMIT_ERROR"
+				remark := fmt.Sprintf("批量交接处理失败[%s] 错误码:%s 报价单:%s 操作人:%s 原因:事务提交失败:%s",
+					batchID, result.ErrorCode, quoteNo, actionIdentity, err.Error())
+				addOperationLogStandalone(quoteID, "批量交接失败", curStatusDisplay, curStatusDisplay, remark, user, batchID)
 			}
 		}
 

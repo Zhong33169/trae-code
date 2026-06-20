@@ -128,6 +128,56 @@ func CreateTables(db *sql.DB) error {
 		}
 	}
 
+	if err := migrateOperationLogs(db); err != nil {
+		return err
+	}
+
 	log.Println("数据库表初始化完成")
+	return nil
+}
+
+func columnExists(db *sql.DB, table, col string) (bool, error) {
+	rows, err := db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notnull, pk int
+		var dflt_value sql.NullString
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt_value, &pk); err != nil {
+			return false, err
+		}
+		if name == col {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func migrateOperationLogs(db *sql.DB) error {
+	hasOpShift, err := columnExists(db, "operation_logs", "operator_shift")
+	if err != nil {
+		return fmt.Errorf("检查 operation_logs.operator_shift 失败: %w", err)
+	}
+	if !hasOpShift {
+		if _, err := db.Exec(`ALTER TABLE operation_logs ADD COLUMN operator_shift TEXT DEFAULT ''`); err != nil {
+			return fmt.Errorf("迁移 operation_logs 加 operator_shift 失败: %w", err)
+		}
+		log.Println("[迁移] operation_logs 已添加 operator_shift 列")
+	}
+
+	hasBatch, err := columnExists(db, "operation_logs", "batch_id")
+	if err != nil {
+		return fmt.Errorf("检查 operation_logs.batch_id 失败: %w", err)
+	}
+	if !hasBatch {
+		if _, err := db.Exec(`ALTER TABLE operation_logs ADD COLUMN batch_id TEXT DEFAULT ''`); err != nil {
+			return fmt.Errorf("迁移 operation_logs 加 batch_id 失败: %w", err)
+		}
+		log.Println("[迁移] operation_logs 已添加 batch_id 列")
+	}
 	return nil
 }
