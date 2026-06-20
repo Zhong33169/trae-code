@@ -293,6 +293,7 @@ class AppFormDetail extends LitElement {
       this.actions = extractActionsFromResponse(resp);
       this.logs = await api.getLogs(this.formId);
       this.success = '操作成功';
+      window.dispatchEvent(new CustomEvent('form-updated'));
     } catch (e) {
       this.error = e.message;
     }
@@ -317,9 +318,14 @@ class AppFormDetail extends LitElement {
       this.showTimeoutDialog = false;
       this.timeoutReason = '';
       this.timeoutFollowUp = '';
-      this.logs = await api.getLogs(this.formId);
-      this.timeoutRecords = await api.getTimeoutRecords(this.formId);
+      const [logs, timeouts] = await Promise.all([
+        api.getLogs(this.formId),
+        api.getTimeoutRecords(this.formId),
+      ]);
+      this.logs = logs;
+      this.timeoutRecords = timeouts;
       this.success = '超时处理成功';
+      window.dispatchEvent(new CustomEvent('form-updated'));
     } catch (e) {
       this.error = e.message;
     }
@@ -332,9 +338,14 @@ class AppFormDetail extends LitElement {
       this.actions = extractActionsFromResponse(resp);
       this.showCoursewareDialog = false;
       this.cwComment = '';
-      this.logs = await api.getLogs(this.formId);
-      this.coursewareReviews = await api.getCoursewareReviews(this.formId);
+      const [logs, cwReviews] = await Promise.all([
+        api.getLogs(this.formId),
+        api.getCoursewareReviews(this.formId),
+      ]);
+      this.logs = logs;
+      this.coursewareReviews = cwReviews;
       this.success = '课件审核完成';
+      window.dispatchEvent(new CustomEvent('form-updated'));
     } catch (e) {
       this.error = e.message;
     }
@@ -347,9 +358,14 @@ class AppFormDetail extends LitElement {
       this.actions = extractActionsFromResponse(resp);
       this.showEvaluationDialog = false;
       this.evalComment = '';
-      this.logs = await api.getLogs(this.formId);
-      this.evaluations = await api.getEvaluations(this.formId);
+      const [logs, evals] = await Promise.all([
+        api.getLogs(this.formId),
+        api.getEvaluations(this.formId),
+      ]);
+      this.logs = logs;
+      this.evaluations = evals;
       this.success = '评价提交成功';
+      window.dispatchEvent(new CustomEvent('form-updated'));
     } catch (e) {
       this.error = e.message;
     }
@@ -363,6 +379,7 @@ class AppFormDetail extends LitElement {
       this.actions = extractActionsFromResponse(resp);
       this.logs = await api.getLogs(this.formId);
       this.success = '授课确认完成';
+      window.dispatchEvent(new CustomEvent('form-updated'));
     } catch (e) {
       this.error = e.message;
     }
@@ -521,11 +538,22 @@ class AppFormDetail extends LitElement {
                 <div class="timeout-item ${t.status === 'handled' ? 'handled' : ''}">
                   <div class="timeout-field"><span class="label">节点：</span>${t.node_label}</div>
                   <div class="timeout-field"><span class="label">超时时间：</span>${t.timeout_at}</div>
-                  <div class="timeout-field"><span class="label">状态：</span>${t.status === 'pending' ? '待处理' : '已处理'}</div>
+                  <div class="timeout-field">
+                    <span class="label">状态：</span>
+                    ${t.status === 'pending' ? html`<span style="color:#e53e3e;font-weight:600;">待处理</span>` : html`<span style="color:#38a169;">已处理</span>`}
+                  </div>
                   ${t.reason ? html`<div class="timeout-field"><span class="label">原因：</span>${t.reason}</div>` : ''}
                   ${t.follow_up ? html`<div class="timeout-field"><span class="label">后续处理：</span>${t.follow_up}</div>` : ''}
                   ${t.handled_by_name ? html`<div class="timeout-field"><span class="label">处理人：</span>${t.handled_by_name}</div>` : ''}
                   ${t.handled_at ? html`<div class="timeout-field"><span class="label">处理时间：</span>${t.handled_at}</div>` : ''}
+                  ${t.status === 'pending' && this.user?.role === 'clerk' ? html`
+                    <div style="margin-top:8px;">
+                      <button class="btn btn-danger" style="font-size:12px;padding:4px 12px;"
+                        @click=${() => { this.error = ''; this.success = ''; this.showTimeoutDialog = true; }}>
+                        处理超时
+                      </button>
+                    </div>
+                  ` : ''}
                 </div>
               `)}
             </div>

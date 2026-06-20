@@ -175,7 +175,14 @@ class AppFormList extends LitElement {
 
   async connectedCallback() {
     super.connectedCallback();
+    this._onFormUpdated = async () => { await this._loadData(); };
+    window.addEventListener('form-updated', this._onFormUpdated);
     await this._loadData();
+  }
+
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    window.removeEventListener('form-updated', this._onFormUpdated);
   }
 
   async _loadData() {

@@ -145,7 +145,7 @@ def get_form(form_id: int, user: dict = Depends(get_current_user)):
         conn.close()
         raise HTTPException(status_code=404, detail="排课单不存在")
     form_data = _enrich_and_filter(conn, row, user["role"])
-    submit_actions = get_submit_actions(user["role"], row["status"])
+    submit_actions = get_submit_actions(user["role"], row["status"], form_id, conn)
     conn.close()
     return {
         "form": form_data,
@@ -238,7 +238,7 @@ def transition_status(form_id: int, req: StatusTransition, user: dict = Depends(
 
     row = conn.execute("SELECT * FROM scheduling_forms WHERE id=?", (form_id,)).fetchone()
     form_data = _enrich_and_filter(conn, row, user["role"])
-    submit_actions = get_submit_actions(user["role"], row["status"])
+    submit_actions = get_submit_actions(user["role"], row["status"], form_id, conn)
     conn.close()
     return {
         "form": form_data,
@@ -276,7 +276,7 @@ def review_courseware(form_id: int, req: CoursewareReview, user: dict = Depends(
 
     row = conn.execute("SELECT * FROM scheduling_forms WHERE id=?", (form_id,)).fetchone()
     form_data = _enrich_and_filter(conn, row, user["role"])
-    submit_actions = get_submit_actions(user["role"], row["status"])
+    submit_actions = get_submit_actions(user["role"], row["status"], form_id, conn)
     conn.close()
     return {
         "form": form_data,
@@ -317,7 +317,7 @@ def create_evaluation(form_id: int, req: EvaluationCreate, user: dict = Depends(
 
     row = conn.execute("SELECT * FROM scheduling_forms WHERE id=?", (form_id,)).fetchone()
     form_data = _enrich_and_filter(conn, row, user["role"])
-    submit_actions = get_submit_actions(user["role"], row["status"])
+    submit_actions = get_submit_actions(user["role"], row["status"], form_id, conn)
     conn.close()
     return {
         "form": form_data,
@@ -349,7 +349,7 @@ def confirm_teaching(form_id: int, user: dict = Depends(get_current_user)):
 
     row = conn.execute("SELECT * FROM scheduling_forms WHERE id=?", (form_id,)).fetchone()
     form_data = _enrich_and_filter(conn, row, user["role"])
-    submit_actions = get_submit_actions(user["role"], row["status"])
+    submit_actions = get_submit_actions(user["role"], row["status"], form_id, conn)
     conn.close()
     return {
         "form": form_data,
@@ -466,7 +466,7 @@ def handle_timeout(form_id: int, req: TimeoutHandle, user: dict = Depends(get_cu
     ).fetchone()
     form_row = conn.execute("SELECT * FROM scheduling_forms WHERE id=?", (form_id,)).fetchone()
     form_data = _enrich_and_filter(conn, form_row, user["role"])
-    submit_actions = get_submit_actions(user["role"], form_row["status"])
+    submit_actions = get_submit_actions(user["role"], form_row["status"], form_id, conn)
     conn.close()
     return {
         "timeout_record": enrich_timeout(t_row),
@@ -549,10 +549,12 @@ def batch_action(req: BatchAction, user: dict = Depends(get_current_user)):
 def get_available_actions(form_id: int, user: dict = Depends(get_current_user)):
     conn = get_db()
     row = conn.execute("SELECT status FROM scheduling_forms WHERE id=?", (form_id,)).fetchone()
-    conn.close()
     if not row:
+        conn.close()
         raise HTTPException(status_code=404, detail="排课单不存在")
-    return get_submit_actions(user["role"], row["status"])
+    actions = get_submit_actions(user["role"], row["status"], form_id, conn)
+    conn.close()
+    return actions
 
 @router.post("/init-db")
 def init_db_endpoint():

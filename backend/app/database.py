@@ -93,7 +93,7 @@ FIELD_VISIBILITY = {
         "course_type", "training_company", "start_date", "end_date", "location",
         "student_count", "description", "status", "status_label", "created_by",
         "created_by_name", "created_at", "updated_at", "courseware_status",
-        "evaluation_status", "is_timeout", "timeout_remaining_hours",
+        "evaluation_status", "is_timeout", "timeout_remaining_hours", "has_pending_timeout",
     ],
     ROLE_SUPERVISOR: [
         "id", "form_no", "title", "instructor_name", "instructor_id", "course_name",
@@ -151,7 +151,6 @@ SUBMIT_ACTION_STRATEGY = {
             {"action": "submit", "label": "重新提交", "requires_remark": True, "remark_label": "补正说明"},
         ],
         "timeout_handling": [
-            {"action": "timeout_handle", "label": "超时处理", "requires_reason": True, "requires_follow_up": True},
             {"action": "submit", "label": "重新提交审核", "requires_remark": True, "remark_label": "补正说明"},
         ],
     },
@@ -250,9 +249,24 @@ def get_visible_fields(role):
     ]
 
 
-def get_submit_actions(role, status):
+def get_submit_actions(role, status, form_id=None, conn=None):
     role_actions = SUBMIT_ACTION_STRATEGY.get(role, {})
-    status_actions = role_actions.get(status, [])
+    status_actions = list(role_actions.get(status, []))
+
+    if role == ROLE_CLERK and form_id and conn:
+        pending = conn.execute(
+            "SELECT id FROM timeout_records WHERE form_id=? AND status='pending' LIMIT 1",
+            (form_id,),
+        ).fetchone()
+        if pending:
+            timeout_action = {
+                "action": "timeout_handle",
+                "label": "超时处理",
+                "requires_reason": True,
+                "requires_follow_up": True,
+            }
+            status_actions.insert(0, timeout_action)
+
     return status_actions
 
 
@@ -686,25 +700,32 @@ def init_db():
     ]
 
     now = datetime.now()
+
+    c.execute("DELETE FROM operation_logs")
+    c.execute("DELETE FROM timeout_records")
+    c.execute("DELETE FROM evaluations")
+    c.execute("DELETE FROM courseware_reviews")
+    c.execute("DELETE FROM instructor_schedules")
+    c.execute("DELETE FROM scheduling_forms")
+
     for f in demo_forms:
-        try:
-            entered_at = (now - timedelta(hours=12)).strftime("%Y-%m-%d %H:%M:%S")
-            if f["status"] == "pending_archive":
-                entered_at = (now - timedelta(hours=120)).strftime("%Y-%m-%d %H:%M:%S")
-            elif f["status"] == "reviewing":
-                entered_at = (now - timedelta(hours=18)).strftime("%Y-%m-%d %H:%M:%S")
-            elif f["status"] == "pending_courseware":
-                entered_at = (now - timedelta(hours=36)).strftime("%Y-%m-%d %H:%M:%S")
-            elif f["status"] == "pending_review":
-                entered_at = (now - timedelta(hours=6)).strftime("%Y-%m-%d %H:%M:%S")
-            elif f["status"] == "pending_teaching":
-                entered_at = (now - timedelta(hours=50)).strftime("%Y-%m-%d %H:%M:%S")
-            elif f["status"] == "teaching_completed":
-                entered_at = (now - timedelta(hours=30)).strftime("%Y-%m-%d %H:%M:%S")
-            elif f["status"] == "rejected":
-                entered_at = (now - timedelta(hours=100)).strftime("%Y-%m-%d %H:%M:%S")
-            c.execute(
-                """INSERT OR IGNORE INTO scheduling_forms
+        entered_at = (now - timedelta(hours=12)).strftime("%Y-%m-%d %H:%M:%S")
+        if f["status"] == "pending_archive":
+            entered_at = (now - timedelta(hours=120)).strftime("%Y-%m-%d %H:%M:%S")
+        elif f["status"] == "reviewing":
+            entered_at = (now - timedelta(hours=18)).strftime("%Y-%m-%d %H:%M:%S")
+        elif f["status"] == "pending_courseware":
+            entered_at = (now - timedelta(hours=36)).strftime("%Y-%m-%d %H:%M:%S")
+        elif f["status"] == "pending_review":
+            entered_at = (now - timedelta(hours=6)).strftime("%Y-%m-%d %H:%M:%S")
+        elif f["status"] == "pending_teaching":
+            entered_at = (now - timedelta(hours=50)).strftime("%Y-%m-%d %H:%M:%S")
+        elif f["status"] == "teaching_completed":
+            entered_at = (now - timedelta(hours=30)).strftime("%Y-%m-%d %H:%M:%S")
+        elif f["status"] == "rejected":
+            entered_at = (now - timedelta(hours=100)).strftime("%Y-%m-%d %H:%M:%S")
+        c.execute(
+            """INSERT INTO scheduling_forms
                 (form_no, title, instructor_name, instructor_id, course_name, course_type,
                  training_company, start_date, end_date, location, student_count, description,
                  status, created_by, current_node_entered_at, courseware_status, evaluation_status)
@@ -717,8 +738,6 @@ def init_db():
                     f["courseware_status"], f["evaluation_status"],
                 ),
             )
-        except sqlite3.IntegrityError:
-            pass
 
     form_id_map = {}
     c.execute("SELECT form_no, id FROM scheduling_forms")
@@ -747,7 +766,7 @@ def init_db():
         if fid is None:
             continue
         c.execute(
-            """INSERT OR IGNORE INTO instructor_schedules
+            """INSERT INTO instructor_schedules
             (form_id, instructor_name, schedule_date, time_slot, status, remark)
             VALUES (?, ?, ?, ?, ?, ?)""",
             (fid, s[1], s[2], s[3], s[4], s[5]),
@@ -757,13 +776,13 @@ def init_db():
     fid_5 = _fid("PK-2026-005")
     if fid_4:
         c.execute(
-            """INSERT OR IGNORE INTO evaluations (form_id, evaluator_id, score, comment)
+            """INSERT INTO evaluations (form_id, evaluator_id, score, comment)
             VALUES (?, ?, ?, ?)""",
             (fid_4, 3, 92, "培训效果良好，学员反馈积极"),
         )
     if fid_5:
         c.execute(
-            """INSERT OR IGNORE INTO evaluations (form_id, evaluator_id, score, comment)
+            """INSERT INTO evaluations (form_id, evaluator_id, score, comment)
             VALUES (?, ?, ?, ?)""",
             (fid_5, 3, 88, "新员工入职培训流程规范，内容完善，建议增加互动环节"),
         )
@@ -781,7 +800,7 @@ def init_db():
         if fid is None:
             continue
         c.execute(
-            """INSERT OR IGNORE INTO courseware_reviews (form_id, reviewer_id, result, comment)
+            """INSERT INTO courseware_reviews (form_id, reviewer_id, result, comment)
             VALUES (?, ?, ?, ?)""",
             (fid, r[1], r[2], r[3]),
         )
@@ -820,6 +839,7 @@ def init_db():
         ("PK-2026-008", 2, "submit", "pending_review", "reviewing", "审核通过"),
         ("PK-2026-008", 2, "submit", "reviewing", "pending_courseware", "审核通过"),
         ("PK-2026-008", 3, "courseware_review", "pending_courseware", "rejected", "课件审核驳回，建议补充方法论和案例"),
+        ("PK-2026-008", 1, "timeout_handle", "rejected", "timeout_handling", "超时处理: 原因=课件内容深度不够，缺少行业案例, 后续处理=已通知讲师补充数字化转型实施路径和金融行业案例，预计48小时内重新提交"),
     ]
 
     for i, log in enumerate(demo_logs):
@@ -829,7 +849,7 @@ def init_db():
         if fid is None:
             continue
         c.execute(
-            """INSERT OR IGNORE INTO operation_logs
+            """INSERT INTO operation_logs
             (form_id, operator_id, action, from_status, to_status, remark, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?)""",
             (fid, op_id, action, from_s, to_s, remark, log_time),
@@ -865,7 +885,7 @@ def init_db():
         if fid is None:
             continue
         c.execute(
-            """INSERT OR IGNORE INTO timeout_records
+            """INSERT INTO timeout_records
             (form_id, node_name, timeout_at, reason, follow_up, handled_by, handled_at, status, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (fid, t["node_name"], t["timeout_at"], t["reason"],
