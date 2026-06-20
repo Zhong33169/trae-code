@@ -80,7 +80,7 @@ export default function NewApp() {
                   <input class="form-input" placeholder="企业联系人"
                     value={form().applicant} onInput={e => update("applicant", e.target.value)} />
                 </div>
-                <div class="form-group" style="grid-column:'1 / -1'">
+                <div class="form-group" style={{gridColumn: "1 / -1"}}>
                   <label class="form-label">联系电话</label>
                   <input class="form-input" placeholder="联系人手机或固定电话"
                     value={form().contact_phone} onInput={e => update("contact_phone", e.target.value)} />

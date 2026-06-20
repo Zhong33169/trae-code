@@ -27,7 +27,7 @@ export default function Stats() {
 
   const d = () => data() || {};
   const byStatus = () => Object.fromEntries((d().byStatus || []).map(x => [x.status, x.n]));
-  const byRole = () => Object.fromEntries((d().byRole || []).map(x => [x.role, x.n]));
+  const byRole = () => Object.fromEntries((d().byRole || []).map(x => [x.current_handler_role, x.n]));
 
   const bars = () => {
     const vals = Object.values(byStatus() || {});

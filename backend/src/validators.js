@@ -9,13 +9,13 @@ const ROLE_TRANSITIONS = {
 const ACTION_ALLOWED_STATUSES = {
   register_submit: ['draft', 'reject_correction'],
   correction_resubmit: ['reject_correction'],
-  audit_pass: ['pending_audit', 'overdue'],
+  audit_pass: ['pending_audit', 'overdue', 'conflict'],
   audit_correction: ['pending_audit', 'overdue'],
   audit_reject: ['pending_audit', 'overdue'],
-  review_pass: ['pending_review'],
+  review_pass: ['pending_review', 'appeal_reviewing'],
   review_reject: ['pending_review', 'appeal_reviewing', 'conflict'],
   review_archive: ['pending_review', 'review_pass', 'conflict', 'appeal_reviewing'],
-  appeal_submit: ['reject_revision', 'review_reject'],
+  appeal_submit: ['reject_revision', 'reject_review'],
 };
 
 function checkHandler(app, user) {

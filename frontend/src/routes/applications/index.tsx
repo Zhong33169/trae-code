@@ -31,7 +31,8 @@ export default function Applications() {
   const [loading, setLoading] = createSignal(true);
   const [ts, setTs] = createSignal(0);
 
-  createEffect(async () => { ts();
+  const load = async () => {
+    ts();
     setLoading(true);
     const u = user();
     const query = {};
@@ -47,7 +48,9 @@ export default function Applications() {
       if (r.ok) setData(r.data);
     } catch {}
     setLoading(false);
-  });
+  };
+
+  createEffect(load);
 
   createEffect(async () => {
     try { const r = await api.statusDict(); if (r.ok) setStatusList(r.data); } catch {}
