@@ -215,7 +215,7 @@ export const api = {
         method: 'POST',
         body: JSON.stringify(data)
       }),
-    update: (id: number, data: { title: string; applicant: string; amount: number }) =>
+    update: (id: number, data: { title: string; applicant: string; amount: number; requiredAttachmentNames?: string[] }) =>
       request<{ success: boolean }>(`/orders/${id}`, {
         method: 'PUT',
         body: JSON.stringify(data)

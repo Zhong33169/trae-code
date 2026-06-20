@@ -28,6 +28,8 @@ function OrderDetail({ user }: Props) {
   const [showApproverReject, setShowApproverReject] = useState(false)
   const [showApprove, setShowApprove] = useState(false)
   const [showArchive, setShowArchive] = useState(false)
+  const [showEditModal, setShowEditModal] = useState(false)
+  const [editForm, setEditForm] = useState({ title: '', applicant: '', amount: '', requiredAttachmentNames: [] as string[] })
 
   const [attachmentForm, setAttachmentForm] = useState({ name: '', fileType: 'pdf', requiredDefId: '' as string | number })
   const [rejectReason, setRejectReason] = useState('')
@@ -281,6 +283,62 @@ function OrderDetail({ user }: Props) {
     }
   }
 
+  const canEdit = isRegistrar && order && ['DRAFT', 'PENDING_CORRECTION'].includes(order.status)
+
+  const openEditModal = () => {
+    if (!order) return
+    setEditForm({
+      title: order.title,
+      applicant: order.applicant,
+      amount: String(order.amount),
+      requiredAttachmentNames: requiredDefs.slice().sort((a, b) => a.sort_order - b.sort_order).map(d => d.name)
+    })
+    setShowEditModal(true)
+  }
+
+  const addEditDef = () => setEditForm({ ...editForm, requiredAttachmentNames: [...editForm.requiredAttachmentNames, ''] })
+  const removeEditDef = (idx: number) => {
+    const def = requiredDefs[idx]
+    const activeVersion = def && groupedAttachments[`def_${def.id}`]?.find((v: Attachment) => v.att_status === 'ACTIVE' && v.rejected === 0)
+    if (activeVersion) {
+      alert(`「${def!.name}」已上传有效附件，无法删除。请先删除对应附件。`)
+      return
+    }
+    const next = editForm.requiredAttachmentNames.slice()
+    next.splice(idx, 1)
+    setEditForm({ ...editForm, requiredAttachmentNames: next })
+  }
+  const updateEditDef = (idx: number, value: string) => {
+    const next = editForm.requiredAttachmentNames.slice()
+    next[idx] = value
+    setEditForm({ ...editForm, requiredAttachmentNames: next })
+  }
+
+  const handleSaveEdit = async (e: Event) => {
+    e.preventDefault()
+    if (!order) return
+    const names = editForm.requiredAttachmentNames.filter(n => n.trim())
+    if (names.length === 0) {
+      alert('请至少保留 1 项必备附件清单')
+      return
+    }
+    setActionLoading(true)
+    try {
+      await api.orders.update(order.id, {
+        title: editForm.title.trim(),
+        applicant: editForm.applicant.trim(),
+        amount: parseFloat(editForm.amount),
+        requiredAttachmentNames: names
+      })
+      setShowEditModal(false)
+      loadDetail()
+    } catch (e: any) {
+      alert(e.message)
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
   if (loading) return <div class="card">加载中...</div>
   if (!order) return <div class="card">兑现单不存在</div>
 
@@ -355,9 +413,14 @@ function OrderDetail({ user }: Props) {
               )}
             </div>
           </div>
-          {canDelete && (
-            <button class="btn btn-danger" onClick={handleDelete}>🗑️ 删除</button>
-          )}
+          <div style={{ display: 'flex', gap: 8 }}>
+            {canEdit && (
+              <button class="btn btn-default" onClick={openEditModal} disabled={actionLoading}>✏️ 编辑</button>
+            )}
+            {canDelete && (
+              <button class="btn btn-danger" onClick={handleDelete} disabled={actionLoading}>🗑️ 删除</button>
+            )}
+          </div>
         </div>
 
         <div class="detail-grid">
@@ -895,6 +958,91 @@ function OrderDetail({ user }: Props) {
                 {actionLoading ? '提交中...' : '确认归档'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {showEditModal && order && (
+        <div class="modal-mask" onClick={() => setShowEditModal(false)}>
+          <div class="modal" style={{ maxWidth: 640 }} onClick={(e) => e.stopPropagation()}>
+            <h3 class="modal-title">编辑政策兑现单</h3>
+            <form onSubmit={handleSaveEdit}>
+              <div class="form-group">
+                <label>兑现项目名称</label>
+                <input
+                  type="text"
+                  value={editForm.title}
+                  onInput={(e) => setEditForm({ ...editForm, title: (e.target as HTMLInputElement).value })}
+                  required
+                />
+              </div>
+              <div class="form-row">
+                <div class="form-group">
+                  <label>申请单位</label>
+                  <input
+                    type="text"
+                    value={editForm.applicant}
+                    onInput={(e) => setEditForm({ ...editForm, applicant: (e.target as HTMLInputElement).value })}
+                    required
+                  />
+                </div>
+                <div class="form-group">
+                  <label>申请金额（元）</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={editForm.amount}
+                    onInput={(e) => setEditForm({ ...editForm, amount: (e.target as HTMLInputElement).value })}
+                    required
+                  />
+                </div>
+              </div>
+              <div class="form-group">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  <label style={{ marginBottom: 0 }}>📋 必备附件清单</label>
+                  <button type="button" class="link-btn" style={{ fontSize: '13px' }} onClick={addEditDef}>
+                    ➕ 新增一项
+                  </button>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {editForm.requiredAttachmentNames.map((name, idx) => (
+                    <div key={idx} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                      <span style={{ color: '#8c8c8c', fontSize: '13px', whiteSpace: 'nowrap' }}>
+                        第 {idx + 1} 项：
+                      </span>
+                      <input
+                        type="text"
+                        value={name}
+                        onInput={(e) => updateEditDef(idx, (e.target as HTMLInputElement).value)}
+                        placeholder="必备附件名称"
+                        style={{ flex: 1 }}
+                      />
+                      <button
+                        type="button"
+                        class="btn btn-danger btn-sm"
+                        onClick={() => removeEditDef(idx)}
+                        disabled={editForm.requiredAttachmentNames.length <= 1}
+                        style={{ padding: '4px 10px', fontSize: '12px' }}
+                      >
+                        删除
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                <div class="alert alert-info" style={{ fontSize: '12px', marginTop: 10 }}>
+                  💡 已上传有效附件的清单项不能删除，只能改名。
+                </div>
+              </div>
+              <div class="modal-footer">
+                <button type="button" class="btn btn-default" onClick={() => setShowEditModal(false)}>
+                  取消
+                </button>
+                <button type="submit" class="btn btn-primary" disabled={actionLoading}>
+                  {actionLoading ? '保存中...' : '保存修改'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

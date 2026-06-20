@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'preact/hooks'
 import { Link } from 'react-router-dom'
-import { User, PolicyOrder, api } from '../api/client'
+import { User, PolicyOrder, RequiredAttachmentDef, api } from '../api/client'
 
 interface Props {
   user: User
@@ -25,15 +25,32 @@ const ABNORMAL_OPTIONS = [
   { value: 'REJECTED', label: '已退回' }
 ]
 
+interface FormState {
+  title: string
+  applicant: string
+  amount: string
+  requiredAttachmentNames: string[]
+}
+
+function buildDefaultForm(): FormState {
+  return {
+    title: '',
+    applicant: '',
+    amount: '',
+    requiredAttachmentNames: ['营业执照', '资质证明文件']
+  }
+}
+
 function OrderList({ user }: Props) {
   const [orders, setOrders] = useState<PolicyOrder[]>([])
   const [statusFilter, setStatusFilter] = useState('ALL')
   const [abnormalFilter, setAbnormalFilter] = useState('ALL')
   const [selectedIds, setSelectedIds] = useState<number[]>([])
-  const [showCreateModal, setShowCreateModal] = useState(false)
+  const [showModal, setShowModal] = useState<'create' | 'edit' | null>(null)
+  const [editOrder, setEditOrder] = useState<{ id: number; defs: RequiredAttachmentDef[] } | null>(null)
   const [showBatchResult, setShowBatchResult] = useState(false)
   const [batchResult, setBatchResult] = useState<any>(null)
-  const [formData, setFormData] = useState({ title: '', applicant: '', amount: '' })
+  const [formData, setFormData] = useState<FormState>(buildDefaultForm())
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
@@ -72,24 +89,120 @@ function OrderList({ user }: Props) {
     }
   }
 
+  const openCreate = () => {
+    setFormData(buildDefaultForm())
+    setEditOrder(null)
+    setShowModal('create')
+  }
+
+  const openEdit = async (order: PolicyOrder) => {
+    setLoading(true)
+    try {
+      const res = await api.orders.get(order.id)
+      const defs = (res.requiredDefs || []).slice().sort((a, b) => a.sort_order - b.sort_order)
+      setFormData({
+        title: res.order.title,
+        applicant: res.order.applicant,
+        amount: String(res.order.amount),
+        requiredAttachmentNames: defs.map(d => d.name)
+      })
+      setEditOrder({ id: order.id, defs })
+      setShowModal('edit')
+    } catch (e: any) {
+      alert(e.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const addRequiredItem = () => {
+    setFormData({
+      ...formData,
+      requiredAttachmentNames: [...formData.requiredAttachmentNames, '']
+    })
+  }
+
+  const removeRequiredItem = (idx: number) => {
+    if (editOrder) {
+      const def = editOrder.defs[idx]
+      if (def) {
+        const hasActiveDef = (def as any).has_active
+        if (hasActiveDef || formData.requiredAttachmentNames[idx].trim()) {
+          if (hasActiveDef) {
+            alert(`「${def.name}」已上传有效附件，无法删除。请先删除对应附件。`)
+            return
+          }
+        }
+      }
+    }
+    const next = formData.requiredAttachmentNames.slice()
+    next.splice(idx, 1)
+    setFormData({ ...formData, requiredAttachmentNames: next })
+  }
+
+  const updateRequiredItem = (idx: number, value: string) => {
+    const next = formData.requiredAttachmentNames.slice()
+    next[idx] = value
+    setFormData({ ...formData, requiredAttachmentNames: next })
+  }
+
   const handleCreate = async (e: Event) => {
     e.preventDefault()
+    const names = formData.requiredAttachmentNames.filter(n => n.trim())
+    if (names.length === 0) {
+      alert('请至少添加 1 项必备附件清单')
+      return
+    }
     setLoading(true)
     try {
       await api.orders.create({
-        title: formData.title,
-        applicant: formData.applicant,
+        title: formData.title.trim(),
+        applicant: formData.applicant.trim(),
         amount: parseFloat(formData.amount),
+        requiredAttachmentNames: names,
         userId: user.id
       })
-      setShowCreateModal(false)
-      setFormData({ title: '', applicant: '', amount: '' })
+      setShowModal(null)
+      setFormData(buildDefaultForm())
       loadOrders()
     } catch (e: any) {
       alert(e.message)
     } finally {
       setLoading(false)
     }
+  }
+
+  const handleUpdate = async (e: Event) => {
+    e.preventDefault()
+    if (!editOrder) return
+    const names = formData.requiredAttachmentNames.filter(n => n.trim())
+    if (names.length === 0) {
+      alert('请至少保留 1 项必备附件清单')
+      return
+    }
+    setLoading(true)
+    try {
+      await api.orders.update(editOrder.id, {
+        title: formData.title.trim(),
+        applicant: formData.applicant.trim(),
+        amount: parseFloat(formData.amount),
+        requiredAttachmentNames: names
+      })
+      setShowModal(null)
+      setEditOrder(null)
+      setFormData(buildDefaultForm())
+      loadOrders()
+    } catch (e: any) {
+      alert(e.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const closeModal = () => {
+    setShowModal(null)
+    setEditOrder(null)
+    setFormData(buildDefaultForm())
   }
 
   const handleBatchSubmit = async () => {
@@ -112,8 +225,9 @@ function OrderList({ user }: Props) {
     }
   }
 
-  const canCreate = user.role === 'REGISTRAR'
-  const canBatchSubmit = user.role === 'REGISTRAR' && selectedIds.some(id => {
+  const isRegistrar = user.role === 'REGISTRAR'
+  const canCreate = isRegistrar
+  const canBatchSubmit = isRegistrar && selectedIds.some(id => {
     const order = orders.find(o => o.id === id)
     return order?.status === 'DRAFT'
   })
@@ -124,6 +238,9 @@ function OrderList({ user }: Props) {
       hour: '2-digit', minute: '2-digit'
     })
   }
+
+  const canEditOrder = (order: PolicyOrder) =>
+    isRegistrar && ['DRAFT', 'PENDING_CORRECTION'].includes(order.status)
 
   return (
     <div>
@@ -149,7 +266,7 @@ function OrderList({ user }: Props) {
           </div>
           <div style={{ flex: 1 }}></div>
           {canCreate && (
-            <button class="btn btn-primary" onClick={() => setShowCreateModal(true)}>
+            <button class="btn btn-primary" onClick={openCreate}>
               ➕ 新建兑现单
             </button>
           )}
@@ -167,7 +284,7 @@ function OrderList({ user }: Props) {
             <thead>
               <tr>
                 <th class="checkbox-col">
-                  {user.role === 'REGISTRAR' && (
+                  {isRegistrar && (
                     <input
                       type="checkbox"
                       checked={selectedIds.length === orders.length && orders.length > 0}
@@ -181,7 +298,7 @@ function OrderList({ user }: Props) {
                 <th>金额（元）</th>
                 <th>状态</th>
                 <th>异常</th>
-                <th>附件</th>
+                <th>必备附件</th>
                 <th>创建人</th>
                 <th>创建时间</th>
                 <th>操作</th>
@@ -191,7 +308,7 @@ function OrderList({ user }: Props) {
               {orders.map(order => (
                 <tr key={order.id}>
                   <td class="checkbox-col">
-                    {user.role === 'REGISTRAR' && order.status === 'DRAFT' && (
+                    {isRegistrar && order.status === 'DRAFT' && (
                       <input
                         type="checkbox"
                         checked={selectedIds.includes(order.id)}
@@ -232,10 +349,20 @@ function OrderList({ user }: Props) {
                   <td style={{ fontSize: '12px', color: '#8c8c8c' }}>
                     {formatDate(order.created_at)}
                   </td>
-                  <td>
+                  <td style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
                     <Link to={`/orders/${order.id}`} class="link-btn">
                       详情
                     </Link>
+                    {canEditOrder(order) && (
+                      <button
+                        class="link-btn"
+                        style={{ padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}
+                        onClick={() => openEdit(order)}
+                        disabled={loading}
+                      >
+                        编辑
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -244,11 +371,13 @@ function OrderList({ user }: Props) {
         )}
       </div>
 
-      {showCreateModal && (
-        <div class="modal-mask" onClick={() => setShowCreateModal(false)}>
-          <div class="modal" onClick={(e) => e.stopPropagation()}>
-            <h3 class="modal-title">新建政策兑现单</h3>
-            <form onSubmit={handleCreate}>
+      {showModal && (
+        <div class="modal-mask" onClick={closeModal}>
+          <div class="modal" style={{ maxWidth: 640 }} onClick={(e) => e.stopPropagation()}>
+            <h3 class="modal-title">
+              {showModal === 'create' ? '新建政策兑现单' : '编辑政策兑现单'}
+            </h3>
+            <form onSubmit={showModal === 'create' ? handleCreate : handleUpdate}>
               <div class="form-group">
                 <label>兑现项目名称</label>
                 <input
@@ -283,15 +412,59 @@ function OrderList({ user }: Props) {
                   />
                 </div>
               </div>
-              <div class="alert alert-info">
-                创建后为草稿状态，可在详情页添加附件后提交审核
+
+              <div class="form-group">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  <label style={{ marginBottom: 0 }}>📋 必备附件清单</label>
+                  <button
+                    type="button"
+                    class="link-btn"
+                    onClick={addRequiredItem}
+                    style={{ fontSize: '13px' }}
+                  >
+                    ➕ 新增一项
+                  </button>
+                </div>
+                <div class="def-editor-list" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {formData.requiredAttachmentNames.map((name, idx) => (
+                    <div key={idx} class="def-editor-row" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                      <span style={{ color: '#8c8c8c', fontSize: '13px', whiteSpace: 'nowrap' }}>
+                        第 {idx + 1} 项：
+                      </span>
+                      <input
+                        type="text"
+                        value={name}
+                        onInput={(e) => updateRequiredItem(idx, (e.target as HTMLInputElement).value)}
+                        placeholder="如：营业执照、研发费用专项审计报告"
+                        style={{ flex: 1 }}
+                      />
+                      <button
+                        type="button"
+                        class="btn btn-danger btn-sm"
+                        onClick={() => removeRequiredItem(idx)}
+                        disabled={formData.requiredAttachmentNames.length <= 1}
+                        style={{ padding: '4px 10px', fontSize: '12px' }}
+                      >
+                        删除
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                {showModal === 'edit' && editOrder && (
+                  <div class="alert alert-info" style={{ fontSize: '12px', marginTop: 10 }}>
+                    💡 已上传有效附件的清单项不能删除，只能改名。
+                  </div>
+                )}
               </div>
+
               <div class="modal-footer">
-                <button type="button" class="btn btn-default" onClick={() => setShowCreateModal(false)}>
+                <button type="button" class="btn btn-default" onClick={closeModal}>
                   取消
                 </button>
                 <button type="submit" class="btn btn-primary" disabled={loading}>
-                  {loading ? '创建中...' : '创建'}
+                  {loading
+                    ? '保存中...'
+                    : (showModal === 'create' ? '创建（草稿）' : '保存修改')}
                 </button>
               </div>
             </form>

@@ -200,9 +200,10 @@ app.post('/', requireRole(ROLES.REGISTRAR), async (c) => {
 app.put('/:id', requireRole(ROLES.REGISTRAR), async (c) => {
   const id = c.req.param('id')
   const body = await c.req.json()
-  const { title, applicant, amount } = body
+  const { title, applicant, amount, requiredAttachmentNames } = body
+  const orderId = Number(id)
   
-  const order = db.prepare('SELECT status FROM policy_orders WHERE id = ?').get(id) as any
+  const order = db.prepare('SELECT status FROM policy_orders WHERE id = ?').get(orderId) as any
   if (!order) {
     return c.json({ error: '兑现单不存在' }, 404)
   }
@@ -210,10 +211,59 @@ app.put('/:id', requireRole(ROLES.REGISTRAR), async (c) => {
     return c.json({ error: '当前状态不能修改兑现单' }, 400)
   }
   
-  db.prepare(`
+  const updateOrder = db.prepare(`
     UPDATE policy_orders SET title = ?, applicant = ?, amount = ?, updated_at = ?
     WHERE id = ?
-  `).run(title, applicant, amount, new Date().toISOString(), id)
+  `)
+  const getDefsWithActive = db.prepare(`
+    SELECT def.id, def.name, def.sort_order, 
+      EXISTS(SELECT 1 FROM attachments a WHERE a.required_def_id = def.id AND a.att_status = ? AND a.rejected = 0) as has_active
+    FROM required_attachment_defs def
+    WHERE def.order_id = ?
+    ORDER BY def.sort_order, def.id
+  `)
+  const updateDefName = db.prepare('UPDATE required_attachment_defs SET name = ? WHERE id = ?')
+  const deleteDef = db.prepare('DELETE FROM required_attachment_defs WHERE id = ?')
+  const insertDef = db.prepare('INSERT INTO required_attachment_defs (order_id, name, sort_order) VALUES (?, ?, ?)')
+  const getMaxSortOrder = db.prepare('SELECT COALESCE(MAX(sort_order), -1) as max_sort FROM required_attachment_defs WHERE order_id = ?')
+  
+  const tx = db.transaction(() => {
+    updateOrder.run(title, applicant, amount, new Date().toISOString(), orderId)
+    
+    if (Array.isArray(requiredAttachmentNames)) {
+      const newNames = requiredAttachmentNames.filter((n: any) => typeof n === 'string' && n.trim())
+      const existingDefs = getDefsWithActive.all(ATTACHMENT_STATUS.ACTIVE, orderId) as any[]
+      const usedExistingIds = new Set<number>()
+      
+      let currentSort = (getMaxSortOrder.get(orderId) as any).max_sort
+      
+      newNames.forEach((newName: string, idx: number) => {
+        const trimmed = newName.trim()
+        const match = existingDefs.find(d =>
+          !usedExistingIds.has(d.id) && d.name.trim() === trimmed
+        )
+        if (match) {
+          usedExistingIds.add(match.id)
+          if (match.name !== trimmed) {
+            updateDefName.run(trimmed, match.id)
+          }
+        } else {
+          currentSort += 1
+          insertDef.run(orderId, trimmed, currentSort)
+        }
+      })
+      
+      existingDefs.forEach(def => {
+        if (!usedExistingIds.has(def.id)) {
+          if (!def.has_active) {
+            deleteDef.run(def.id)
+          }
+        }
+      })
+    }
+  })
+  
+  tx()
   
   return c.json({ success: true })
 })
