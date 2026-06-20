@@ -4,6 +4,7 @@ const {
   canTransition, statusName, roleName,
   validateEvidenceForReview, validateEvidenceForAudit
 } = require('../business/rules');
+const { idempotent, isValidIdempotentAction } = require('./idempotent.service');
 
 function buildOrderQuery(filters = {}) {
   const clauses = [];
@@ -79,269 +80,6 @@ function getOrderDetail(orderId) {
   return { order, evidences, logs };
 }
 
-function createOrder(user, data) {
-  const orderNo = `EB-${new Date().getFullYear()}-${String(Date.now() % 10000).padStart(4, '0')}`;
-  const tx = db.transaction(() => {
-    const info = db.prepare(`
-      INSERT INTO equipment_orders (
-        order_no, applicant, department, equipment_name, equipment_model,
-        quantity, borrow_reason, expected_return_date, status, version, created_by
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'draft', 1, ?)
-    `).run(
-      orderNo, data.applicant, data.department, data.equipment_name,
-      data.equipment_model || null, data.quantity || 1, data.borrow_reason,
-      data.expected_return_date, user.id
-    );
-    const orderId = info.lastInsertRowid;
-    db.prepare(`INSERT INTO operation_logs (order_id, user_id, action, from_status, to_status, comment)
-      VALUES (?, ?, '创建', NULL, 'draft', ?)`).run(orderId, user.id, `登记员${user.real_name}创建`);
-    return orderId;
-  });
-  const orderId = tx();
-  return getOrderDetail(orderId);
-}
-
-function submitForAudit(user, orderId, data = {}) {
-  const order = db.prepare('SELECT * FROM equipment_orders WHERE id = ?').get(orderId);
-  if (!order) return { ok: false, message: '借用单不存在' };
-  if (order.created_by !== user.id) {
-    return { ok: false, message: `仅创建人（登记员）可以提交审核，当前操作人不是该单创建人` };
-  }
-  if (![ORDER_STATUS.DRAFT, ORDER_STATUS.AUDIT_REJECTED, ORDER_STATUS.REVIEW_REJECTED].includes(order.status)) {
-    return { ok: false, message: `当前状态为【${statusName(order.status)}】，无法提交审核` };
-  }
-  if (data.version !== undefined && data.version !== order.version) {
-    return { ok: false, message: `版本冲突：当前版本v${order.version}，提交版本v${data.version}，请刷新后重试` };
-  }
-
-  const tx = db.transaction(() => {
-    const result = db.prepare(`
-      UPDATE equipment_orders SET
-        applicant = ?, department = ?, equipment_name = ?, equipment_model = ?,
-        quantity = ?, borrow_reason = ?, expected_return_date = ?,
-        status = ?, version = version + 1, updated_at = CURRENT_TIMESTAMP,
-        last_failure_reason = NULL
-      WHERE id = ? AND version = ?
-    `).run(
-      data.applicant || order.applicant,
-      data.department || order.department,
-      data.equipment_name || order.equipment_name,
-      data.equipment_model ?? order.equipment_model,
-      data.quantity ?? order.quantity,
-      data.borrow_reason || order.borrow_reason,
-      data.expected_return_date || order.expected_return_date,
-      ORDER_STATUS.PENDING_AUDIT,
-      order.id, order.version
-    );
-    if (result.changes === 0) {
-      throw new Error('VERSION_CONFLICT');
-    }
-    db.prepare(`INSERT INTO operation_logs (order_id, user_id, action, from_status, to_status, comment)
-      VALUES (?, ?, '提交审核', ?, ?, ?)`).run(
-      orderId, user.id, order.status, ORDER_STATUS.PENDING_AUDIT, data.comment || '补正后重新提交'
-    );
-  });
-  try {
-    tx();
-    return { ok: true, data: getOrderDetail(orderId) };
-  } catch (e) {
-    if (e.message === 'VERSION_CONFLICT') return { ok: false, message: '更新失败，版本可能已被他人修改，请刷新' };
-    throw e;
-  }
-}
-
-function auditOrder(user, orderId, decision, data = {}) {
-  const order = db.prepare('SELECT * FROM equipment_orders WHERE id = ?').get(orderId);
-  if (!order) return { ok: false, message: '借用单不存在' };
-  if (order.status !== ORDER_STATUS.PENDING_AUDIT) {
-    return { ok: false, message: `当前状态为【${statusName(order.status)}】，审核仅可在【待审核】状态进行` };
-  }
-  const toStatus = decision === 'approve' ? ORDER_STATUS.PENDING_REVIEW : ORDER_STATUS.AUDIT_REJECTED;
-  if (data.version !== undefined && data.version !== order.version) {
-    return { ok: false, message: `版本冲突：当前v${order.version}，请刷新` };
-  }
-  const auditErrors = validateEvidenceForAudit(order, []);
-  if (decision === 'approve' && auditErrors.length) {
-    return { ok: false, message: `审核前校验失败：${auditErrors.join('；')}` };
-  }
-  const tx = db.transaction(() => {
-    const result = db.prepare(`
-      UPDATE equipment_orders SET
-        status = ?, auditor_id = ?, audit_comment = ?, version = version + 1,
-        updated_at = CURRENT_TIMESTAMP
-      WHERE id = ? AND version = ?
-    `).run(toStatus, user.id, data.comment || null, order.id, order.version);
-    if (result.changes === 0) throw new Error('VERSION_CONFLICT');
-    db.prepare(`INSERT INTO operation_logs (order_id, user_id, action, from_status, to_status, comment)
-      VALUES (?, ?, ?, ?, ?, ?)`).run(
-      orderId, user.id,
-      decision === 'approve' ? '审核通过' : '审核驳回',
-      ORDER_STATUS.PENDING_AUDIT, toStatus,
-      data.comment || (decision === 'approve' ? '审核通过' : '驳回')
-    );
-  });
-  try {
-    tx();
-    return { ok: true, data: getOrderDetail(orderId) };
-  } catch (e) {
-    if (e.message === 'VERSION_CONFLICT') return { ok: false, message: '审核失败，版本冲突，请刷新后重试' };
-    throw e;
-  }
-}
-
-function reviewOrder(user, orderId, decision, data = {}) {
-  const order = db.prepare('SELECT * FROM equipment_orders WHERE id = ?').get(orderId);
-  if (!order) return { ok: false, message: '借用单不存在' };
-  if (order.status !== ORDER_STATUS.PENDING_REVIEW && order.status !== ORDER_STATUS.REVIEW_REJECTED) {
-    return { ok: false, message: `当前状态为【${statusName(order.status)}】，复核仅可在待复核/复核驳回状态进行` };
-  }
-  const toStatus = decision === 'approve' ? ORDER_STATUS.ARCHIVED : ORDER_STATUS.REVIEW_REJECTED;
-  if (data.version !== undefined && data.version !== order.version) {
-    return { ok: false, message: `版本冲突：当前v${order.version}，请刷新` };
-  }
-  const evidences = db.prepare('SELECT * FROM evidences WHERE order_id = ?').all(orderId);
-  const reviewErrors = validateEvidenceForReview(order, evidences);
-
-  // ========== 分支 A：approve 但校验不通过 → 写 last_failure_reason + version+1 + 校验未通过日志 ==========
-  if (decision === 'approve' && reviewErrors.length) {
-    const reason = reviewErrors.join('；');
-    const tx = db.transaction(() => {
-      const result = db.prepare(`
-        UPDATE equipment_orders SET
-          last_failure_reason = ?,
-          version = version + 1,
-          updated_at = CURRENT_TIMESTAMP
-        WHERE id = ? AND version = ?
-      `).run(reason, order.id, order.version);
-      if (result.changes === 0) throw new Error('VERSION_CONFLICT');
-      db.prepare(`INSERT INTO operation_logs (order_id, user_id, action, from_status, to_status, comment)
-        VALUES (?, ?, '复核校验未通过', ?, ?, ?)`).run(
-        orderId, user.id,
-        order.status, order.status,
-        `校验失败：${reason}`
-      );
-    });
-    try {
-      tx();
-      return { ok: false, message: `复核校验失败：${reason}`, failureReason: reason };
-    } catch (e) {
-      if (e.message === 'VERSION_CONFLICT') return { ok: false, message: '复核失败，版本冲突，请刷新后重试' };
-      throw e;
-    }
-  }
-
-  // ========== 分支 B：approve（校验全过）或 reject → 状态推进 + version + 1 + 日志 ==========
-  const tx = db.transaction(() => {
-    const result = db.prepare(`
-      UPDATE equipment_orders SET
-        status = ?, reviewer_id = ?, review_comment = ?,
-        actual_return_date = COALESCE(?, actual_return_date),
-        loss_remark = COALESCE(?, loss_remark),
-        last_failure_reason = CASE WHEN ? THEN NULL ELSE last_failure_reason END,
-        version = version + 1, updated_at = CURRENT_TIMESTAMP
-      WHERE id = ? AND version = ?
-    `).run(
-      toStatus, user.id, data.comment || null,
-      data.actual_return_date || null,
-      data.loss_remark || null,
-      decision === 'approve' ? 1 : 0,
-      order.id, order.version
-    );
-    if (result.changes === 0) throw new Error('VERSION_CONFLICT');
-    db.prepare(`INSERT INTO operation_logs (order_id, user_id, action, from_status, to_status, comment)
-      VALUES (?, ?, ?, ?, ?, ?)`).run(
-      orderId, user.id,
-      decision === 'approve' ? '复核通过并归档' : '复核驳回',
-      order.status, toStatus,
-      data.comment || (decision === 'approve' ? '复核通过，归档' : '驳回待补正')
-    );
-  });
-  try {
-    tx();
-    return { ok: true, data: getOrderDetail(orderId) };
-  } catch (e) {
-    if (e.message === 'VERSION_CONFLICT') return { ok: false, message: '复核失败，版本冲突，请刷新后重试' };
-    throw e;
-  }
-}
-
-function batchReviewOrders(user, orderIds, data = {}) {
-  const results = [];
-  for (const oid of orderIds) {
-    try {
-      const res = reviewOrder(user, oid, 'approve', data);
-      results.push({
-        orderId: oid,
-        status: res.ok ? 'success' : (res.message?.includes('版本') ? 'retry' : 'failed'),
-        message: res.message,
-        failureReason: res.failureReason || null
-      });
-    } catch (e) {
-      results.push({ orderId: oid, status: 'retry', message: `系统异常: ${e.message}` });
-    }
-  }
-  return results;
-}
-
-function addEvidence(user, orderId, evidenceData) {
-  const order = db.prepare('SELECT * FROM equipment_orders WHERE id = ?').get(orderId);
-  if (!order) return { ok: false, message: '借用单不存在' };
-  if (order.status === ORDER_STATUS.ARCHIVED) return { ok: false, message: '已归档单据不可新增证据' };
-  if (order.created_by !== user.id && user.role !== ROLES.REGISTRAR) {
-    return { ok: false, message: '仅登记员（创建人）可上传证据' };
-  }
-  if (!Object.values(EVIDENCE_TYPES).includes(evidenceData.type)) {
-    return { ok: false, message: '证据类型非法' };
-  }
-  const tx = db.transaction(() => {
-    const info = db.prepare(`
-      INSERT INTO evidences (order_id, type, description, file_name, uploaded_by)
-      VALUES (?, ?, ?, ?, ?)
-    `).run(
-      orderId, evidenceData.type, evidenceData.description,
-      evidenceData.file_name || null, user.id
-    );
-    db.prepare(`INSERT INTO operation_logs (order_id, user_id, action, from_status, to_status, comment)
-      VALUES (?, ?, '新增证据', ?, ?, ?)`).run(
-      orderId, user.id, order.status, order.status,
-      `上传【${evidenceData.type === 'borrow' ? '借用' : evidenceData.type === 'return' ? '归还验收' : '损耗确认'}】证据`
-    );
-    db.prepare('UPDATE equipment_orders SET updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(orderId);
-    return info.lastInsertRowid;
-  });
-  try {
-    const id = tx();
-    return { ok: true, evidenceId: id };
-  } catch (e) {
-    return { ok: false, message: `保存证据失败：${e.message}` };
-  }
-}
-
-function deleteEvidence(user, evidenceId) {
-  const ev = db.prepare('SELECT * FROM evidences WHERE id = ?').get(evidenceId);
-  if (!ev) return { ok: false, message: '证据不存在' };
-  const order = db.prepare('SELECT * FROM equipment_orders WHERE id = ?').get(ev.order_id);
-  if (!order) return { ok: false, message: '所属借用单不存在' };
-  if (order.status === ORDER_STATUS.ARCHIVED) return { ok: false, message: '已归档单据证据不可删除' };
-  if (ev.uploaded_by !== user.id) {
-    return { ok: false, message: '仅上传者可删除证据' };
-  }
-  const tx = db.transaction(() => {
-    db.prepare('DELETE FROM evidences WHERE id = ?').run(evidenceId);
-    db.prepare(`INSERT INTO operation_logs (order_id, user_id, action, from_status, to_status, comment)
-      VALUES (?, ?, '删除证据', ?, ?, ?)`).run(
-      ev.order_id, user.id, order.status, order.status, '删除证据'
-    );
-    db.prepare('UPDATE equipment_orders SET updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(ev.order_id);
-  });
-  try {
-    tx();
-    return { ok: true };
-  } catch (e) {
-    return { ok: false, message: `删除证据失败：${e.message}` };
-  }
-}
-
 function getQueueStats() {
   const rows = db.prepare(`
     SELECT status, COUNT(*) AS cnt FROM equipment_orders GROUP BY status
@@ -355,6 +93,324 @@ function getQueueStats() {
     archived: map[ORDER_STATUS.ARCHIVED] || 0,
     draft: map[ORDER_STATUS.DRAFT] || 0
   };
+}
+
+// ======================= 写操作：全部幂等包裹 =======================
+
+function createOrder(user, requestId, data) {
+  const fn = () => {
+    const orderNo = `EB-${new Date().getFullYear()}-${String(Date.now() % 10000).padStart(4, '0')}`;
+    const tx = db.transaction(() => {
+      const info = db.prepare(`
+        INSERT INTO equipment_orders (
+          order_no, applicant, department, equipment_name, equipment_model,
+          quantity, borrow_reason, expected_return_date, status, version, created_by
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'draft', 1, ?)
+      `).run(
+        orderNo, data.applicant, data.department, data.equipment_name,
+        data.equipment_model || null, data.quantity || 1, data.borrow_reason,
+        data.expected_return_date, user.id
+      );
+      const orderId = info.lastInsertRowid;
+      db.prepare(`INSERT INTO operation_logs (order_id, user_id, action, from_status, to_status, comment)
+        VALUES (?, ?, '创建', NULL, 'draft', ?)`).run(orderId, user.id, `登记员${user.real_name}创建`);
+      return { ok: true, data: getOrderDetail(orderId) };
+    });
+    return tx();
+  };
+  const wrap = idempotent(requestId, {
+    userId: user.id, orderId: null, action: 'create',
+    version: null, payload: data
+  }, fn);
+  return wrap.hit ? { ...wrap.response, ok: wrap.response.code === 0 } : wrap.response;
+}
+
+function submitForAudit(user, requestId, orderId, data = {}) {
+  const fn = () => {
+    const order = db.prepare('SELECT * FROM equipment_orders WHERE id = ?').get(orderId);
+    if (!order) return { ok: false, code: 404, message: '借用单不存在' };
+    if (order.created_by !== user.id) {
+      return { ok: false, code: 403, message: `仅创建人（登记员）可以提交审核，当前操作人不是该单创建人` };
+    }
+    if (![ORDER_STATUS.DRAFT, ORDER_STATUS.AUDIT_REJECTED, ORDER_STATUS.REVIEW_REJECTED].includes(order.status)) {
+      return { ok: false, code: 400, message: `当前状态为【${statusName(order.status)}】，无法提交审核` };
+    }
+    if (data.version !== undefined && data.version !== order.version) {
+      return { ok: false, code: 400, message: `版本冲突：当前版本v${order.version}，提交版本v${data.version}，请刷新后重试` };
+    }
+    const tx = db.transaction(() => {
+      const result = db.prepare(`
+        UPDATE equipment_orders SET
+          applicant = ?, department = ?, equipment_name = ?, equipment_model = ?,
+          quantity = ?, borrow_reason = ?, expected_return_date = ?,
+          status = ?, version = version + 1, updated_at = CURRENT_TIMESTAMP,
+          last_failure_reason = NULL
+        WHERE id = ? AND version = ?
+      `).run(
+        data.applicant || order.applicant,
+        data.department || order.department,
+        data.equipment_name || order.equipment_name,
+        data.equipment_model ?? order.equipment_model,
+        data.quantity ?? order.quantity,
+        data.borrow_reason || order.borrow_reason,
+        data.expected_return_date || order.expected_return_date,
+        ORDER_STATUS.PENDING_AUDIT,
+        order.id, order.version
+      );
+      if (result.changes === 0) throw new Error('VERSION_CONFLICT');
+      db.prepare(`INSERT INTO operation_logs (order_id, user_id, action, from_status, to_status, comment)
+        VALUES (?, ?, '提交审核', ?, ?, ?)`).run(
+        orderId, user.id, order.status, ORDER_STATUS.PENDING_AUDIT, data.comment || '补正后重新提交'
+      );
+      return { ok: true, data: getOrderDetail(orderId) };
+    });
+    try {
+      return tx();
+    } catch (e) {
+      if (e.message === 'VERSION_CONFLICT') return { ok: false, code: 400, message: '更新失败，版本可能已被他人修改，请刷新' };
+      throw e;
+    }
+  };
+  const wrap = idempotent(requestId, {
+    userId: user.id, orderId, action: 'submit',
+    version: data.version, payload: data
+  }, fn);
+  return wrap.hit ? { ...wrap.response, ok: wrap.response.code === 0 } : wrap.response;
+}
+
+function auditOrder(user, requestId, orderId, decision, data = {}) {
+  const fn = () => {
+    const order = db.prepare('SELECT * FROM equipment_orders WHERE id = ?').get(orderId);
+    if (!order) return { ok: false, code: 404, message: '借用单不存在' };
+    if (order.status !== ORDER_STATUS.PENDING_AUDIT) {
+      return { ok: false, code: 400, message: `当前状态为【${statusName(order.status)}】，审核仅可在【待审核】状态进行` };
+    }
+    const toStatus = decision === 'approve' ? ORDER_STATUS.PENDING_REVIEW : ORDER_STATUS.AUDIT_REJECTED;
+    if (data.version !== undefined && data.version !== order.version) {
+      return { ok: false, code: 400, message: `版本冲突：当前v${order.version}，请刷新` };
+    }
+    const auditErrors = validateEvidenceForAudit(order, []);
+    if (decision === 'approve' && auditErrors.length) {
+      return { ok: false, code: 400, message: `审核前校验失败：${auditErrors.join('；')}` };
+    }
+    const tx = db.transaction(() => {
+      const result = db.prepare(`
+        UPDATE equipment_orders SET
+          status = ?, auditor_id = ?, audit_comment = ?, version = version + 1,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE id = ? AND version = ?
+      `).run(toStatus, user.id, data.comment || null, order.id, order.version);
+      if (result.changes === 0) throw new Error('VERSION_CONFLICT');
+      db.prepare(`INSERT INTO operation_logs (order_id, user_id, action, from_status, to_status, comment)
+        VALUES (?, ?, ?, ?, ?, ?)`).run(
+        orderId, user.id,
+        decision === 'approve' ? '审核通过' : '审核驳回',
+        ORDER_STATUS.PENDING_AUDIT, toStatus,
+        data.comment || (decision === 'approve' ? '审核通过' : '驳回')
+      );
+      return { ok: true, data: getOrderDetail(orderId) };
+    });
+    try {
+      return tx();
+    } catch (e) {
+      if (e.message === 'VERSION_CONFLICT') return { ok: false, code: 400, message: '审核失败，版本冲突，请刷新后重试' };
+      throw e;
+    }
+  };
+  const wrap = idempotent(requestId, {
+    userId: user.id, orderId, action: 'audit',
+    version: data.version, payload: { decision, ...data }
+  }, fn);
+  return wrap.hit ? { ...wrap.response, ok: wrap.response.code === 0 } : wrap.response;
+}
+
+function reviewOrder(user, requestId, orderId, decision, data = {}) {
+  const fn = () => {
+    const order = db.prepare('SELECT * FROM equipment_orders WHERE id = ?').get(orderId);
+    if (!order) return { ok: false, code: 404, message: '借用单不存在' };
+    if (order.status !== ORDER_STATUS.PENDING_REVIEW && order.status !== ORDER_STATUS.REVIEW_REJECTED) {
+      return { ok: false, code: 400, message: `当前状态为【${statusName(order.status)}】，复核仅可在待复核/复核驳回状态进行` };
+    }
+    const toStatus = decision === 'approve' ? ORDER_STATUS.ARCHIVED : ORDER_STATUS.REVIEW_REJECTED;
+    if (data.version !== undefined && data.version !== order.version) {
+      return { ok: false, code: 400, message: `版本冲突：当前v${order.version}，请刷新` };
+    }
+    const evidences = db.prepare('SELECT * FROM evidences WHERE order_id = ?').all(orderId);
+    const reviewErrors = validateEvidenceForReview(order, evidences);
+    if (decision === 'approve' && reviewErrors.length) {
+      const reason = reviewErrors.join('；');
+      const tx = db.transaction(() => {
+        const result = db.prepare(`
+          UPDATE equipment_orders SET
+            last_failure_reason = ?,
+            version = version + 1,
+            updated_at = CURRENT_TIMESTAMP
+          WHERE id = ? AND version = ?
+        `).run(reason, order.id, order.version);
+        if (result.changes === 0) throw new Error('VERSION_CONFLICT');
+        db.prepare(`INSERT INTO operation_logs (order_id, user_id, action, from_status, to_status, comment)
+          VALUES (?, ?, '复核校验未通过', ?, ?, ?)`).run(
+          orderId, user.id,
+          order.status, order.status,
+          `校验失败：${reason}`
+        );
+        return { ok: false, code: 400, message: `复核校验失败：${reason}`, failureReason: reason };
+      });
+      try {
+        return tx();
+      } catch (e) {
+        if (e.message === 'VERSION_CONFLICT') return { ok: false, code: 400, message: '复核失败，版本冲突，请刷新后重试' };
+        throw e;
+      }
+    }
+    const tx = db.transaction(() => {
+      const result = db.prepare(`
+        UPDATE equipment_orders SET
+          status = ?, reviewer_id = ?, review_comment = ?,
+          actual_return_date = COALESCE(?, actual_return_date),
+          loss_remark = COALESCE(?, loss_remark),
+          last_failure_reason = CASE WHEN ? THEN NULL ELSE last_failure_reason END,
+          version = version + 1, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ? AND version = ?
+      `).run(
+        toStatus, user.id, data.comment || null,
+        data.actual_return_date || null,
+        data.loss_remark || null,
+        decision === 'approve' ? 1 : 0,
+        order.id, order.version
+      );
+      if (result.changes === 0) throw new Error('VERSION_CONFLICT');
+      db.prepare(`INSERT INTO operation_logs (order_id, user_id, action, from_status, to_status, comment)
+        VALUES (?, ?, ?, ?, ?, ?)`).run(
+        orderId, user.id,
+        decision === 'approve' ? '复核通过并归档' : '复核驳回',
+        order.status, toStatus,
+        data.comment || (decision === 'approve' ? '复核通过，归档' : '驳回待补正')
+      );
+      return { ok: true, data: getOrderDetail(orderId) };
+    });
+    try {
+      return tx();
+    } catch (e) {
+      if (e.message === 'VERSION_CONFLICT') return { ok: false, code: 400, message: '复核失败，版本冲突，请刷新后重试' };
+      throw e;
+    }
+  };
+  const wrap = idempotent(requestId, {
+    userId: user.id, orderId, action: 'review',
+    version: data.version, payload: { decision, ...data }
+  }, fn);
+  return wrap.hit ? { ...wrap.response, ok: wrap.response.code === 0 } : wrap.response;
+}
+
+function batchReviewOrders(user, requestId, orderIds, data = {}) {
+  const fn = () => {
+    const results = [];
+    for (const oid of orderIds) {
+      try {
+        const subReqId = `${requestId}__${oid}`;
+        const subFn = () => {
+          const r = reviewOrder(user, subReqId, oid, 'approve', data);
+          return r;
+        };
+        const subWrap = idempotent(subReqId, {
+          userId: user.id, orderId: oid, action: 'review',
+          version: data.version, payload: { decision: 'approve', ...data }
+        }, subFn);
+        const res = subWrap.hit ? { ...subWrap.response, ok: subWrap.response.code === 0 } : subWrap.response;
+        results.push({
+          orderId: oid,
+          status: res.ok ? 'success' : (res.message?.includes('版本') ? 'retry' : 'failed'),
+          message: res.message,
+          failureReason: res.failureReason || null
+        });
+      } catch (e) {
+        results.push({ orderId: oid, status: 'retry', message: `系统异常: ${e.message}` });
+      }
+    }
+    return { ok: true, data: results };
+  };
+  const wrap = idempotent(requestId, {
+    userId: user.id, orderId: null, action: 'batchReview',
+    version: null, payload: { orderIds, ...data }
+  }, fn);
+  return wrap.hit ? { ...wrap.response, ok: wrap.response.code === 0 } : wrap.response;
+}
+
+function addEvidence(user, requestId, orderId, evidenceData) {
+  const fn = () => {
+    const order = db.prepare('SELECT * FROM equipment_orders WHERE id = ?').get(orderId);
+    if (!order) return { ok: false, code: 404, message: '借用单不存在' };
+    if (order.status === ORDER_STATUS.ARCHIVED) return { ok: false, code: 400, message: '已归档单据不可新增证据' };
+    if (order.created_by !== user.id && user.role !== ROLES.REGISTRAR) {
+      return { ok: false, code: 403, message: '仅登记员（创建人）可上传证据' };
+    }
+    if (!Object.values(EVIDENCE_TYPES).includes(evidenceData.type)) {
+      return { ok: false, code: 400, message: '证据类型非法' };
+    }
+    const tx = db.transaction(() => {
+      const info = db.prepare(`
+        INSERT INTO evidences (order_id, type, description, file_name, uploaded_by)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(
+        orderId, evidenceData.type, evidenceData.description,
+        evidenceData.file_name || null, user.id
+      );
+      db.prepare(`INSERT INTO operation_logs (order_id, user_id, action, from_status, to_status, comment)
+        VALUES (?, ?, '新增证据', ?, ?, ?)`).run(
+        orderId, user.id, order.status, order.status,
+        `上传【${evidenceData.type === 'borrow' ? '借用' : evidenceData.type === 'return' ? '归还验收' : '损耗确认'}】证据`
+      );
+      db.prepare('UPDATE equipment_orders SET updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(orderId);
+      return { ok: true, evidenceId: info.lastInsertRowid };
+    });
+    try {
+      return tx();
+    } catch (e) {
+      return { ok: false, code: 500, message: `保存证据失败：${e.message}` };
+    }
+  };
+  const wrap = idempotent(requestId, {
+    userId: user.id, orderId, action: 'addEvidence',
+    version: evidenceData.version, payload: evidenceData
+  }, fn);
+  return wrap.hit ? { ...wrap.response, ok: wrap.response.code === 0 } : wrap.response;
+}
+
+function deleteEvidence(user, requestId, evidenceId, data = {}) {
+  const ev = db.prepare('SELECT * FROM evidences WHERE id = ?').get(evidenceId);
+  if (!ev) return { ok: false, code: 404, message: '证据不存在' };
+  const order = db.prepare('SELECT * FROM equipment_orders WHERE id = ?').get(ev.order_id);
+  if (!order) return { ok: false, code: 404, message: '所属借用单不存在' };
+  if (order.status === ORDER_STATUS.ARCHIVED) return { ok: false, code: 400, message: '已归档单据证据不可删除' };
+  if (ev.uploaded_by !== user.id) {
+    return { ok: false, code: 403, message: '仅上传者可删除证据' };
+  }
+  const version = data.version;
+  if (version != null && order.version !== version) {
+    return { ok: false, code: 409, message: `版本冲突：当前版本 ${order.version}，提交版本 ${version}，请刷新后重试` };
+  }
+  const fn = () => {
+    const tx = db.transaction(() => {
+      db.prepare('DELETE FROM evidences WHERE id = ?').run(evidenceId);
+      db.prepare(`INSERT INTO operation_logs (order_id, user_id, action, from_status, to_status, comment)
+        VALUES (?, ?, '删除证据', ?, ?, ?)`).run(
+        ev.order_id, user.id, order.status, order.status, '删除证据'
+      );
+      db.prepare('UPDATE equipment_orders SET updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(ev.order_id);
+      return { ok: true, data: null };
+    });
+    try {
+      return tx();
+    } catch (e) {
+      return { ok: false, code: 500, message: `删除证据失败：${e.message}` };
+    }
+  };
+  const wrap = idempotent(requestId, {
+    userId: user.id, orderId: ev.order_id, action: 'deleteEvidence',
+    version: order.version, payload: { evidenceId, ...data }
+  }, fn);
+  return wrap.hit ? { ...wrap.response, ok: wrap.response.code === 0 } : wrap.response;
 }
 
 module.exports = {

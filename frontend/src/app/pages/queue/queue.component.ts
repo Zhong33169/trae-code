@@ -4,7 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { Router, ActivatedRoute } from '@angular/router';
 import { Subject, takeUntil, filter } from 'rxjs';
 import { AuthService } from '../../services/auth.service';
-import { OrderService, RefreshEvent } from '../../services/order.service';
+import { OrderService, RefreshEvent, WriteRequestMeta } from '../../services/order.service';
 import { User, OrderSummary, QueueStats, Evidence, BatchResultItem } from '../../models/app.models';
 
 const STATUS_META: Record<string, [string, string]> = {
@@ -315,8 +315,13 @@ export class QueueComponent implements OnInit, OnDestroy {
   }
   runBatchReview() {
     if (!this.selectedCount || this.batchRunning) return;
+    const reqMeta: WriteRequestMeta = {
+      requestId: OrderService.newRequestId(),
+      action: 'batchReview',
+      sentAt: Date.now()
+    };
     this.batchRunning = true;
-    this.orderService.batchReview(this.selectedIds).subscribe({
+    this.orderService.batchReview(this.selectedIds, {}, reqMeta.requestId).subscribe({
       next: r => {
         if (r.code === 0) {
           this.batchResults = r.data.map(it => {
@@ -377,13 +382,23 @@ export class QueueComponent implements OnInit, OnDestroy {
     const err = this.validateCreateForm();
     if (err) { alert(err); return; }
     this.createLoading = true;
+    const reqMeta: WriteRequestMeta = {
+      requestId: OrderService.newRequestId(),
+      action: 'create',
+      sentAt: Date.now()
+    };
     const finish = () => { this.createLoading = false; };
-    this.orderService.create(this.createForm).subscribe({
+    this.orderService.create(this.createForm, reqMeta.requestId).subscribe({
       next: r => {
         if (r.code !== 0) { finish(); alert(r.message); return; }
         const newId = r.data?.order?.id;
         if (directAudit && newId) {
-          this.orderService.submit(newId, { ...this.createForm, version: r.data.order?.version }).subscribe({
+          const submitMeta: WriteRequestMeta = {
+            requestId: OrderService.newRequestId(),
+            action: 'submit',
+            sentAt: Date.now()
+          };
+          this.orderService.submit(newId, { ...this.createForm, version: r.data.order?.version }, submitMeta.requestId).subscribe({
             next: rs => {
               finish();
               this.createDialog = false;

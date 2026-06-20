@@ -4,7 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, NavigationEnd } from '@angular/router';
 import { Subject, takeUntil, filter } from 'rxjs';
 import { AuthService } from '../../services/auth.service';
-import { OrderService } from '../../services/order.service';
+import { OrderService, WriteRequestMeta } from '../../services/order.service';
 import { User, OrderDetail, Evidence, OperationLog } from '../../models/app.models';
 
 const STATUS_META: Record<string, [string, string]> = {
@@ -327,12 +327,18 @@ export class OrderDetailComponent implements OnInit, OnDestroy {
 
   runSubmit() {
     if (!this.detail || this.submitting) return;
+    const reqMeta: WriteRequestMeta = {
+      requestId: OrderService.newRequestId(),
+      action: 'submit',
+      sentAt: Date.now()
+    };
     this.submitting = true;
     const finish = () => { this.submitting = false; };
-    this.orderService.submit(this.detail.order.id, {
-      version: this.detail.order.version,
-      comment: this.actionForm.comment
-    }).subscribe({
+    this.orderService.submit(
+      this.detail.order.id,
+      { version: this.detail.order.version, comment: this.actionForm.comment },
+      reqMeta.requestId
+    ).subscribe({
       next: r => {
         finish();
         if (r.code === 0) { this.detail = r.data; this.closeDialog(); this.flash('success', '已提交审核'); this.computeReviewChecklist(); }
@@ -344,12 +350,18 @@ export class OrderDetailComponent implements OnInit, OnDestroy {
   runAudit() {
     if (!this.detail || this.submitting) return;
     const decision = this.actionDialog === 'audit_approve' ? 'approve' : 'reject';
+    const reqMeta: WriteRequestMeta = {
+      requestId: OrderService.newRequestId(),
+      action: 'audit',
+      sentAt: Date.now()
+    };
     this.submitting = true;
     const finish = () => { this.submitting = false; };
-    this.orderService.audit(this.detail.order.id, decision, {
-      comment: this.actionForm.comment,
-      version: this.detail.order.version
-    }).subscribe({
+    this.orderService.audit(
+      this.detail.order.id, decision,
+      { version: this.detail.order.version, comment: this.actionForm.comment },
+      reqMeta.requestId
+    ).subscribe({
       next: r => {
         finish();
         if (r.code === 0) { this.detail = r.data; this.closeDialog(); this.flash('success', decision === 'approve' ? '审核通过' : '已驳回'); this.computeReviewChecklist(); }
@@ -361,14 +373,23 @@ export class OrderDetailComponent implements OnInit, OnDestroy {
   runReview() {
     if (!this.detail || this.submitting) return;
     const decision = this.actionDialog === 'review_approve' ? 'approve' : 'reject';
+    const reqMeta: WriteRequestMeta = {
+      requestId: OrderService.newRequestId(),
+      action: 'review',
+      sentAt: Date.now()
+    };
     this.submitting = true;
     const finish = () => { this.submitting = false; };
-    this.orderService.review(this.detail.order.id, decision, {
-      comment: this.actionForm.comment,
-      version: this.detail.order.version,
-      actual_return_date: this.detail.order.actual_return_date || new Date().toISOString().slice(0, 10),
-      loss_remark: this.detail.order.loss_remark
-    }).subscribe({
+    this.orderService.review(
+      this.detail.order.id, decision,
+      {
+        version: this.detail.order.version,
+        comment: this.actionForm.comment,
+        actual_return_date: this.detail.order.actual_return_date || new Date().toISOString().slice(0, 10),
+        loss_remark: this.detail.order.loss_remark
+      },
+      reqMeta.requestId
+    ).subscribe({
       next: r => {
         finish();
         if (r.code === 0) { this.detail = r.data; this.closeDialog(); this.flash('success', decision === 'approve' ? '复核通过，已归档' : '已驳回'); this.computeReviewChecklist(); }
@@ -401,12 +422,23 @@ export class OrderDetailComponent implements OnInit, OnDestroy {
   evidenceFormValid(): boolean {
     return !!(this.evidenceForm.type && this.evidenceForm.description?.trim());
   }
+  uploadingEvidence = false;
   uploadEvidence() {
-    if (!this.detail || this.submitting) return;
+    if (!this.detail || this.submitting || this.uploadingEvidence) return;
     if (!this.evidenceFormValid()) { alert('请完整选择证据类型并填写描述'); return; }
+    const reqMeta: WriteRequestMeta = {
+      requestId: OrderService.newRequestId(),
+      action: 'addEvidence',
+      sentAt: Date.now()
+    };
+    this.uploadingEvidence = true;
     this.submitting = true;
-    const finish = () => { this.submitting = false; };
-    this.orderService.addEvidence(this.detail.order.id, this.evidenceForm).subscribe({
+    const finish = () => { this.submitting = false; this.uploadingEvidence = false; };
+    this.orderService.addEvidence(
+      this.detail.order.id,
+      { ...this.evidenceForm, version: this.detail.order.version },
+      reqMeta.requestId
+    ).subscribe({
       next: r => {
         finish();
         if (r.code === 0) { this.closeDialog(); this.loadDetail(); this.flash('success', '证据已上传'); }
@@ -417,16 +449,25 @@ export class OrderDetailComponent implements OnInit, OnDestroy {
   }
   deletingEvidence = false;
   deleteEvidence(id: number) {
-    if (this.submitting || this.deletingEvidence) return;
+    if (!this.detail || this.submitting || this.deletingEvidence) return;
     if (!this.canDo('delete_evidence')) {
       const hint = this.actionDisabledHint('delete_evidence');
       if (hint) { alert(hint); return; }
     }
     if (!confirm('确定删除该证据？删除后不可恢复。')) return;
+    const reqMeta: WriteRequestMeta = {
+      requestId: OrderService.newRequestId(),
+      action: 'deleteEvidence',
+      sentAt: Date.now()
+    };
     this.deletingEvidence = true;
     this.submitting = true;
     const finish = () => { this.submitting = false; this.deletingEvidence = false; };
-    this.orderService.deleteEvidence(id).subscribe({
+    this.orderService.deleteEvidence(
+      id,
+      { version: this.detail.order.version },
+      reqMeta.requestId
+    ).subscribe({
       next: r => {
         finish();
         if (r.code === 0) { this.loadDetail(); this.flash('success', '证据已删除'); }

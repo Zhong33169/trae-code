@@ -5,6 +5,33 @@ const { ROLES } = require('../config');
 
 const router = new Router({ prefix: '/api/orders' });
 
+function getRequestId(ctx) {
+  return ctx.request.headers['x-request-id'] || ctx.request.body?.requestId;
+}
+
+function badRequest(ctx, message, code = 400, extra = {}) {
+  ctx.status = code;
+  ctx.body = { code, message, ...extra };
+}
+
+function writeResponse(ctx, res) {
+  if (res?.idempotent) {
+    ctx.set('X-Idempotent-Hit', '1');
+    ctx.set('X-Idempotent-Cached-At', res.cachedAt || '');
+  }
+  if (!res.ok) {
+    const code = res.code || 400;
+    ctx.status = code;
+    ctx.body = {
+      code,
+      message: res.message,
+      failureReason: res.failureReason || null
+    };
+    return;
+  }
+  ctx.body = { code: 0, message: res.message || 'success', data: res.data };
+}
+
 router.get('/', authMiddleware(), async (ctx) => {
   const q = ctx.query;
   const filters = {};
@@ -23,11 +50,7 @@ router.get('/stats', authMiddleware(), async (ctx) => {
 
 router.get('/:id', authMiddleware(), async (ctx) => {
   const detail = orderService.getOrderDetail(parseInt(ctx.params.id));
-  if (!detail) {
-    ctx.status = 404;
-    ctx.body = { code: 404, message: '借用单不存在' };
-    return;
-  }
+  if (!detail) return badRequest(ctx, '借用单不存在', 404);
   ctx.body = { code: 0, data: detail };
 });
 
@@ -35,93 +58,67 @@ router.post('/', authMiddleware([ROLES.REGISTRAR]), async (ctx) => {
   const data = ctx.request.body || {};
   const required = ['applicant', 'department', 'equipment_name', 'borrow_reason', 'expected_return_date'];
   const missing = required.filter(k => !data[k]);
-  if (missing.length) {
-    ctx.status = 400;
-    ctx.body = { code: 400, message: `缺少必填字段: ${missing.join(', ')}` };
-    return;
-  }
-  const result = orderService.createOrder(ctx.state.user, data);
-  ctx.body = { code: 0, data: result };
+  if (missing.length) return badRequest(ctx, `缺少必填字段: ${missing.join(', ')}`);
+  const requestId = getRequestId(ctx);
+  if (!requestId) return badRequest(ctx, '缺少幂等请求 ID (X-Request-Id header)');
+  const res = orderService.createOrder(ctx.state.user, requestId, data);
+  writeResponse(ctx, res);
 });
 
 router.post('/:id/submit', authMiddleware([ROLES.REGISTRAR]), async (ctx) => {
   const data = ctx.request.body || {};
-  const res = orderService.submitForAudit(ctx.state.user, parseInt(ctx.params.id), data);
-  if (!res.ok) {
-    ctx.status = 400;
-    ctx.body = { code: 400, message: res.message };
-    return;
-  }
-  ctx.body = { code: 0, data: res.data };
+  const requestId = getRequestId(ctx);
+  if (!requestId) return badRequest(ctx, '缺少幂等请求 ID (X-Request-Id header)');
+  const res = orderService.submitForAudit(ctx.state.user, requestId, parseInt(ctx.params.id), data);
+  writeResponse(ctx, res);
 });
 
 router.post('/:id/audit', authMiddleware([ROLES.AUDITOR]), async (ctx) => {
   const data = ctx.request.body || {};
-  if (!['approve', 'reject'].includes(data.decision)) {
-    ctx.status = 400;
-    ctx.body = { code: 400, message: 'decision 必须是 approve 或 reject' };
-    return;
-  }
-  const res = orderService.auditOrder(ctx.state.user, parseInt(ctx.params.id), data.decision, data);
-  if (!res.ok) {
-    ctx.status = 400;
-    ctx.body = { code: 400, message: res.message };
-    return;
-  }
-  ctx.body = { code: 0, data: res.data };
+  if (!['approve', 'reject'].includes(data.decision)) return badRequest(ctx, 'decision 必须是 approve 或 reject');
+  const requestId = getRequestId(ctx);
+  if (!requestId) return badRequest(ctx, '缺少幂等请求 ID (X-Request-Id header)');
+  const res = orderService.auditOrder(ctx.state.user, requestId, parseInt(ctx.params.id), data.decision, data);
+  writeResponse(ctx, res);
 });
 
 router.post('/:id/review', authMiddleware([ROLES.REVIEWER]), async (ctx) => {
   const data = ctx.request.body || {};
-  if (!['approve', 'reject'].includes(data.decision)) {
-    ctx.status = 400;
-    ctx.body = { code: 400, message: 'decision 必须是 approve 或 reject' };
-    return;
-  }
-  const res = orderService.reviewOrder(ctx.state.user, parseInt(ctx.params.id), data.decision, data);
+  if (!['approve', 'reject'].includes(data.decision)) return badRequest(ctx, 'decision 必须是 approve 或 reject');
+  const requestId = getRequestId(ctx);
+  if (!requestId) return badRequest(ctx, '缺少幂等请求 ID (X-Request-Id header)');
+  const res = orderService.reviewOrder(ctx.state.user, requestId, parseInt(ctx.params.id), data.decision, data);
   if (!res.ok) {
-    ctx.status = 400;
-    ctx.body = { code: 400, message: res.message, failureReason: res.failureReason };
+    writeResponse(ctx, res);
     return;
   }
-  ctx.body = { code: 0, data: res.data };
+  writeResponse(ctx, res);
 });
 
 router.post('/batch-review', authMiddleware([ROLES.REVIEWER]), async (ctx) => {
   const data = ctx.request.body || {};
-  if (!Array.isArray(data.orderIds) || data.orderIds.length === 0) {
-    ctx.status = 400;
-    ctx.body = { code: 400, message: 'orderIds 必须是非空数组' };
-    return;
-  }
-  const results = orderService.batchReviewOrders(ctx.state.user, data.orderIds, data);
-  ctx.body = { code: 0, data: results };
+  if (!Array.isArray(data.orderIds) || data.orderIds.length === 0) return badRequest(ctx, 'orderIds 必须是非空数组');
+  const requestId = getRequestId(ctx);
+  if (!requestId) return badRequest(ctx, '缺少幂等请求 ID (X-Request-Id header)');
+  const res = orderService.batchReviewOrders(ctx.state.user, requestId, data.orderIds, data);
+  writeResponse(ctx, res);
 });
 
 router.post('/:id/evidences', authMiddleware([ROLES.REGISTRAR]), async (ctx) => {
   const data = ctx.request.body || {};
-  if (!data.type || !data.description) {
-    ctx.status = 400;
-    ctx.body = { code: 400, message: 'type 和 description 必填' };
-    return;
-  }
-  const res = orderService.addEvidence(ctx.state.user, parseInt(ctx.params.id), data);
-  if (!res.ok) {
-    ctx.status = 400;
-    ctx.body = { code: 400, message: res.message };
-    return;
-  }
-  ctx.body = { code: 0, data: res };
+  if (!data.type || !data.description) return badRequest(ctx, 'type 和 description 必填');
+  const requestId = getRequestId(ctx);
+  if (!requestId) return badRequest(ctx, '缺少幂等请求 ID (X-Request-Id header)');
+  const res = orderService.addEvidence(ctx.state.user, requestId, parseInt(ctx.params.id), data);
+  writeResponse(ctx, res);
 });
 
 router.delete('/evidences/:evidenceId', authMiddleware([ROLES.REGISTRAR]), async (ctx) => {
-  const res = orderService.deleteEvidence(ctx.state.user, parseInt(ctx.params.evidenceId));
-  if (!res.ok) {
-    ctx.status = 400;
-    ctx.body = { code: 400, message: res.message };
-    return;
-  }
-  ctx.body = { code: 0, data: res };
+  const data = ctx.request.body || {};
+  const requestId = getRequestId(ctx);
+  if (!requestId) return badRequest(ctx, '缺少幂等请求 ID (X-Request-Id header)');
+  const res = orderService.deleteEvidence(ctx.state.user, requestId, parseInt(ctx.params.evidenceId), data);
+  writeResponse(ctx, res);
 });
 
 module.exports = router;

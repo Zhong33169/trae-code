@@ -68,10 +68,26 @@ function createSchema() {
       FOREIGN KEY (user_id) REFERENCES users(id)
     );
 
+    CREATE TABLE IF NOT EXISTS idempotent_requests (
+      request_id TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL,
+      order_id INTEGER,
+      action TEXT NOT NULL,
+      version INTEGER,
+      request_payload TEXT,
+      response_code INTEGER NOT NULL,
+      response_body TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_idempotent_unique
+      ON idempotent_requests(user_id, COALESCE(order_id, -1), action, COALESCE(version, -1));
+
     CREATE INDEX IF NOT EXISTS idx_orders_status ON equipment_orders(status);
     CREATE INDEX IF NOT EXISTS idx_orders_created_by ON equipment_orders(created_by);
     CREATE INDEX IF NOT EXISTS idx_evidences_order_id ON evidences(order_id);
     CREATE INDEX IF NOT EXISTS idx_logs_order_id ON operation_logs(order_id);
+    CREATE INDEX IF NOT EXISTS idx_idempotent_created ON idempotent_requests(created_at DESC);
   `);
 }
 
