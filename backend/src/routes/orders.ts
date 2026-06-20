@@ -166,8 +166,19 @@ app.get('/:id', requireRole(ROLES.REGISTRAR, ROLES.REVIEWER, ROLES.APPROVER), (c
 
 app.post('/', requireRole(ROLES.REGISTRAR), async (c) => {
   const body = await c.req.json()
-  const { title, applicant, amount, requiredAttachmentNames = [] } = body
+  const { title, applicant, amount } = body
   const userId = getUserId(c)
+  
+  let defNames: string[] = []
+  if (Array.isArray(body.requiredAttachmentDefs)) {
+    defNames = body.requiredAttachmentDefs
+      .filter((d: any) => d && typeof d.name === 'string' && d.name.trim())
+      .map((d: any) => d.name.trim())
+  } else if (Array.isArray(body.requiredAttachmentNames)) {
+    defNames = body.requiredAttachmentNames
+      .filter((n: any) => typeof n === 'string' && n.trim())
+      .map((n: string) => n.trim())
+  }
   
   const orderNo = 'ZC' + new Date().getFullYear() + String(Math.floor(Math.random() * 9000) + 1000)
   
@@ -183,10 +194,8 @@ app.post('/', requireRole(ROLES.REGISTRAR), async (c) => {
     const info = insertOrder.run(orderNo, title, applicant, amount, STATUS.DRAFT, userId, new Date().toISOString())
     const orderId = info.lastInsertRowid as number
     
-    requiredAttachmentNames.forEach((name: string, idx: number) => {
-      if (name && name.trim()) {
-        insertDef.run(orderId, name.trim(), idx)
-      }
+    defNames.forEach((name: string, idx: number) => {
+      insertDef.run(orderId, name, idx)
     })
     
     return { orderId, orderNo }
@@ -200,7 +209,7 @@ app.post('/', requireRole(ROLES.REGISTRAR), async (c) => {
 app.put('/:id', requireRole(ROLES.REGISTRAR), async (c) => {
   const id = c.req.param('id')
   const body = await c.req.json()
-  const { title, applicant, amount, requiredAttachmentNames } = body
+  const { title, applicant, amount } = body
   const orderId = Number(id)
   
   const order = db.prepare('SELECT status FROM policy_orders WHERE id = ?').get(orderId) as any
@@ -227,29 +236,53 @@ app.put('/:id', requireRole(ROLES.REGISTRAR), async (c) => {
   const insertDef = db.prepare('INSERT INTO required_attachment_defs (order_id, name, sort_order) VALUES (?, ?, ?)')
   const getMaxSortOrder = db.prepare('SELECT COALESCE(MAX(sort_order), -1) as max_sort FROM required_attachment_defs WHERE order_id = ?')
   
+  interface IncomingDef { id?: number; name: string }
+  let incomingDefs: IncomingDef[] | null = null
+  if (Array.isArray(body.requiredAttachmentDefs)) {
+    incomingDefs = body.requiredAttachmentDefs
+      .filter((d: any) => d && typeof d.name === 'string' && d.name.trim())
+      .map((d: any) => ({ id: typeof d.id === 'number' ? d.id : undefined, name: d.name.trim() }))
+  } else if (Array.isArray(body.requiredAttachmentNames)) {
+    incomingDefs = body.requiredAttachmentNames
+      .filter((n: any) => typeof n === 'string' && n.trim())
+      .map((n: string) => ({ name: n.trim() }))
+  }
+  
   const tx = db.transaction(() => {
     updateOrder.run(title, applicant, amount, new Date().toISOString(), orderId)
     
-    if (Array.isArray(requiredAttachmentNames)) {
-      const newNames = requiredAttachmentNames.filter((n: any) => typeof n === 'string' && n.trim())
+    if (incomingDefs !== null) {
       const existingDefs = getDefsWithActive.all(ATTACHMENT_STATUS.ACTIVE, orderId) as any[]
+      const existingById = new Map<number, any>()
+      existingDefs.forEach(d => existingById.set(d.id, d))
       const usedExistingIds = new Set<number>()
       
       let currentSort = (getMaxSortOrder.get(orderId) as any).max_sort
       
-      newNames.forEach((newName: string, idx: number) => {
-        const trimmed = newName.trim()
-        const match = existingDefs.find(d =>
-          !usedExistingIds.has(d.id) && d.name.trim() === trimmed
-        )
-        if (match) {
-          usedExistingIds.add(match.id)
-          if (match.name !== trimmed) {
-            updateDefName.run(trimmed, match.id)
+      incomingDefs.forEach((incoming: IncomingDef) => {
+        if (incoming.id && existingById.has(incoming.id)) {
+          const def = existingById.get(incoming.id)!
+          usedExistingIds.add(def.id)
+          if (def.name !== incoming.name) {
+            updateDefName.run(incoming.name, def.id)
           }
         } else {
-          currentSort += 1
-          insertDef.run(orderId, trimmed, currentSort)
+          let matchedByName: any = null
+          for (const d of existingDefs) {
+            if (!usedExistingIds.has(d.id) && d.name.trim() === incoming.name) {
+              matchedByName = d
+              break
+            }
+          }
+          if (matchedByName) {
+            usedExistingIds.add(matchedByName.id)
+            if (matchedByName.name !== incoming.name) {
+              updateDefName.run(incoming.name, matchedByName.id)
+            }
+          } else {
+            currentSort += 1
+            insertDef.run(orderId, incoming.name, currentSort)
+          }
         }
       })
       

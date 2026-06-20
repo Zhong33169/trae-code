@@ -239,6 +239,8 @@ const orders: DemoOrder[] = [
       { operator_id: 2, action: '驳回补正', remark: '缺少关键材料，研发台账数据有误', from_status: STATUS.PENDING_REVIEW, to_status: STATUS.PENDING_CORRECTION, created_at: new Date(now - dayMs * 1).toISOString() }
     ],
     audits: [
+      { operator_id: 1, action: '修改必备清单', failure_reason: null, detail: '登记员将「研发人员花名册」改名为「研发人员清单」，同时新增「研发费用专项审计报告」作为必备清单项', created_at: new Date(now - dayMs * 4).toISOString() },
+      { operator_id: 2, action: '附件驳回', failure_reason: '研发费用台账数据与纳税申报表不符', detail: '驳回附件「研发费用台账.pdf」：2023年Q3研发费用台账金额为120万，纳税申报表金额为95万，请核对后重新上传', created_at: new Date(now - dayMs * 2).toISOString() },
       { operator_id: 2, action: '审核驳回', failure_reason: '缺少研发费用专项审计报告和研发人员清单，研发费用台账与纳税申报表数据不符', detail: '需补充：1.研发费用专项审计报告；2.研发人员清单；3.更正研发费用台账数据后重新上传', created_at: new Date(now - dayMs * 1).toISOString() }
     ]
   },

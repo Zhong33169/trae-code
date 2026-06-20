@@ -1,11 +1,11 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
-import { useState, useEffect } from 'preact/hooks'
+import { useState, useEffect, useMemo } from 'preact/hooks'
 import Login from './pages/Login'
 import OrderList from './pages/OrderList'
 import OrderDetail from './pages/OrderDetail'
 import AuditLogs from './pages/AuditLogs'
 import Layout from './components/Layout'
-import { User, api, getCurrentUser, setCurrentUser, clearCurrentUser } from './api/client'
+import { User, ROLES, api, getCurrentUser, setCurrentUser, clearCurrentUser } from './api/client'
 
 function App() {
   const [user, setUser] = useState<User | null>(null)
@@ -15,6 +15,10 @@ function App() {
     setUser(getCurrentUser())
     setLoading(false)
   }, [])
+
+  const isRegistrar = useMemo(() => user?.role === ROLES.REGISTRAR, [user])
+  const isReviewer = useMemo(() => user?.role === ROLES.REVIEWER, [user])
+  const isApprover = useMemo(() => user?.role === ROLES.APPROVER, [user])
 
   const handleLogin = (userData: User) => {
     setCurrentUser(userData)
@@ -47,8 +51,8 @@ function App() {
   return (
     <Layout user={user} onLogout={handleLogout} onSwitchRole={handleSwitchRole}>
       <Routes>
-        <Route path="/" element={<OrderList user={user} />} />
-        <Route path="/orders/:id" element={<OrderDetail user={user} />} />
+        <Route path="/" element={<OrderList user={user} isRegistrar={isRegistrar} isReviewer={isReviewer} isApprover={isApprover} />} />
+        <Route path="/orders/:id" element={<OrderDetail user={user} isRegistrar={isRegistrar} isReviewer={isReviewer} isApprover={isApprover} />} />
         <Route path="/audit" element={<AuditLogs />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

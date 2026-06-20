@@ -2,15 +2,18 @@ import { useState, useEffect } from 'preact/hooks'
 import { Link, useParams, useNavigate } from 'react-router-dom'
 import {
   User, PolicyOrder, Attachment, ReviewRecord, AuditLog,
-  RequiredAttachmentDef, AttachmentCompletion, ATTACHMENT_STATUS_LABELS, ROLE_LABELS,
+  RequiredAttachmentDef, RequiredAttachmentDefInput, AttachmentCompletion, ATTACHMENT_STATUS_LABELS, ROLE_LABELS,
   api
 } from '../api/client'
 
 interface Props {
   user: User
+  isRegistrar: boolean
+  isReviewer: boolean
+  isApprover: boolean
 }
 
-function OrderDetail({ user }: Props) {
+function OrderDetail({ user, isRegistrar, isReviewer, isApprover }: Props) {
   const { id } = useParams()
   const navigate = useNavigate()
   const [order, setOrder] = useState<PolicyOrder | null>(null)
@@ -29,7 +32,7 @@ function OrderDetail({ user }: Props) {
   const [showApprove, setShowApprove] = useState(false)
   const [showArchive, setShowArchive] = useState(false)
   const [showEditModal, setShowEditModal] = useState(false)
-  const [editForm, setEditForm] = useState({ title: '', applicant: '', amount: '', requiredAttachmentNames: [] as string[] })
+  const [editForm, setEditForm] = useState({ title: '', applicant: '', amount: '', requiredAttachmentDefs: [] as RequiredAttachmentDefInput[] })
 
   const [attachmentForm, setAttachmentForm] = useState({ name: '', fileType: 'pdf', requiredDefId: '' as string | number })
   const [rejectReason, setRejectReason] = useState('')
@@ -291,34 +294,37 @@ function OrderDetail({ user }: Props) {
       title: order.title,
       applicant: order.applicant,
       amount: String(order.amount),
-      requiredAttachmentNames: requiredDefs.slice().sort((a, b) => a.sort_order - b.sort_order).map(d => d.name)
+      requiredAttachmentDefs: requiredDefs.slice().sort((a, b) => a.sort_order - b.sort_order).map(d => ({ id: d.id, name: d.name }))
     })
     setShowEditModal(true)
   }
 
-  const addEditDef = () => setEditForm({ ...editForm, requiredAttachmentNames: [...editForm.requiredAttachmentNames, ''] })
+  const addEditDef = () => setEditForm({ ...editForm, requiredAttachmentDefs: [...editForm.requiredAttachmentDefs, { name: '' }] })
   const removeEditDef = (idx: number) => {
-    const def = requiredDefs[idx]
-    const activeVersion = def && groupedAttachments[`def_${def.id}`]?.find((v: Attachment) => v.att_status === 'ACTIVE' && v.rejected === 0)
-    if (activeVersion) {
-      alert(`「${def!.name}」已上传有效附件，无法删除。请先删除对应附件。`)
-      return
+    const defInput = editForm.requiredAttachmentDefs[idx]
+    if (defInput?.id) {
+      const originalDef = requiredDefs.find(d => d.id === defInput.id)
+      const activeVersion = originalDef && groupedAttachments[`def_${originalDef.id}`]?.find((v: Attachment) => v.att_status === 'ACTIVE' && v.rejected === 0)
+      if (activeVersion) {
+        alert(`「${originalDef.name}」已上传有效附件，无法删除。请先删除对应附件。`)
+        return
+      }
     }
-    const next = editForm.requiredAttachmentNames.slice()
+    const next = editForm.requiredAttachmentDefs.slice()
     next.splice(idx, 1)
-    setEditForm({ ...editForm, requiredAttachmentNames: next })
+    setEditForm({ ...editForm, requiredAttachmentDefs: next })
   }
   const updateEditDef = (idx: number, value: string) => {
-    const next = editForm.requiredAttachmentNames.slice()
-    next[idx] = value
-    setEditForm({ ...editForm, requiredAttachmentNames: next })
+    const next = editForm.requiredAttachmentDefs.slice()
+    next[idx] = { ...next[idx], name: value }
+    setEditForm({ ...editForm, requiredAttachmentDefs: next })
   }
 
   const handleSaveEdit = async (e: Event) => {
     e.preventDefault()
     if (!order) return
-    const names = editForm.requiredAttachmentNames.filter(n => n.trim())
-    if (names.length === 0) {
+    const defs = editForm.requiredAttachmentDefs.filter(d => d.name.trim())
+    if (defs.length === 0) {
       alert('请至少保留 1 项必备附件清单')
       return
     }
@@ -328,7 +334,7 @@ function OrderDetail({ user }: Props) {
         title: editForm.title.trim(),
         applicant: editForm.applicant.trim(),
         amount: parseFloat(editForm.amount),
-        requiredAttachmentNames: names
+        requiredAttachmentDefs: defs.map(d => d.id ? { id: d.id, name: d.name.trim() } : { name: d.name.trim() })
       })
       setShowEditModal(false)
       loadDetail()
@@ -341,10 +347,6 @@ function OrderDetail({ user }: Props) {
 
   if (loading) return <div class="card">加载中...</div>
   if (!order) return <div class="card">兑现单不存在</div>
-
-  const isRegistrar = user.role === 'REGISTRAR'
-  const isReviewer = user.role === 'REVIEWER'
-  const isApprover = user.role === 'APPROVER'
 
   const canEditAttachments = isRegistrar && ['DRAFT', 'PENDING_CORRECTION'].includes(order.status)
   const canRejectAttachment = isReviewer && order.status === 'PENDING_REVIEW'
@@ -1006,14 +1008,14 @@ function OrderDetail({ user }: Props) {
                   </button>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {editForm.requiredAttachmentNames.map((name, idx) => (
+                  {editForm.requiredAttachmentDefs.map((def, idx) => (
                     <div key={idx} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                       <span style={{ color: '#8c8c8c', fontSize: '13px', whiteSpace: 'nowrap' }}>
                         第 {idx + 1} 项：
                       </span>
                       <input
                         type="text"
-                        value={name}
+                        value={def.name}
                         onInput={(e) => updateEditDef(idx, (e.target as HTMLInputElement).value)}
                         placeholder="必备附件名称"
                         style={{ flex: 1 }}
@@ -1022,7 +1024,7 @@ function OrderDetail({ user }: Props) {
                         type="button"
                         class="btn btn-danger btn-sm"
                         onClick={() => removeEditDef(idx)}
-                        disabled={editForm.requiredAttachmentNames.length <= 1}
+                        disabled={editForm.requiredAttachmentDefs.length <= 1}
                         style={{ padding: '4px 10px', fontSize: '12px' }}
                       >
                         删除

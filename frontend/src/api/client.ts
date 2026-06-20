@@ -1,5 +1,11 @@
 const BASE_URL = '/api'
 
+export const ROLES = {
+  REGISTRAR: 'REGISTRAR',
+  REVIEWER: 'REVIEWER',
+  APPROVER: 'APPROVER'
+} as const
+
 export const ROLE_LABELS: Record<string, string> = {
   REGISTRAR: '政策兑现登记员',
   REVIEWER: '政策兑现审核主管',
@@ -66,6 +72,11 @@ export interface RequiredAttachmentDef {
   name: string
   sort_order: number
   has_active?: number
+}
+
+export interface RequiredAttachmentDefInput {
+  id?: number
+  name: string
 }
 
 export interface Attachment {
@@ -210,12 +221,12 @@ export const api = {
         reviews: ReviewRecord[]
         audits: AuditLog[]
       }>(`/orders/${id}`),
-    create: (data: { title: string; applicant: string; amount: number; requiredAttachmentNames?: string[]; userId?: number }) =>
+    create: (data: { title: string; applicant: string; amount: number; requiredAttachmentDefs?: RequiredAttachmentDefInput[]; userId?: number }) =>
       request<{ id: number; orderNo: string }>('/orders', {
         method: 'POST',
         body: JSON.stringify(data)
       }),
-    update: (id: number, data: { title: string; applicant: string; amount: number; requiredAttachmentNames?: string[] }) =>
+    update: (id: number, data: { title: string; applicant: string; amount: number; requiredAttachmentDefs?: RequiredAttachmentDefInput[] }) =>
       request<{ success: boolean }>(`/orders/${id}`, {
         method: 'PUT',
         body: JSON.stringify(data)

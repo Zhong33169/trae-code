@@ -1,9 +1,12 @@
 import { useState, useEffect } from 'preact/hooks'
 import { Link } from 'react-router-dom'
-import { User, PolicyOrder, RequiredAttachmentDef, api } from '../api/client'
+import { User, PolicyOrder, RequiredAttachmentDef, RequiredAttachmentDefInput, api } from '../api/client'
 
 interface Props {
   user: User
+  isRegistrar: boolean
+  isReviewer: boolean
+  isApprover: boolean
 }
 
 const STATUS_OPTIONS = [
@@ -29,7 +32,7 @@ interface FormState {
   title: string
   applicant: string
   amount: string
-  requiredAttachmentNames: string[]
+  requiredAttachmentDefs: RequiredAttachmentDefInput[]
 }
 
 function buildDefaultForm(): FormState {
@@ -37,11 +40,14 @@ function buildDefaultForm(): FormState {
     title: '',
     applicant: '',
     amount: '',
-    requiredAttachmentNames: ['营业执照', '资质证明文件']
+    requiredAttachmentDefs: [
+      { name: '营业执照' },
+      { name: '资质证明文件' }
+    ]
   }
 }
 
-function OrderList({ user }: Props) {
+function OrderList({ user, isRegistrar }: Props) {
   const [orders, setOrders] = useState<PolicyOrder[]>([])
   const [statusFilter, setStatusFilter] = useState('ALL')
   const [abnormalFilter, setAbnormalFilter] = useState('ALL')
@@ -104,7 +110,7 @@ function OrderList({ user }: Props) {
         title: res.order.title,
         applicant: res.order.applicant,
         amount: String(res.order.amount),
-        requiredAttachmentNames: defs.map(d => d.name)
+        requiredAttachmentDefs: defs.map(d => ({ id: d.id, name: d.name }))
       })
       setEditOrder({ id: order.id, defs })
       setShowModal('edit')
@@ -118,38 +124,34 @@ function OrderList({ user }: Props) {
   const addRequiredItem = () => {
     setFormData({
       ...formData,
-      requiredAttachmentNames: [...formData.requiredAttachmentNames, '']
+      requiredAttachmentDefs: [...formData.requiredAttachmentDefs, { name: '' }]
     })
   }
 
   const removeRequiredItem = (idx: number) => {
-    if (editOrder) {
-      const def = editOrder.defs[idx]
-      if (def) {
-        const hasActiveDef = (def as any).has_active
-        if (hasActiveDef || formData.requiredAttachmentNames[idx].trim()) {
-          if (hasActiveDef) {
-            alert(`「${def.name}」已上传有效附件，无法删除。请先删除对应附件。`)
-            return
-          }
-        }
+    const defInput = formData.requiredAttachmentDefs[idx]
+    if (defInput?.id && editOrder) {
+      const originalDef = editOrder.defs.find(d => d.id === defInput.id)
+      if (originalDef && (originalDef as any).has_active) {
+        alert(`「${originalDef.name}」已上传有效附件，无法删除。请先删除对应附件。`)
+        return
       }
     }
-    const next = formData.requiredAttachmentNames.slice()
+    const next = formData.requiredAttachmentDefs.slice()
     next.splice(idx, 1)
-    setFormData({ ...formData, requiredAttachmentNames: next })
+    setFormData({ ...formData, requiredAttachmentDefs: next })
   }
 
   const updateRequiredItem = (idx: number, value: string) => {
-    const next = formData.requiredAttachmentNames.slice()
-    next[idx] = value
-    setFormData({ ...formData, requiredAttachmentNames: next })
+    const next = formData.requiredAttachmentDefs.slice()
+    next[idx] = { ...next[idx], name: value }
+    setFormData({ ...formData, requiredAttachmentDefs: next })
   }
 
   const handleCreate = async (e: Event) => {
     e.preventDefault()
-    const names = formData.requiredAttachmentNames.filter(n => n.trim())
-    if (names.length === 0) {
+    const defs = formData.requiredAttachmentDefs.filter(d => d.name.trim())
+    if (defs.length === 0) {
       alert('请至少添加 1 项必备附件清单')
       return
     }
@@ -159,7 +161,7 @@ function OrderList({ user }: Props) {
         title: formData.title.trim(),
         applicant: formData.applicant.trim(),
         amount: parseFloat(formData.amount),
-        requiredAttachmentNames: names,
+        requiredAttachmentDefs: defs.map(d => ({ name: d.name.trim() })),
         userId: user.id
       })
       setShowModal(null)
@@ -175,8 +177,8 @@ function OrderList({ user }: Props) {
   const handleUpdate = async (e: Event) => {
     e.preventDefault()
     if (!editOrder) return
-    const names = formData.requiredAttachmentNames.filter(n => n.trim())
-    if (names.length === 0) {
+    const defs = formData.requiredAttachmentDefs.filter(d => d.name.trim())
+    if (defs.length === 0) {
       alert('请至少保留 1 项必备附件清单')
       return
     }
@@ -186,7 +188,7 @@ function OrderList({ user }: Props) {
         title: formData.title.trim(),
         applicant: formData.applicant.trim(),
         amount: parseFloat(formData.amount),
-        requiredAttachmentNames: names
+        requiredAttachmentDefs: defs.map(d => d.id ? { id: d.id, name: d.name.trim() } : { name: d.name.trim() })
       })
       setShowModal(null)
       setEditOrder(null)
@@ -225,7 +227,6 @@ function OrderList({ user }: Props) {
     }
   }
 
-  const isRegistrar = user.role === 'REGISTRAR'
   const canCreate = isRegistrar
   const canBatchSubmit = isRegistrar && selectedIds.some(id => {
     const order = orders.find(o => o.id === id)
@@ -426,14 +427,14 @@ function OrderList({ user }: Props) {
                   </button>
                 </div>
                 <div class="def-editor-list" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {formData.requiredAttachmentNames.map((name, idx) => (
+                  {formData.requiredAttachmentDefs.map((def, idx) => (
                     <div key={idx} class="def-editor-row" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                       <span style={{ color: '#8c8c8c', fontSize: '13px', whiteSpace: 'nowrap' }}>
                         第 {idx + 1} 项：
                       </span>
                       <input
                         type="text"
-                        value={name}
+                        value={def.name}
                         onInput={(e) => updateRequiredItem(idx, (e.target as HTMLInputElement).value)}
                         placeholder="如：营业执照、研发费用专项审计报告"
                         style={{ flex: 1 }}
@@ -442,7 +443,7 @@ function OrderList({ user }: Props) {
                         type="button"
                         class="btn btn-danger btn-sm"
                         onClick={() => removeRequiredItem(idx)}
-                        disabled={formData.requiredAttachmentNames.length <= 1}
+                        disabled={formData.requiredAttachmentDefs.length <= 1}
                         style={{ padding: '4px 10px', fontSize: '12px' }}
                       >
                         删除
