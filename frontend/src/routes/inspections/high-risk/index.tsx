@@ -2,7 +2,7 @@
 // High Risk Inspection Orders List
 // ============================================================
 
-import { component$, useStore, $, useOnMount, useTask$ } from "@builder.io/qwik";
+import { component$, useStore, $, useTask$ } from "@builder.io/qwik";
 import { useNavigate } from "@builder.io/qwik-city";
 import api from "~/services/api";
 import { useCurrentUser, useRefreshSignal } from "~/state/app";
@@ -199,16 +199,7 @@ export default component$(() => {
                       {row.last_handler_opinion ? (
                         <div class="text-xs text-gray-700 bg-blue-50 px-2 py-1 rounded border border-blue-100">
                           <div class="font-semibold text-blue-700 mb-1">
-                            {row.last_handler_result
-                              ? {
-                                  normal: "正常",
-                                  abnormal: "异常",
-                                  missing_evidence: "缺证据",
-                                  overdue: "逾期",
-                                  returned: "退回补正",
-                                  status_conflict: "状态冲突",
-                                }[row.last_handler_result]
-                              : ""}
+                            {row.last_handler_result ?? ""}
                           </div>
                           <div class="line-clamp-2">
                             {row.last_handler_opinion}

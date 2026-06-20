@@ -99,6 +99,7 @@ export interface FaultReport {
   reported_at: string;
   is_resolved: boolean;
   resolved_by: number | null;
+  resolved_by_name: string | null;
   resolved_at: string | null;
   resolution: string | null;
 }
@@ -124,10 +125,16 @@ export interface InspectionOrderListItem {
   equipment_name: string;
   equipment_code: string;
   equipment_location: string;
+  equipment_specification: string | null;
+  equipment_model: string | null;
+  location_detail: string | null;
   initiator_id: number;
   initiator_name: string;
+  inspector_name: string | null;
   current_handler_id: number | null;
   current_handler_name: string | null;
+  handler_name: string | null;
+  reviewer_name: string | null;
   status: InspectionStatus;
   risk_level: RiskLevel;
   inspection_result: InspectionResult | null;
@@ -137,6 +144,8 @@ export interface InspectionOrderListItem {
   last_handler_result: string | null;
   handler_opinion: string | null;
   handler_result: string | null;
+  last_reviewer_opinion: string | null;
+  last_reviewer_result: string | null;
   reviewer_opinion: string | null;
   reviewer_result: string | null;
   version: number;

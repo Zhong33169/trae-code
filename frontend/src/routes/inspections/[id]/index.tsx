@@ -4,7 +4,7 @@
 // All forms match the backend request schemas 1:1
 // ============================================================
 
-import { component$, useStore, $, useOnMount, useTask$, useVisibleTask$ } from "@builder.io/qwik";
+import { component$, useStore, $, useTask$, useVisibleTask$ } from "@builder.io/qwik";
 import { useNavigate, routeLoader$, type DocumentHead } from "@builder.io/qwik-city";
 import api from "~/services/api";
 import { useCurrentUser, useRefreshSignal } from "~/state/app";
@@ -30,7 +30,6 @@ import {
   formatDate,
   formatShortDate,
   riskLabels,
-  resultLabels,
   operationLabels,
   checkItems,
   canHandle,
@@ -222,18 +221,16 @@ export default component$(() => {
     }
   });
 
-  useOnMount$(async () => {
+  useTask$(async ({ track }) => {
+    track(() => refreshSig.tick);
+    track(() => userCtx.user?.id);
+    track(() => loaderOrder.value);
     if (loaderOrder.value) {
       state.detail = loaderOrder.value;
       state.loading = false;
     } else {
       await loadDetail();
     }
-  });
-
-  useTask$(({ track }) => {
-    track(() => refreshSig.tick);
-    if (state.detail) loadDetail();
   });
 
   // Clear flash after a delay
@@ -611,7 +608,7 @@ export default component$(() => {
                   </span>
                   {order.last_handler_result && (
                     <span class="text-xs font-semibold text-blue-600 bg-blue-100 px-2 py-0.5 rounded">
-                      {resultLabels[order.last_handler_result]}
+                      {order.last_handler_result}
                     </span>
                   )}
                 </div>
@@ -628,7 +625,7 @@ export default component$(() => {
                   </span>
                   {order.last_reviewer_result && (
                     <span class="text-xs font-semibold text-purple-600 bg-purple-100 px-2 py-0.5 rounded">
-                      {resultLabels[order.last_reviewer_result]}
+                      {order.last_reviewer_result}
                     </span>
                   )}
                 </div>
@@ -774,7 +771,7 @@ export default component$(() => {
                       办理员意见
                       {order.handler_result && (
                         <span class="bg-blue-100 px-1.5 py-0.5 rounded text-[11px]">
-                          {resultLabels[order.handler_result]}
+                          {order.handler_result}
                         </span>
                       )}
                     </div>
@@ -789,7 +786,7 @@ export default component$(() => {
                       复核员意见
                       {order.reviewer_result && (
                         <span class="bg-purple-100 px-1.5 py-0.5 rounded text-[11px]">
-                          {resultLabels[order.reviewer_result]}
+                          {order.reviewer_result}
                         </span>
                       )}
                     </div>
@@ -1097,7 +1094,7 @@ export default component$(() => {
               <div class="flex items-center gap-2 mb-2">
                 {order.handler_result && (
                   <span class="text-xs font-semibold bg-blue-100 text-blue-800 px-2 py-0.5 rounded">
-                    办理结果：{resultLabels[order.handler_result]}
+                    办理结果：{order.handler_result}
                   </span>
                 )}
               </div>

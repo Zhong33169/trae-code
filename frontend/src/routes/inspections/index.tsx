@@ -2,7 +2,7 @@
 // Inspection Order List Page
 // ============================================================
 
-import { component$, useStore, $, useOnMount, useTask$ } from "@builder.io/qwik";
+import { component$, useStore, $, useTask$ } from "@builder.io/qwik";
 import { useNavigate } from "@builder.io/qwik-city";
 import api from "~/services/api";
 import { useCurrentUser, useRefreshSignal } from "~/state/app";

@@ -2,7 +2,7 @@
 // Home / Workbench Dashboard
 // ============================================================
 
-import { component$, useStore, $, useOnMount, useTask$ } from "@builder.io/qwik";
+import { component$, useStore, $, useTask$ } from "@builder.io/qwik";
 import { useNavigate } from "@builder.io/qwik-city";
 import { useCurrentUser, useRefreshSignal } from "~/state/app";
 import api from "~/services/api";
@@ -48,14 +48,10 @@ export default component$(() => {
     }
   });
 
-  useOnMount$(async () => {
-    if (userCtx.user) await loadData();
-  });
-
-  useTask$(({ track }) => {
+  useTask$(async ({ track }) => {
     track(() => userCtx.user?.id);
     track(() => refreshSig.tick);
-    if (userCtx.user) loadData();
+    if (userCtx.user) await loadData();
   });
 
   const statCards = [

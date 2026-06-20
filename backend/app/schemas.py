@@ -367,6 +367,7 @@ class FaultReport(FaultReportBase):
     reported_at: datetime
     is_resolved: bool
     resolved_by: Optional[int] = None
+    resolved_by_name: Optional[str] = None
     resolved_at: Optional[datetime] = None
     resolution: Optional[str] = None
 
@@ -405,10 +406,16 @@ class InspectionOrderListItem(BaseModel):
     equipment_name: str
     equipment_code: str
     equipment_location: str
+    equipment_specification: Optional[str] = None
+    equipment_model: Optional[str] = None
+    location_detail: Optional[str] = None
     initiator_id: int
     initiator_name: str
+    inspector_name: Optional[str] = None
     current_handler_id: Optional[int] = None
     current_handler_name: Optional[str] = None
+    handler_name: Optional[str] = None
+    reviewer_name: Optional[str] = None
     status: InspectionStatus
     risk_level: RiskLevel
     inspection_result: Optional[InspectionResult] = None
@@ -418,6 +425,8 @@ class InspectionOrderListItem(BaseModel):
     last_handler_result: Optional[str] = None
     handler_opinion: Optional[str] = None
     handler_result: Optional[str] = None
+    last_reviewer_opinion: Optional[str] = None
+    last_reviewer_result: Optional[str] = None
     reviewer_opinion: Optional[str] = None
     reviewer_result: Optional[str] = None
     version: int

@@ -248,6 +248,40 @@ def seed_data():
             )
             orders.append(order7)
 
+            order8 = InspectionOrder(
+                order_no="INSP202606200008",
+                equipment_id=eq_map["EQ-004"].id,
+                initiator_id=inspector.id,
+                current_handler_id=reviewer.id,
+                status=InspectionStatus.PENDING_REVIEW,
+                risk_level=RiskLevel.MEDIUM,
+                inspection_result=InspectionResult.ABNORMAL,
+                inspection_date=now - timedelta(days=8),
+                due_date=now - timedelta(days=1),
+                appearance_check=True,
+                appearance_remark="轻微划痕，使用正常",
+                function_check=False,
+                function_evidence="/evidences/eq004_function_v2.jpg",
+                function_remark="下拉时钢丝绳卡滞，阻力不均匀，已补充高清照片",
+                safety_check=True,
+                safety_remark="安全锁功能正常",
+                maintenance_check=True,
+                maintenance_remark="距上次维护已30天",
+                last_handler_opinion="钢索磨损情况需进一步核实，建议更换",
+                last_handler_result="异常",
+                handler_opinion="已补充高清磨损照片，确实存在卡滞，建议厂家更换钢丝绳总成",
+                handler_result="异常待修",
+                handled_at=now - timedelta(days=2),
+                last_reviewer_opinion="证据不足，钢索磨损照片不清晰，需重新提交",
+                last_reviewer_result="退回补正",
+                reviewer_opinion=None,
+                reviewer_result=None,
+                version=5,
+                created_at=now - timedelta(days=8),
+                updated_at=now - timedelta(days=2),
+            )
+            orders.append(order8)
+
             for order in orders:
                 db.add(order)
             db.flush()
@@ -462,6 +496,68 @@ def seed_data():
                     ),
                 ])
 
+            ord8 = db.query(InspectionOrder).filter(InspectionOrder.order_no == "INSP202606200008").first()
+            if ord8:
+                op_records.extend([
+                    OperationRecord(
+                        inspection_order_id=ord8.id,
+                        operator_id=inspector.id,
+                        operation_type=OperationType.INITIATE,
+                        from_status=InspectionStatus.DRAFT,
+                        to_status=InspectionStatus.PENDING_HANDLING,
+                        opinion="发起巡检，功能测试时感觉钢丝绳有轻微卡滞",
+                        result="提交成功",
+                        version=1,
+                        operated_at=now - timedelta(days=8),
+                    ),
+                    OperationRecord(
+                        inspection_order_id=ord8.id,
+                        operator_id=handler.id,
+                        operation_type=OperationType.HANDLE,
+                        from_status=InspectionStatus.PENDING_HANDLING,
+                        to_status=InspectionStatus.PENDING_REVIEW,
+                        opinion="钢索磨损情况需进一步核实，建议更换",
+                        result="异常",
+                        version=2,
+                        operated_at=now - timedelta(days=7),
+                    ),
+                    OperationRecord(
+                        inspection_order_id=ord8.id,
+                        operator_id=reviewer.id,
+                        operation_type=OperationType.RETURN,
+                        from_status=InspectionStatus.PENDING_REVIEW,
+                        to_status=InspectionStatus.RETURNED,
+                        opinion="证据不足，钢索磨损照片不清晰，需重新提交",
+                        result="退回补正",
+                        version=3,
+                        operated_at=now - timedelta(days=6),
+                    ),
+                    OperationRecord(
+                        inspection_order_id=ord8.id,
+                        operator_id=handler.id,
+                        operation_type=OperationType.HANDLE,
+                        from_status=InspectionStatus.RETURNED,
+                        to_status=InspectionStatus.PENDING_REVIEW,
+                        from_risk_level=RiskLevel.LOW,
+                        to_risk_level=RiskLevel.MEDIUM,
+                        opinion="已补充高清磨损照片，确实存在卡滞，建议厂家更换钢丝绳总成",
+                        result="异常待修",
+                        version=5,
+                        operated_at=now - timedelta(days=2),
+                    ),
+                    OperationRecord(
+                        inspection_order_id=ord8.id,
+                        operator_id=handler.id,
+                        operation_type=OperationType.RISK_UPGRADE,
+                        from_risk_level=RiskLevel.LOW,
+                        to_risk_level=RiskLevel.MEDIUM,
+                        opinion="经多次测试确认钢丝绳卡滞频率较高，存在使用风险，升级为中风险",
+                        result="风险等级从 low 变更为 medium",
+                        version=4,
+                        operated_at=now - timedelta(days=3),
+                    ),
+                ])
+
             for rec in op_records:
                 db.add(rec)
             db.flush()
@@ -487,6 +583,16 @@ def seed_data():
                     to_level=RiskLevel.HIGH,
                     reason="哑铃片固定螺栓缺失，手柄松动，使用时可能脱落伤人",
                     changed_at=now - timedelta(days=15),
+                ))
+
+            if ord8:
+                risk_changes.append(RiskLevelChange(
+                    inspection_order_id=ord8.id,
+                    operator_id=handler.id,
+                    from_level=RiskLevel.LOW,
+                    to_level=RiskLevel.MEDIUM,
+                    reason="经多次测试确认钢丝绳卡滞频率较高，存在使用风险",
+                    changed_at=now - timedelta(days=3),
                 ))
 
             for rc in risk_changes:
@@ -524,6 +630,18 @@ def seed_data():
                     resolved_at=now - timedelta(days=12),
                     resolution="已更换手柄并补充螺栓，经测试使用正常",
                 ))
+            if ord8:
+                faults.append(FaultReport(
+                    inspection_order_id=ord8.id,
+                    fault_description="高位下拉训练器钢丝绳卡滞，阻力调节不均匀",
+                    fault_level=RiskLevel.MEDIUM,
+                    reported_by=handler.id,
+                    reported_at=now - timedelta(days=5),
+                    is_resolved=True,
+                    resolved_by=handler.id,
+                    resolved_at=now - timedelta(days=4),
+                    resolution="已对钢丝绳润滑并调整张紧度，临时修复，建议更换总成",
+                ))
 
             for f in faults:
                 db.add(f)
@@ -543,6 +661,20 @@ def seed_data():
                     confirmed_at=now - timedelta(days=12),
                     confirmation_remark="已更换新手柄，补充缺失的螺栓，经多人测试使用正常，无安全隐患",
                     evidence_path="/evidences/eq005_recovery.jpg",
+                    is_successful=True,
+                ))
+
+            eq008_fault = db.query(FaultReport).filter(
+                FaultReport.inspection_order_id == ord8.id if ord8 else None
+            ).first()
+            if eq008_fault and eq008_fault.is_resolved:
+                recoveries.append(RecoveryConfirm(
+                    fault_report_id=eq008_fault.id,
+                    inspection_order_id=ord8.id if ord8 else None,
+                    confirmed_by=handler.id,
+                    confirmed_at=now - timedelta(days=4),
+                    confirmation_remark="经3组共15次测试，钢丝绳润滑和张紧度调整有效，卡滞现象消失，恢复正常使用",
+                    evidence_path="/evidences/eq008_recovery.jpg",
                     is_successful=True,
                 ))
 

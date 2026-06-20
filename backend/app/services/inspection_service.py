@@ -169,6 +169,18 @@ def _enrich_order_list_item(db: Session, order: InspectionOrder) -> InspectionOr
         RecoveryConfirm.inspection_order_id == order.id
     ).count()
 
+    reviewer_name = None
+    reviewer_ops = db.query(OperationRecord).filter(
+        OperationRecord.inspection_order_id == order.id,
+        OperationRecord.operation_type.in_([
+            OperationType.REVIEW, OperationType.ARCHIVE, OperationType.RETURN
+        ])
+    ).order_by(OperationRecord.operated_at.desc()).first()
+    if reviewer_ops:
+        r_user = get_user(db, reviewer_ops.operator_id)
+        if r_user:
+            reviewer_name = r_user.name
+
     return InspectionOrderListItem(
         id=order.id,
         order_no=order.order_no,
@@ -176,10 +188,16 @@ def _enrich_order_list_item(db: Session, order: InspectionOrder) -> InspectionOr
         equipment_name=equipment.name if equipment else "未知设备",
         equipment_code=equipment.code if equipment else "N/A",
         equipment_location=equipment.location if equipment else "未知位置",
+        equipment_specification=equipment.specification if equipment else None,
+        equipment_model=equipment.specification if equipment else None,
+        location_detail=equipment.location if equipment else None,
         initiator_id=order.initiator_id,
         initiator_name=initiator.name if initiator else "未知",
+        inspector_name=initiator.name if initiator else None,
         current_handler_id=order.current_handler_id,
         current_handler_name=handler.name if handler else None,
+        handler_name=handler.name if handler else None,
+        reviewer_name=reviewer_name,
         status=order.status,
         risk_level=order.risk_level,
         inspection_result=order.inspection_result,
@@ -189,6 +207,8 @@ def _enrich_order_list_item(db: Session, order: InspectionOrder) -> InspectionOr
         last_handler_result=order.last_handler_result,
         handler_opinion=order.handler_opinion,
         handler_result=order.handler_result,
+        last_reviewer_opinion=order.last_reviewer_opinion,
+        last_reviewer_result=order.last_reviewer_result,
         reviewer_opinion=order.reviewer_opinion,
         reviewer_result=order.reviewer_result,
         version=order.version,
@@ -291,6 +311,7 @@ def get_inspection_order_detail(db: Session, order_id: int) -> Optional[Inspecti
     fault_schemas = []
     for fr in fault_reports:
         reporter = get_user(db, fr.reported_by)
+        resolver = get_user(db, fr.resolved_by) if fr.resolved_by else None
         fault_schemas.append(FaultReportSchema(
             id=fr.id,
             inspection_order_id=fr.inspection_order_id,
@@ -301,6 +322,7 @@ def get_inspection_order_detail(db: Session, order_id: int) -> Optional[Inspecti
             reported_at=fr.reported_at,
             is_resolved=fr.is_resolved,
             resolved_by=fr.resolved_by,
+            resolved_by_name=resolver.name if resolver else None,
             resolved_at=fr.resolved_at,
             resolution=fr.resolution,
         ))
@@ -558,6 +580,8 @@ def review_inspection(
             version=data.version,
         )
 
+        order.last_reviewer_opinion = order.reviewer_opinion
+        order.last_reviewer_result = order.reviewer_result
         order.reviewer_opinion = data.reviewer_opinion
         order.reviewer_result = data.reviewer_result
         order.reviewed_at = datetime.utcnow()
@@ -631,6 +655,11 @@ def return_inspection(
         order.version += 1
         order.last_handler_opinion = order.handler_opinion
         order.last_handler_result = order.handler_result
+        order.last_reviewer_opinion = order.reviewer_opinion
+        order.last_reviewer_result = order.reviewer_result
+        order.reviewer_opinion = data.opinion
+        order.reviewer_result = "退回补正"
+        order.reviewed_at = datetime.utcnow()
 
         handler = db.query(User).filter(User.role == UserRole.HANDLER).first()
         if handler:

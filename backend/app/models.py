@@ -126,6 +126,9 @@ class InspectionOrder(Base):
     handler_result = Column(String(100))
     handled_at = Column(DateTime)
 
+    last_reviewer_opinion = Column(Text)
+    last_reviewer_result = Column(String(100))
+
     reviewer_opinion = Column(Text)
     reviewer_result = Column(String(100))
     reviewed_at = Column(DateTime)
