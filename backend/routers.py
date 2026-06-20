@@ -280,9 +280,22 @@ async def execute_action(
 
         if app["version"] != req.version:
             await db.rollback()
+            msg = f"数据版本冲突：当前版本为 {app['version']}，您提交的版本为 {req.version}，请刷新后重试"
+            await db.execute("BEGIN IMMEDIATE")
+            await log_audit(db, app_id, f"{req.action}(失败)", user,
+                           f"并发冲突: {msg}",
+                           request.client.host if request.client else None)
+            await db.execute(
+                """INSERT INTO process_records
+                (application_id, action, from_status, to_status, operator_id, operator_name, operator_role, opinion)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (app_id, f"{req.action}(失败)", app["status"], None,
+                 user["id"], user["display_name"], user["role"], msg),
+            )
+            await db.commit()
             raise HTTPException(
                 status_code=409,
-                detail=f"数据版本冲突：当前版本为 {app['version']}，您提交的版本为 {req.version}，请刷新后重试"
+                detail=msg
             )
 
         valid, msg = validate_action(user["role"], req.action, app["status"])
@@ -422,54 +435,174 @@ async def batch_action(
     db = await get_db()
     try:
         results = []
+        ip = request.client.host if request.client else None
+
         for app_id in req.application_ids:
-            cursor = await db.execute("SELECT * FROM transfer_applications WHERE id = ?", (app_id,))
-            app = await cursor.fetchone()
-            if not app:
-                results.append({"id": app_id, "success": False, "error": "申请不存在"})
-                continue
+            try:
+                await db.execute("BEGIN IMMEDIATE")
 
-            app = dict(app)
-            valid, msg = validate_action(user["role"], req.action, app["status"])
-            if not valid:
+                cursor = await db.execute("SELECT * FROM transfer_applications WHERE id = ?", (app_id,))
+                app = await cursor.fetchone()
+                if not app:
+                    await db.rollback()
+                    results.append({"id": app_id, "success": False, "error": "申请不存在"})
+                    await db.execute("BEGIN IMMEDIATE")
+                    await log_audit(db, app_id, f"批量{req.action}(失败)", user, "原因: 申请不存在", ip)
+                    await db.execute(
+                        """INSERT INTO process_records
+                        (application_id, action, from_status, to_status, operator_id, operator_name, operator_role, opinion)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (app_id, f"批量{req.action}(失败)", None, None,
+                         user["id"], user["display_name"], user["role"], "申请不存在"),
+                    )
+                    await db.commit()
+                    continue
+
+                app = dict(app)
+
+                valid, msg = validate_action(user["role"], req.action, app["status"])
+                if not valid:
+                    await db.rollback()
+                    results.append({"id": app_id, "success": False, "error": msg})
+                    await db.execute("BEGIN IMMEDIATE")
+                    await log_audit(db, app_id, f"批量{req.action}(失败)", user, f"越权/顺序错误: {msg}", ip)
+                    await db.execute(
+                        """INSERT INTO process_records
+                        (application_id, action, from_status, to_status, operator_id, operator_name, operator_role, opinion)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (app_id, f"批量{req.action}(失败)", app["status"], None,
+                         user["id"], user["display_name"], user["role"], msg),
+                    )
+                    await db.commit()
+                    continue
+
+                cursor = await db.execute("SELECT * FROM materials WHERE application_id = ?", (app_id,))
+                materials = [dict(m) for m in await cursor.fetchall()]
+
+                valid, msg = validate_materials_for_submit(app["status"], materials, req.action)
+                if not valid:
+                    await db.rollback()
+                    results.append({"id": app_id, "success": False, "error": msg})
+                    await db.execute("BEGIN IMMEDIATE")
+                    await log_audit(db, app_id, f"批量{req.action}(失败)", user, f"材料缺失: {msg}", ip)
+                    await db.execute(
+                        """INSERT INTO process_records
+                        (application_id, action, from_status, to_status, operator_id, operator_name, operator_role, opinion)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (app_id, f"批量{req.action}(失败)", app["status"], None,
+                         user["id"], user["display_name"], user["role"], msg),
+                    )
+                    await db.commit()
+                    continue
+
+                valid, msg = validate_opinion_required(req.action, req.opinion)
+                if not valid:
+                    await db.rollback()
+                    results.append({"id": app_id, "success": False, "error": msg})
+                    await db.execute("BEGIN IMMEDIATE")
+                    await log_audit(db, app_id, f"批量{req.action}(失败)", user, f"意见缺失: {msg}", ip)
+                    await db.execute(
+                        """INSERT INTO process_records
+                        (application_id, action, from_status, to_status, operator_id, operator_name, operator_role, opinion)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (app_id, f"批量{req.action}(失败)", app["status"], None,
+                         user["id"], user["display_name"], user["role"], msg),
+                    )
+                    await db.commit()
+                    continue
+
+                is_overdue, overdue_reason, overdue_action = check_overdue(app)
+                if is_overdue and app["status"] != STATUS_OVERDUE:
+                    if req.action in ("开始审核", "审核通过", "复核归档", "开始复核"):
+                        await db.rollback()
+                        msg = f"申请已逾期，{overdue_reason}，需先处理逾期: {overdue_action}"
+                        results.append({"id": app_id, "success": False, "error": msg})
+                        await db.execute("BEGIN IMMEDIATE")
+                        await log_audit(db, app_id, f"批量{req.action}(失败)", user, f"逾期拦截: {msg}", ip)
+                        await db.execute(
+                            """INSERT INTO process_records
+                            (application_id, action, from_status, to_status, operator_id, operator_name, operator_role, opinion)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                            (app_id, f"批量{req.action}(失败)", app["status"], None,
+                             user["id"], user["display_name"], user["role"], msg),
+                        )
+                        await db.commit()
+                        continue
+
+                target_status = get_target_status(user["role"], req.action)
+                new_role = get_current_role_for_status(target_status)
+                new_deadline = calculate_deadline(target_status)
+
+                cursor = await db.execute("SELECT id FROM users WHERE role = ? LIMIT 1", (new_role,))
+                new_assignee_row = await cursor.fetchone()
+                new_assignee = new_assignee_row["id"] if new_assignee_row else None
+
+                new_overdue_reason = None
+                new_overdue_action = None
+                if app["status"] == STATUS_OVERDUE and req.action in ("提交审核", "补正提交"):
+                    new_overdue_reason = "逾期后重新提交"
+
+                now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                await db.execute(
+                    """UPDATE transfer_applications
+                    SET status = ?, current_role = ?, assignee_id = ?, deadline_at = ?,
+                        overdue_reason = ?, overdue_action = ?, updated_at = ?, version = version + 1
+                    WHERE id = ? AND version = ?""",
+                    (target_status, new_role, new_assignee, new_deadline,
+                     new_overdue_reason, new_overdue_action, now_str, app_id, app["version"]),
+                )
+                changed = (await (await db.execute("SELECT changes()")).fetchone())[0]
+                if changed == 0:
+                    await db.rollback()
+                    msg = "并发冲突：数据已被其他操作修改，请刷新后重试"
+                    results.append({"id": app_id, "success": False, "error": msg})
+                    await db.execute("BEGIN IMMEDIATE")
+                    await log_audit(db, app_id, f"批量{req.action}(失败)", user, f"并发冲突: {msg}", ip)
+                    await db.execute(
+                        """INSERT INTO process_records
+                        (application_id, action, from_status, to_status, operator_id, operator_name, operator_role, opinion)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (app_id, f"批量{req.action}(失败)", app["status"], None,
+                         user["id"], user["display_name"], user["role"], msg),
+                    )
+                    await db.commit()
+                    continue
+
+                await db.execute(
+                    """INSERT INTO process_records
+                    (application_id, action, from_status, to_status, operator_id, operator_name, operator_role, opinion, materials_snapshot)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (app_id, f"批量{req.action}", app["status"], target_status,
+                     user["id"], user["display_name"], user["role"], req.opinion,
+                     json.dumps([{k: v for k, v in m.items() if k in ("name", "is_submitted", "category")} for m in materials])),
+                )
+
+                await log_audit(db, app_id, f"批量{req.action}", user,
+                               f"从 {app['status']} -> {target_status}，意见: {req.opinion or '无'}", ip)
+
+                await db.commit()
+                results.append({"id": app_id, "success": True, "new_status": target_status})
+
+            except Exception as inner_e:
+                await db.rollback()
+                msg = f"系统错误: {str(inner_e)}"
                 results.append({"id": app_id, "success": False, "error": msg})
-                continue
+                try:
+                    await db.execute("BEGIN IMMEDIATE")
+                    await log_audit(db, app_id, f"批量{req.action}(失败)", user, f"系统错误: {msg}", ip)
+                    await db.execute(
+                        """INSERT INTO process_records
+                        (application_id, action, from_status, to_status, operator_id, operator_name, operator_role, opinion)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (app_id, f"批量{req.action}(失败)", None, None,
+                         user["id"], user["display_name"], user["role"], msg),
+                    )
+                    await db.commit()
+                except Exception:
+                    pass
 
-            target_status = get_target_status(user["role"], req.action)
-            new_role = get_current_role_for_status(target_status)
-            new_deadline = calculate_deadline(target_status)
-
-            cursor = await db.execute("SELECT id FROM users WHERE role = ? LIMIT 1", (new_role,))
-            new_assignee_row = await cursor.fetchone()
-            new_assignee = new_assignee_row["id"] if new_assignee_row else None
-
-            now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            await db.execute(
-                """UPDATE transfer_applications
-                SET status = ?, current_role = ?, assignee_id = ?, deadline_at = ?,
-                    updated_at = ?, version = version + 1
-                WHERE id = ?""",
-                (target_status, new_role, new_assignee, new_deadline, now_str, app_id),
-            )
-
-            await db.execute(
-                """INSERT INTO process_records
-                (application_id, action, from_status, to_status, operator_id, operator_name, operator_role, opinion)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                (app_id, req.action, app["status"], target_status,
-                 user["id"], user["display_name"], user["role"], req.opinion),
-            )
-
-            await log_audit(db, app_id, f"批量{req.action}", user,
-                          f"批量操作: {app['status']} -> {target_status}",
-                          request.client.host if request.client else None)
-
-            results.append({"id": app_id, "success": True, "new_status": target_status})
-
-        await db.commit()
         return {"results": results}
     except Exception as e:
-        await db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         await db.close()

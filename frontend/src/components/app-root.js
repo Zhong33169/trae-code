@@ -779,9 +779,15 @@ class AppRoot extends LitElement {
       const result = await batchAction(this.selectedIds, action, opinion);
       const succeeded = result.results.filter(r => r.success).length;
       const failed = result.results.filter(r => !r.success).length;
-      alert(`批量操作完成：成功 ${succeeded} 条${failed > 0 ? `，失败 ${failed} 条` : ''}`);
+      let msg = `批量操作完成：成功 ${succeeded} 条，失败 ${failed} 条`;
+      if (failed > 0) {
+        const errors = result.results.filter(r => !r.success).map(r => `#${r.id}: ${r.error}`).join('\n');
+        msg += `\n\n失败详情：\n${errors}`;
+      }
+      alert(msg);
       this.selectedIds = [];
       await this._loadApplications();
+      await this._loadDashboard();
     } catch (e) {
       this.error = e.message;
     }
@@ -795,7 +801,7 @@ class AppRoot extends LitElement {
   }
 
   _renderDetail() {
-    return html`<app-detail .appId=${this.selectedAppId} .user=${this.user} @back=${() => this._navigate('list')} @refresh=${() => { this.page = 'list'; this._navigate('list'); }}></app-detail>`;
+    return html`<app-detail .appId=${this.selectedAppId} .user=${this.user} @back=${() => this._navigate('list')} @refresh=${async () => { await this._loadDashboard(); this.page = 'list'; await this._navigate('list'); }}></app-detail>`;
   }
 
   _renderCreateDialog() {
@@ -837,6 +843,7 @@ class AppRoot extends LitElement {
       const app = await createApplication(data);
       this.showCreateDialog = false;
       this.selectedAppId = app.id;
+      await this._loadDashboard();
       this.page = 'detail';
     } catch (e) {
       this.error = e.message;

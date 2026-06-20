@@ -251,6 +251,96 @@ async def seed_demo_data():
                 "overdue_reason": "审核时限即将到期",
                 "overdue_action": "需审核主管立即处理",
             },
+            {
+                "no": "TF-2026-0011",
+                "seller": ("施廿六", "350101198903151234"),
+                "buyer": ("张廿七", "320101199304162345"),
+                "plate": "闽L99999",
+                "vin": "LSVAU2A39EN999999",
+                "brand": "小鹏P7 2022款",
+                "status": "待审核",
+                "role": "审核主管",
+                "deadline": now + timedelta(hours=36),
+                "all_materials": True,
+            },
+            {
+                "no": "TF-2026-0012",
+                "seller": ("孔廿八", "360101199005173456"),
+                "buyer": ("曹廿九", "410101199106184567"),
+                "plate": "赣M10101",
+                "vin": "LSVAU2A39EN000001",
+                "brand": "理想L9 2023款",
+                "status": "待审核",
+                "role": "审核主管",
+                "deadline": now + timedelta(hours=28),
+                "all_materials": True,
+            },
+            {
+                "no": "TF-2026-0013",
+                "seller": ("严三十", "530101198707195678"),
+                "buyer": ("华卅一", "450101199408206789"),
+                "plate": "云N11223",
+                "vin": "LSVAU2A39EN000002",
+                "brand": "问界M5 2023款",
+                "status": "待审核",
+                "role": "审核主管",
+                "deadline": now + timedelta(hours=40),
+                "all_materials": False,
+                "missing_materials": ["车辆购置税完税证明"],
+            },
+            {
+                "no": "TF-2026-0014",
+                "seller": ("金卅二", "210101198609216789"),
+                "buyer": ("魏卅三", "610101199510227890"),
+                "plate": "辽P33445",
+                "vin": "LSVAU2A39EN000003",
+                "brand": "极氪001 2023款",
+                "status": "待审核",
+                "role": "审核主管",
+                "deadline": now - timedelta(hours=12),
+                "overdue_reason": "超过48小时审核时限",
+                "overdue_action": "需审核主管立即处理或退回登记员补正",
+                "all_materials": True,
+            },
+            {
+                "no": "TF-2026-0015",
+                "seller": ("陶卅四", "440101198911237890"),
+                "buyer": ("姜卅五", "510101199212248901"),
+                "plate": "粤Q55667",
+                "vin": "LSVAU2A39EN000004",
+                "brand": "比亚迪海豹 2023款",
+                "status": "待审核",
+                "role": "审核主管",
+                "deadline": now - timedelta(hours=6),
+                "overdue_reason": "超过48小时审核时限",
+                "overdue_action": "需审核主管立即处理",
+                "all_materials": True,
+            },
+            {
+                "no": "TF-2026-0016",
+                "seller": ("戚卅六", "330101199102258901"),
+                "buyer": ("谢卅七", "310101199303269012"),
+                "plate": "浙R77889",
+                "vin": "LSVAU2A39EN000005",
+                "brand": "长安深蓝SL03 2023款",
+                "status": "待复核归档",
+                "role": "复核负责人",
+                "deadline": now + timedelta(hours=18),
+                "all_materials": True,
+            },
+            {
+                "no": "TF-2026-0017",
+                "seller": ("邹卅八", "370101198704279012"),
+                "buyer": ("喻卅九", "420101199405280123"),
+                "plate": "鲁S99001",
+                "vin": "LSVAU2A39EN000006",
+                "brand": "哪吒S 2023款",
+                "status": "待复核归档",
+                "role": "复核负责人",
+                "deadline": now + timedelta(hours=20),
+                "all_materials": False,
+                "missing_materials": ["交强险保单"],
+            },
         ]
 
         for app in apps_data:
@@ -275,6 +365,10 @@ async def seed_demo_data():
 
             for mat_name in REQUIRED_MATERIALS:
                 submitted = app["status"] not in ("草稿", "待补正")
+                if "all_materials" in app:
+                    submitted = app["all_materials"]
+                if app.get("missing_materials") and mat_name in app["missing_materials"]:
+                    submitted = False
                 submitted_at = now.strftime("%Y-%m-%d %H:%M:%S") if submitted else None
                 if app["status"] == "已驳回" and mat_name == "车辆购置税完税证明":
                     submitted = False
@@ -330,5 +424,63 @@ async def seed_demo_data():
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                     (app_id, "复核归档", "复核归档中", "已办结", 3, "王五", "复核负责人", "复核通过，已归档"),
                 )
+
+        demo_batch_records = [
+            {
+                "app_no": "TF-2026-0011",
+                "records": [
+                    ("批量开始审核(失败)", "待审核", None, 2, "李四", "审核主管",
+                     "申请已逾期，超过48小时审核时限，需先处理逾期"),
+                ]
+            },
+            {
+                "app_no": "TF-2026-0013",
+                "records": [
+                    ("批量审核通过(失败)", "待审核", None, 2, "李四", "审核主管",
+                     "审核通过前必交材料缺失: 车辆购置税完税证明"),
+                ]
+            },
+        ]
+        for demo in demo_batch_records:
+            cursor = await db.execute("SELECT id FROM transfer_applications WHERE application_no = ?", (demo["app_no"],))
+            row = await cursor.fetchone()
+            if row:
+                app_id = row[0]
+                for rec in demo["records"]:
+                    await db.execute(
+                        """INSERT INTO process_records
+                        (application_id, action, from_status, to_status, operator_id, operator_name, operator_role, opinion)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (app_id, rec[0], rec[1], rec[2], rec[3], rec[4], rec[5], rec[6]),
+                    )
+
+        demo_audit_logs = [
+            {
+                "app_no": "TF-2026-0011",
+                "logs": [
+                    ("批量开始审核(失败)", 2, "李四", "审核主管",
+                     "逾期拦截: 申请已逾期，超过48小时审核时限，需先处理逾期: 需审核主管立即处理或退回登记员补正"),
+                ]
+            },
+            {
+                "app_no": "TF-2026-0013",
+                "logs": [
+                    ("批量审核通过(失败)", 2, "李四", "审核主管",
+                     "材料缺失: 审核通过前必交材料缺失: 车辆购置税完税证明"),
+                ]
+            },
+        ]
+        for demo in demo_audit_logs:
+            cursor = await db.execute("SELECT id FROM transfer_applications WHERE application_no = ?", (demo["app_no"],))
+            row = await cursor.fetchone()
+            if row:
+                app_id = row[0]
+                for log in demo["logs"]:
+                    await db.execute(
+                        """INSERT INTO audit_logs
+                        (application_id, action, actor_id, actor_name, actor_role, detail)
+                        VALUES (?, ?, ?, ?, ?, ?)""",
+                        (app_id, log[0], log[1], log[2], log[3], log[4]),
+                    )
 
         await db.commit()
