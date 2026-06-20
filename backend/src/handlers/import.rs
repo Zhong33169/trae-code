@@ -1,6 +1,6 @@
 use actix_web::{web, HttpResponse, Responder};
 use crate::db::Database;
-use crate::middleware::auth::{AuthUser, require_role};
+use crate::middleware::auth::{AuthUser, require_role, role_label};
 use crate::models::*;
 use chrono::Utc;
 use rusqlite::params;
@@ -34,16 +34,16 @@ fn row_to_record(row: &rusqlite::Row) -> rusqlite::Result<ImportRecord> {
     })
 }
 
-fn insert_audit_log(conn: &rusqlite::Connection, ticket_id: Option<i64>, user_id: i64, action: &str, detail: Option<&str>, is_failure: bool, failure_reason: Option<&str>) {
+fn insert_audit_log(conn: &rusqlite::Connection, ticket_id: Option<i64>, user_id: i64, action: &str, detail: Option<&str>, is_failure: bool, failure_reason: Option<&str>, batch_id: Option<i64>) {
     let _ = conn.execute(
-        "INSERT INTO audit_logs (ticket_id, user_id, action, detail, is_failure, failure_reason) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        params![ticket_id, user_id, action, detail, if is_failure { 1 } else { 0 }, failure_reason],
+        "INSERT INTO audit_logs (ticket_id, user_id, action, detail, is_failure, failure_reason, batch_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![ticket_id, user_id, action, detail, if is_failure { 1 } else { 0 }, failure_reason, batch_id],
     );
 }
 
 fn add_audit_log(db: &Database, ticket_id: Option<i64>, user_id: i64, action: &str, detail: Option<&str>, is_failure: bool, failure_reason: Option<&str>) {
     let conn = db.conn.lock().unwrap();
-    insert_audit_log(&conn, ticket_id, user_id, action, detail, is_failure, failure_reason);
+    insert_audit_log(&conn, ticket_id, user_id, action, detail, is_failure, failure_reason, None);
 }
 
 pub async fn import_tickets(
@@ -52,6 +52,8 @@ pub async fn import_tickets(
     auth_user: AuthUser,
 ) -> impl Responder {
     if let Err(resp) = require_role(&auth_user, &["registrar", "auditor"]) {
+        add_audit_log(&db, None, auth_user.user_id, "import_forbidden", None, true,
+            Some(&format!("{}({})无权导入工单，仅投诉登记员或审核主管可操作", auth_user.name, role_label(&auth_user.role))));
         return resp;
     }
 
@@ -142,6 +144,7 @@ pub async fn import_tickets(
                     Some(&format!("批次{}：{}", batch_no, error_msg)),
                     true,
                     Some(&error_msg),
+                    Some(batch_id),
                 );
 
                 let record = conn.query_row(
@@ -196,6 +199,7 @@ pub async fn import_tickets(
                             Some(&format!("批次{}：离线台账导入成功", batch_no)),
                             false,
                             None,
+                            Some(batch_id),
                         );
 
                         let record = conn.query_row(
@@ -224,6 +228,7 @@ pub async fn import_tickets(
                             Some(&format!("批次{}：工单号{}导入失败", batch_no, item.ticket_no)),
                             true,
                             Some(&format!("{}", e)),
+                            Some(batch_id),
                         );
 
                         let record = conn.query_row(
@@ -255,6 +260,7 @@ pub async fn import_tickets(
         Some(&format!("批次{}：共{}条，成功{}条，失败{}条", batch_no, total, success_count, fail_count)),
         fail_count > 0,
         if fail_count > 0 { Some("部分条目导入失败") } else { None },
+        Some(batch_id),
     );
 
     HttpResponse::Ok().json(ApiResponse::success(ImportResult {

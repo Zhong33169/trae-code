@@ -122,26 +122,32 @@ impl Database {
         conn.execute(attach_sql, params![2, 4, "服务评价表.pdf", "/uploads/4/evaluation.pdf", 204800, 1])?;
         conn.execute(attach_sql, params![3, 5, "初步描述.txt", "/uploads/5/description.txt", 1024, 1])?;
 
-        let audit_sql = "INSERT OR IGNORE INTO audit_logs (id, ticket_id, user_id, action, detail, is_failure, failure_reason)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)";
-        conn.execute(audit_sql, params![1, Some(1), 1, "create_ticket", Some("创建投诉工单"), 0, None as Option<String>])?;
-        conn.execute(audit_sql, params![2, Some(2), 1, "create_ticket", Some("创建投诉工单"), 0, None as Option<String>])?;
-        conn.execute(audit_sql, params![3, Some(2), 2, "start_process", Some("审核主管开始办理"), 0, None as Option<String>])?;
-        conn.execute(audit_sql, params![4, Some(3), 1, "create_ticket", Some("创建投诉工单"), 0, None as Option<String>])?;
-        conn.execute(audit_sql, params![5, Some(3), 2, "start_process", Some("审核主管开始办理"), 0, None as Option<String>])?;
-        conn.execute(audit_sql, params![6, Some(3), 2, "submit_review", Some("提交复核"), 0, None as Option<String>])?;
-        conn.execute(audit_sql, params![7, Some(4), 1, "create_ticket", Some("创建投诉工单"), 0, None as Option<String>])?;
-        conn.execute(audit_sql, params![8, Some(4), 2, "start_process", Some("审核主管开始办理"), 0, None as Option<String>])?;
-        conn.execute(audit_sql, params![9, Some(4), 2, "submit_review", Some("提交复核"), 0, None as Option<String>])?;
-        conn.execute(audit_sql, params![10, Some(4), 3, "archive", Some("复核通过，归档"), 0, None as Option<String>])?;
-        conn.execute(audit_sql, params![11, Some(5), 1, "create_ticket", Some("创建投诉工单"), 0, None as Option<String>])?;
-        conn.execute(audit_sql, params![12, Some(5), 2, "return_ticket_auditor", Some("退回补正：缺少材料"), 0, None as Option<String>])?;
-        conn.execute(audit_sql, params![13, Some(6), 1, "create_ticket", Some("创建投诉工单"), 0, None as Option<String>])?;
-        conn.execute(audit_sql, params![14, Some(7), 1, "create_ticket", Some("创建投诉工单"), 0, None as Option<String>])?;
-        conn.execute(audit_sql, params![15, Some(7), 2, "start_process", Some("审核主管开始办理"), 0, None as Option<String>])?;
-        conn.execute(audit_sql, params![16, Some(7), 2, "submit_review", Some("提交复核"), 0, None as Option<String>])?;
-        conn.execute(audit_sql, params![17, Some(7), 3, "return_ticket_reviewer", Some("复核退回：处理结果不充分"), 0, None as Option<String>])?;
-        conn.execute(audit_sql, params![18, Some(8), 1, "create_ticket", Some("创建草稿工单"), 0, None as Option<String>])?;
+        let audit_sql = "INSERT OR IGNORE INTO audit_logs (id, ticket_id, user_id, action, detail, is_failure, failure_reason, batch_id)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)";
+        conn.execute(audit_sql, params![1, Some(1), 1, "create_ticket", Some("投诉登记员创建工单并提交审核"), 0, None as Option<String>, None as Option<i64>])?;
+        conn.execute(audit_sql, params![2, Some(2), 1, "create_ticket", Some("投诉登记员创建工单并提交审核"), 0, None as Option<String>, None as Option<i64>])?;
+        conn.execute(audit_sql, params![3, Some(2), 2, "start_process", Some("审核主管开始办理"), 0, None as Option<String>, None as Option<i64>])?;
+        conn.execute(audit_sql, params![4, Some(3), 1, "create_ticket", Some("投诉登记员创建工单并提交审核"), 0, None as Option<String>, None as Option<i64>])?;
+        conn.execute(audit_sql, params![5, Some(3), 2, "start_process", Some("审核主管开始办理"), 0, None as Option<String>, None as Option<i64>])?;
+        conn.execute(audit_sql, params![6, Some(3), 2, "submit_review", Some("审核主管提交复核"), 0, None as Option<String>, None as Option<i64>])?;
+        conn.execute(audit_sql, params![7, Some(4), 1, "create_ticket", Some("投诉登记员创建工单并提交审核"), 0, None as Option<String>, None as Option<i64>])?;
+        conn.execute(audit_sql, params![8, Some(4), 2, "start_process", Some("审核主管开始办理"), 0, None as Option<String>, None as Option<i64>])?;
+        conn.execute(audit_sql, params![9, Some(4), 2, "submit_review", Some("审核主管提交复核"), 0, None as Option<String>, None as Option<i64>])?;
+        conn.execute(audit_sql, params![10, Some(4), 3, "archive", Some("复核负责人归档通过"), 0, None as Option<String>, None as Option<i64>])?;
+        conn.execute(audit_sql, params![11, Some(5), 1, "create_ticket", Some("投诉登记员创建工单并提交审核"), 0, None as Option<String>, None as Option<i64>])?;
+        conn.execute(audit_sql, params![12, Some(5), 2, "return_ticket_auditor", Some("退回原因：缺少损坏物品现场照片及购买凭证"), 0, None as Option<String>, None as Option<i64>])?;
+        conn.execute(audit_sql, params![13, Some(6), 1, "create_ticket", Some("投诉登记员创建工单并提交审核"), 0, None as Option<String>, None as Option<i64>])?;
+        conn.execute(audit_sql, params![14, Some(7), 1, "create_ticket", Some("投诉登记员创建工单并提交审核"), 0, None as Option<String>, None as Option<i64>])?;
+        conn.execute(audit_sql, params![15, Some(7), 2, "start_process", Some("审核主管开始办理"), 0, None as Option<String>, None as Option<i64>])?;
+        conn.execute(audit_sql, params![16, Some(7), 2, "submit_review", Some("审核主管提交复核"), 0, None as Option<String>, None as Option<i64>])?;
+        conn.execute(audit_sql, params![17, Some(7), 3, "return_ticket_reviewer", Some("复核退回原因：处理结果不充分，仅批评教育不足以解决问题"), 0, None as Option<String>, None as Option<i64>])?;
+        conn.execute(audit_sql, params![18, Some(8), 1, "create_ticket", Some("投诉登记员创建草稿工单"), 0, None as Option<String>, None as Option<i64>])?;
+        conn.execute(audit_sql, params![19, None as Option<i64>, 3, "archive_forbidden", Some("复核负责人尝试归档工单6"), 1, Some("权限不足：工单6状态为pending_audit，仅待复核状态可归档"), None as Option<i64>])?;
+        conn.execute(audit_sql, params![20, Some(4), 1, "archive_forbidden", Some("投诉登记员尝试归档已归档工单4"), 1, Some("张登记员(投诉登记员)无权归档，仅复核负责人可操作"), None as Option<i64>])?;
+        conn.execute(audit_sql, params![21, Some(1), 1, "start_process_forbidden", Some("投诉登记员尝试开始办理工单1"), 1, Some("张登记员(投诉登记员)无权开始办理，仅投诉审核主管可操作"), None as Option<i64>])?;
+        conn.execute(audit_sql, params![22, Some(4), 2, "start_process_status_conflict", Some("审核主管尝试对已归档工单4开始办理"), 1, Some("工单状态为archived，仅待审核状态可开始办理"), None as Option<i64>])?;
+        conn.execute(audit_sql, params![23, Some(5), 3, "resubmit_ticket_forbidden", Some("复核负责人尝试补正重提工单5"), 1, Some("王复核负责人(复核负责人)无权补正重提，仅投诉登记员可操作"), None as Option<i64>])?;
+        conn.execute(audit_sql, params![24, None as Option<i64>, 3, "import_forbidden", Some("复核负责人尝试导入工单"), 1, Some("王复核负责人(复核负责人)无权导入工单，仅投诉登记员或审核主管可操作"), None as Option<i64>])?;
 
         conn.execute(
             "INSERT OR IGNORE INTO import_batches (id, batch_no, source, total_count, success_count, fail_count, imported_by)

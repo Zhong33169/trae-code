@@ -23,6 +23,12 @@ api.interceptors.response.use(
     return Promise.reject(response.data || { message: '请求失败' })
   },
   (error) => {
+    if (error.response?.status === 401) {
+      localStorage.removeItem('token')
+      if (!error.config?.url?.includes('/auth/')) {
+        window.dispatchEvent(new CustomEvent('auth:unauthorized'))
+      }
+    }
     const message = error.response?.data?.message || error.message || '网络错误'
     return Promise.reject({ message, ...error.response?.data })
   }

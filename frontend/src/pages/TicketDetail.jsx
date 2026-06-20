@@ -26,6 +26,12 @@ const sourceLabels = {
   other: '其他',
 }
 
+const roleLabels = {
+  registrar: '投诉登记员',
+  auditor: '投诉审核主管',
+  reviewer: '复核负责人',
+}
+
 const actionLabels = {
   create_ticket: '创建工单',
   update_ticket: '更新工单',
@@ -33,14 +39,32 @@ const actionLabels = {
   submit_review: '提交复核',
   return_ticket_auditor: '审核退回',
   return_ticket_reviewer: '复核退回',
-  resubmit_ticket: '重新提交',
-  archive: '归档',
+  resubmit_ticket: '补正重提',
+  archive: '复核归档',
   import_success: '导入成功',
   import_duplicate: '导入重复',
   import_conflict: '导入冲突',
   import_failed: '导入失败',
   import_batch: '批次导入',
   delete_attachment: '删除附件',
+  upload_attachment: '上传附件',
+  create_ticket_forbidden: '创建工单(无权限)',
+  update_ticket_forbidden: '更新工单(无权限)',
+  start_process_forbidden: '开始办理(无权限)',
+  submit_review_forbidden: '提交复核(无权限)',
+  return_ticket_forbidden: '退回(无权限)',
+  resubmit_ticket_forbidden: '补正重提(无权限)',
+  archive_forbidden: '归档(无权限)',
+  import_forbidden: '导入(无权限)',
+  upload_attachment_forbidden: '上传附件(无权限)',
+  delete_attachment_forbidden: '删除附件(无权限)',
+  update_ticket_status_conflict: '更新工单(状态冲突)',
+  start_process_status_conflict: '开始办理(状态冲突)',
+  submit_review_status_conflict: '提交复核(状态冲突)',
+  return_ticket_status_conflict: '退回(状态冲突)',
+  resubmit_ticket_status_conflict: '补正重提(状态冲突)',
+  archive_status_conflict: '归档(状态冲突)',
+  create_ticket_failed: '创建工单失败',
 }
 
 const TicketDetail = () => {
@@ -52,6 +76,7 @@ const TicketDetail = () => {
   const [auditLogs, setAuditLogs] = useState([])
   const [activeTab, setActiveTab] = useState('info')
   const [loading, setLoading] = useState(true)
+  const [errorMsg, setErrorMsg] = useState('')
 
   const [showReturnModal, setShowReturnModal] = useState(false)
   const [returnReason, setReturnReason] = useState('')
@@ -64,6 +89,7 @@ const TicketDetail = () => {
 
   const loadData = async () => {
     setLoading(true)
+    setErrorMsg('')
     try {
       const [ticketData, attachData, auditData] = await Promise.all([
         ticketApi.get(id),
@@ -74,7 +100,7 @@ const TicketDetail = () => {
       setAttachments(attachData)
       setAuditLogs(auditData)
     } catch (e) {
-      console.error('加载工单详情失败', e)
+      setErrorMsg(e.message || '加载工单详情失败')
     } finally {
       setLoading(false)
     }
@@ -84,28 +110,59 @@ const TicketDetail = () => {
     loadData()
   }, [id])
 
-  const canStartProcess = currentUser?.role === 'auditor' && ticket?.status === 'pending_audit'
-  const canSubmitReview = currentUser?.role === 'auditor' && ticket?.status === 'processing'
-  const canReturn = (currentUser?.role === 'auditor' && (ticket?.status === 'pending_audit' || ticket?.status === 'processing'))
-    || (currentUser?.role === 'reviewer' && ticket?.status === 'pending_review')
-  const canResubmit = currentUser?.role === 'registrar' && (ticket?.status === 'returned' || ticket?.status === 'draft')
-  const canArchive = currentUser?.role === 'reviewer' && ticket?.status === 'pending_review'
-  const canEdit = currentUser?.role === 'registrar' && (ticket?.status === 'draft' || ticket?.status === 'returned')
+  const role = currentUser?.role
+  const status = ticket?.status
+
+  const canStartProcess = role === 'auditor' && status === 'pending_audit'
+  const canSubmitReview = role === 'auditor' && status === 'processing'
+  const canReturnAuditor = role === 'auditor' && (status === 'pending_audit' || status === 'processing')
+  const canReturnReviewer = role === 'reviewer' && status === 'pending_review'
+  const canReturn = canReturnAuditor || canReturnReviewer
+  const canResubmit = role === 'registrar' && (status === 'returned' || status === 'draft')
+  const canArchive = role === 'reviewer' && status === 'pending_review'
+  const canEdit = role === 'registrar' && (status === 'draft' || status === 'returned')
+  const canUpload = role === 'registrar' || role === 'auditor'
+  const canDeleteAttachment = role === 'registrar'
+
+  const forbiddenHints = []
+  if (status === 'pending_audit' && role === 'registrar') {
+    forbiddenHints.push('当前工单待审核，需审核主管开始办理')
+  }
+  if (status === 'processing' && role !== 'auditor') {
+    forbiddenHints.push('当前工单办理中，需审核主管操作')
+  }
+  if (status === 'pending_review' && role !== 'reviewer') {
+    forbiddenHints.push('当前工单待复核，需复核负责人操作')
+  }
+  if (status === 'archived') {
+    forbiddenHints.push('当前工单已归档，不可再操作')
+  }
+  if (status === 'returned' && role !== 'registrar') {
+    forbiddenHints.push('当前工单已退回，需投诉登记员补正后重提')
+  }
+
+  const handleError = (e, action) => {
+    const msg = e?.message || e?.failure_reason || (action + '失败')
+    setErrorMsg(action + '失败：' + msg)
+    loadData()
+  }
 
   const handleStartProcess = async () => {
+    setErrorMsg('')
     try {
       await ticketApi.startProcess(id)
       loadData()
     } catch (e) {
-      alert(e.message || '操作失败')
+      handleError(e, '开始办理')
     }
   }
 
   const handleSubmitReview = async () => {
     if (!processResult.trim()) {
-      alert('请填写处理结果')
+      setErrorMsg('请填写处理结果')
       return
     }
+    setErrorMsg('')
     try {
       await ticketApi.submitReview(id, {
         result_summary: processResult,
@@ -116,37 +173,38 @@ const TicketDetail = () => {
       setProcessRemark('')
       loadData()
     } catch (e) {
-      alert(e.message || '提交失败')
+      handleError(e, '提交复核')
     }
   }
 
   const handleReturn = async () => {
     if (!returnReason.trim()) {
-      alert('请填写退回原因')
+      setErrorMsg('请填写退回原因')
       return
     }
+    setErrorMsg('')
     try {
       await ticketApi.returnTicket(id, returnReason)
       setShowReturnModal(false)
       setReturnReason('')
       loadData()
     } catch (e) {
-      alert(e.message || '退回失败')
+      handleError(e, '退回')
     }
   }
 
   const handleResubmit = async () => {
-    if (window.confirm('确定要重新提交审核吗？')) {
-      try {
-        await ticketApi.resubmit(id)
-        loadData()
-      } catch (e) {
-        alert(e.message || '提交失败')
-      }
+    setErrorMsg('')
+    try {
+      await ticketApi.resubmit(id)
+      loadData()
+    } catch (e) {
+      handleError(e, '补正重提')
     }
   }
 
   const handleArchive = async () => {
+    setErrorMsg('')
     try {
       await ticketApi.archive(id, {
         audit_remark: archiveRemark,
@@ -155,7 +213,7 @@ const TicketDetail = () => {
       setArchiveRemark('')
       loadData()
     } catch (e) {
-      alert(e.message || '归档失败')
+      handleError(e, '归档')
     }
   }
 
@@ -163,11 +221,12 @@ const TicketDetail = () => {
     const file = e.target.files?.[0]
     if (!file) return
     setUploading(true)
+    setErrorMsg('')
     try {
       await attachmentApi.upload(id, file)
       loadData()
     } catch (e) {
-      alert(e.message || '上传失败')
+      handleError(e, '上传附件')
     } finally {
       setUploading(false)
       e.target.value = ''
@@ -175,13 +234,12 @@ const TicketDetail = () => {
   }
 
   const handleDeleteAttachment = async (attId) => {
-    if (window.confirm('确定要删除该附件吗？')) {
-      try {
-        await attachmentApi.remove(id, attId)
-        loadData()
-      } catch (e) {
-        alert(e.message || '删除失败')
-      }
+    setErrorMsg('')
+    try {
+      await attachmentApi.remove(id, attId)
+      loadData()
+    } catch (e) {
+      handleError(e, '删除附件')
     }
   }
 
@@ -220,7 +278,10 @@ const TicketDetail = () => {
             </span>
           </h2>
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <span style={{ fontSize: 12, color: '#888', padding: '4px 8px', background: '#f5f5f5', borderRadius: 4 }}>
+            当前角色：{roleLabels[role] || role}
+          </span>
           {canStartProcess && (
             <button className="btn btn-primary" onClick={handleStartProcess}>
               开始办理
@@ -233,7 +294,7 @@ const TicketDetail = () => {
           )}
           {canReturn && (
             <button className="btn btn-warning" onClick={() => setShowReturnModal(true)}>
-              退回
+              {canReturnReviewer ? '复核退回' : '退回'}
             </button>
           )}
           {canResubmit && (
@@ -248,6 +309,38 @@ const TicketDetail = () => {
           )}
         </div>
       </div>
+
+      {errorMsg && (
+        <div style={{
+          padding: '10px 14px',
+          background: '#fff0f0',
+          border: '1px solid #ffcccc',
+          borderRadius: 6,
+          color: '#c01818',
+          marginBottom: 16,
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+        }}>
+          <span>{errorMsg}</span>
+          <button style={{ background: 'none', border: 'none', color: '#c01818', cursor: 'pointer', fontSize: 16 }} onClick={() => setErrorMsg('')}>×</button>
+        </div>
+      )}
+
+      {forbiddenHints.length > 0 && (
+        <div style={{
+          padding: '10px 14px',
+          background: '#f0f5ff',
+          border: '1px solid #cce0ff',
+          borderRadius: 6,
+          color: '#3366cc',
+          marginBottom: 16,
+        }}>
+          {forbiddenHints.map((hint, i) => (
+            <div key={i}>ℹ️ {hint}</div>
+          ))}
+        </div>
+      )}
 
       <div className="card">
         <div className="card-body">
@@ -377,16 +470,20 @@ const TicketDetail = () => {
 
           {activeTab === 'attachments' && (
             <div>
-              <div style={{ marginBottom: 12 }}>
-                <label className="btn btn-primary btn-sm">
-                  {uploading ? '上传中...' : '+ 上传附件'}
-                  <input
-                    type="file"
-                    style={{ display: 'none' }}
-                    onChange={handleFileUpload}
-                    disabled={uploading}
-                  />
-                </label>
+              <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+                {canUpload ? (
+                  <label className="btn btn-primary btn-sm">
+                    {uploading ? '上传中...' : '+ 上传附件'}
+                    <input
+                      type="file"
+                      style={{ display: 'none' }}
+                      onChange={handleFileUpload}
+                      disabled={uploading}
+                    />
+                  </label>
+                ) : (
+                  <span style={{ fontSize: 12, color: '#999' }}>当前角色不可上传附件</span>
+                )}
               </div>
               {attachments.length === 0 ? (
                 <div className="empty">暂无附件</div>
@@ -399,7 +496,7 @@ const TicketDetail = () => {
                     <span style={{ color: '#999', fontSize: 12 }}>
                       {att.uploaded_by_name} · {formatDate(att.uploaded_at)}
                     </span>
-                    {canEdit && (
+                    {canDeleteAttachment && (
                       <button
                         className="btn btn-sm"
                         onClick={() => handleDeleteAttachment(att.id)}
@@ -425,13 +522,18 @@ const TicketDetail = () => {
                     <span className={`audit-log-action ${log.is_failure ? 'audit-log-failure' : ''}`}>
                       {actionLabels[log.action] || log.action}
                     </span>
-                    {log.is_failure && (
+                    {log.is_failure && log.failure_reason && (
                       <span style={{ color: '#e01b24', fontSize: 12 }}>
                         [失败] {log.failure_reason}
                       </span>
                     )}
                     {log.detail && (
                       <span className="audit-log-detail">{log.detail}</span>
+                    )}
+                    {log.batch_id && (
+                      <span style={{ color: '#888', fontSize: 11 }}>
+                        批次#{log.batch_id}
+                      </span>
                     )}
                   </div>
                 ))
@@ -445,7 +547,7 @@ const TicketDetail = () => {
         <div className="modal-mask" onClick={() => setShowReturnModal(false)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
-              <span>退回工单</span>
+              <span>{canReturnReviewer ? '复核退回' : '退回工单'}</span>
               <span className="modal-close" onClick={() => setShowReturnModal(false)}>×</span>
             </div>
             <div className="modal-body">
@@ -454,7 +556,7 @@ const TicketDetail = () => {
                 <textarea
                   value={returnReason}
                   onChange={e => setReturnReason(e.target.value)}
-                  placeholder="请详细说明退回原因..."
+                  placeholder="请详细说明退回原因，以便登记员补正..."
                   rows={4}
                 />
               </div>

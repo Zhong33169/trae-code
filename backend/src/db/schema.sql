@@ -60,9 +60,11 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     detail TEXT,
     is_failure BOOLEAN DEFAULT 0,
     failure_reason TEXT,
+    batch_id INTEGER,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (ticket_id) REFERENCES complaint_tickets(id),
-    FOREIGN KEY (user_id) REFERENCES users(id)
+    FOREIGN KEY (user_id) REFERENCES users(id),
+    FOREIGN KEY (batch_id) REFERENCES import_batches(id)
 );
 
 CREATE TABLE IF NOT EXISTS import_batches (

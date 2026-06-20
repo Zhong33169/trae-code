@@ -123,6 +123,7 @@ pub struct AuditLog {
     pub detail: Option<String>,
     pub is_failure: bool,
     pub failure_reason: Option<String>,
+    pub batch_id: Option<i64>,
     pub created_at: DateTime<Utc>,
 }
 

@@ -15,6 +15,12 @@ const Header = () => {
     reviewer: '复核负责人',
   }
 
+  const roleHints = {
+    registrar: '可创建工单、补正重提、上传/删除附件',
+    auditor: '可开始办理、提交复核、退回补正、上传附件',
+    reviewer: '可复核归档、复核退回',
+  }
+
   return (
     <header className="header">
       <h1>📋 投诉工单管理系统</h1>
@@ -25,6 +31,7 @@ const Header = () => {
               key={role}
               className={currentUser?.role === role ? 'active' : ''}
               onClick={() => switchRole(role)}
+              title={roleHints[role]}
             >
               {label}
             </button>
@@ -33,7 +40,10 @@ const Header = () => {
         {currentUser && (
           <div className="user-info">
             <div className="avatar">{currentUser.name?.charAt(0) || 'U'}</div>
-            <span>{currentUser.name}</span>
+            <div>
+              <span>{currentUser.name}</span>
+              <div style={{ fontSize: 11, color: '#aaa' }}>{roleHints[currentUser.role]}</div>
+            </div>
           </div>
         )}
       </div>

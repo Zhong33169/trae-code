@@ -14,16 +14,22 @@ export const AuthProvider = ({ children }) => {
     } else {
       simulateLogin('registrar1', '123456')
     }
+
+    const handleUnauthorized = () => {
+      simulateLogin('registrar1', '123456')
+    }
+    window.addEventListener('auth:unauthorized', handleUnauthorized)
+    return () => window.removeEventListener('auth:unauthorized', handleUnauthorized)
   }, [])
 
   const loadUser = async () => {
     try {
       const user = await authApi.getCurrentUser()
       setCurrentUser(user)
+      setLoading(false)
     } catch (e) {
       localStorage.removeItem('token')
-    } finally {
-      setLoading(false)
+      await simulateLogin('registrar1', '123456')
     }
   }
 
