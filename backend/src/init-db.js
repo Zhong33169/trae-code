@@ -110,6 +110,30 @@ function seedData() {
     daysAgo(8), daysAgo(2)
   );
 
+  // #9 布丁 - 已发起（可批量办理）
+  insertCareRecord.run(
+    '布丁', '猫', '加菲', '陈十', '13100009999', daysAgo(2),
+    '结膜炎', '抗生素滴眼液+消炎', 'initiated', 'normal', 'B区', 'B-05',
+    2, null, null, futureDays(5), null,
+    daysAgo(2), daysAgo(2)
+  );
+
+  // #10 奶茶 - 已发起（可批量办理，但缺少必传附件）
+  insertCareRecord.run(
+    '奶茶', '犬', '比熊', '林冬', '13000010000', daysAgo(1),
+    '中耳炎', '抗生素+耳道清洁', 'initiated', 'normal', 'C区', 'C-08',
+    1, null, null, futureDays(6), null,
+    daysAgo(1), daysAgo(1)
+  );
+
+  // #11 橘子 - 办理中（可批量提交复核）
+  insertCareRecord.run(
+    '橘子', '猫', '橘猫', '黄梅', '15900011111', daysAgo(4),
+    '肥胖综合征', '减重饮食+运动计划', 'processing', 'normal', 'D区', 'D-03',
+    2, 4, null, futureDays(3), null,
+    daysAgo(4), daysAgo(3)
+  );
+
   const insertAttachment = db.prepare(`
     INSERT INTO attachments (care_record_id, file_name, file_type, file_size, category, is_required, upload_type, status, uploaded_by, reviewed_by, reviewed_at, reject_reason, supplement_reason, replaced_attachment_id, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -167,6 +191,19 @@ function seedData() {
   insertAttachment.run(8, '腹水分析报告_补传.pdf', '.pdf', 145408, 'lab_result', 0, 'supplement', 'pending', 4, null, null, null, '入院后第2天采集腹水送检', null, daysAgo(6));
   insertAttachment.run(8, '治疗记录.pdf', '.pdf', 155648, 'treatment_record', 0, 'initial', 'approved', 4, 6, daysAgo(5), null, null, null, daysAgo(6));
 
+  // #9 布丁 - 已发起（附件齐全，可批量办理）
+  insertAttachment.run(9, '入院登记表.pdf', '.pdf', 93184, 'admission_form', 1, 'initial', 'approved', 2, 6, daysAgo(1), null, null, null, daysAgo(2));
+  insertAttachment.run(9, '住院同意书.pdf', '.pdf', 79872, 'consent_form', 1, 'initial', 'approved', 2, 6, daysAgo(1), null, null, null, daysAgo(2));
+
+  // #10 奶茶 - 已发起（缺少必传附件，批量办理会失败）
+  insertAttachment.run(10, '入院登记表.pdf', '.pdf', 107520, 'admission_form', 1, 'initial', 'approved', 1, 5, daysAgo(0), null, null, null, daysAgo(1));
+  insertAttachment.run(10, '[待上传]住院同意书', '', 0, 'consent_form', 1, 'initial', 'pending', null, null, null, null, null, null, daysAgo(1));
+
+  // #11 橘子 - 办理中（附件齐全，可批量提交复核）
+  insertAttachment.run(11, '入院登记表.pdf', '.pdf', 96256, 'admission_form', 1, 'initial', 'approved', 2, 5, daysAgo(3), null, null, null, daysAgo(4));
+  insertAttachment.run(11, '住院同意书.pdf', '.pdf', 82944, 'consent_form', 1, 'initial', 'approved', 2, 5, daysAgo(3), null, null, null, daysAgo(4));
+  insertAttachment.run(11, '血常规报告.pdf', '.pdf', 138240, 'lab_result', 0, 'initial', 'approved', 4, 5, daysAgo(2), null, null, null, daysAgo(3));
+
   const insertMedication = db.prepare(`
     INSERT INTO medication_records (care_record_id, medicine_name, dosage, route, frequency, start_time, end_time, administered_by, notes, status, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -206,6 +243,15 @@ function seedData() {
   insertMedication.run(8, 'GS441524', '2mg/kg', '皮下注射', '每日1次', daysAgo(8), null, 4, '抗传腹', 'active', daysAgo(8));
   insertMedication.run(8, '水飞蓟素', '2mg/kg', '口服', '每日2次', daysAgo(8), null, 4, '保肝', 'active', daysAgo(8));
   insertMedication.run(8, '丹诺士', '10mg/kg', '口服', '每日2次', daysAgo(8), null, 4, '护肝', 'active', daysAgo(8));
+
+  // #9 布丁
+  insertMedication.run(9, '左氧氟沙星滴眼液', '每次2滴', '滴眼', '每日3次', daysAgo(2), null, 4, '抗感染', 'active', daysAgo(2));
+
+  // #10 奶茶
+  insertMedication.run(10, '阿莫西林克拉维酸', '12.5mg/kg', '口服', '每日2次', daysAgo(1), null, 3, '抗感染', 'active', daysAgo(1));
+
+  // #11 橘子
+  insertMedication.run(11, '减重处方粮', '按体重的2%', '口服', '每日2次', daysAgo(4), null, 4, '控制体重', 'active', daysAgo(4));
 
   const insertDischarge = db.prepare(`
     INSERT INTO discharge_confirmations (care_record_id, discharge_date, discharge_summary, follow_up, condition_at_discharge, discharged_by, confirmed_by, status, created_at, confirmed_at)
@@ -309,6 +355,28 @@ function seedData() {
   insertAudit.run(8, 'upload_attachment', 4, '刘护士', 'nurse', null, '{"file_name":"治疗记录.pdf","upload_type":"initial"}', null, '刘护士上传附件: 治疗记录.pdf (初始上传)', daysAgo(6, 16));
   insertAudit.run(8, 'approve_attachment', 6, '赵主任', 'reviewer', '{"status":"pending"}', '{"status":"approved"}', null, '赵主任审核通过附件: 治疗记录.pdf', daysAgo(5, 11));
   insertAudit.run(8, 'status_change', 4, '刘护士', 'nurse', '{"status":"processing","reviewer_id":null,"reviewer_name":null}', '{"status":"reviewing","reviewer_id":6,"reviewer_name":"赵主任"}', null, '刘护士提交护理单进入复核，复核人: 赵主任', daysAgo(2, 10));
+
+  // ===== #9 布丁 - 已发起（可批量办理）
+  insertAudit.run(9, 'create', 2, '李医生', 'doctor', null, '{"pet_name":"布丁","status":"initiated"}', null, '李医生创建住院护理单', daysAgo(2, 9));
+  insertAudit.run(9, 'upload_attachment', 2, '李医生', 'doctor', null, '{"file_name":"入院登记表.pdf","upload_type":"initial"}', null, '李医生上传附件: 入院登记表.pdf (初始上传)', daysAgo(2, 9));
+  insertAudit.run(9, 'upload_attachment', 2, '李医生', 'doctor', null, '{"file_name":"住院同意书.pdf","upload_type":"initial"}', null, '李医生上传附件: 住院同意书.pdf (初始上传)', daysAgo(2, 10));
+  insertAudit.run(9, 'approve_attachment', 6, '赵主任', 'reviewer', '{"status":"pending"}', '{"status":"approved"}', null, '赵主任审核通过附件: 入院登记表.pdf', daysAgo(1, 10));
+  insertAudit.run(9, 'approve_attachment', 6, '赵主任', 'reviewer', '{"status":"pending"}', '{"status":"approved"}', null, '赵主任审核通过附件: 住院同意书.pdf', daysAgo(1, 10));
+
+  // ===== #10 奶茶 - 已发起（缺必传附件，批量办理会失败）
+  insertAudit.run(10, 'create', 1, '张医生', 'doctor', null, '{"pet_name":"奶茶","status":"initiated"}', null, '张医生创建住院护理单', daysAgo(1, 10));
+  insertAudit.run(10, 'upload_attachment', 1, '张医生', 'doctor', null, '{"file_name":"入院登记表.pdf","upload_type":"initial"}', null, '张医生上传附件: 入院登记表.pdf (初始上传)', daysAgo(1, 10));
+  insertAudit.run(10, 'approve_attachment', 5, '陈主任', 'reviewer', '{"status":"pending"}', '{"status":"approved"}', null, '陈主任审核通过附件: 入院登记表.pdf', daysAgo(0, 9));
+
+  // ===== #11 橘子 - 办理中（可批量提交复核）
+  insertAudit.run(11, 'create', 2, '李医生', 'doctor', null, '{"pet_name":"橘子","status":"initiated"}', null, '李医生创建住院护理单', daysAgo(4, 9));
+  insertAudit.run(11, 'status_change', 2, '李医生', 'doctor', '{"status":"initiated","nurse_id":null,"nurse_name":null}', '{"status":"processing","nurse_id":4,"nurse_name":"刘护士"}', null, '李医生将护理单分配给刘护士开始办理，经办护士: 刘护士', daysAgo(4, 10));
+  insertAudit.run(11, 'upload_attachment', 2, '李医生', 'doctor', null, '{"file_name":"入院登记表.pdf","upload_type":"initial"}', null, '李医生上传附件: 入院登记表.pdf (初始上传)', daysAgo(4, 10));
+  insertAudit.run(11, 'upload_attachment', 2, '李医生', 'doctor', null, '{"file_name":"住院同意书.pdf","upload_type":"initial"}', null, '李医生上传附件: 住院同意书.pdf (初始上传)', daysAgo(4, 10));
+  insertAudit.run(11, 'upload_attachment', 4, '刘护士', 'nurse', null, '{"file_name":"血常规报告.pdf","upload_type":"initial"}', null, '刘护士上传附件: 血常规报告.pdf (初始上传)', daysAgo(3, 14));
+  insertAudit.run(11, 'approve_attachment', 5, '陈主任', 'reviewer', '{"status":"pending"}', '{"status":"approved"}', null, '陈主任审核通过附件: 入院登记表.pdf', daysAgo(3, 16));
+  insertAudit.run(11, 'approve_attachment', 5, '陈主任', 'reviewer', '{"status":"pending"}', '{"status":"approved"}', null, '陈主任审核通过附件: 住院同意书.pdf', daysAgo(3, 16));
+  insertAudit.run(11, 'approve_attachment', 5, '陈主任', 'reviewer', '{"status":"pending"}', '{"status":"approved"}', null, '陈主任审核通过附件: 血常规报告.pdf', daysAgo(2, 10));
 
   console.log('演示数据初始化完成');
   console.log('\n用户列表:');

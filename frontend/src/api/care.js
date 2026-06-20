@@ -20,6 +20,10 @@ export function updateCareRecordStatus(id, data) {
   return api.put(`/care-records/${id}/status`, data)
 }
 
+export function batchUpdateStatus(data) {
+  return api.put('/care-records/batch-status', data)
+}
+
 export function getMedications(careRecordId) {
   return api.get(`/medications/${careRecordId}`)
 }

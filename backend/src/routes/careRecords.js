@@ -76,6 +76,213 @@ router.get('/stats/summary', (req, res) => {
   res.json(stats);
 });
 
+router.put('/batch-status', requireRole('doctor', 'nurse', 'reviewer', 'admin'), (req, res) => {
+  const db = getDB();
+  const { ids, status, nurse_id, reviewer_id, return_reason } = req.body;
+
+  if (!Array.isArray(ids) || ids.length === 0) {
+    return res.status(400).json({ error: '请选择至少一条护理单' });
+  }
+  if (!status) {
+    return res.status(400).json({ error: '请指定目标状态' });
+  }
+
+  const roleTransitions = {
+    doctor: ['processing'],
+    nurse: ['reviewing', 'processing'],
+    reviewer: ['archived', 'returned']
+  };
+  const roleAllowed = roleTransitions[req.user.role] || [];
+  if (!roleAllowed.includes(status) && req.user.role !== 'admin') {
+    return res.status(403).json({ error: `角色 ${req.user.role} 无权批量执行此操作` });
+  }
+
+  const transitions = {
+    initiated: ['processing'],
+    processing: ['reviewing', 'returned', 'overdue'],
+    reviewing: ['archived', 'returned'],
+    returned: ['processing'],
+    overdue: ['processing']
+  };
+
+  let nurseInfo = null;
+  if (status === 'processing' && nurse_id) {
+    nurseInfo = db.prepare('SELECT id, name FROM users WHERE id = ? AND role = ?').get(parseInt(nurse_id), 'nurse');
+  }
+  let reviewerInfo = null;
+  if (status === 'reviewing' && reviewer_id) {
+    reviewerInfo = db.prepare('SELECT id, name FROM users WHERE id = ? AND role = ?').get(parseInt(reviewer_id), 'reviewer');
+  }
+
+  const results = [];
+  const successIds = [];
+
+  for (const rawId of ids) {
+    const id = parseInt(rawId);
+    const result = { id, success: false, message: '' };
+
+    const current = db.prepare(`
+      SELECT cr.*, d.name as doctor_name, n.name as nurse_name, r.name as reviewer_name
+      FROM care_records cr
+      LEFT JOIN users d ON cr.doctor_id = d.id
+      LEFT JOIN users n ON cr.nurse_id = n.id
+      LEFT JOIN users r ON cr.reviewer_id = r.id
+      WHERE cr.id = ?
+    `).get(id);
+
+    if (!current) {
+      result.message = '护理单不存在';
+      results.push(result);
+      continue;
+    }
+
+    const allowed = transitions[current.status] || [];
+    if (!allowed.includes(status) && req.user.role !== 'admin') {
+      result.message = `当前状态 ${current.status} 不允许转为 ${status}`;
+      auditLog(id, 'batch_status_failed', current.status, status, '批量操作-状态不允许', result.message, req);
+      results.push(result);
+      continue;
+    }
+
+    if (status === 'processing') {
+      let finalNurseId = null;
+      let finalNurseName = null;
+      if (req.user.role === 'nurse') {
+        finalNurseId = req.user.id;
+        finalNurseName = req.user.name;
+      } else if (nurseInfo) {
+        finalNurseId = nurseInfo.id;
+        finalNurseName = nurseInfo.name;
+      }
+      if (!finalNurseId) {
+        result.message = '缺少经办护士，请选择护士';
+        auditLog(id, 'batch_status_failed', current.status, status, '批量操作-缺少经办护士', result.message, req);
+        results.push(result);
+        continue;
+      }
+
+      const missingRequired = db.prepare(
+        "SELECT COUNT(*) as cnt FROM attachments WHERE care_record_id = ? AND is_required = 1 AND status = 'pending'"
+      ).get(id);
+      if (missingRequired.cnt > 0) {
+        result.message = `有 ${missingRequired.cnt} 个必传附件未审核，无法开始办理`;
+        auditLog(id, 'batch_status_failed', current.status, status, '批量操作-必传附件未审核', result.message, req);
+        results.push(result);
+        continue;
+      }
+
+      const updates = { status, nurse_id: finalNurseId, updated_at: new Date().toISOString(), id };
+      db.prepare('UPDATE care_records SET status = @status, nurse_id = @nurse_id, updated_at = @updated_at WHERE id = @id').run(updates);
+
+      const detail = `批量操作: 状态从 ${current.status} 变更为 processing，经办护士: ${finalNurseName}`;
+      auditLog(id, 'batch_status_change',
+        { status: current.status, nurse_id: current.nurse_id, nurse_name: current.nurse_name },
+        { status: 'processing', nurse_id: finalNurseId, nurse_name: finalNurseName },
+        null, detail, req);
+
+      result.success = true;
+      result.message = `已分配给 ${finalNurseName} 开始办理`;
+      result.nurse_name = finalNurseName;
+      successIds.push(id);
+    }
+
+    if (status === 'reviewing') {
+      let finalReviewerId = null;
+      let finalReviewerName = null;
+      if (req.user.role === 'reviewer') {
+        finalReviewerId = req.user.id;
+        finalReviewerName = req.user.name;
+      } else if (reviewerInfo) {
+        finalReviewerId = reviewerInfo.id;
+        finalReviewerName = reviewerInfo.name;
+      }
+      if (!finalReviewerId) {
+        result.message = '缺少复核人，请选择复核员';
+        auditLog(id, 'batch_status_failed', current.status, status, '批量操作-缺少复核人', result.message, req);
+        results.push(result);
+        continue;
+      }
+
+      const rejectedRequired = db.prepare(
+        "SELECT COUNT(*) as cnt FROM attachments WHERE care_record_id = ? AND is_required = 1 AND status = 'rejected'"
+      ).get(id);
+      if (rejectedRequired.cnt > 0) {
+        result.message = `有 ${rejectedRequired.cnt} 个必传附件被驳回，需补正后才能提交复核`;
+        auditLog(id, 'batch_status_failed', current.status, status, '批量操作-必传附件被驳回', result.message, req);
+        results.push(result);
+        continue;
+      }
+
+      const updates = { status, reviewer_id: finalReviewerId, updated_at: new Date().toISOString(), id };
+      db.prepare('UPDATE care_records SET status = @status, reviewer_id = @reviewer_id, updated_at = @updated_at WHERE id = @id').run(updates);
+
+      const detail = `批量操作: 状态从 ${current.status} 变更为 reviewing，复核人: ${finalReviewerName}`;
+      auditLog(id, 'batch_status_change',
+        { status: current.status, reviewer_id: current.reviewer_id, reviewer_name: current.reviewer_name },
+        { status: 'reviewing', reviewer_id: finalReviewerId, reviewer_name: finalReviewerName },
+        null, detail, req);
+
+      result.success = true;
+      result.message = `已提交 ${finalReviewerName} 复核`;
+      result.reviewer_name = finalReviewerName;
+      successIds.push(id);
+    }
+
+    if (status === 'returned') {
+      if (!return_reason || !return_reason.trim()) {
+        result.message = '退回必须填写原因';
+        auditLog(id, 'batch_status_failed', current.status, status, '批量操作-缺少退回原因', result.message, req);
+        results.push(result);
+        continue;
+      }
+
+      const updates = { status, return_reason, updated_at: new Date().toISOString(), id };
+      db.prepare('UPDATE care_records SET status = @status, return_reason = @return_reason, updated_at = @updated_at WHERE id = @id').run(updates);
+
+      const responsible = [];
+      if (current.nurse_name) responsible.push(`经办护士: ${current.nurse_name}`);
+      if (current.reviewer_name) responsible.push(`复核人: ${current.reviewer_name}`);
+      const responsibleStr = responsible.length ? responsible.join('、') : '暂无责任人';
+
+      const detail = `批量操作: 状态从 ${current.status} 变更为 returned，退回原因: ${return_reason}，责任人: ${responsibleStr}`;
+      auditLog(id, 'batch_status_change',
+        { status: current.status },
+        { status: 'returned', return_reason },
+        return_reason, detail, req);
+      auditLog(id, 'returned_recorded', null, null, return_reason,
+        `批量退回，责任人: ${responsibleStr}，退回原因: ${return_reason}`, req);
+
+      result.success = true;
+      result.message = `已退回，责任人: ${responsibleStr}`;
+      successIds.push(id);
+    }
+
+    if (status === 'archived') {
+      const updates = { status, updated_at: new Date().toISOString(), id };
+      db.prepare('UPDATE care_records SET status = @status, updated_at = @updated_at WHERE id = @id').run(updates);
+
+      const detail = `批量操作: 状态从 ${current.status} 变更为 archived`;
+      auditLog(id, 'batch_status_change',
+        { status: current.status },
+        { status: 'archived' },
+        null, detail, req);
+
+      result.success = true;
+      result.message = '已归档';
+      successIds.push(id);
+    }
+
+    results.push(result);
+  }
+
+  res.json({
+    total: ids.length,
+    success_count: successIds.length,
+    fail_count: ids.length - successIds.length,
+    results
+  });
+});
+
 router.get('/:id', (req, res) => {
   const db = getDB();
   const record = db.prepare(`
