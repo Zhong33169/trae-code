@@ -401,6 +401,18 @@ async def seed_demo_data():
                     """INSERT INTO process_records
                     (application_id, action, from_status, to_status, operator_id, operator_name, operator_role, opinion)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (app_id, "提交审核", "草稿", "待审核", 1, "张三", "登记员", "申请提交，材料基本齐全"),
+                )
+                await db.execute(
+                    """INSERT INTO process_records
+                    (application_id, action, from_status, to_status, operator_id, operator_name, operator_role, opinion)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (app_id, "开始审核", "待审核", "审核中", 2, "李四", "审核主管", ""),
+                )
+                await db.execute(
+                    """INSERT INTO process_records
+                    (application_id, action, from_status, to_status, operator_id, operator_name, operator_role, opinion)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                     (app_id, "审核驳回", "审核中", "已驳回", 2, "李四", "审核主管",
                      "车辆购置税完税证明缺失，不符合过户条件"),
                 )
@@ -410,7 +422,13 @@ async def seed_demo_data():
                     """INSERT INTO process_records
                     (application_id, action, from_status, to_status, operator_id, operator_name, operator_role, opinion)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (app_id, "发起申请", "草稿", "待审核", 1, "张三", "登记员", "材料齐全，提交审核"),
+                    (app_id, "提交审核", "草稿", "待审核", 1, "张三", "登记员", "材料齐全，提交审核"),
+                )
+                await db.execute(
+                    """INSERT INTO process_records
+                    (application_id, action, from_status, to_status, operator_id, operator_name, operator_role, opinion)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (app_id, "开始审核", "待审核", "审核中", 2, "李四", "审核主管", ""),
                 )
                 await db.execute(
                     """INSERT INTO process_records
@@ -422,65 +440,13 @@ async def seed_demo_data():
                     """INSERT INTO process_records
                     (application_id, action, from_status, to_status, operator_id, operator_name, operator_role, opinion)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (app_id, "开始复核", "待复核归档", "复核归档中", 3, "王五", "复核负责人", ""),
+                )
+                await db.execute(
+                    """INSERT INTO process_records
+                    (application_id, action, from_status, to_status, operator_id, operator_name, operator_role, opinion)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                     (app_id, "复核归档", "复核归档中", "已办结", 3, "王五", "复核负责人", "复核通过，已归档"),
                 )
-
-        demo_batch_records = [
-            {
-                "app_no": "TF-2026-0011",
-                "records": [
-                    ("批量开始审核(失败)", "待审核", None, 2, "李四", "审核主管",
-                     "申请已逾期，超过48小时审核时限，需先处理逾期"),
-                ]
-            },
-            {
-                "app_no": "TF-2026-0013",
-                "records": [
-                    ("批量审核通过(失败)", "待审核", None, 2, "李四", "审核主管",
-                     "审核通过前必交材料缺失: 车辆购置税完税证明"),
-                ]
-            },
-        ]
-        for demo in demo_batch_records:
-            cursor = await db.execute("SELECT id FROM transfer_applications WHERE application_no = ?", (demo["app_no"],))
-            row = await cursor.fetchone()
-            if row:
-                app_id = row[0]
-                for rec in demo["records"]:
-                    await db.execute(
-                        """INSERT INTO process_records
-                        (application_id, action, from_status, to_status, operator_id, operator_name, operator_role, opinion)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                        (app_id, rec[0], rec[1], rec[2], rec[3], rec[4], rec[5], rec[6]),
-                    )
-
-        demo_audit_logs = [
-            {
-                "app_no": "TF-2026-0011",
-                "logs": [
-                    ("批量开始审核(失败)", 2, "李四", "审核主管",
-                     "逾期拦截: 申请已逾期，超过48小时审核时限，需先处理逾期: 需审核主管立即处理或退回登记员补正"),
-                ]
-            },
-            {
-                "app_no": "TF-2026-0013",
-                "logs": [
-                    ("批量审核通过(失败)", 2, "李四", "审核主管",
-                     "材料缺失: 审核通过前必交材料缺失: 车辆购置税完税证明"),
-                ]
-            },
-        ]
-        for demo in demo_audit_logs:
-            cursor = await db.execute("SELECT id FROM transfer_applications WHERE application_no = ?", (demo["app_no"],))
-            row = await cursor.fetchone()
-            if row:
-                app_id = row[0]
-                for log in demo["logs"]:
-                    await db.execute(
-                        """INSERT INTO audit_logs
-                        (application_id, action, actor_id, actor_name, actor_role, detail)
-                        VALUES (?, ?, ?, ?, ?, ?)""",
-                        (app_id, log[0], log[1], log[2], log[3], log[4]),
-                    )
 
         await db.commit()

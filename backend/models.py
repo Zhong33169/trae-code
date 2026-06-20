@@ -35,8 +35,13 @@ class ActionRequest(BaseModel):
     version: int
 
 
+class BatchItem(BaseModel):
+    id: int
+    version: int
+
+
 class BatchActionRequest(BaseModel):
-    application_ids: List[int]
+    items: List[BatchItem]
     action: str
     opinion: Optional[str] = None
 

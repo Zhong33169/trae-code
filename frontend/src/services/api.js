@@ -73,11 +73,15 @@ export async function executeAction(id, action, opinion, materials, correctionMa
   });
 }
 
-export async function batchAction(ids, action, opinion) {
+export async function batchAction(applications, action, opinion) {
+  const items = applications.map(app => ({
+    id: app.id,
+    version: app.version,
+  }));
   return apiFetch('/applications/batch-action', {
     method: 'POST',
     body: JSON.stringify({
-      application_ids: ids,
+      items,
       action,
       opinion: opinion || null,
     }),

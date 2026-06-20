@@ -1,5 +1,5 @@
 import { LitElement, html, css } from 'lit';
-import { setCurrentUser, getCurrentUser, login, fetchUsers, fetchApplications, fetchDashboard, fetchQueue, triggerOverdueCheck } from '../services/api.js';
+import { setCurrentUser, getCurrentUser, login, fetchUsers, fetchApplications, fetchDashboard, fetchQueue, triggerOverdueCheck, createApplication, batchAction } from '../services/api.js';
 
 class AppRoot extends LitElement {
   static properties = {
@@ -776,7 +776,8 @@ class AppRoot extends LitElement {
     const opinion = prompt(`批量执行「${action}」，请输入处理意见：`);
     if (opinion === null) return;
     try {
-      const result = await batchAction(this.selectedIds, action, opinion);
+      const selectedApps = this.applications.filter(a => this.selectedIds.includes(a.id));
+      const result = await batchAction(selectedApps, action, opinion);
       const succeeded = result.results.filter(r => r.success).length;
       const failed = result.results.filter(r => !r.success).length;
       let msg = `批量操作完成：成功 ${succeeded} 条，失败 ${failed} 条`;
@@ -788,6 +789,10 @@ class AppRoot extends LitElement {
       this.selectedIds = [];
       await this._loadApplications();
       await this._loadDashboard();
+      if (this.page === 'detail' && this.selectedAppId) {
+        this.dispatchEvent(new CustomEvent('refresh', { bubbles: true, composed: true }));
+      }
+      this.requestUpdate();
     } catch (e) {
       this.error = e.message;
     }
@@ -844,7 +849,9 @@ class AppRoot extends LitElement {
       this.showCreateDialog = false;
       this.selectedAppId = app.id;
       await this._loadDashboard();
+      await this._loadApplications();
       this.page = 'detail';
+      this.requestUpdate();
     } catch (e) {
       this.error = e.message;
     }

@@ -437,7 +437,9 @@ async def batch_action(
         results = []
         ip = request.client.host if request.client else None
 
-        for app_id in req.application_ids:
+        for item in req.items:
+            app_id = item.id
+            client_version = item.version
             try:
                 await db.execute("BEGIN IMMEDIATE")
 
@@ -459,6 +461,22 @@ async def batch_action(
                     continue
 
                 app = dict(app)
+
+                if app["version"] != client_version:
+                    await db.rollback()
+                    msg = f"数据版本冲突：当前版本为 {app['version']}，您提交的版本为 {client_version}，请刷新后重试"
+                    results.append({"id": app_id, "success": False, "error": msg})
+                    await db.execute("BEGIN IMMEDIATE")
+                    await log_audit(db, app_id, f"批量{req.action}(失败)", user, f"并发冲突: {msg}", ip)
+                    await db.execute(
+                        """INSERT INTO process_records
+                        (application_id, action, from_status, to_status, operator_id, operator_name, operator_role, opinion)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (app_id, f"批量{req.action}(失败)", app["status"], None,
+                         user["id"], user["display_name"], user["role"], msg),
+                    )
+                    await db.commit()
+                    continue
 
                 valid, msg = validate_action(user["role"], req.action, app["status"])
                 if not valid:
