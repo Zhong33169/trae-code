@@ -1,0 +1,23 @@
+{
+  "name": "policy-redemption-backend",
+  "version": "1.0.0",
+  "description": "政策兑现单管理系统后端",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/serve.ts",
+    "start": "tsx src/serve.ts",
+    "init-db": "tsx src/db/init.ts"
+  },
+  "dependencies": {
+    "hono": "^4.0.0",
+    "@hono/node-server": "^1.0.0",
+    "better-sqlite3": "^11.0.0",
+    "bcryptjs": "^2.4.3"
+  },
+  "devDependencies": {
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.0",
+    "@types/better-sqlite3": "^7.0.0",
+    "@types/bcryptjs": "^2.4.6"
+  }
+}
