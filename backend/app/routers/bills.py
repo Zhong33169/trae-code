@@ -15,7 +15,7 @@ from ..schemas import (
     OverdueInfo, MeterReadingResponse, PaymentResponse
 )
 from ..services import (
-    calculate_overdue_info, get_visible_fields, get_allowed_actions,
+    calculate_overdue_info, get_visible_fields, get_editable_fields, get_allowed_actions,
     transition_bill_status, update_bill_overdue_status, generate_bill_no
 )
 
@@ -25,6 +25,7 @@ def _enrich_bill_response(db, bill: EnergyBill, user: User) -> EnergyBillRespons
     overdue_info = calculate_overdue_info(db, bill)
     allowed_actions = get_allowed_actions(user.role, bill)
     visible_fields = get_visible_fields(user.role, bill)
+    editable_fields = get_editable_fields(user.role, bill)
 
     creator = db.query(User).filter(User.id == bill.created_by).first()
 
@@ -112,7 +113,8 @@ def _enrich_bill_response(db, bill: EnergyBill, user: User) -> EnergyBillRespons
         operation_logs=operation_logs,
         overdue_info=overdue_info,
         allowed_actions=allowed_actions,
-        visible_fields=visible_fields
+        visible_fields=visible_fields,
+        editable_fields=editable_fields
     )
 
 
@@ -367,7 +369,16 @@ async def batch_action(data: dict, request: Request, db: Session = Provide(get_d
     remark = data.get("remark")
 
     if not bill_ids or not action:
-        raise HTTPException(status_code=400, detail="缺少必要参数: bill_ids, action")
+        raise HTTPException(
+            status_code=400,
+            detail={"code": 400, "message": "缺少必要参数: bill_ids, action"}
+        )
+
+    if action in ("audit_reject", "review_reject") and not anomaly_reason:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": 400, "message": "驳回操作必须填写异常原因", "required_field": "anomaly_reason"}
+        )
 
     results = []
     success_count = 0
@@ -376,7 +387,12 @@ async def batch_action(data: dict, request: Request, db: Session = Provide(get_d
     for bill_id in bill_ids:
         bill = db.query(EnergyBill).filter(EnergyBill.id == bill_id).first()
         if not bill:
-            results.append({"bill_id": bill_id, "success": False, "message": "账单不存在"})
+            results.append({
+                "bill_id": bill_id,
+                "success": False,
+                "message": "账单不存在",
+                "error_code": "NOT_FOUND"
+            })
             fail_count += 1
             continue
 
@@ -385,14 +401,26 @@ async def batch_action(data: dict, request: Request, db: Session = Provide(get_d
             anomaly_reason=anomaly_reason,
             remark=remark
         )
-        results.append({
-            "bill_id": bill_id,
-            "bill_no": bill.bill_no,
-            **result
-        })
         if result["success"]:
+            db.refresh(bill)
+            enriched = _enrich_bill_response(db, bill, user)
+            results.append({
+                "bill_id": bill_id,
+                "bill_no": bill.bill_no,
+                "current_status": bill.status.value,
+                "current_node": bill.current_node.value,
+                **result,
+                "bill": enriched.model_dump(mode="json") if hasattr(enriched, "model_dump") else enriched
+            })
             success_count += 1
         else:
+            results.append({
+                "bill_id": bill_id,
+                "bill_no": bill.bill_no,
+                "current_status": bill.status.value,
+                **result,
+                "error_code": "TRANSITION_FAILED"
+            })
             fail_count += 1
 
     return {

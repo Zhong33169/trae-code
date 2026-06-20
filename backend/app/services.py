@@ -71,7 +71,7 @@ def get_visible_fields(role: Role, bill: EnergyBill) -> List[str]:
     base_fields = [
         "id", "bill_no", "period", "park_name", "building", "room",
         "status", "current_node", "is_overdue", "overdue_hours",
-        "created_at", "updated_at"
+        "created_at", "updated_at", "creator_name"
     ]
 
     role_fields = {
@@ -85,17 +85,27 @@ def get_visible_fields(role: Role, bill: EnergyBill) -> List[str]:
             "electricity_usage", "water_usage", "gas_usage",
             "electricity_amount", "water_amount", "gas_amount", "total_amount",
             "has_meter_reading", "has_bill_generated", "has_payment_verified",
-            "meter_readings", "payments", "operation_logs"
+            "meter_readings", "operation_logs"
         ],
         Role.PROPERTY: [
             "electricity_usage", "water_usage", "gas_usage",
             "electricity_amount", "water_amount", "gas_amount", "total_amount",
             "has_meter_reading", "has_bill_generated", "has_payment_verified",
-            "meter_readings", "payments", "operation_logs"
+            "payments", "operation_logs"
         ],
     }
 
     return base_fields + role_fields.get(role, [])
+
+
+def get_editable_fields(role: Role, bill: EnergyBill) -> List[str]:
+    editable = []
+
+    if bill.current_node == ProcessNode.REGISTRATION and bill.current_responsible_role == role:
+        if bill.status in [BillStatus.DRAFT, BillStatus.REJECTED, BillStatus.REVIEW_REJECTED]:
+            editable = ["period", "park_name", "building", "room"]
+
+    return editable
 
 
 def get_allowed_actions(role: Role, bill: EnergyBill) -> List[str]:
@@ -113,6 +123,8 @@ def get_allowed_actions(role: Role, bill: EnergyBill) -> List[str]:
         if bill.status == BillStatus.DRAFT:
             actions.extend(["edit", "delete", "submit_audit"])
         elif bill.status == BillStatus.REJECTED:
+            actions.extend(["edit", "resubmit_audit"])
+        elif bill.status == BillStatus.REVIEW_REJECTED:
             actions.extend(["edit", "resubmit_audit"])
         if not bill.has_meter_reading:
             actions.append("add_meter_reading")
@@ -151,42 +163,48 @@ def transition_bill_status(
             "to_status": BillStatus.PENDING_AUDIT,
             "to_node": ProcessNode.AUDIT,
             "to_role": Role.AUDITOR,
-            "operation": "提交审核"
+            "operation": "提交审核",
+            "require_anomaly_reason": False
         },
         "resubmit_audit": {
-            "from_status": [BillStatus.REJECTED],
+            "from_status": [BillStatus.REJECTED, BillStatus.REVIEW_REJECTED],
             "to_status": BillStatus.PENDING_AUDIT,
             "to_node": ProcessNode.AUDIT,
             "to_role": Role.AUDITOR,
-            "operation": "补正后重提审核"
+            "operation": "补正后重提审核",
+            "require_anomaly_reason": False
         },
         "audit_approve": {
             "from_status": [BillStatus.PENDING_AUDIT],
             "to_status": BillStatus.AUDITED,
             "to_node": ProcessNode.REVIEW,
             "to_role": Role.PROPERTY,
-            "operation": "审核通过"
+            "operation": "审核通过",
+            "require_anomaly_reason": False
         },
         "audit_reject": {
             "from_status": [BillStatus.PENDING_AUDIT],
             "to_status": BillStatus.REJECTED,
             "to_node": ProcessNode.REGISTRATION,
             "to_role": Role.REGISTRAR,
-            "operation": "审核驳回"
+            "operation": "审核驳回",
+            "require_anomaly_reason": True
         },
         "review_approve": {
             "from_status": [BillStatus.AUDITED, BillStatus.PENDING_REVIEW],
             "to_status": BillStatus.ARCHIVED,
             "to_node": ProcessNode.COMPLETED,
             "to_role": Role.PROPERTY,
-            "operation": "复核归档完成"
+            "operation": "复核归档完成",
+            "require_anomaly_reason": False
         },
         "review_reject": {
             "from_status": [BillStatus.AUDITED, BillStatus.PENDING_REVIEW],
             "to_status": BillStatus.REVIEW_REJECTED,
             "to_node": ProcessNode.REGISTRATION,
             "to_role": Role.REGISTRAR,
-            "operation": "复核驳回"
+            "operation": "复核驳回",
+            "require_anomaly_reason": True
         },
     }
 
@@ -194,6 +212,14 @@ def transition_bill_status(
         return bill, {"success": False, "message": f"未知操作: {action}"}
 
     trans = transitions[action]
+
+    if trans.get("require_anomaly_reason") and not anomaly_reason:
+        return bill, {
+            "success": False,
+            "message": f"{trans['operation']}必须填写异常原因",
+            "required_field": "anomaly_reason"
+        }
+
     if from_status not in trans["from_status"]:
         return bill, {
             "success": False,

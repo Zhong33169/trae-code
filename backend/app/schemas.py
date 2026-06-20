@@ -158,6 +158,7 @@ class EnergyBillResponse(EnergyBillBase):
     overdue_info: Optional[OverdueInfo] = None
     allowed_actions: List[str] = []
     visible_fields: List[str] = []
+    editable_fields: List[str] = []
 
 
 class BillListResponse(BaseModel):

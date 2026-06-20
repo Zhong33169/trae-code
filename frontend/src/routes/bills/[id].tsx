@@ -49,6 +49,7 @@ interface BillDetail {
   overdue_info: OverdueInfo;
   allowed_actions: string[];
   visible_fields: string[];
+  editable_fields: string[];
 }
 
 const BillDetail: Component = () => {
@@ -110,6 +111,10 @@ const BillDetail: Component = () => {
   };
 
   const submitAction = async () => {
+    if (actionData().action.includes("reject") && !actionData().anomaly_reason.trim()) {
+      showAlert("error", "驳回操作必须填写异常原因");
+      return;
+    }
     try {
       const result = await api.performAction(
         bill()!.id,
@@ -209,6 +214,8 @@ const BillDetail: Component = () => {
     if (!dateStr) return "-";
     return new Date(dateStr).toLocaleString("zh-CN");
   };
+
+  const canSee = (field: string) => bill()?.visible_fields?.includes(field) ?? false;
 
   if (loading()) {
     return (
@@ -336,73 +343,77 @@ const BillDetail: Component = () => {
             </div>
           </div>
 
-          <div class="detail-card">
-            <h3>⚡ 能耗用量与费用</h3>
-            <div class="detail-grid">
-              <div class="detail-item">
-                <span class="label">用电量</span>
-                <span class="value">{bill()!.electricity_usage?.toFixed(2) || 0} 度</span>
-              </div>
-              <div class="detail-item">
-                <span class="label">电费</span>
-                <span class="value amount">¥{bill()!.electricity_amount?.toFixed(2) || 0}</span>
-              </div>
-              <div class="detail-item">
-                <span class="label">用水量</span>
-                <span class="value">{bill()!.water_usage?.toFixed(2) || 0} 吨</span>
-              </div>
-              <div class="detail-item">
-                <span class="label">水费</span>
-                <span class="value amount">¥{bill()!.water_amount?.toFixed(2) || 0}</span>
-              </div>
-              <div class="detail-item">
-                <span class="label">用气量</span>
-                <span class="value">{bill()!.gas_usage?.toFixed(2) || 0} m³</span>
-              </div>
-              <div class="detail-item">
-                <span class="label">气费</span>
-                <span class="value amount">¥{bill()!.gas_amount?.toFixed(2) || 0}</span>
-              </div>
-              <div class="detail-item" style={{ "grid-column": "span 2" }}>
-                <span class="label">合计金额</span>
-                <span class="value" style={{ "font-size": "24px", color: "#dc2626" }}>
-                  ¥{bill()!.total_amount.toFixed(2)}
-                </span>
+          {canSee("electricity_usage") && (
+            <div class="detail-card">
+              <h3>⚡ 能耗用量与费用</h3>
+              <div class="detail-grid">
+                <div class="detail-item">
+                  <span class="label">用电量</span>
+                  <span class="value">{bill()!.electricity_usage?.toFixed(2) || 0} 度</span>
+                </div>
+                <div class="detail-item">
+                  <span class="label">电费</span>
+                  <span class="value amount">¥{bill()!.electricity_amount?.toFixed(2) || 0}</span>
+                </div>
+                <div class="detail-item">
+                  <span class="label">用水量</span>
+                  <span class="value">{bill()!.water_usage?.toFixed(2) || 0} 吨</span>
+                </div>
+                <div class="detail-item">
+                  <span class="label">水费</span>
+                  <span class="value amount">¥{bill()!.water_amount?.toFixed(2) || 0}</span>
+                </div>
+                <div class="detail-item">
+                  <span class="label">用气量</span>
+                  <span class="value">{bill()!.gas_usage?.toFixed(2) || 0} m³</span>
+                </div>
+                <div class="detail-item">
+                  <span class="label">气费</span>
+                  <span class="value amount">¥{bill()!.gas_amount?.toFixed(2) || 0}</span>
+                </div>
+                <div class="detail-item" style={{ "grid-column": "span 2" }}>
+                  <span class="label">合计金额</span>
+                  <span class="value" style={{ "font-size": "24px", color: "#dc2626" }}>
+                    ¥{bill()!.total_amount.toFixed(2)}
+                  </span>
+                </div>
               </div>
             </div>
-          </div>
+          )}
 
-          <div class="detail-card">
-            <h3>🔗 三单关联状态</h3>
-            <div class="detail-grid">
-              <div class="detail-item">
-                <span class="label">能耗抄表</span>
-                <span class="value">
-                  <span class={`tag ${bill()!.has_meter_reading ? "tag-success" : "tag-warning"}`}>
-                    {bill()!.has_meter_reading ? "✓ 已录入" : "✗ 待录入"}
+          {canSee("has_meter_reading") && (
+            <div class="detail-card">
+              <h3>🔗 三单关联状态</h3>
+              <div class="detail-grid">
+                <div class="detail-item">
+                  <span class="label">能耗抄表</span>
+                  <span class="value">
+                    <span class={`tag ${bill()!.has_meter_reading ? "tag-success" : "tag-warning"}`}>
+                      {bill()!.has_meter_reading ? "✓ 已录入" : "✗ 待录入"}
+                    </span>
                   </span>
-                </span>
-              </div>
-              <div class="detail-item">
-                <span class="label">账单生成</span>
-                <span class="value">
-                  <span class={`tag ${bill()!.has_bill_generated ? "tag-success" : "tag-warning"}`}>
-                    {bill()!.has_bill_generated ? "✓ 已生成" : "✗ 待生成"}
+                </div>
+                <div class="detail-item">
+                  <span class="label">账单生成</span>
+                  <span class="value">
+                    <span class={`tag ${bill()!.has_bill_generated ? "tag-success" : "tag-warning"}`}>
+                      {bill()!.has_bill_generated ? "✓ 已生成" : "✗ 待生成"}
+                    </span>
                   </span>
-                </span>
-              </div>
-              <div class="detail-item">
-                <span class="label">缴费核销</span>
-                <span class="value">
-                  <span class={`tag ${bill()!.has_payment_verified ? "tag-success" : "tag-warning"}`}>
-                    {bill()!.has_payment_verified ? "✓ 已核销" : "✗ 待核销"}
+                </div>
+                <div class="detail-item">
+                  <span class="label">缴费核销</span>
+                  <span class="value">
+                    <span class={`tag ${bill()!.has_payment_verified ? "tag-success" : "tag-warning"}`}>
+                      {bill()!.has_payment_verified ? "✓ 已核销" : "✗ 待核销"}
+                    </span>
                   </span>
-                </span>
+                </div>
               </div>
             </div>
-          </div>
+          )}
 
-          {bill()!.meter_readings.length > 0 && (
+          {canSee("meter_readings") && bill()!.meter_readings.length > 0 && (
             <div class="detail-card">
               <h3>📊 抄表记录</h3>
               <table>
@@ -434,7 +445,7 @@ const BillDetail: Component = () => {
             </div>
           )}
 
-          {bill()!.payments.length > 0 && (
+          {canSee("payments") && bill()!.payments.length > 0 && (
             <div class="detail-card">
               <h3>💳 缴费记录</h3>
               <table>
@@ -483,35 +494,37 @@ const BillDetail: Component = () => {
             </div>
           )}
 
-          <div class="detail-card">
-            <h3>📜 操作记录</h3>
-            <div class="timeline">
-              <For each={[...bill()!.operation_logs].reverse()}>
-                {(log) => (
-                  <div class="timeline-item">
-                    <div class="time">{formatDate(log.created_at)}</div>
-                    <div class="operation">{log.operation}</div>
-                    <div class="operator">操作人: {log.operator_name || "系统"}</div>
-                    {log.from_status && (
-                      <div class="operator">
-                        状态: {statusLabels[log.from_status]} → {statusLabels[log.to_status!]}
-                      </div>
-                    )}
-                    {log.anomaly_reason && (
-                      <div class="remark anomaly">
-                        <strong>异常原因:</strong> {log.anomaly_reason}
-                      </div>
-                    )}
-                    {log.remark && (
-                      <div class="remark">
-                        <strong>备注:</strong> {log.remark}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </For>
+          {canSee("operation_logs") && (
+            <div class="detail-card">
+              <h3>📜 操作记录</h3>
+              <div class="timeline">
+                <For each={[...bill()!.operation_logs].reverse()}>
+                  {(log) => (
+                    <div class="timeline-item">
+                      <div class="time">{formatDate(log.created_at)}</div>
+                      <div class="operation">{log.operation}</div>
+                      <div class="operator">操作人: {log.operator_name || "系统"}</div>
+                      {log.from_status && (
+                        <div class="operator">
+                          状态: {statusLabels[log.from_status]} → {statusLabels[log.to_status!]}
+                        </div>
+                      )}
+                      {log.anomaly_reason && (
+                        <div class="remark anomaly">
+                          <strong>异常原因:</strong> {log.anomaly_reason}
+                        </div>
+                      )}
+                      {log.remark && (
+                        <div class="remark">
+                          <strong>备注:</strong> {log.remark}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </For>
+              </div>
             </div>
-          </div>
+          )}
         </div>
 
         <div>

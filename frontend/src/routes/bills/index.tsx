@@ -23,6 +23,8 @@ interface Bill {
   has_bill_generated: boolean;
   has_payment_verified: boolean;
   allowed_actions: string[];
+  visible_fields: string[];
+  editable_fields: string[];
   created_at: string;
   updated_at: string;
 }
@@ -136,6 +138,10 @@ const BillList: Component = () => {
   };
 
   const submitAction = async () => {
+    if (actionData().action.includes("reject") && !actionData().anomaly_reason.trim()) {
+      showAlert("error", "驳回操作必须填写异常原因");
+      return;
+    }
     try {
       const ids = Array.from(selected());
       let result;
@@ -335,8 +341,8 @@ const BillList: Component = () => {
                 <th>状态</th>
                 <th>当前节点</th>
                 <th>责任人</th>
-                <th>金额</th>
-                <th>三单状态</th>
+                {bills().some(b => b.visible_fields?.includes("total_amount")) && <th>金额</th>}
+                {bills().some(b => b.visible_fields?.includes("has_meter_reading")) && <th>三单状态</th>}
                 <th>操作</th>
               </tr>
             </thead>
@@ -383,18 +389,20 @@ const BillList: Component = () => {
                     </td>
                     <td>{nodeLabels[bill.current_node]}</td>
                     <td style={{ fontSize: "12px" }}>{roleLabels[bill.current_responsible_role]}</td>
-                    <td class="amount">¥{bill.total_amount.toFixed(2)}</td>
-                    <td>
-                      <span class={`tag ${bill.has_meter_reading ? "tag-success" : "tag-warning"}`}>
-                        抄表{bill.has_meter_reading ? "✓" : "✗"}
-                      </span>
-                      <span class={`tag ${bill.has_bill_generated ? "tag-success" : "tag-warning"}`}>
-                        账单{bill.has_bill_generated ? "✓" : "✗"}
-                      </span>
-                      <span class={`tag ${bill.has_payment_verified ? "tag-success" : "tag-warning"}`}>
-                        缴费{bill.has_payment_verified ? "✓" : "✗"}
-                      </span>
-                    </td>
+                    {bill.visible_fields?.includes("total_amount") && <td class="amount">¥{bill.total_amount.toFixed(2)}</td>}
+                    {bill.visible_fields?.includes("has_meter_reading") && (
+                      <td>
+                        <span class={`tag ${bill.has_meter_reading ? "tag-success" : "tag-warning"}`}>
+                          抄表{bill.has_meter_reading ? "✓" : "✗"}
+                        </span>
+                        <span class={`tag ${bill.has_bill_generated ? "tag-success" : "tag-warning"}`}>
+                          账单{bill.has_bill_generated ? "✓" : "✗"}
+                        </span>
+                        <span class={`tag ${bill.has_payment_verified ? "tag-success" : "tag-warning"}`}>
+                          缴费{bill.has_payment_verified ? "✓" : "✗"}
+                        </span>
+                      </td>
+                    )}
                     <td class="actions-cell" onClick={(e) => e.stopPropagation()}>
                       <button
                         class="btn btn-sm btn-primary"
