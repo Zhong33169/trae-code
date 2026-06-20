@@ -692,7 +692,7 @@ def init_db():
             "location": "培训中心C-302",
             "student_count": 35,
             "description": "面向企业中高层的数字化转型战略培训",
-            "status": "rejected",
+            "status": "timeout_handling",
             "created_by": 1,
             "courseware_status": "rejected",
             "evaluation_status": "pending",
@@ -724,6 +724,8 @@ def init_db():
             entered_at = (now - timedelta(hours=30)).strftime("%Y-%m-%d %H:%M:%S")
         elif f["status"] == "rejected":
             entered_at = (now - timedelta(hours=100)).strftime("%Y-%m-%d %H:%M:%S")
+        elif f["status"] == "timeout_handling":
+            entered_at = (now - timedelta(hours=10)).strftime("%Y-%m-%d %H:%M:%S")
         c.execute(
             """INSERT INTO scheduling_forms
                 (form_no, title, instructor_name, instructor_id, course_name, course_type,
@@ -858,7 +860,7 @@ def init_db():
     demo_timeouts = [
         {
             "form_no": "PK-2026-008",
-            "node_name": "pending_courseware",
+            "node_name": "rejected",
             "timeout_at": (now - timedelta(hours=60)).strftime("%Y-%m-%d %H:%M:%S"),
             "reason": "课件内容深度不够，缺少行业案例",
             "follow_up": "已通知讲师补充数字化转型实施路径和金融行业案例，预计48小时内重新提交",

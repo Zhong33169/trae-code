@@ -474,14 +474,35 @@ def handle_timeout(form_id: int, req: TimeoutHandle, user: dict = Depends(get_cu
         "submit_actions": submit_actions,
     }
 
-@router.get("/timeout-records", response_model=list[TimeoutRecordResponse])
+@router.get("/timeout-records")
 def list_timeout_records(user: dict = Depends(get_current_user)):
+    check_timeouts()
     conn = get_db()
     rows = conn.execute(
         "SELECT * FROM timeout_records ORDER BY created_at DESC"
     ).fetchall()
+    results = []
+    for r in rows:
+        record = enrich_timeout(r)
+        form_row = conn.execute("SELECT * FROM scheduling_forms WHERE id=?", (r["form_id"],)).fetchone()
+        if form_row:
+            record["form_no"] = form_row["form_no"]
+            record["form_title"] = form_row["title"]
+            record["form_status"] = form_row["status"]
+            record["form_status_label"] = STATUS_LABELS.get(form_row["status"], form_row["status"])
+            enriched = _enrich_and_filter(conn, form_row, user["role"])
+            record["has_pending_timeout"] = enriched.get("has_pending_timeout", False)
+            record["submit_actions"] = get_submit_actions(user["role"], form_row["status"], r["form_id"], conn)
+        else:
+            record["form_no"] = None
+            record["form_title"] = None
+            record["form_status"] = None
+            record["form_status_label"] = None
+            record["has_pending_timeout"] = False
+            record["submit_actions"] = []
+        results.append(record)
     conn.close()
-    return [enrich_timeout(r) for r in rows]
+    return results
 
 @router.get("/statistics", response_model=StatisticsResponse)
 def get_statistics(user: dict = Depends(get_current_user)):
