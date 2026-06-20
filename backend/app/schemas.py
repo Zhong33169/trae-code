@@ -93,6 +93,7 @@ class OperationLogResponse(BaseModel):
     from_node: Optional[ProcessNode] = None
     to_node: Optional[ProcessNode] = None
     anomaly_reason: Optional[str] = None
+    field_changes: Optional[str] = None
     remark: Optional[str] = None
     created_at: datetime
 
@@ -115,7 +116,7 @@ class EnergyBillCreate(EnergyBillBase):
 
 
 class EnergyBillUpdate(EnergyBillBase):
-    pass
+    remark: Optional[str] = None
 
 
 class BillAction(BaseModel):

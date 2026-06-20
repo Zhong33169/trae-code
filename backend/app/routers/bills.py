@@ -1,3 +1,4 @@
+import json as json_module
 from datetime import datetime
 from typing import Optional, List
 from litestar import Router, get, post, put, delete, Request, patch
@@ -30,79 +31,83 @@ def _enrich_bill_response(db, bill: EnergyBill, user: User) -> EnergyBillRespons
     creator = db.query(User).filter(User.id == bill.created_by).first()
 
     meter_readings = []
-    for mr in bill.meter_readings:
-        reader = db.query(User).filter(User.id == mr.read_by).first()
-        meter_readings.append(MeterReadingResponse(
-            id=mr.id,
-            bill_id=mr.bill_id,
-            reading_type=mr.reading_type,
-            previous_reading=mr.previous_reading,
-            current_reading=mr.current_reading,
-            usage=mr.usage,
-            remark=mr.remark,
-            read_by=mr.read_by,
-            read_at=mr.read_at,
-            reader_name=reader.real_name if reader else None
-        ))
+    if "meter_readings" in visible_fields:
+        for mr in bill.meter_readings:
+            reader = db.query(User).filter(User.id == mr.read_by).first()
+            meter_readings.append(MeterReadingResponse(
+                id=mr.id,
+                bill_id=mr.bill_id,
+                reading_type=mr.reading_type,
+                previous_reading=mr.previous_reading,
+                current_reading=mr.current_reading,
+                usage=mr.usage,
+                remark=mr.remark,
+                read_by=mr.read_by,
+                read_at=mr.read_at,
+                reader_name=reader.real_name if reader else None
+            ))
 
     payments = []
-    for p in bill.payments:
-        verifier = db.query(User).filter(User.id == p.verified_by).first() if p.verified_by else None
-        payments.append(PaymentResponse(
-            id=p.id,
-            bill_id=p.bill_id,
-            amount=p.amount,
-            payment_method=p.payment_method,
-            transaction_no=p.transaction_no,
-            paid_by=p.paid_by,
-            paid_at=p.paid_at,
-            remark=p.remark,
-            verified_by=p.verified_by,
-            verified_at=p.verified_at,
-            is_verified=p.is_verified,
-            verifier_name=verifier.real_name if verifier else None
-        ))
+    if "payments" in visible_fields:
+        for p in bill.payments:
+            verifier = db.query(User).filter(User.id == p.verified_by).first() if p.verified_by else None
+            payments.append(PaymentResponse(
+                id=p.id,
+                bill_id=p.bill_id,
+                amount=p.amount,
+                payment_method=p.payment_method,
+                transaction_no=p.transaction_no,
+                paid_by=p.paid_by,
+                paid_at=p.paid_at,
+                remark=p.remark,
+                verified_by=p.verified_by,
+                verified_at=p.verified_at,
+                is_verified=p.is_verified,
+                verifier_name=verifier.real_name if verifier else None
+            ))
 
     operation_logs = []
-    for log in bill.operation_logs:
-        operator = db.query(User).filter(User.id == log.operator_id).first()
-        operation_logs.append(OperationLogResponse(
-            id=log.id,
-            bill_id=log.bill_id,
-            operator_id=log.operator_id,
-            operator_name=operator.real_name if operator else None,
-            operation=log.operation,
-            from_status=log.from_status,
-            to_status=log.to_status,
-            from_node=log.from_node,
-            to_node=log.to_node,
-            anomaly_reason=log.anomaly_reason,
-            remark=log.remark,
-            created_at=log.created_at
-        ))
+    if "operation_logs" in visible_fields:
+        for log in bill.operation_logs:
+            operator = db.query(User).filter(User.id == log.operator_id).first()
+            operation_logs.append(OperationLogResponse(
+                id=log.id,
+                bill_id=log.bill_id,
+                operator_id=log.operator_id,
+                operator_name=operator.real_name if operator else None,
+                operation=log.operation,
+                from_status=log.from_status,
+                to_status=log.to_status,
+                from_node=log.from_node,
+                to_node=log.to_node,
+                anomaly_reason=log.anomaly_reason,
+                field_changes=log.field_changes,
+                remark=log.remark,
+                created_at=log.created_at
+            ))
 
     return EnergyBillResponse(
         id=bill.id,
         bill_no=bill.bill_no,
-        period=bill.period,
-        park_name=bill.park_name,
-        building=bill.building,
-        room=bill.room,
-        electricity_usage=bill.electricity_usage,
-        water_usage=bill.water_usage,
-        gas_usage=bill.gas_usage,
-        electricity_amount=bill.electricity_amount,
-        water_amount=bill.water_amount,
-        gas_amount=bill.gas_amount,
-        total_amount=bill.total_amount,
+        period=bill.period if "period" in visible_fields else None,
+        park_name=bill.park_name if "park_name" in visible_fields else None,
+        building=bill.building if "building" in visible_fields else None,
+        room=bill.room if "room" in visible_fields else None,
+        electricity_usage=bill.electricity_usage if "electricity_usage" in visible_fields else None,
+        water_usage=bill.water_usage if "water_usage" in visible_fields else None,
+        gas_usage=bill.gas_usage if "gas_usage" in visible_fields else None,
+        electricity_amount=bill.electricity_amount if "electricity_amount" in visible_fields else None,
+        water_amount=bill.water_amount if "water_amount" in visible_fields else None,
+        gas_amount=bill.gas_amount if "gas_amount" in visible_fields else None,
+        total_amount=bill.total_amount if "total_amount" in visible_fields else None,
         status=bill.status,
         current_node=bill.current_node,
         current_responsible_role=bill.current_responsible_role,
-        has_meter_reading=bill.has_meter_reading,
-        has_bill_generated=bill.has_bill_generated,
-        has_payment_verified=bill.has_payment_verified,
-        is_overdue=bill.is_overdue,
-        overdue_hours=bill.overdue_hours,
+        has_meter_reading=bill.has_meter_reading if "has_meter_reading" in visible_fields else None,
+        has_bill_generated=bill.has_bill_generated if "has_bill_generated" in visible_fields else None,
+        has_payment_verified=bill.has_payment_verified if "has_payment_verified" in visible_fields else None,
+        is_overdue=bill.is_overdue if "is_overdue" in visible_fields else None,
+        overdue_hours=bill.overdue_hours if "overdue_hours" in visible_fields else None,
         current_node_started_at=bill.current_node_started_at,
         created_by=bill.created_by,
         creator_name=creator.real_name if creator else None,
@@ -251,8 +256,8 @@ async def update_bill(bill_id: int, data: EnergyBillUpdate, request: Request, db
     if not bill:
         raise HTTPException(status_code=404, detail=f"账单不存在: {bill_id}")
 
-    allowed_actions = get_allowed_actions(user.role, bill)
-    if "edit" not in allowed_actions:
+    editable_fields = get_editable_fields(user.role, bill)
+    if not editable_fields:
         raise HTTPException(
             status_code=403,
             detail={
@@ -264,28 +269,50 @@ async def update_bill(bill_id: int, data: EnergyBillUpdate, request: Request, db
             }
         )
 
-    bill.period = data.period
-    bill.park_name = data.park_name
-    bill.building = data.building
-    bill.room = data.room
-    bill.electricity_usage = data.electricity_usage
-    bill.water_usage = data.water_usage
-    bill.gas_usage = data.gas_usage
-    bill.electricity_amount = data.electricity_amount
-    bill.water_amount = data.water_amount
-    bill.gas_amount = data.gas_amount
-    bill.total_amount = (data.electricity_amount or 0) + (data.water_amount or 0) + (data.gas_amount or 0)
+    field_changes = {}
+    field_map = {
+        "period": ("period", data.period),
+        "park_name": ("park_name", data.park_name),
+        "building": ("building", data.building),
+        "room": ("room", data.room),
+        "electricity_usage": ("electricity_usage", data.electricity_usage),
+        "water_usage": ("water_usage", data.water_usage),
+        "gas_usage": ("gas_usage", data.gas_usage),
+        "electricity_amount": ("electricity_amount", data.electricity_amount),
+        "water_amount": ("water_amount", data.water_amount),
+        "gas_amount": ("gas_amount", data.gas_amount),
+    }
+
+    for field_name, (attr_name, new_value) in field_map.items():
+        if new_value is None:
+            continue
+        if field_name not in editable_fields:
+            continue
+        old_value = getattr(bill, attr_name)
+        if old_value != new_value:
+            field_changes[field_name] = {"old": old_value, "new": new_value}
+            setattr(bill, attr_name, new_value)
+
+    if field_changes:
+        amount_fields = {"electricity_amount", "water_amount", "gas_amount"}
+        if amount_fields & set(field_changes.keys()):
+            bill.total_amount = (bill.electricity_amount or 0) + (bill.water_amount or 0) + (bill.gas_amount or 0)
+            if "total_amount" not in field_changes:
+                field_changes["total_amount"] = {"old": None, "new": bill.total_amount, "auto": True}
+
     bill.updated_at = datetime.utcnow()
 
+    operation_desc = "补正账单" if bill.status in [BillStatus.REJECTED, BillStatus.REVIEW_REJECTED] else "编辑账单"
     log = OperationLog(
         bill_id=bill.id,
         operator_id=user.id,
-        operation="编辑账单",
+        operation=operation_desc,
         from_status=bill.status,
         to_status=bill.status,
         from_node=bill.current_node,
         to_node=bill.current_node,
-        remark="修改账单内容"
+        field_changes=json_module.dumps(field_changes, ensure_ascii=False) if field_changes else None,
+        remark=data.remark if hasattr(data, 'remark') and data.remark else None
     )
     db.add(log)
     db.commit()

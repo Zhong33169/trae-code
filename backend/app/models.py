@@ -127,6 +127,7 @@ class OperationLog(Base):
     from_node = Column(Enum(ProcessNode))
     to_node = Column(Enum(ProcessNode))
     anomaly_reason = Column(Text)
+    field_changes = Column(Text)
     remark = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow)
 

@@ -410,7 +410,7 @@ const BillList: Component = () => {
                       >
                         查看
                       </button>
-                      <For each={bill.allowed_actions.slice(0, 3)}>
+                      <For each={bill.allowed_actions.filter(a => a !== 'edit').slice(0, 3)}>
                         {(action) => (
                           <button
                             class={`btn btn-sm ${getActionButtonClass(action)}`}
@@ -427,6 +427,17 @@ const BillList: Component = () => {
                           </button>
                         )}
                       </For>
+                      {bill.allowed_actions.includes("edit") && (
+                        <button
+                          class="btn btn-sm btn-warning"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            navigate(`/bills/${bill.id}`);
+                          }}
+                        >
+                          {bill.status === "rejected" || bill.status === "review_rejected" ? "补正" : "编辑"}
+                        </button>
+                      )}
                     </td>
                   </tr>
                 )}

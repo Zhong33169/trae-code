@@ -63,6 +63,21 @@ const BillDetail: Component = () => {
   const [showActionModal, setShowActionModal] = createSignal(false);
   const [actionData, setActionData] = createSignal({ action: "", anomaly_reason: "", remark: "" });
 
+  const [showEditModal, setShowEditModal] = createSignal(false);
+  const [editData, setEditData] = createSignal({
+    period: "",
+    park_name: "",
+    building: "",
+    room: "",
+    electricity_usage: "",
+    water_usage: "",
+    gas_usage: "",
+    electricity_amount: "",
+    water_amount: "",
+    gas_amount: "",
+    remark: "",
+  });
+
   const [showMeterModal, setShowMeterModal] = createSignal(false);
   const [meterData, setMeterData] = createSignal({
     reading_type: "electricity",
@@ -216,6 +231,55 @@ const BillDetail: Component = () => {
   };
 
   const canSee = (field: string) => bill()?.visible_fields?.includes(field) ?? false;
+  const canEdit = (field: string) => bill()?.editable_fields?.includes(field) ?? false;
+
+  const openEditModal = () => {
+    const b = bill();
+    if (!b) return;
+    setEditData({
+      period: b.period || "",
+      park_name: b.park_name || "",
+      building: b.building || "",
+      room: b.room || "",
+      electricity_usage: b.electricity_usage?.toString() || "",
+      water_usage: b.water_usage?.toString() || "",
+      gas_usage: b.gas_usage?.toString() || "",
+      electricity_amount: b.electricity_amount?.toString() || "",
+      water_amount: b.water_amount?.toString() || "",
+      gas_amount: b.gas_amount?.toString() || "",
+      remark: "",
+    });
+    setShowEditModal(true);
+  };
+
+  const submitEdit = async () => {
+    try {
+      const data: Record<string, any> = {};
+      const fields: Record<string, string> = {
+        period: editData().period,
+        park_name: editData().park_name,
+        building: editData().building,
+        room: editData().room,
+        electricity_usage: editData().electricity_usage,
+        water_usage: editData().water_usage,
+        gas_usage: editData().gas_usage,
+        electricity_amount: editData().electricity_amount,
+        water_amount: editData().water_amount,
+        gas_amount: editData().gas_amount,
+      };
+      for (const [key, val] of Object.entries(fields)) {
+        if (canEdit(key) && val !== "") {
+          data[key] = parseFloat(val) || val;
+        }
+      }
+      await api.updateBill(bill()!.id, data);
+      setShowEditModal(false);
+      showAlert("success", "保存成功");
+      loadBill();
+    } catch (err: any) {
+      showAlert("error", err.message || "保存失败");
+    }
+  };
 
   if (loading()) {
     return (
@@ -514,6 +578,25 @@ const BillDetail: Component = () => {
                           <strong>异常原因:</strong> {log.anomaly_reason}
                         </div>
                       )}
+                      {log.field_changes && (
+                        <div class="remark" style={{ "border-left": "3px solid #3b82f6" }}>
+                          <strong>字段变更:</strong>
+                          <For each={Object.entries(JSON.parse(log.field_changes))}>
+                            {([field, change]: [string, any]) => (
+                              <div style={{ "margin-left": "8px", "font-size": "12px" }}>
+                                <span style={{ color: "#6b7280" }}>{field}:</span>{" "}
+                                <span style={{ "text-decoration": "line-through", color: "#ef4444" }}>
+                                  {change.old ?? "-"}
+                                </span>{" "}
+                                →{" "}
+                                <span style={{ color: "#10b981" }}>
+                                  {change.new ?? "-"}
+                                </span>
+                              </div>
+                            )}
+                          </For>
+                        </div>
+                      )}
                       {log.remark && (
                         <div class="remark">
                           <strong>备注:</strong> {log.remark}
@@ -541,7 +624,9 @@ const BillDetail: Component = () => {
                     <button
                       class={getActionButtonClass(action)}
                       onClick={() => {
-                        if (action === "add_meter_reading") {
+                        if (action === "edit") {
+                          openEditModal();
+                        } else if (action === "add_meter_reading") {
                           setShowMeterModal(true);
                         } else if (action === "generate_bill") {
                           handleGenerateBill();
@@ -747,6 +832,141 @@ const BillDetail: Component = () => {
             rows={2}
             value={paymentData().remark}
             onInput={(e) => setPaymentData({ ...paymentData(), remark: e.target.value })}
+          />
+        </div>
+      </Modal>
+
+      <Modal
+        show={showEditModal()}
+        title={bill()?.status === "rejected" || bill()?.status === "review_rejected" ? "补正账单" : "编辑账单"}
+        onClose={() => setShowEditModal(false)}
+        footer={
+          <>
+            <button class="btn btn-secondary" onClick={() => setShowEditModal(false)}>取消</button>
+            <button class="btn btn-primary" onClick={submitEdit}>保存</button>
+          </>
+        }
+        width="700px"
+      >
+        <div class="alert alert-info">
+          可编辑字段由当前角色和账单状态决定。灰显字段为只读。
+        </div>
+        <div class="detail-grid">
+          <div class="form-group">
+            <label>账期 {canEdit("period") && "*"}</label>
+            <input
+              type="text"
+              value={editData().period}
+              onInput={(e) => setEditData({ ...editData(), period: e.target.value })}
+              disabled={!canEdit("period")}
+              placeholder="如: 2026-06"
+              style={!canEdit("period") ? { background: "#f3f4f6", color: "#9ca3af" } : {}}
+            />
+          </div>
+          <div class="form-group">
+            <label>园区名称 {canEdit("park_name") && "*"}</label>
+            <input
+              type="text"
+              value={editData().park_name}
+              onInput={(e) => setEditData({ ...editData(), park_name: e.target.value })}
+              disabled={!canEdit("park_name")}
+              placeholder="如: 产业园A区"
+              style={!canEdit("park_name") ? { background: "#f3f4f6", color: "#9ca3af" } : {}}
+            />
+          </div>
+          <div class="form-group">
+            <label>楼栋</label>
+            <input
+              type="text"
+              value={editData().building}
+              onInput={(e) => setEditData({ ...editData(), building: e.target.value })}
+              disabled={!canEdit("building")}
+              placeholder="如: 1号楼"
+              style={!canEdit("building") ? { background: "#f3f4f6", color: "#9ca3af" } : {}}
+            />
+          </div>
+          <div class="form-group">
+            <label>房间</label>
+            <input
+              type="text"
+              value={editData().room}
+              onInput={(e) => setEditData({ ...editData(), room: e.target.value })}
+              disabled={!canEdit("room")}
+              placeholder="如: 101"
+              style={!canEdit("room") ? { background: "#f3f4f6", color: "#9ca3af" } : {}}
+            />
+          </div>
+          <div class="form-group">
+            <label>用电量 (度)</label>
+            <input
+              type="number"
+              value={editData().electricity_usage}
+              onInput={(e) => setEditData({ ...editData(), electricity_usage: e.target.value })}
+              disabled={!canEdit("electricity_usage")}
+              style={!canEdit("electricity_usage") ? { background: "#f3f4f6", color: "#9ca3af" } : {}}
+            />
+          </div>
+          <div class="form-group">
+            <label>用水量 (吨)</label>
+            <input
+              type="number"
+              value={editData().water_usage}
+              onInput={(e) => setEditData({ ...editData(), water_usage: e.target.value })}
+              disabled={!canEdit("water_usage")}
+              style={!canEdit("water_usage") ? { background: "#f3f4f6", color: "#9ca3af" } : {}}
+            />
+          </div>
+          <div class="form-group">
+            <label>用气量 (立方)</label>
+            <input
+              type="number"
+              value={editData().gas_usage}
+              onInput={(e) => setEditData({ ...editData(), gas_usage: e.target.value })}
+              disabled={!canEdit("gas_usage")}
+              style={!canEdit("gas_usage") ? { background: "#f3f4f6", color: "#9ca3af" } : {}}
+            />
+          </div>
+          <div class="form-group">
+            <label>电费 (元)</label>
+            <input
+              type="number"
+              step="0.01"
+              value={editData().electricity_amount}
+              onInput={(e) => setEditData({ ...editData(), electricity_amount: e.target.value })}
+              disabled={!canEdit("electricity_amount")}
+              style={!canEdit("electricity_amount") ? { background: "#f3f4f6", color: "#9ca3af" } : {}}
+            />
+          </div>
+          <div class="form-group">
+            <label>水费 (元)</label>
+            <input
+              type="number"
+              step="0.01"
+              value={editData().water_amount}
+              onInput={(e) => setEditData({ ...editData(), water_amount: e.target.value })}
+              disabled={!canEdit("water_amount")}
+              style={!canEdit("water_amount") ? { background: "#f3f4f6", color: "#9ca3af" } : {}}
+            />
+          </div>
+          <div class="form-group">
+            <label>气费 (元)</label>
+            <input
+              type="number"
+              step="0.01"
+              value={editData().gas_amount}
+              onInput={(e) => setEditData({ ...editData(), gas_amount: e.target.value })}
+              disabled={!canEdit("gas_amount")}
+              style={!canEdit("gas_amount") ? { background: "#f3f4f6", color: "#9ca3af" } : {}}
+            />
+          </div>
+        </div>
+        <div class="form-group" style={{ "margin-top": "12px" }}>
+          <label>补正备注</label>
+          <textarea
+            rows={2}
+            value={editData().remark}
+            onInput={(e) => setEditData({ ...editData(), remark: e.target.value })}
+            placeholder="填写补正原因或备注..."
           />
         </div>
       </Modal>
