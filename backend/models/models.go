@@ -78,6 +78,7 @@ type OperationLog struct {
 	OperatorName  string    `json:"operator_name"`
 	OperatorRole  string    `json:"operator_role"`
 	OperatorShift string    `json:"operator_shift"`
+	BatchID       string    `json:"batch_id"`
 	Remark        string    `json:"remark"`
 	CreatedAt     time.Time `json:"created_at"`
 }

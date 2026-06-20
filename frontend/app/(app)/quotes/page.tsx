@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation';
 import { apiFetch, formatDateTime, formatMoney, getCurrentUser } from '@/lib/api';
 import { STATUS_COLORS } from '@/types';
 import type { RepairQuote } from '@/types';
+import BatchHandoverModal, { BatchConfirmResponse } from '@/components/BatchHandoverModal';
+import BatchResultModal from '@/components/BatchResultModal';
 
 const STATUS_OPTIONS: { code: string; name: string }[] = [
   { code: 'all', name: '全部状态' },
@@ -39,6 +41,10 @@ export default function QuotesListPage() {
   const [message, setMessage] = useState<{ type: string; text: string } | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [pendingIncoming, setPendingIncoming] = useState<number>(0);
+
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [batchModal, setBatchModal] = useState<{ open: boolean; action: 'confirm' | 'reject' | null }>({ open: false, action: null });
+  const [batchResult, setBatchResult] = useState<BatchConfirmResponse | null>(null);
 
   const canCreate = user?.role === 'customer_service' || user?.role === 'service_manager';
 
@@ -78,7 +84,36 @@ export default function QuotesListPage() {
     };
   }, [load, loadHandovers]);
 
+  useEffect(() => {
+    setSelected(new Set());
+  }, [filters, page]);
+
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
+
+  const pendingQuotes = list.filter(q => !!q.pending_handover_id && q.pending_handover_id > 0);
+
+  const toggleSelect = (hid: number) => {
+    const s = new Set(selected);
+    if (s.has(hid)) s.delete(hid); else s.add(hid);
+    setSelected(s);
+  };
+
+  const selectAll = () => {
+    if (selected.size === pendingQuotes.length) {
+      setSelected(new Set());
+    } else {
+      setSelected(new Set(pendingQuotes.map(q => q.pending_handover_id!)));
+    }
+  };
+
+  const onBatchCompleted = (data: BatchConfirmResponse) => {
+    setBatchModal({ open: false, action: null });
+    setSelected(new Set());
+    setBatchResult(data);
+    load();
+    loadHandovers();
+    window.dispatchEvent(new CustomEvent('handover-updated'));
+  };
 
   return (
     <div>
@@ -115,38 +150,73 @@ export default function QuotesListPage() {
       </div>
 
       <div className="card p-4 mb-4">
-        <div className="grid grid-cols-4 gap-3 items-end">
-          <div>
-            <label className="label">状态</label>
-            <select className="select" value={filters.status} onChange={e => { setFilters({ ...filters, status: e.target.value }); setPage(1); }}>
-              {STATUS_OPTIONS.map(s => <option key={s.code} value={s.code}>{s.name}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="label">所属班次</label>
-            <select className="select" value={filters.shift} onChange={e => { setFilters({ ...filters, shift: e.target.value }); setPage(1); }}>
-              {SHIFT_OPTIONS.map(s => <option key={s.code} value={s.code}>{s.name}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="label">关键字搜索</label>
-            <input className="input" placeholder="单号/客户/电话/设备" value={filters.keyword}
-              onChange={e => { setFilters({ ...filters, keyword: e.target.value }); setPage(1); }} />
-          </div>
-          <div className="flex items-center gap-3">
-            <label className="inline-flex items-center gap-1.5 text-sm">
-              <input type="checkbox" checked={filters.myOnly} onChange={e => { setFilters({ ...filters, myOnly: e.target.checked }); setPage(1); }} />
-              仅看我负责的
-            </label>
-            <button className="btn btn-secondary btn-sm" onClick={() => { setFilters({ status: 'all', keyword: '', myOnly: false, shift: 'all' }); setPage(1); }}>重置</button>
+        <div className="flex items-center gap-3 flex-wrap mb-3">
+          <div className="grid grid-cols-4 gap-3 flex-1 items-end">
+            <div>
+              <label className="label">状态</label>
+              <select className="select" value={filters.status} onChange={e => { setFilters({ ...filters, status: e.target.value }); setPage(1); }}>
+                {STATUS_OPTIONS.map(s => <option key={s.code} value={s.code}>{s.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="label">所属班次</label>
+              <select className="select" value={filters.shift} onChange={e => { setFilters({ ...filters, shift: e.target.value }); setPage(1); }}>
+                {SHIFT_OPTIONS.map(s => <option key={s.code} value={s.code}>{s.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="label">关键字搜索</label>
+              <input className="input" placeholder="单号/客户/电话/设备" value={filters.keyword}
+                onChange={e => { setFilters({ ...filters, keyword: e.target.value }); setPage(1); }} />
+            </div>
+            <div className="flex items-center gap-3">
+              <label className="inline-flex items-center gap-1.5 text-sm">
+                <input type="checkbox" checked={filters.myOnly} onChange={e => { setFilters({ ...filters, myOnly: e.target.checked }); setPage(1); }} />
+                仅看我负责的
+              </label>
+              <button className="btn btn-secondary btn-sm" onClick={() => { setFilters({ status: 'all', keyword: '', myOnly: false, shift: 'all' }); setPage(1); }}>重置</button>
+            </div>
           </div>
         </div>
+        {pendingQuotes.length > 0 && (
+          <div className="flex items-center gap-2 pt-3 border-t border-gray-100">
+            <span className="text-sm text-orange-700 font-medium">
+              📋 当前列表有 <b>{pendingQuotes.length}</b> 条属于您的待接收交接单，可直接勾选批量处理
+            </span>
+            <div className="flex-1" />
+            {selected.size > 0 ? (
+              <div className="flex items-center gap-2 bg-blue-50 px-3 py-1.5 rounded-lg border border-blue-200">
+                <span className="text-sm text-blue-700 font-medium">已选 {selected.size} 条</span>
+                <button className="btn btn-success btn-sm" onClick={() => setBatchModal({ open: true, action: 'confirm' })}>
+                  ✓ 批量接收
+                </button>
+                <button className="btn btn-danger btn-sm" onClick={() => setBatchModal({ open: true, action: 'reject' })}>
+                  ✗ 批量拒绝
+                </button>
+                <button className="btn btn-secondary btn-xs" onClick={() => setSelected(new Set())}>
+                  清空
+                </button>
+              </div>
+            ) : (
+              <Link href="/handovers" className="text-sm text-blue-700 hover:underline">
+                前往交接中心查看全部 →
+              </Link>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="card overflow-hidden">
         <table className="data-table">
           <thead>
             <tr>
+              {pendingQuotes.length > 0 && (
+                <th style={{ width: 38 }}>
+                  <input type="checkbox"
+                    checked={selected.size > 0 && selected.size === pendingQuotes.length}
+                    onChange={selectAll} />
+                </th>
+              )}
               <th>报价单号</th>
               <th>客户信息</th>
               <th>设备</th>
@@ -161,44 +231,63 @@ export default function QuotesListPage() {
           </thead>
           <tbody>
             {list.length === 0 && (
-              <tr><td colSpan={10} className="text-center text-gray-400 py-10">
+              <tr><td colSpan={pendingQuotes.length > 0 ? 11 : 10} className="text-center text-gray-400 py-10">
                 {loading ? '加载中...' : '暂无数据'}
               </td></tr>
             )}
-            {list.map(q => (
-              <tr key={q.id}>
-                <td className="font-mono text-xs text-blue-700">{q.quote_no}</td>
-                <td>
-                  <div className="font-medium">{q.customer_name}</div>
-                  <div className="text-xs text-gray-500">{q.customer_phone}</div>
-                </td>
-                <td>
-                  <div>{q.device_type}</div>
-                  <div className="text-xs text-gray-500">{q.device_model || '-'}</div>
-                </td>
-                <td>
-                  <span className={`tag border ${STATUS_COLORS[q.status] || ''}`}>{q.status_display}</span>
-                </td>
-                <td>
-                  <div className="font-semibold">{formatMoney(q.estimate_amount || q.actual_amount)}</div>
-                  <div className="text-xs text-gray-500">
-                    {q.payment_status === 'paid' ? <span className="text-emerald-600">已支付</span> : <span className="text-amber-600">{q.payment_status === 'unpaid' ? '未支付' : q.payment_status}</span>}
-                  </div>
-                </td>
-                <td>
-                  <div>{q.current_handler || '-'}</div>
-                  {q.assigned_technician && <div className="text-xs text-orange-600">维修师傅: {q.assigned_technician}</div>}
-                </td>
-                <td className="text-xs">{q.shift_display}</td>
-                <td className="text-center">
-                  {q.handover_count > 0 ? <span className="tag bg-orange-50 text-orange-700 border-orange-200">×{q.handover_count}</span> : '0'}
-                </td>
-                <td className="text-xs text-gray-500">{formatDateTime(q.updated_at)}</td>
-                <td>
-                  <Link href={`/quotes/${q.id}`} className="btn btn-primary btn-xs">查看详情</Link>
-                </td>
-              </tr>
-            ))}
+            {list.map(q => {
+              const hasPending = !!q.pending_handover_id && q.pending_handover_id > 0;
+              const isSelected = hasPending && selected.has(q.pending_handover_id!);
+              return (
+                <tr key={q.id} className={isSelected ? 'bg-blue-50' : ''}>
+                  {pendingQuotes.length > 0 && (
+                    <td>
+                      {hasPending ? (
+                        <input type="checkbox" checked={isSelected}
+                          onChange={() => toggleSelect(q.pending_handover_id!)} />
+                      ) : null}
+                    </td>
+                  )}
+                  <td>
+                    <div className="font-mono text-xs text-blue-700">{q.quote_no}</div>
+                    {hasPending && (
+                      <span className="tag bg-orange-50 text-orange-700 border-orange-200 mt-1 text-[10px]">
+                        待我接收
+                      </span>
+                    )}
+                  </td>
+                  <td>
+                    <div className="font-medium">{q.customer_name}</div>
+                    <div className="text-xs text-gray-500">{q.customer_phone}</div>
+                  </td>
+                  <td>
+                    <div>{q.device_type}</div>
+                    <div className="text-xs text-gray-500">{q.device_model || '-'}</div>
+                  </td>
+                  <td>
+                    <span className={`tag border ${STATUS_COLORS[q.status] || ''}`}>{q.status_display}</span>
+                  </td>
+                  <td>
+                    <div className="font-semibold">{formatMoney(q.estimate_amount || q.actual_amount)}</div>
+                    <div className="text-xs text-gray-500">
+                      {q.payment_status === 'paid' ? <span className="text-emerald-600">已支付</span> : <span className="text-amber-600">{q.payment_status === 'unpaid' ? '未支付' : q.payment_status}</span>}
+                    </div>
+                  </td>
+                  <td>
+                    <div>{q.current_handler || '-'}</div>
+                    {q.assigned_technician && <div className="text-xs text-orange-600">维修师傅: {q.assigned_technician}</div>}
+                  </td>
+                  <td className="text-xs">{q.shift_display}</td>
+                  <td className="text-center">
+                    {q.handover_count > 0 ? <span className="tag bg-orange-50 text-orange-700 border-orange-200">×{q.handover_count}</span> : '0'}
+                  </td>
+                  <td className="text-xs text-gray-500">{formatDateTime(q.updated_at)}</td>
+                  <td>
+                    <Link href={`/quotes/${q.id}`} className="btn btn-primary btn-xs">查看详情</Link>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
         {total > pageSize && (
@@ -218,6 +307,20 @@ export default function QuotesListPage() {
 
       {showCreate && <CreateQuoteModal onClose={() => setShowCreate(false)}
         onCreated={() => { setMessage({ type: 'success', text: '报价单已登记，稍后可在列表查看' }); setShowCreate(false); setTimeout(() => setMessage(null), 3000); load(); }} />}
+
+      <BatchHandoverModal
+        open={batchModal.open}
+        action={batchModal.action}
+        selectedCount={selected.size}
+        handoverIDs={Array.from(selected)}
+        onClose={() => setBatchModal({ open: false, action: null })}
+        onCompleted={onBatchCompleted}
+      />
+      <BatchResultModal
+        open={!!batchResult}
+        data={batchResult}
+        onClose={() => setBatchResult(null)}
+      />
     </div>
   );
 }

@@ -162,8 +162,16 @@ export default function QuoteDetailPage() {
                     <div className="text-xs text-gray-500 mt-0.5">
                       <span className="font-medium text-gray-700">{l.operator_name}</span>
                       <span className="tag bg-gray-100 text-gray-600 ml-1" style={{ fontSize: 10 }}>{l.operator_role}</span>
+                      {l.operator_shift && (
+                        <span className="tag bg-blue-50 text-blue-700 border-blue-200 ml-1" style={{ fontSize: 10 }}>{l.operator_shift}</span>
+                      )}
                       <span className="mx-1">·</span>
                       {formatDateTime(l.created_at)}
+                      {l.batch_id && (
+                        <span className="ml-2 font-mono bg-amber-50 px-1.5 py-0.5 rounded text-amber-700 border border-amber-200" style={{ fontSize: 10 }}>
+                          批次: {l.batch_id}
+                        </span>
+                      )}
                     </div>
                     {l.remark && <div className="text-sm text-gray-700 mt-1 bg-gray-50 rounded px-2 py-1 border border-gray-100">{l.remark}</div>}
                   </div>
@@ -385,7 +393,7 @@ function StatusFlow({ current }: { current: string }) {
 
 interface Field { k: string; label: string; type: string; required?: boolean; placeholder?: string; default?: any; options?: [string, string][]; }
 
-function Modal({ title, onClose, onSubmit, fields, warning }: { title: string; onClose: () => void; onSubmit: (form: any) => Promise<boolean> | void; fields: Field[]; warning?: string }) {
+function Modal({ title, onClose, onSubmit, fields, warning }: { title: string; onClose: () => void; onSubmit: (form: any) => Promise<boolean | void> | boolean | void; fields: Field[]; warning?: string }) {
   const [form, setForm] = useState<any>(() => {
     const init: any = {};
     fields.forEach(f => { if (f.default != null) init[f.k] = f.default; });

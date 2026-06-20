@@ -2,6 +2,8 @@
 import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { apiFetch, formatDateTime, getCurrentUser } from '@/lib/api';
+import BatchHandoverModal, { BatchConfirmResponse } from '@/components/BatchHandoverModal';
+import BatchResultModal from '@/components/BatchResultModal';
 
 interface Handover {
   id: number;
@@ -21,17 +23,6 @@ interface Handover {
   confirmed_at: string | null;
 }
 
-interface BatchResult {
-  handover_id: number;
-  quote_id: number;
-  quote_no: string;
-  success: boolean;
-  action: string;
-  message: string;
-  new_handler?: string;
-  new_shift?: string;
-}
-
 export default function HandoversPage() {
   const user = getCurrentUser();
   const [handovers, setHandovers] = useState<Handover[]>([]);
@@ -39,12 +30,9 @@ export default function HandoversPage() {
   const [status, setStatus] = useState<'all' | 'pending' | 'confirmed' | 'rejected'>('pending');
   const [message, setMessage] = useState<{ type: string; text: string } | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
-  const [showBatchConfirm, setShowBatchConfirm] = useState<null | { action: 'confirm' | 'reject' }>(null);
-  const [showBatchResult, setShowBatchResult] = useState<{
-    total: number; success_count: number; fail_count: number; results: BatchResult[];
-  } | null>(null);
-  const [batchRemark, setBatchRemark] = useState('');
-  const [batchLoading, setBatchLoading] = useState(false);
+
+  const [batchModal, setBatchModal] = useState<{ open: boolean; action: 'confirm' | 'reject' | null }>({ open: false, action: null });
+  const [batchResult, setBatchResult] = useState<BatchConfirmResponse | null>(null);
 
   const load = useCallback(async (s = status) => {
     const r = await apiFetch<any>(`/api/handovers/mine?status=${s === 'all' ? '' : s}`);
@@ -95,44 +83,13 @@ export default function HandoversPage() {
     if (!r.ok) { showMsg('error', r.error || '操作失败'); return; }
     showMsg('success', accept ? '交接已接收，你成为新的处理人' : '已拒绝交接');
     load();
-    // 通知父组件刷新侧边栏
     window.dispatchEvent(new CustomEvent('handover-updated'));
   };
 
-  const executeBatch = async () => {
-    if (!showBatchConfirm) return;
-    const action = showBatchConfirm.action;
-    if (action === 'reject' && !batchRemark.trim()) {
-      showMsg('error', '批量拒绝必须填写原因');
-      return;
-    }
-    if (selected.size === 0) {
-      showMsg('error', '请先勾选待处理的交接');
-      return;
-    }
-
-    setBatchLoading(true);
-    const items = Array.from(selected).map(hid => ({
-      handover_id: hid,
-      action,
-      remark: action === 'reject' ? batchRemark : batchRemark || '批量接收',
-    }));
-
-    const r = await apiFetch('/api/handovers/batch-confirm', {
-      method: 'POST',
-      body: JSON.stringify({ items }),
-    });
-
-    setBatchLoading(false);
-    if (!r.ok) {
-      showMsg('error', r.error || '批量处理失败');
-      setShowBatchConfirm(null);
-      return;
-    }
-
-    setShowBatchConfirm(null);
+  const onBatchCompleted = (data: BatchConfirmResponse) => {
+    setBatchModal({ open: false, action: null });
     setSelected(new Set());
-    setShowBatchResult(r.data);
+    setBatchResult(data);
     load();
     window.dispatchEvent(new CustomEvent('handover-updated'));
   };
@@ -190,10 +147,10 @@ export default function HandoversPage() {
         {selected.size > 0 && (
           <div className="flex items-center gap-2 bg-blue-50 px-3 py-2 rounded-lg border border-blue-200">
             <span className="text-sm text-blue-700 font-medium">已选 {selected.size} 条</span>
-            <button className="btn btn-success btn-sm" onClick={() => { setBatchRemark(''); setShowBatchConfirm({ action: 'confirm' }); }}>
+            <button className="btn btn-success btn-sm" onClick={() => setBatchModal({ open: true, action: 'confirm' })}>
               ✓ 批量接收
             </button>
-            <button className="btn btn-danger btn-sm" onClick={() => { setBatchRemark(''); setShowBatchConfirm({ action: 'reject' }); }}>
+            <button className="btn btn-danger btn-sm" onClick={() => setBatchModal({ open: true, action: 'reject' })}>
               ✗ 批量拒绝
             </button>
             <button className="btn btn-secondary btn-xs" onClick={() => setSelected(new Set())}>
@@ -290,105 +247,19 @@ export default function HandoversPage() {
         )}
       </div>
 
-      {showBatchConfirm && (
-        <div className="modal-mask" onClick={e => e.target === e.currentTarget && setShowBatchConfirm(null)}>
-          <div className="modal">
-            <div className="modal-header">
-              <span>{showBatchConfirm.action === 'confirm' ? '批量确认接收' : '批量拒绝交接'}</span>
-              <button className="text-gray-400 hover:text-gray-700 text-lg leading-none" onClick={() => setShowBatchConfirm(null)}>×</button>
-            </div>
-            <div className="modal-body space-y-3">
-              <div className="alert alert-info">
-                已选择 <b>{selected.size}</b> 条交接记录{showBatchConfirm.action === 'confirm' ? '批量接收' : '批量拒绝'}
-              </div>
-              <div>
-                <label className="label">{showBatchConfirm.action === 'confirm' ? '批量备注（可选）' : '拒绝原因 *'}</label>
-                <textarea className="textarea" value={batchRemark} onChange={e => setBatchRemark(e.target.value)}
-                  placeholder={showBatchConfirm.action === 'confirm' ? '如：已了解情况，后续跟进' : '请详细说明拒绝原因'} />
-              </div>
-              <div className="text-xs text-gray-500">
-                提示：每条交接记录后端都会独立校验权限和状态，成功/失败会逐条返回结果。
-              </div>
-            </div>
-            <div className="modal-footer">
-              <button className="btn btn-secondary" onClick={() => setShowBatchConfirm(null)}>取消</button>
-              <button className={`btn ${showBatchConfirm.action === 'confirm' ? 'btn-success' : 'btn-danger'}`}
-                disabled={batchLoading} onClick={executeBatch}>
-                {batchLoading ? '处理中...' : `确认${showBatchConfirm.action === 'confirm' ? '接收' : '拒绝'}`}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {showBatchResult && (
-        <div className="modal-mask" onClick={e => e.target === e.currentTarget && setShowBatchResult(null)}>
-          <div className="modal modal-lg">
-            <div className="modal-header">
-              <span>批量处理结果</span>
-              <button className="text-gray-400 hover:text-gray-700 text-lg leading-none" onClick={() => setShowBatchResult(null)}>×</button>
-            </div>
-            <div className="modal-body space-y-4">
-              <div className="grid grid-cols-3 gap-3">
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-center">
-                  <div className="text-2xl font-bold text-blue-700">{showBatchResult.total}</div>
-                  <div className="text-xs text-blue-600">处理总数</div>
-                </div>
-                <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-center">
-                  <div className="text-2xl font-bold text-green-700">{showBatchResult.success_count}</div>
-                  <div className="text-xs text-green-600">成功</div>
-                </div>
-                <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-center">
-                  <div className="text-2xl font-bold text-red-700">{showBatchResult.fail_count}</div>
-                  <div className="text-xs text-red-600">失败</div>
-                </div>
-              </div>
-
-              <div>
-                <div className="font-semibold text-sm text-gray-700 mb-2">逐条明细：</div>
-                <div className="max-h-80 overflow-y-auto border border-gray-200 rounded-lg">
-                  <table className="data-table" style={{ fontSize: 12 }}>
-                    <thead className="sticky top-0 bg-white">
-                      <tr>
-                        <th>结果</th>
-                        <th>交接ID</th>
-                        <th>报价单号</th>
-                        <th>操作</th>
-                        <th>说明</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {showBatchResult.results.map((res, i) => (
-                        <tr key={i}>
-                          <td style={{ width: 32 }}>
-                            <span className={res.success ? 'text-green-600' : 'text-red-600'}>
-                              {res.success ? '✅' : '❌'}
-                            </span>
-                          </td>
-                          <td className="font-mono">{res.handover_id}</td>
-                          <td className="font-mono text-blue-700">{res.quote_no}</td>
-                          <td>
-                            {res.action === 'confirm' ? '接收' : '拒绝'}
-                            {res.new_handler && <div className="text-xs text-gray-500">处理人: {res.new_handler}</div>}
-                            {res.new_shift && <div className="text-xs text-gray-500">班次: {res.new_shift}</div>}
-                          </td>
-                          <td className={!res.success ? 'text-red-600' : ''}>{res.message}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-              <div className="text-xs text-gray-500">
-                注意：已成功处理的交接，报价单列表、详情页、统计数据均已自动同步更新，刷新即可看到最新状态。
-              </div>
-            </div>
-            <div className="modal-footer">
-              <button className="btn btn-primary" onClick={() => { setShowBatchResult(null); load(); }}>好的，我知道了</button>
-            </div>
-          </div>
-        </div>
-      )}
+      <BatchHandoverModal
+        open={batchModal.open}
+        action={batchModal.action}
+        selectedCount={selected.size}
+        handoverIDs={Array.from(selected)}
+        onClose={() => setBatchModal({ open: false, action: null })}
+        onCompleted={onBatchCompleted}
+      />
+      <BatchResultModal
+        open={!!batchResult}
+        data={batchResult}
+        onClose={() => setBatchResult(null)}
+      />
     </div>
   );
 }

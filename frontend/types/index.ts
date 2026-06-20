@@ -37,6 +37,7 @@ export interface RepairQuote {
   handover_count: number;
   created_at: string;
   updated_at: string;
+  pending_handover_id?: number;
 }
 
 export interface OperationLog {
@@ -47,6 +48,8 @@ export interface OperationLog {
   operator_id: number;
   operator_name: string;
   operator_role: string;
+  operator_shift?: string;
+  batch_id?: string;
   remark: string;
   created_at: string;
 }

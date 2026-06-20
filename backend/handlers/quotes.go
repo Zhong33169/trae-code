@@ -8,17 +8,22 @@ import (
 	"repair-platform/middleware"
 	"repair-platform/models"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/labstack/echo/v4"
 )
 
 func addOperationLog(tx *sql.Tx, quoteID int64, operation, oldStatus, newStatus, remark string, user *middleware.UserInfo) error {
+	return addOperationLogWithBatch(tx, quoteID, operation, oldStatus, newStatus, remark, user, "")
+}
+
+func addOperationLogWithBatch(tx *sql.Tx, quoteID int64, operation, oldStatus, newStatus, remark string, user *middleware.UserInfo, batchID string) error {
 	shift := getUserShift(user.ID)
 	_, err := tx.Exec(
-		`INSERT INTO operation_logs (quote_id, operation, old_status, new_status, operator_id, operator_name, operator_role, operator_shift, remark)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		quoteID, operation, oldStatus, newStatus, user.ID, user.RealName, user.Role, shift, remark,
+		`INSERT INTO operation_logs (quote_id, operation, old_status, new_status, operator_id, operator_name, operator_role, operator_shift, batch_id, remark)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		quoteID, operation, oldStatus, newStatus, user.ID, user.RealName, user.Role, shift, batchID, remark,
 	)
 	return err
 }
@@ -121,6 +126,9 @@ func ListQuotes(c echo.Context) error {
 	defer rows.Close()
 
 	list := make([]map[string]interface{}, 0)
+	quoteIDs := make([]int64, 0)
+	quoteIdxMap := map[int64]int{}
+
 	for rows.Next() {
 		var q models.RepairQuote
 		rows.Scan(&q.ID, &q.QuoteNo, &q.CustomerName, &q.CustomerPhone, &q.DeviceType, &q.DeviceModel,
@@ -136,6 +144,9 @@ func ListQuotes(c echo.Context) error {
 		if !ok {
 			shiftDisplay = q.Shift
 		}
+
+		quoteIDs = append(quoteIDs, q.ID)
+		quoteIdxMap[q.ID] = len(list)
 
 		list = append(list, map[string]interface{}{
 			"id":                  q.ID,
@@ -158,7 +169,56 @@ func ListQuotes(c echo.Context) error {
 			"handover_count":      q.HandoverCount,
 			"created_at":          q.CreatedAt,
 			"updated_at":          q.UpdatedAt,
+			"pending_handover_id": 0,
 		})
+	}
+	rows.Close()
+
+	if len(quoteIDs) > 0 {
+		isManager := user.Role == models.RoleServiceManager
+		var handoverRows *sql.Rows
+		if isManager {
+			placeholders := make([]string, len(quoteIDs))
+			for i := range placeholders {
+				placeholders[i] = "?"
+			}
+			inArgs := make([]interface{}, len(quoteIDs))
+			for i, id := range quoteIDs {
+				inArgs[i] = id
+			}
+			handoverRows, _ = database.DB.Query(
+				fmt.Sprintf(`SELECT id, quote_id, to_user_id FROM shift_handovers
+					WHERE status = 'pending' AND quote_id IN (%s)`,
+					strings.Join(placeholders, ",")),
+				inArgs...,
+			)
+		} else {
+			placeholders := make([]string, len(quoteIDs))
+			for i := range placeholders {
+				placeholders[i] = "?"
+			}
+			inArgs := make([]interface{}, len(quoteIDs)+1)
+			for i, id := range quoteIDs {
+				inArgs[i] = id
+			}
+			inArgs[len(quoteIDs)] = user.ID
+			handoverRows, _ = database.DB.Query(
+				fmt.Sprintf(`SELECT id, quote_id, to_user_id FROM shift_handovers
+					WHERE status = 'pending' AND quote_id IN (%s) AND to_user_id = ?`,
+					strings.Join(placeholders, ",")),
+				inArgs...,
+			)
+		}
+		if handoverRows != nil {
+			for handoverRows.Next() {
+				var hid, qid, toUID int64
+				handoverRows.Scan(&hid, &qid, &toUID)
+				if idx, ok := quoteIdxMap[qid]; ok {
+					list[idx]["pending_handover_id"] = hid
+				}
+			}
+			handoverRows.Close()
+		}
 	}
 
 	return c.JSON(http.StatusOK, map[string]interface{}{
@@ -211,12 +271,12 @@ func GetQuote(c echo.Context) error {
 	statusDisplay, _ := models.StatusDisplayNames[q.Status]
 	shiftDisplay, _ := models.ShiftDisplayNames[q.Shift]
 
-	logRows, _ := database.DB.Query(`SELECT id, operation, old_status, new_status, operator_id, operator_name, operator_role, operator_shift, remark, created_at
+	logRows, _ := database.DB.Query(`SELECT id, operation, old_status, new_status, operator_id, operator_name, operator_role, operator_shift, batch_id, remark, created_at
 		FROM operation_logs WHERE quote_id = ? ORDER BY id ASC`, id)
 	logs := make([]map[string]interface{}, 0)
 	for logRows.Next() {
 		var l models.OperationLog
-		logRows.Scan(&l.ID, &l.Operation, &l.OldStatus, &l.NewStatus, &l.OperatorID, &l.OperatorName, &l.OperatorRole, &l.OperatorShift, &l.Remark, &l.CreatedAt)
+		logRows.Scan(&l.ID, &l.Operation, &l.OldStatus, &l.NewStatus, &l.OperatorID, &l.OperatorName, &l.OperatorRole, &l.OperatorShift, &l.BatchID, &l.Remark, &l.CreatedAt)
 		oldSt := l.OldStatus
 		newSt := l.NewStatus
 		if name, ok := models.StatusDisplayNames[l.OldStatus]; ok && l.OldStatus != "" {
@@ -236,6 +296,7 @@ func GetQuote(c echo.Context) error {
 			"operator_name":  l.OperatorName,
 			"operator_role":  roleDisplay,
 			"operator_shift": shiftDisplay,
+			"batch_id":       l.BatchID,
 			"remark":         l.Remark,
 			"created_at":     l.CreatedAt,
 		})

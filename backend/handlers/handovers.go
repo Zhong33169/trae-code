@@ -1,7 +1,9 @@
 package handlers
 
 import (
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"fmt"
 	"net/http"
 	"repair-platform/database"
@@ -12,6 +14,12 @@ import (
 
 	"github.com/labstack/echo/v4"
 )
+
+func generateBatchID() string {
+	b := make([]byte, 6)
+	rand.Read(b)
+	return "B" + time.Now().Format("20060102150405") + hex.EncodeToString(b)
+}
 
 type CreateHandoverRequest struct {
 	ToUserID       int64  `json:"to_user_id"`
@@ -288,6 +296,7 @@ type BatchResultItem struct {
 	Message    string `json:"message"`
 	NewHandler string `json:"new_handler,omitempty"`
 	NewShift   string `json:"new_shift,omitempty"`
+	ErrorCode  string `json:"error_code,omitempty"`
 }
 
 func BatchConfirmHandover(c echo.Context) error {
@@ -303,29 +312,40 @@ func BatchConfirmHandover(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "一次最多批量处理50条"})
 	}
 
+	validActions := map[string]bool{"confirm": true, "reject": true}
+
+	batchID := generateBatchID()
+
 	results := make([]BatchResultItem, 0, len(req.Items))
 	successCount := 0
 	failCount := 0
 
-	for _, item := range req.Items {
+	for idx, item := range req.Items {
 		result := BatchResultItem{
 			HandoverID: item.HandoverID,
 			Action:     item.Action,
 		}
 
-		action := "confirm"
-		if item.Action == "reject" {
-			action = "reject"
+		if !validActions[item.Action] {
+			result.Success = false
+			result.Message = fmt.Sprintf("操作类型无效，仅支持 confirm(接收) 或 reject(拒绝)，当前值：%s", item.Action)
+			result.ErrorCode = "INVALID_ACTION"
+			results = append(results, result)
+			failCount++
+			continue
 		}
 
+		action := item.Action
+
 		var hid, quoteID, toUserID int64
-		var status, toUserName, toUserRole, toUserNameDb, toRoleDb, toShift string
-		err := database.DB.QueryRow(`SELECT h.id, h.quote_id, h.status, h.to_user_id, h.to_user_name, h.to_user_role
+		var status, toUserNameDb, toRoleDb, toShift string
+		err := database.DB.QueryRow(`SELECT h.id, h.quote_id, h.status, h.to_user_id
 			FROM shift_handovers h WHERE h.id = ?`, item.HandoverID).Scan(
-			&hid, &quoteID, &status, &toUserID, &toUserName, &toUserRole)
+			&hid, &quoteID, &status, &toUserID)
 		if err == sql.ErrNoRows {
 			result.Success = false
-			result.Message = "交接记录不存在"
+			result.Message = fmt.Sprintf("第 %d 条：交接记录 #%d 不存在，请检查是否已被删除或 ID 错误", idx+1, item.HandoverID)
+			result.ErrorCode = "NOT_FOUND"
 			results = append(results, result)
 			failCount++
 			continue
@@ -333,37 +353,50 @@ func BatchConfirmHandover(c echo.Context) error {
 		if err != nil {
 			result.Success = false
 			result.Message = "查询交接记录失败: " + err.Error()
+			result.ErrorCode = "DB_ERROR"
 			results = append(results, result)
 			failCount++
 			continue
 		}
 
 		result.QuoteID = quoteID
-		var quoteNo string
-		database.DB.QueryRow("SELECT quote_no FROM repair_quotes WHERE id = ?", quoteID).Scan(&quoteNo)
+		var quoteNo, customerName, deviceType string
+		database.DB.QueryRow("SELECT quote_no, customer_name, device_type FROM repair_quotes WHERE id = ?", quoteID).Scan(&quoteNo, &customerName, &deviceType)
 		result.QuoteNo = quoteNo
 
-		if toUserID != user.ID && user.Role != models.RoleServiceManager {
+		isManager := user.Role == models.RoleServiceManager
+		isReceiver := toUserID == user.ID
+
+		if !isReceiver && !isManager {
 			result.Success = false
-			result.Message = "权限不足：仅交接接收人或服务经理可确认"
+			result.Message = fmt.Sprintf("报价单 %s(%s-%s)：权限不足。仅交接接收人本人或服务经理可处理，您不是该交接的接收人",
+				quoteNo, customerName, deviceType)
+			result.ErrorCode = "PERMISSION_DENIED"
 			results = append(results, result)
 			failCount++
 			continue
 		}
+
+		statusDisplay := map[string]string{
+			"pending":   "待确认",
+			"confirmed": "已接收",
+			"rejected":  "已拒绝",
+		}
+
 		if status != "pending" {
 			result.Success = false
-			result.Message = "该交接已处理过，状态为：" + map[string]string{
-				"pending":   "待确认",
-				"confirmed": "已接收",
-				"rejected":  "已拒绝",
-			}[status]
+			result.Message = fmt.Sprintf("报价单 %s：该交接已处理过，当前状态为 %s，无法重复处理",
+				quoteNo, statusDisplay[status])
+			result.ErrorCode = "ALREADY_PROCESSED"
 			results = append(results, result)
 			failCount++
 			continue
 		}
+
 		if action == "reject" && item.Remark == "" {
 			result.Success = false
-			result.Message = "拒绝原因必填"
+			result.Message = fmt.Sprintf("报价单 %s：拒绝交接必须填写拒绝原因，请补充说明后重试", quoteNo)
+			result.ErrorCode = "REJECT_REASON_REQUIRED"
 			results = append(results, result)
 			failCount++
 			continue
@@ -373,11 +406,13 @@ func BatchConfirmHandover(c echo.Context) error {
 
 		var curStatus string
 		database.DB.QueryRow("SELECT status FROM repair_quotes WHERE id = ?", quoteID).Scan(&curStatus)
+		curStatusDisplay, _ := models.StatusDisplayNames[curStatus]
 
 		tx, err := database.DB.Begin()
 		if err != nil {
 			result.Success = false
 			result.Message = "启动事务失败"
+			result.ErrorCode = "TX_ERROR"
 			results = append(results, result)
 			failCount++
 			continue
@@ -393,45 +428,59 @@ func BatchConfirmHandover(c echo.Context) error {
 					WHERE id = ?`, toUserID, toUserNameDb, currentToShift, now, quoteID)
 			}
 			if err == nil {
-				opRemark := "批量交接确认: " + toUserNameDb + "(" + models.RoleDisplayNames[toRoleDb] + ")" + models.ShiftDisplayNames[currentToShift]
+				actionIdentity := user.RealName + "(" + models.RoleDisplayNames[user.Role] + ")"
+				if isManager {
+					actionIdentity += "【服务经理代处理】"
+				}
+				opRemark := fmt.Sprintf("批量交接确认[%s]：接收人 %s(%s)%s，操作人 %s",
+					batchID,
+					toUserNameDb, models.RoleDisplayNames[toRoleDb], models.ShiftDisplayNames[currentToShift],
+					actionIdentity)
 				if item.Remark != "" {
 					opRemark += "，备注: " + item.Remark
 				}
-				err = addOperationLog(tx, quoteID, "批量交接确认", curStatus, curStatus, opRemark, user)
+				err = addOperationLogWithBatch(tx, quoteID, "批量交接确认", curStatusDisplay, curStatusDisplay, opRemark, user, batchID)
 			}
 			if err == nil {
 				result.Success = true
-				result.Message = "交接已确认"
+				result.Message = fmt.Sprintf("报价单 %s(%s-%s)：交接接收成功，新处理人 %s(%s)",
+					quoteNo, customerName, deviceType, toUserNameDb, models.ShiftDisplayNames[currentToShift])
 				result.NewHandler = toUserNameDb
 				result.NewShift = models.ShiftDisplayNames[currentToShift]
 			} else {
 				tx.Rollback()
 				result.Success = false
-				result.Message = "处理失败: " + err.Error()
+				result.Message = fmt.Sprintf("报价单 %s：接收处理失败: %s", quoteNo, err.Error())
+				result.ErrorCode = "PROCESS_ERROR"
 			}
 		} else {
 			_, err = tx.Exec(`UPDATE shift_handovers SET status = 'rejected', confirmed_at = ? WHERE id = ?`, now, hid)
 			if err == nil {
-				opRemark := "批量拒绝交接: " + toUserNameDb
-				if item.Remark != "" {
-					opRemark += "，原因: " + item.Remark
+				actionIdentity := user.RealName + "(" + models.RoleDisplayNames[user.Role] + ")"
+				if isManager {
+					actionIdentity += "【服务经理代处理】"
 				}
-				err = addOperationLog(tx, quoteID, "批量交接被拒绝", curStatus, curStatus, opRemark, user)
+				opRemark := fmt.Sprintf("批量交接拒绝[%s]：涉及接收人 %s，操作人 %s，原因: %s",
+					batchID, toUserNameDb, actionIdentity, item.Remark)
+				err = addOperationLogWithBatch(tx, quoteID, "批量交接被拒绝", curStatusDisplay, curStatusDisplay, opRemark, user, batchID)
 			}
 			if err == nil {
 				result.Success = true
-				result.Message = "已拒绝交接"
+				result.Message = fmt.Sprintf("报价单 %s(%s-%s)：已成功拒绝交接，原因: %s",
+					quoteNo, customerName, deviceType, item.Remark)
 			} else {
 				tx.Rollback()
 				result.Success = false
-				result.Message = "处理失败: " + err.Error()
+				result.Message = fmt.Sprintf("报价单 %s：拒绝处理失败: %s", quoteNo, err.Error())
+				result.ErrorCode = "PROCESS_ERROR"
 			}
 		}
 
 		if result.Success {
 			if err := tx.Commit(); err != nil {
 				result.Success = false
-				result.Message = "提交事务失败: " + err.Error()
+				result.Message = fmt.Sprintf("报价单 %s：提交事务失败: %s", quoteNo, err.Error())
+				result.ErrorCode = "COMMIT_ERROR"
 			}
 		}
 
@@ -445,6 +494,7 @@ func BatchConfirmHandover(c echo.Context) error {
 
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"message":       fmt.Sprintf("批量处理完成：成功 %d 条，失败 %d 条", successCount, failCount),
+		"batch_id":      batchID,
 		"total":         len(req.Items),
 		"success_count": successCount,
 		"fail_count":    failCount,
