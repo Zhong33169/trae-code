@@ -1,0 +1,9 @@
+{
+  "source": "offline_excel",
+  "items": [
+    {"ticket_no": "TS202606001", "title": "家政服务人员迟到问题", "content": "和线上内容一致", "complainant": "陈先生", "priority": "normal"},
+    {"ticket_no": "TS-NEW-001", "title": "新导入工单1", "content": "这是一个新导入的工单", "complainant": "测试用户", "priority": "high"},
+    {"ticket_no": "TS202606002", "title": "保洁服务质量不满意", "content": "和线上内容不一样，冲突了", "complainant": "不同的人", "priority": "urgent"},
+    {"ticket_no": "TS-BAD-001", "title": "", "content": "", "complainant": "", "priority": "invalid"}
+  ]
+}
