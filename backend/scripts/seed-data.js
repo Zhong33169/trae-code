@@ -111,7 +111,7 @@ const applications = [
     prev_handler_id: reviewerId, prev_handler_role: 'reviewer',
     prev_opinion: '完整流程闭环验证：申诉后复核通过，全部资料齐全，授信160万元已归档。', prev_result: 'archive',
     version: 3, evidence_status: 'complete',
-    reject_reason: '首次复核驳回：经营流水连续性不足，需补充第3季度完整业务凭证。',
+    reject_reason: null,
     created_by: registrarId,
   },
 ];

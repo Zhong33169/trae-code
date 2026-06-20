@@ -40,7 +40,7 @@ router.get('/users', (req, res) => {
 
 router.get('/applications', (req, res) => {
   const { status, role, handler_id, keyword, evidence_status, is_overdue, has_conflict } = req.query;
-  let sql = 'SELECT a.*, u.name as handler_name, u2.name as creator_name FROM credit_applications a LEFT JOIN users u ON a.current_handler_id = u.id LEFT JOIN users u2 ON a.created_by = u2.id WHERE 1=1';
+  let sql = 'SELECT a.*, u.name as handler_name, r.name as prev_handler_name, u2.name as creator_name FROM credit_applications a LEFT JOIN users u ON a.current_handler_id = u.id LEFT JOIN users r ON a.prev_handler_id = r.id LEFT JOIN users u2 ON a.created_by = u2.id WHERE 1=1';
   const params = [];
   if (status) { sql += ' AND a.status = ?'; params.push(status); }
   if (role) { sql += ' AND a.current_handler_role = ?'; params.push(role); }
@@ -399,7 +399,7 @@ router.post('/applications/:id/action', (req, res) => {
           cleared_conflict: mapping.clearConflict ? !!app.has_conflict : false,
         })
       });
-      return db.prepare(`
+      const updatedApp = db.prepare(`
         SELECT a.*, u.name as handler_name, r.name as prev_handler_name, c.name as creator_name
         FROM credit_applications a
         LEFT JOIN users u ON a.current_handler_id = u.id
@@ -407,6 +407,10 @@ router.post('/applications/:id/action', (req, res) => {
         LEFT JOIN users c ON a.created_by = c.id
         WHERE a.id = ?
       `).get(id);
+      const updatedEvidence = db.prepare('SELECT * FROM evidence_items WHERE app_id = ? ORDER BY is_required DESC, id').all(id);
+      const updatedNodes = db.prepare('SELECT * FROM process_nodes WHERE app_id = ? ORDER BY node_order, id').all(id);
+      const updatedLogs = db.prepare('SELECT * FROM operation_logs WHERE app_id = ? ORDER BY id DESC').all(id);
+      return { app: updatedApp, evidence: updatedEvidence, nodes: updatedNodes, logs: updatedLogs };
     })();
     res.json({ ok: true, data: updated });
   } catch (e) {

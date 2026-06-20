@@ -112,7 +112,7 @@ export default function ApplicationDetail() {
       if (r.ok) {
         showToast("操作成功");
         setModal(null);
-        load();
+        setData(r.data);
       } else {
         showToast(r.msg || "操作失败，状态未改变", "error");
         load();
@@ -201,7 +201,7 @@ export default function ApplicationDetail() {
                   </span></div>
                 </div>
                 <div class="detail-item"><label>处理截止（如有）</label><div class="val">{app()?.deadline?.slice(0,16) || "-"}</div></div>
-                <div class="detail-item" style="grid-column: 1 / -1"><label>备注</label><div class="val" style="color:#6b7280; font-weight:400">{app()?.remark || app()?.reject_reason || "无"}</div></div>
+                <div class="detail-item" style="grid-column: 1 / -1"><label>备注</label><div class="val" style="color:#6b7280; font-weight:400">{app()?.remark || "无"}</div></div>
               </div>
             </div>
           </div>
