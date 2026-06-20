@@ -356,6 +356,7 @@ class FaultReportBase(BaseModel):
 
 class FaultReportCreate(FaultReportBase):
     inspection_order_id: int
+    version: int = Field(..., description="当前版本号，用于乐观锁")
 
 
 class FaultReport(FaultReportBase):
@@ -382,6 +383,7 @@ class RecoveryConfirmBase(BaseModel):
 class RecoveryConfirmCreate(RecoveryConfirmBase):
     fault_report_id: int
     inspection_order_id: Optional[int] = Field(None, description="巡检单ID（可选）")
+    version: int = Field(..., description="当前版本号，用于乐观锁")
 
 
 class RecoveryConfirm(RecoveryConfirmBase):
@@ -423,6 +425,9 @@ class InspectionOrderListItem(BaseModel):
     updated_at: datetime
     is_overdue: bool = False
     has_fault: bool = False
+    risk_change_count: int = 0
+    fault_report_count: int = 0
+    recovery_confirm_count: int = 0
 
     class Config:
         from_attributes = True

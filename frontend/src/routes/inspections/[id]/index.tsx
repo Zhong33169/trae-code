@@ -119,7 +119,7 @@ export default component$(() => {
     // Fault form
     faultForm: {
       fault_description: string;
-      fault_level: "general" | "major" | "critical";
+      fault_level: RiskLevel;
       selected_fault_for_recovery: number | null;
     };
     // Recovery form
@@ -167,7 +167,7 @@ export default component$(() => {
     },
     faultForm: {
       fault_description: "",
-      fault_level: "general",
+      fault_level: "medium",
       selected_fault_for_recovery: null,
     },
     recoveryForm: {
@@ -387,12 +387,13 @@ export default component$(() => {
         inspection_order_id: order.id,
         fault_description: state.faultForm.fault_description,
         fault_level: state.faultForm.fault_level,
+        version: order.version,
       };
       const res = await api.createFaultReport(body, userCtx.user.id);
       if (res.success) {
         state.flash = "🔧 故障报修已提交";
         state.faultForm.fault_description = "";
-        state.faultForm.fault_level = "general";
+        state.faultForm.fault_level = "medium";
         await loadDetail();
         refreshSig.bump();
       } else state.error = res.message;
@@ -418,6 +419,7 @@ export default component$(() => {
         confirmation_remark: state.recoveryForm.confirmation_remark,
         is_successful: state.recoveryForm.is_successful,
         evidence_path: state.recoveryForm.evidence_path || undefined,
+        version: order.version,
       };
       const res = await api.confirmRecovery(body, userCtx.user.id);
       if (res.success) {
@@ -1333,12 +1335,12 @@ export default component$(() => {
                       onChange$={(e) =>
                         (state.faultForm.fault_level = (
                           e.target as HTMLSelectElement
-                        ).value as any)
+                        ).value as RiskLevel)
                       }
                     >
-                      <option value="general">一般故障</option>
-                      <option value="major">较大故障</option>
-                      <option value="critical">严重故障</option>
+                      <option value="low">低风险</option>
+                      <option value="medium">中风险</option>
+                      <option value="high">高风险</option>
                     </select>
                   </div>
                   <div class="md:col-span-3">
@@ -1392,17 +1394,6 @@ export default component$(() => {
                 {order.fault_reports.map((f) => {
                   const isExpanded =
                     state.faultForm.selected_fault_for_recovery === f.id;
-                  const levelColor =
-                    f.fault_level === "critical"
-                      ? "bg-red-100 text-red-800"
-                      : f.fault_level === "major"
-                      ? "bg-orange-100 text-orange-800"
-                      : "bg-yellow-100 text-yellow-800";
-                  const levelLabel = {
-                    critical: "严重",
-                    major: "较大",
-                    general: "一般",
-                  }[f.fault_level];
                   return (
                     <li
                       key={f.id}
@@ -1414,11 +1405,7 @@ export default component$(() => {
                     >
                       <div class="flex flex-wrap items-start justify-between gap-3 mb-2">
                         <div class="flex items-center gap-2">
-                          <span
-                            class={`px-2 py-0.5 rounded text-xs font-bold ${levelColor}`}
-                          >
-                            {levelLabel}
-                          </span>
+                          <RiskBadge level={f.fault_level} size="sm" showIcon />
                           <span class="text-xs text-gray-500">
                             报修单 #{f.id}
                           </span>

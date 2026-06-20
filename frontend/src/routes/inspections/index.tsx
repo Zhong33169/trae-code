@@ -61,9 +61,10 @@ export default component$(() => {
     }
   });
 
-  useOnMount$(() => loadList());
-  useTask$(({ track }) => {
+  useTask$(async ({ track }) => {
     track(() => refreshSig.tick);
+    track(() => userCtx.user.id);
+    await loadList();
   });
 
   const onFilterChange = $((k: keyof InspectionListFilter, v: string) => {

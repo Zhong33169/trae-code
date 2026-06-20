@@ -157,6 +157,18 @@ def _enrich_order_list_item(db: Session, order: InspectionOrder) -> InspectionOr
         FaultReport.is_resolved == False
     ).first() is not None
 
+    risk_change_count = db.query(RiskLevelChange).filter(
+        RiskLevelChange.inspection_order_id == order.id
+    ).count()
+
+    fault_report_count = db.query(FaultReport).filter(
+        FaultReport.inspection_order_id == order.id
+    ).count()
+
+    recovery_confirm_count = db.query(RecoveryConfirm).filter(
+        RecoveryConfirm.inspection_order_id == order.id
+    ).count()
+
     return InspectionOrderListItem(
         id=order.id,
         order_no=order.order_no,
@@ -184,6 +196,9 @@ def _enrich_order_list_item(db: Session, order: InspectionOrder) -> InspectionOr
         updated_at=order.updated_at,
         is_overdue=is_overdue,
         has_fault=has_fault,
+        risk_change_count=risk_change_count,
+        fault_report_count=fault_report_count,
+        recovery_confirm_count=recovery_confirm_count,
     )
 
 
@@ -750,6 +765,15 @@ def create_fault_report(
                 "role_mismatch"
             )
 
+        if order.version != data.version:
+            raise ValidationError(
+                f"版本冲突：当前版本为 {order.version}，您提交的版本为 {data.version}，请刷新后重试",
+                "version_conflict"
+            )
+
+        if order.status == InspectionStatus.ARCHIVED:
+            raise ValidationError("已归档的巡检单不能再报修故障", "status_conflict")
+
         fault = FaultReport(
             inspection_order_id=data.inspection_order_id,
             fault_description=data.fault_description,
@@ -842,6 +866,7 @@ def confirm_recovery(
         return None, "巡检单不存在"
 
     original_status = order.status
+    original_risk = order.risk_level
 
     try:
         user = db.query(User).filter(User.id == confirmer_id).first()
@@ -852,6 +877,15 @@ def confirm_recovery(
                 f"角色不匹配：当前角色为 {user.role.value}，需要 handler 或 reviewer 角色",
                 "role_mismatch"
             )
+
+        if order.version != data.version:
+            raise ValidationError(
+                f"版本冲突：当前版本为 {order.version}，您提交的版本为 {data.version}，请刷新后重试",
+                "version_conflict"
+            )
+
+        if order.status == InspectionStatus.ARCHIVED:
+            raise ValidationError("已归档的巡检单不能做恢复确认", "status_conflict")
 
         confirm = RecoveryConfirm(
             fault_report_id=data.fault_report_id,
@@ -898,6 +932,8 @@ def confirm_recovery(
             db, order, confirmer_id, OperationType.CONFIRM_RECOVERY,
             from_status=original_status,
             to_status=original_status,
+            from_risk=original_risk,
+            to_risk=original_risk,
             opinion="恢复确认失败",
             result=e.message,
             remark=f"错误类型: {e.error_type}",

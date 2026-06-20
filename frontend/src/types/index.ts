@@ -144,6 +144,9 @@ export interface InspectionOrderListItem {
   updated_at: string;
   is_overdue: boolean;
   has_fault: boolean;
+  risk_change_count: number;
+  fault_report_count: number;
+  recovery_confirm_count: number;
 }
 
 // ========= Inspection Order Detail =========
@@ -274,6 +277,7 @@ export interface FaultReportCreateRequest {
   inspection_order_id: number;
   fault_description: string;
   fault_level: RiskLevel;
+  version: number;
 }
 
 // Recovery Confirm
@@ -283,6 +287,7 @@ export interface RecoveryConfirmCreateRequest {
   confirmation_remark: string;
   is_successful?: boolean;
   evidence_path?: string | null;
+  version: number;
 }
 
 // Initiate new inspection order

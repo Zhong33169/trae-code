@@ -419,6 +419,49 @@ def seed_data():
                     ),
                 ])
 
+            ord6 = db.query(InspectionOrder).filter(InspectionOrder.order_no == "INSP202606200006").first()
+            if ord6:
+                op_records.extend([
+                    OperationRecord(
+                        inspection_order_id=ord6.id,
+                        operator_id=inspector.id,
+                        operation_type=OperationType.INITIATE,
+                        from_status=InspectionStatus.DRAFT,
+                        to_status=InspectionStatus.PENDING_HANDLING,
+                        opinion="发起巡检",
+                        result="提交成功",
+                        version=1,
+                        operated_at=now - timedelta(days=2),
+                    ),
+                    OperationRecord(
+                        inspection_order_id=ord6.id,
+                        operator_id=handler.id,
+                        operation_type=OperationType.HANDLE,
+                        from_status=InspectionStatus.PENDING_HANDLING,
+                        to_status=InspectionStatus.IN_PROGRESS,
+                        opinion="正在核实功能异常情况",
+                        result="办理中",
+                        version=1,
+                        operated_at=now - timedelta(days=1),
+                    ),
+                ])
+
+            ord7 = db.query(InspectionOrder).filter(InspectionOrder.order_no == "INSP202606200007").first()
+            if ord7:
+                op_records.extend([
+                    OperationRecord(
+                        inspection_order_id=ord7.id,
+                        operator_id=inspector.id,
+                        operation_type=OperationType.INITIATE,
+                        from_status=InspectionStatus.DRAFT,
+                        to_status=InspectionStatus.PENDING_HANDLING,
+                        opinion="发起巡检，各项检查正常",
+                        result="提交成功",
+                        version=1,
+                        operated_at=now,
+                    ),
+                ])
+
             for rec in op_records:
                 db.add(rec)
             db.flush()
@@ -495,6 +538,7 @@ def seed_data():
             if eq005_fault and eq005_fault.is_resolved:
                 recoveries.append(RecoveryConfirm(
                     fault_report_id=eq005_fault.id,
+                    inspection_order_id=ord5.id if ord5 else None,
                     confirmed_by=handler.id,
                     confirmed_at=now - timedelta(days=12),
                     confirmation_remark="已更换新手柄，补充缺失的螺栓，经多人测试使用正常，无安全隐患",

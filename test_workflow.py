@@ -121,6 +121,7 @@ else:
         "inspection_order_id": fid,
         "fault_description": "跑步机电机异响，皮带磨损严重，存在安全隐患",
         "fault_level": "high",
+        "version": cur["version"],
     }
     d = req("POST", "/api/fault-reports", fault_data, {"user_id": 2})
     print(f"  success={d['success']} msg={d['message']}")
