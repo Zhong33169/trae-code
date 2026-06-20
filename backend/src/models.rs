@@ -324,6 +324,7 @@ pub fn get_role_actions(role_code: &str, order_status: &str) -> Vec<String> {
         ("registrar", "returned") => vec!["resubmit".to_string(), "edit".to_string()],
         ("auditor", "pending_audit") => vec!["approve".to_string(), "reject".to_string(), "view".to_string()],
         ("reviewer", "pending_review") => vec!["archive".to_string(), "reject".to_string(), "view".to_string()],
+        ("reviewer", "archived") => vec!["view".to_string(), "create_verification".to_string()],
         (_, "archived") => vec!["view".to_string()],
         _ => vec!["view".to_string()],
     }

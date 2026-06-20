@@ -59,7 +59,7 @@ fn map_ar(row: &Row) -> rusqlite::Result<AccountsReceivable> {
 
 fn map_order(row: &Row) -> rusqlite::Result<ConfirmationOrder> {
     let status: String = row.get(8)?;
-    let role_code: Option<String> = row.get(23).ok().flatten();
+    let role_code: Option<String> = row.get(22).ok().flatten();
     let rc = role_code.as_deref().unwrap_or("registrar");
 
     Ok(ConfirmationOrder {
@@ -222,6 +222,27 @@ fn sync_ar_status(conn: &Connection, ar_id: i64) {
             ELSE 'pending'
         END, updated_at = CURRENT_TIMESTAMP WHERE id = ?1",
         params![ar_id],
+    );
+}
+
+fn sync_verified_amounts(conn: &Connection, order_id: i64) {
+    let _ = conn.execute(
+        "UPDATE confirmation_orders SET
+            verified_amount = (SELECT COALESCE(SUM(payment_amount), 0) FROM payment_verifications WHERE order_id = ?1),
+            verification_count = (SELECT COUNT(*) FROM payment_verifications WHERE order_id = ?1),
+            updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?1",
+        params![order_id],
+    );
+    let _ = conn.execute(
+        "UPDATE accounts_receivable SET
+            verified_amount = (SELECT COALESCE(SUM(pv.payment_amount), 0)
+                              FROM payment_verifications pv
+                              JOIN confirmation_orders co ON pv.order_id = co.id
+                              WHERE co.ar_id = accounts_receivable.id),
+            updated_at = CURRENT_TIMESTAMP
+         WHERE id = (SELECT ar_id FROM confirmation_orders WHERE id = ?1)",
+        params![order_id],
     );
 }
 
@@ -571,7 +592,7 @@ pub fn list_orders(
                 co.handover_from, co.handover_to, co.handover_time, co.created_by, co.created_at, co.updated_at,
                 (SELECT COUNT(*) FROM payment_verifications pv WHERE pv.order_id = co.id),
                 (SELECT COALESCE(SUM(pv.payment_amount), 0) FROM payment_verifications pv WHERE pv.order_id = co.id),
-                u1.id, ?22, u1.real_name,
+                u1.id, ?, u1.real_name,
                 u_creator.real_name, u_handler.real_name,
                 u_from.real_name, u_to.real_name
          FROM confirmation_orders co
@@ -1293,12 +1314,13 @@ pub fn batch_submit(
     }))
 }
 
-#[get("/verifications?<page>&<page_size>&<ar_id>")]
+#[get("/verifications?<page>&<page_size>&<ar_id>&<order_id>")]
 pub fn list_verifications(
     _auth: AuthUser,
     page: Option<i64>,
     page_size: Option<i64>,
     ar_id: Option<i64>,
+    order_id: Option<i64>,
     pool: &State<DbPool>,
 ) -> Json<ApiResponse<PaginatedResponse<PaymentVerification>>> {
     let p = page.unwrap_or(1);
@@ -1312,6 +1334,10 @@ pub fn list_verifications(
     if let Some(aid) = ar_id {
         where_clauses.push("co.ar_id = ?".to_string());
         args.push(Box::new(aid));
+    }
+    if let Some(oid) = order_id {
+        where_clauses.push("pv.order_id = ?".to_string());
+        args.push(Box::new(oid));
     }
 
     let where_sql = if where_clauses.is_empty() {
@@ -1369,27 +1395,35 @@ pub fn create_verification(
         return Json(ApiResponse::error(400, "回款金额必须大于0"));
     }
 
-    let conn = pool.get().unwrap();
+    let mut conn = pool.get().unwrap();
+    let tx = match conn.transaction() {
+        Ok(t) => t,
+        Err(e) => return Json(ApiResponse::error(500, &format!("事务启动失败: {}", e))),
+    };
 
-    let order_info: Option<(String, String, f64)> = conn
+    let order_info: Option<(i64, String, String, f64)> = tx
         .query_row(
-            "SELECT order_no, status, COALESCE(confirm_amount, amount) FROM confirmation_orders WHERE id = ?1",
+            "SELECT ar_id, order_no, status, COALESCE(confirm_amount, amount) FROM confirmation_orders WHERE id = ?1",
             params![req.order_id],
-            |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, f64>(2)?)),
+            |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, f64>(3)?)),
         )
         .optional()
         .unwrap();
 
-    let (order_no, status, confirm_amt) = match order_info {
+    let (ar_id, order_no, status, confirm_amt) = match order_info {
         Some(r) => r,
-        None => return Json(ApiResponse::error(404, "确权单不存在")),
+        None => {
+            let _ = tx.rollback();
+            return Json(ApiResponse::error(404, "确权单不存在"));
+        }
     };
 
     if status != "archived" {
+        let _ = tx.rollback();
         return Json(ApiResponse::error(400, &format!("确权单状态为「{}」，仅已归档的确权单可核销", status_to_name(&status))));
     }
 
-    let verified_sum: f64 = conn
+    let verified_sum: f64 = tx
         .query_row(
             "SELECT COALESCE(SUM(payment_amount), 0) FROM payment_verifications WHERE order_id = ?1",
             params![req.order_id],
@@ -1398,12 +1432,13 @@ pub fn create_verification(
         .unwrap_or(0.0);
 
     if verified_sum + req.payment_amount > confirm_amt + 0.01 {
+        let _ = tx.rollback();
         return Json(ApiResponse::error(400, &format!("累计核销金额（{:.2}）+本次（{:.2}）超过确权金额（{:.2}）", verified_sum, req.payment_amount, confirm_amt)));
     }
 
-    let verify_no = gen_verify_no(&conn);
+    let verify_no = gen_verify_no(&tx);
 
-    match conn.execute(
+    match tx.execute(
         "INSERT INTO payment_verifications (verify_no, order_id, order_no, payment_amount, payment_date, payer_name, bank_slip_no, remark, status, created_by)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'verified', ?9)",
         params![
@@ -1419,8 +1454,16 @@ pub fn create_verification(
         ],
     ) {
         Ok(_) => {
-            let id = conn.last_insert_rowid();
-            insert_log(&conn, auth.user_id, &auth.real_name, "核销", "payment_verification", id, &verify_no, None, Some("verified"), req.remark.as_deref());
+            let id = tx.last_insert_rowid();
+            sync_verified_amounts(&tx, req.order_id);
+            sync_ar_status(&tx, ar_id);
+            insert_log(&tx, auth.user_id, &auth.real_name, "核销", "payment_verification", id, &verify_no, None, Some("verified"), req.remark.as_deref());
+            insert_log(&tx, auth.user_id, &auth.real_name, "更新已核销金额", "confirmation_order", req.order_id, &order_no, None, None, Some(&format!("回款金额 {:.2} 元", req.payment_amount)));
+
+            if let Err(e) = tx.commit() {
+                return Json(ApiResponse::error(500, &format!("事务提交失败: {}", e)));
+            }
+
             let pv = conn.query_row(
                 "SELECT pv.id, pv.verify_no, pv.order_id, pv.order_no, pv.payment_amount, pv.payment_date,
                         pv.payer_name, pv.bank_slip_no, pv.remark, pv.status, pv.created_by, pv.created_at,
@@ -1431,7 +1474,10 @@ pub fn create_verification(
             ).unwrap();
             Json(ApiResponse::success(pv))
         }
-        Err(e) => Json(ApiResponse::error(500, &format!("核销失败: {}", e))),
+        Err(e) => {
+            let _ = tx.rollback();
+            Json(ApiResponse::error(500, &format!("核销失败: {}", e)))
+        }
     }
 }
 
