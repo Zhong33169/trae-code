@@ -2,6 +2,9 @@ import { Hono } from 'hono'
 import db from '../db/index.js'
 import bcrypt from 'bcryptjs'
 import { ROLE_LABELS } from '../db/schema.js'
+import { requireRole, ROLES } from '../middleware/auth.js'
+
+const ALL_ROLES = [ROLES.REGISTRAR, ROLES.REVIEWER, ROLES.APPROVER] as const
 
 const app = new Hono()
 
@@ -25,7 +28,7 @@ app.post('/login', async (c) => {
   return c.json({ user: userWithoutPassword })
 })
 
-app.get('/users', (c) => {
+app.get('/users', requireRole(...ALL_ROLES), (c) => {
   const users = db.prepare('SELECT id, username, name, role FROM users').all() as any[]
   users.forEach(u => {
     u.roleLabel = ROLE_LABELS[u.role]
@@ -33,7 +36,7 @@ app.get('/users', (c) => {
   return c.json({ users })
 })
 
-app.post('/switch-role', async (c) => {
+app.post('/switch-role', requireRole(...ALL_ROLES), async (c) => {
   const { userId } = await c.req.json()
   
   const user = db.prepare('SELECT id, username, name, role FROM users WHERE id = ?').get(userId) as any

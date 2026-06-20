@@ -129,16 +129,27 @@ export interface AuditLog {
   title?: string
 }
 
-function getCurrentUserId(): string | null {
+const STORAGE_KEY = 'policy_current_user'
+
+export function getCurrentUser(): User | null {
   try {
-    const raw = localStorage.getItem('currentUser')
-    if (raw) {
-      const user = JSON.parse(raw)
-      return String(user.id)
-    }
-  } catch {
-  }
+    const raw = localStorage.getItem(STORAGE_KEY)
+    if (raw) return JSON.parse(raw) as User
+  } catch {}
   return null
+}
+
+export function setCurrentUser(user: User): void {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(user))
+}
+
+export function clearCurrentUser(): void {
+  localStorage.removeItem(STORAGE_KEY)
+}
+
+function getCurrentUserId(): string | null {
+  const user = getCurrentUser()
+  return user ? String(user.id) : null
 }
 
 async function request<T>(url: string, options: RequestInit = {}): Promise<T> {

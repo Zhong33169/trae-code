@@ -5,39 +5,32 @@ import OrderList from './pages/OrderList'
 import OrderDetail from './pages/OrderDetail'
 import AuditLogs from './pages/AuditLogs'
 import Layout from './components/Layout'
-import { User, api } from './api/client'
+import { User, api, getCurrentUser, setCurrentUser, clearCurrentUser } from './api/client'
 
 function App() {
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    const savedUser = localStorage.getItem('policy_user')
-    if (savedUser) {
-      try {
-        setUser(JSON.parse(savedUser))
-      } catch (e) {
-        localStorage.removeItem('policy_user')
-      }
-    }
+    setUser(getCurrentUser())
     setLoading(false)
   }, [])
 
   const handleLogin = (userData: User) => {
+    setCurrentUser(userData)
     setUser(userData)
-    localStorage.setItem('policy_user', JSON.stringify(userData))
   }
 
   const handleLogout = () => {
+    clearCurrentUser()
     setUser(null)
-    localStorage.removeItem('policy_user')
   }
 
   const handleSwitchRole = async (userId: number) => {
     try {
       const res = await api.auth.switchRole(userId)
+      setCurrentUser(res.user)
       setUser(res.user)
-      localStorage.setItem('policy_user', JSON.stringify(res.user))
     } catch (e: any) {
       alert(e.message)
     }
