@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'preact/hooks'
 import { getOrders, createOrder, batchProcessOrders } from '../api/client.js'
-import { STATUS_MAP, PRIORITY_MAP, formatDate, isOverdue, ROLE_MAP } from '../utils/constants.js'
+import { STATUS_MAP, PRIORITY_MAP, formatDate, isOverdue, ROLE_MAP, EXCEPTION_OPTIONS } from '../utils/constants.js'
 
 export default function OrderList(props) {
   const defaultView = props.defaultView || 'all'
@@ -11,8 +11,10 @@ export default function OrderList(props) {
   const [pageSize] = useState(10)
   const [status, setStatus] = useState(defaultView === 'all' ? '' : getDefaultStatus(defaultView))
   const [keyword, setKeyword] = useState('')
+  const [exception, setException] = useState('')
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [stats, setStats] = useState({ pending: 0, processing: 0, completed: 0, overdue: 0 })
+  const [exceptionStats, setExceptionStats] = useState({ overdue: 0, returned: 0, missing_material: 0, batch_failed: 0 })
   const [currentUser, setCurrentUser] = useState(null)
   const [selectedIds, setSelectedIds] = useState([])
   const [showBatchModal, setShowBatchModal] = useState(false)
@@ -42,7 +44,7 @@ export default function OrderList(props) {
 
   useEffect(() => {
     loadOrders()
-  }, [page, status, keyword])
+  }, [page, status, keyword, exception])
 
   useEffect(() => {
     if (defaultView !== 'all') {
@@ -53,6 +55,7 @@ export default function OrderList(props) {
   async function loadOrders() {
     const params = {
       status: status.includes(',') ? status.split(',')[0] : status,
+      exception,
       keyword,
       page,
       page_size: pageSize
@@ -69,7 +72,7 @@ export default function OrderList(props) {
         let allOrders = []
         const statuses = status.split(',')
         for (const s of statuses) {
-          const res = await getOrders({ status: s, keyword, page: 1, page_size: 100 })
+          const res = await getOrders({ status: s, exception, keyword, page: 1, page_size: 100 })
           if (res.list) {
             allOrders = [...allOrders, ...res.list]
           }
@@ -90,31 +93,40 @@ export default function OrderList(props) {
   }, [])
 
   async function loadStats() {
-    const [pendingRes, processingRes, completedRes] = await Promise.all([
-      getOrders({ status: 'pending', page_size: 100 }),
-      getOrders({ status: 'processing', page_size: 100 }),
-      getOrders({ status: 'completed', page_size: 100 })
-    ])
-
+    const allRes = await getOrders({ page_size: 1000 })
+    const allOrders = allRes.list || []
+    
+    let pendingCount = 0
+    let processingCount = 0
+    let completedCount = 0
     let overdueCount = 0
-    const allStatuses = ['pending', 'supplement', 'processing', 'review', 'returned']
-    for (const s of allStatuses) {
-      const res = await getOrders({ status: s, page_size: 100 })
-      if (res.list) {
-        res.list.forEach(order => {
-          if (isOverdue(order.due_at)) {
-            overdueCount++
+    
+    const excStats = { overdue: 0, returned: 0, missing_material: 0, batch_failed: 0 }
+    
+    allOrders.forEach(order => {
+      if (order.status === 'pending' || order.status === 'supplement') pendingCount++
+      if (order.status === 'processing' || order.status === 'review') processingCount++
+      if (order.status === 'completed') completedCount++
+      if (isOverdue(order.due_at) && order.status !== 'completed' && order.status !== 'rejected') {
+        overdueCount++
+      }
+      
+      if (order.exceptions) {
+        order.exceptions.forEach(exc => {
+          if (exc.type in excStats) {
+            excStats[exc.type]++
           }
         })
       }
-    }
+    })
 
     setStats({
-      pending: pendingRes.total || 0,
-      processing: processingRes.total || 0,
-      completed: completedRes.total || 0,
+      pending: pendingCount,
+      processing: processingCount,
+      completed: completedCount,
       overdue: overdueCount
     })
+    setExceptionStats(excStats)
   }
 
   const statusOptions = [
@@ -243,22 +255,58 @@ export default function OrderList(props) {
       </div>
 
       {defaultView === 'all' && (
-        <div className="stat-cards">
-          <div className="stat-card">
-            <div className="stat-label">待审核</div>
-            <div className="stat-value pending">{stats.pending}</div>
+        <div>
+          <div className="stat-cards">
+            <div className="stat-card">
+              <div className="stat-label">待审核</div>
+              <div className="stat-value pending">{stats.pending}</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-label">处理中</div>
+              <div className="stat-value processing">{stats.processing}</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-label">已完成</div>
+              <div className="stat-value completed">{stats.completed}</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-label">已超时</div>
+              <div className="stat-value overdue">{stats.overdue}</div>
+            </div>
           </div>
-          <div className="stat-card">
-            <div className="stat-label">处理中</div>
-            <div className="stat-value processing">{stats.processing}</div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-label">已完成</div>
-            <div className="stat-value completed">{stats.completed}</div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-label">已超时</div>
-            <div className="stat-value overdue">{stats.overdue}</div>
+          <div className="stat-cards" style={{ marginTop: '12px' }}>
+            <div
+              className={`stat-card ${exception === 'overdue' ? 'active' : ''}`}
+              onClick={() => { setException(exception === 'overdue' ? '' : 'overdue'); setPage(1) }}
+              style={{ cursor: 'pointer', border: exception === 'overdue' ? '2px solid #f5222d' : '1px solid #e8e8e8' }}
+            >
+              <div className="stat-label" style={{ color: '#f5222d' }}>⚠ 超时</div>
+              <div className="stat-value overdue">{exceptionStats.overdue}</div>
+            </div>
+            <div
+              className={`stat-card ${exception === 'returned' ? 'active' : ''}`}
+              onClick={() => { setException(exception === 'returned' ? '' : 'returned'); setPage(1) }}
+              style={{ cursor: 'pointer', border: exception === 'returned' ? '2px solid #faad14' : '1px solid #e8e8e8' }}
+            >
+              <div className="stat-label" style={{ color: '#faad14' }}>↺ 退回补正</div>
+              <div className="stat-value" style={{ color: '#faad14' }}>{exceptionStats.returned}</div>
+            </div>
+            <div
+              className={`stat-card ${exception === 'missing_material' ? 'active' : ''}`}
+              onClick={() => { setException(exception === 'missing_material' ? '' : 'missing_material'); setPage(1) }}
+              style={{ cursor: 'pointer', border: exception === 'missing_material' ? '2px solid #fa8c16' : '1px solid #e8e8e8' }}
+            >
+              <div className="stat-label" style={{ color: '#fa8c16' }}>📋 缺必需材料</div>
+              <div className="stat-value" style={{ color: '#fa8c16' }}>{exceptionStats.missing_material}</div>
+            </div>
+            <div
+              className={`stat-card ${exception === 'batch_failed' ? 'active' : ''}`}
+              onClick={() => { setException(exception === 'batch_failed' ? '' : 'batch_failed'); setPage(1) }}
+              style={{ cursor: 'pointer', border: exception === 'batch_failed' ? '2px solid #eb2f96' : '1px solid #e8e8e8' }}
+            >
+              <div className="stat-label" style={{ color: '#eb2f96' }}>✗ 批量失败</div>
+              <div className="stat-value" style={{ color: '#eb2f96' }}>{exceptionStats.batch_failed}</div>
+            </div>
           </div>
         </div>
       )}
@@ -298,6 +346,15 @@ export default function OrderList(props) {
             </select>
           </div>
           <div className="filter-item">
+            <span className="filter-label">异常:</span>
+            <select className="select" value={exception} onChange={e => { setException(e.target.value); setPage(1); setSelectedIds([]) }}>
+              <option value="">全部（无异常筛选）</option>
+              {EXCEPTION_OPTIONS.filter(o => o.value !== 'all').map(opt => (
+                <option key={opt.value} value={opt.value}>{opt.label} ({exceptionStats[opt.value] || 0})</option>
+              ))}
+            </select>
+          </div>
+          <div className="filter-item">
             <span className="filter-label">搜索:</span>
             <input
               className="input"
@@ -310,6 +367,11 @@ export default function OrderList(props) {
           <button className="btn btn-default btn-sm" onClick={() => { setPage(1); setSelectedIds([]); loadOrders() }}>
             查询
           </button>
+          {exception && (
+            <button className="btn btn-sm" style={{ background: '#f0f0f0', color: '#666' }} onClick={() => { setException(''); setPage(1) }}>
+              ✕ 清除异常筛选
+            </button>
+          )}
         </div>
 
         <table className="table">
@@ -328,6 +390,7 @@ export default function OrderList(props) {
               <th>会员姓名</th>
               <th>服务类型</th>
               <th>状态</th>
+              <th>异常标签</th>
               <th>优先级</th>
               <th>当前处理人</th>
               <th>创建时间</th>
@@ -357,6 +420,30 @@ export default function OrderList(props) {
                   <span className="status-tag" style={{ background: STATUS_MAP[order.status]?.color + '20', color: STATUS_MAP[order.status]?.color }}>
                     {STATUS_MAP[order.status]?.label}
                   </span>
+                </td>
+                <td>
+                  {order.exceptions && order.exceptions.length > 0 ? (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                      {order.exceptions.map(exc => (
+                        <span
+                          key={exc.type}
+                          className="status-tag"
+                          style={{
+                            background: exc.color + '15',
+                            color: exc.color,
+                            fontSize: '11px',
+                            padding: '2px 6px',
+                            border: `1px solid ${exc.color}40`
+                          }}
+                          title={exc.desc}
+                        >
+                          {exc.label}
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <span style={{ color: '#999', fontSize: '12px' }}>-</span>
+                  )}
                 </td>
                 <td>
                   <span style={{ color: PRIORITY_MAP[order.priority]?.color }}>

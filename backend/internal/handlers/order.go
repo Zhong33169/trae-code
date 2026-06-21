@@ -27,7 +27,9 @@ func GetOrders(c *gin.Context) {
 		req.PageSize = 10
 	}
 
-	query := database.DB.Model(&models.MemberServiceOrder{})
+	query := database.DB.Model(&models.MemberServiceOrder{}).Preload("Attachments").Preload("Logs", func(db *gorm.DB) *gorm.DB {
+		return db.Order("created_at DESC")
+	})
 
 	if req.Status != "" && req.Status != "all" {
 		query = query.Where("status = ?", req.Status)
@@ -39,16 +41,104 @@ func GetOrders(c *gin.Context) {
 	}
 
 	var total int64
-	query.Count(&total)
+	var allOrders []models.MemberServiceOrder
+	query.Order("created_at DESC").Find(&allOrders)
+	total = int64(len(allOrders))
 
-	var orders []models.MemberServiceOrder
+	now := time.Now()
+	for i := range allOrders {
+		allOrders[i].Exceptions = getOrderExceptions(&allOrders[i], now)
+	}
+
+	if req.Exception != "" && req.Exception != "all" {
+		filtered := make([]models.MemberServiceOrder, 0)
+		for _, order := range allOrders {
+			for _, exc := range order.Exceptions {
+				if exc.Type == req.Exception {
+					filtered = append(filtered, order)
+					break
+				}
+			}
+		}
+		allOrders = filtered
+		total = int64(len(allOrders))
+	}
+
 	offset := (req.Page - 1) * req.PageSize
-	query.Order("created_at DESC").Offset(offset).Limit(req.PageSize).Find(&orders)
+	end := offset + req.PageSize
+	if offset > len(allOrders) {
+		allOrders = []models.MemberServiceOrder{}
+	} else if end > len(allOrders) {
+		allOrders = allOrders[offset:]
+	} else {
+		allOrders = allOrders[offset:end]
+	}
 
 	c.JSON(http.StatusOK, models.OrderListResponse{
 		Total: total,
-		List:  orders,
+		List:  allOrders,
 	})
+}
+
+func getOrderExceptions(order *models.MemberServiceOrder, now time.Time) []models.ExceptionInfo {
+	exceptions := make([]models.ExceptionInfo, 0)
+
+	if order.DueAt != nil && !order.DueAt.IsZero() && now.After(*order.DueAt) &&
+		order.Status != models.StatusCompleted && order.Status != models.StatusRejected {
+		exceptions = append(exceptions, models.ExceptionInfo{
+			Type:  "overdue",
+			Label: "超时",
+			Color: "#f5222d",
+			Desc:  "超过截止时间未处理",
+		})
+	}
+
+	if order.Status == models.StatusSupplement || order.Status == models.StatusReturned {
+		label := "退回补正"
+		desc := "需要补充材料"
+		if order.Status == models.StatusReturned {
+			label = "复核退回"
+			desc = "复核未通过，需要修正"
+		}
+		exceptions = append(exceptions, models.ExceptionInfo{
+			Type:  "returned",
+			Label: label,
+			Color: "#faad14",
+			Desc:  desc,
+		})
+	}
+
+	missing := getMissingRequiredMaterials(order.Attachments, order.ServiceType)
+	if len(missing) > 0 && order.Status != models.StatusCompleted && order.Status != models.StatusRejected {
+		names := make([]string, 0)
+		for _, m := range missing {
+			names = append(names, m.Name)
+		}
+		exceptions = append(exceptions, models.ExceptionInfo{
+			Type:  "missing_material",
+			Label: "缺必需材料",
+			Color: "#fa8c16",
+			Desc:  "缺少: " + strings.Join(names, "、"),
+		})
+	}
+
+	hasBatchFail := false
+	for _, log := range order.Logs {
+		if strings.Contains(log.Action, "批量") && strings.Contains(log.Action, "失败") {
+			hasBatchFail = true
+			break
+		}
+	}
+	if hasBatchFail {
+		exceptions = append(exceptions, models.ExceptionInfo{
+			Type:  "batch_failed",
+			Label: "批量失败",
+			Color: "#eb2f96",
+			Desc:  "批量处理未通过",
+		})
+	}
+
+	return exceptions
 }
 
 func GetOrder(c *gin.Context) {

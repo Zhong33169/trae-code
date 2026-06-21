@@ -27,6 +27,14 @@ export const ATTACHMENT_STATUS_MAP = {
   rejected: { label: '已驳回', color: '#f5222d' }
 }
 
+export const EXCEPTION_OPTIONS = [
+  { value: 'all', label: '全部异常' },
+  { value: 'overdue', label: '超时', color: '#f5222d' },
+  { value: 'returned', label: '退回补正/复核退回', color: '#faad14' },
+  { value: 'missing_material', label: '缺必需材料', color: '#fa8c16' },
+  { value: 'batch_failed', label: '批量失败', color: '#eb2f96' }
+]
+
 export function formatDate(dateStr) {
   if (!dateStr) return '-'
   const date = new Date(dateStr)

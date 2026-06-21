@@ -53,6 +53,7 @@ type MemberServiceOrder struct {
 	UpdatedAt      time.Time   `json:"updated_at"`
 	Attachments    []Attachment `json:"attachments,omitempty" gorm:"foreignKey:OrderID"`
 	Logs           []AuditLog   `json:"logs,omitempty" gorm:"foreignKey:OrderID"`
+	Exceptions     []ExceptionInfo `json:"exceptions,omitempty" gorm:"-"`
 }
 
 type Attachment struct {
@@ -84,10 +85,18 @@ type AuditLog struct {
 }
 
 type OrderListRequest struct {
-	Status   string `form:"status"`
-	Keyword  string `form:"keyword"`
-	Page     int    `form:"page"`
-	PageSize int    `form:"page_size"`
+	Status    string `form:"status"`
+	Keyword   string `form:"keyword"`
+	Exception string `form:"exception"`
+	Page      int    `form:"page"`
+	PageSize  int    `form:"page_size"`
+}
+
+type ExceptionInfo struct {
+	Type  string `json:"type"`
+	Label string `json:"label"`
+	Color string `json:"color"`
+	Desc  string `json:"desc,omitempty"`
 }
 
 type OrderListResponse struct {
