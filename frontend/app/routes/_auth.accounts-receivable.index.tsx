@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { createFileRoute, useNavigate } from '@tanstack/react-router';
+import { createFileRoute } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
 import { api, buildQueryString, type PaginatedData } from '~/api/client';
 import { AR_STATUS_LABELS, AR_STATUS_COLORS, type ARStatus } from '~/lib/constants';
@@ -30,7 +30,7 @@ function AccountsReceivableList() {
   const [keyword, setKeyword] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
-  const navigate = useNavigate({ from: Route.fullPath });
+  const navigate = Route.useNavigate();
 
   const { data, isLoading, error, refetch } = useQuery<PaginatedData<AccountsReceivable>>({
     queryKey: ['ar-list', page, perPage, searchTerm, statusFilter],

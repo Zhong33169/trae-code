@@ -38,6 +38,7 @@ fn map_user(row: &Row) -> rusqlite::Result<User> {
 }
 
 fn map_ar(row: &Row) -> rusqlite::Result<AccountsReceivable> {
+    let status: String = row.get(8)?;
     Ok(AccountsReceivable {
         id: row.get(0)?,
         ar_no: row.get(1)?,
@@ -47,7 +48,8 @@ fn map_ar(row: &Row) -> rusqlite::Result<AccountsReceivable> {
         invoice_no: row.get(5).ok(),
         invoice_date: row.get::<_, String>(6).ok().and_then(|s| parse_date(&s)),
         due_date: row.get::<_, String>(7).ok().and_then(|s| parse_date(&s)),
-        status: row.get(8)?,
+        status: status.clone(),
+        status_name: Some(status_to_name(&status).to_string()),
         remark: row.get(9).ok(),
         created_by: row.get(10).ok(),
         created_at: row.get::<_, String>(11).ok().and_then(|s| parse_dt(&s)),
@@ -110,6 +112,7 @@ fn map_verification(row: &Row) -> rusqlite::Result<PaymentVerification> {
         bank_slip_no: row.get(7).ok(),
         remark: row.get(8).ok(),
         status: row.get(9)?,
+        status_name: Some(status_to_name(&row.get::<_, String>(9)?).to_string()),
         created_by: row.get(10).ok(),
         created_by_name: row.get(12).ok(),
         created_at: row.get::<_, String>(11).ok().and_then(|s| parse_dt(&s)),

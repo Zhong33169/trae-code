@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate, useParams } from '@tanstack/react-router';
+import { createFileRoute } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
 import { api, buildQueryString, type PaginatedData } from '~/api/client';
 import { StatusBadge } from '~/components/StatusBadge';
@@ -39,8 +39,8 @@ interface ARDetail {
 }
 
 function AccountsReceivableDetail() {
-  const { id } = useParams({ from: Route.fullPath });
-  const navigate = useNavigate({ from: Route.fullPath });
+  const { id } = Route.useParams();
+  const navigate = Route.useNavigate();
 
   const { data, isLoading, error } = useQuery<ARDetail>({
     queryKey: ['ar-detail', id],

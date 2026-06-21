@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { createFileRoute, useNavigate, useParams } from '@tanstack/react-router';
+import { createFileRoute } from '@tanstack/react-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, buildQueryString, type PaginatedData } from '~/api/client';
 import { StatusBadge } from '~/components/StatusBadge';
@@ -53,8 +53,8 @@ interface ConfirmationOrderDetail {
 }
 
 function ConfirmationOrdersDetail() {
-  const { id } = useParams({ from: Route.fullPath });
-  const navigate = useNavigate({ from: Route.fullPath });
+  const { id } = Route.useParams();
+  const navigate = Route.useNavigate();
   const queryClient = useQueryClient();
   const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [handoverOpen, setHandoverOpen] = useState(false);

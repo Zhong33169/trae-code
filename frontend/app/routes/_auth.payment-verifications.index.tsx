@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { createFileRoute, useNavigate } from '@tanstack/react-router';
+import { createFileRoute } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
 import { api, buildQueryString, type PaginatedData } from '~/api/client';
 
@@ -27,7 +27,7 @@ function PaymentVerificationsList() {
   const [keyword, setKeyword] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [arIdFilter, setArIdFilter] = useState('');
-  const navigate = useNavigate({ from: Route.fullPath });
+  const navigate = Route.useNavigate();
 
   const { data, isLoading, error, refetch } = useQuery<PaginatedData<PaymentVerification>>({
     queryKey: ['pv-list', page, perPage, searchTerm, arIdFilter],

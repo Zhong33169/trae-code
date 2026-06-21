@@ -51,7 +51,7 @@
 
 | 层 | 技术 | 端口 |
 |----|------|------|
-| 前端 | TanStack Start (React 18 + TS + Vite + Tailwind + React Query) | **3003** |
+| 前端 | TanStack Router 文件路由 (React 18 + TS + Vite 6 + Tailwind + React Query) | **3003** |
 | 后端 | Rust Rocket 0.5 + r2d2 连接池 | **8003** |
 | 数据库 | SQLite 本地文件 `backend/scf_platform.db` | — |
 | 认证 | JWT (jsonwebtoken) + bcrypt 密码哈希 | — |
@@ -95,7 +95,7 @@ npm run dev
 
 启动成功：
 ```
-VITE v5.x  ready in xxx ms
+VITE v6.x  ready in xxx ms
   ➜  Local:   http://localhost:3003/
 ```
 
@@ -217,27 +217,36 @@ trae-code-3/
 │   │   └── handlers.rs               # 业务处理（事务/校验/日志/联动更新）
 │   └── test_api.sh                   # 后端接口自检脚本
 │
-├── frontend/                         # TanStack Start 前端
-│   ├── vite.config.ts                # 端口=3003 + /api 代理到 8003
+├── frontend/                         # TanStack Router 前端
+│   ├── vite.config.ts                # TanStack Router 插件 + 端口 3003 + /api 代理
 │   ├── package.json
 │   ├── tsconfig.json
 │   ├── tailwind.config.js
-│   └── src/
-│       ├── main.tsx / App.tsx        # 入口、路由守卫
+│   ├── index.html                    # SPA 入口
+│   └── app/
+│       ├── entry-client.tsx          # React 挂载入口
+│       ├── index.css                 # Tailwind 样式
+│       ├── router.tsx                # TanStack Router 配置 + React Query
+│       ├── env.d.ts                  # 类型声明
+│       ├── routeTree.gen.ts          # 自动生成的路由树
 │       ├── api/client.ts             # fetch 封装（token/401跳转/统一错误）
 │       ├── store/auth.ts             # Zustand 登录态
 │       ├── lib/constants.ts          # 状态/动作/角色常量
 │       ├── components/
-│       │   ├── Layout.tsx            # 带侧边栏布局（按角色显示菜单）
 │       │   ├── StatusBadge.tsx       # 状态标签
 │       │   └── HandoverModal.tsx     # 交接信息弹窗（必填校验）
-│       └── pages/
-│           ├── Login.tsx
-│           ├── Dashboard.tsx         # 统计看板
-│           ├── AccountsReceivable/{List,Detail}.tsx
-│           ├── ConfirmationOrders/{List,Detail}.tsx  # 含批量/流转
-│           ├── PaymentVerifications/List.tsx
-│           └── OperationLogs/List.tsx
+│       └── routes/
+│           ├── __root.tsx            # 根路由
+│           ├── index.tsx             # / → 重定向到 /dashboard
+│           ├── login.tsx             # /login（公开）
+│           ├── _auth.tsx             # 受保护布局（路由守卫+侧边栏）
+│           ├── _auth.dashboard.tsx           # 统计看板
+│           ├── _auth.accounts-receivable.index.tsx  # AR 列表
+│           ├── _auth.accounts-receivable.$id.tsx    # AR 详情
+│           ├── _auth.confirmation-orders.index.tsx   # 确权单列表
+│           ├── _auth.confirmation-orders.$id.tsx     # 确权单详情（含核销）
+│           ├── _auth.payment-verifications.index.tsx # 核销列表
+│           └── _auth.operation-logs.index.tsx        # 操作日志
 │
 └── README.md
 ```
@@ -251,8 +260,8 @@ cd backend
 bash test_api.sh
 ```
 
-覆盖：登录 → 统计 → 缺项拦截（交接校验） → 真实提交 → 提交后统计更新。
-所有测试点通过表示后端核心逻辑正常。
+覆盖：登录 → 三岗权限验证 → 归档 → 核销 → 联动更新 → 超额拦截 → 操作日志。
+所有 12 项测试通过表示后端核心逻辑正常。
 
 ---
 

@@ -1,4 +1,4 @@
-import { createFileRoute, Link, Outlet, redirect, useNavigate, useRouterState } from '@tanstack/react-router';
+import { createFileRoute, Link, Outlet, redirect, useRouterState } from '@tanstack/react-router';
 import { useAuthStore } from '~/store/auth';
 import { ROLE_MENUS, ROLE_LABELS, type UserRole } from '~/lib/constants';
 
@@ -41,7 +41,7 @@ export const Route = createFileRoute('/_auth')({
 
 function AuthLayout() {
   const { user, logout } = useAuthStore();
-  const navigate = useNavigate({ from: Route.fullPath });
+  const navigate = Route.useNavigate();
   const routerState = useRouterState();
 
   const handleLogout = () => {

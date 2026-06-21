@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { createFileRoute, redirect, useNavigate } from '@tanstack/react-router';
+import { createFileRoute, redirect } from '@tanstack/react-router';
 import { useAuthStore } from '~/store/auth';
 
 export const Route = createFileRoute('/login')({
@@ -11,7 +11,7 @@ function Login() {
   const [password, setPassword] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const { login, isLoading, user } = useAuthStore();
-  const navigate = useNavigate({ from: Route.fullPath });
+  const navigate = Route.useNavigate();
 
   useEffect(() => {
     if (user) {

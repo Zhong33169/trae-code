@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { createFileRoute, useNavigate } from '@tanstack/react-router';
+import { createFileRoute } from '@tanstack/react-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, buildQueryString, type PaginatedData } from '~/api/client';
 import { StatusBadge } from '~/components/StatusBadge';
@@ -50,7 +50,7 @@ function ConfirmationOrdersList() {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [handoverOpen, setHandoverOpen] = useState(false);
-  const navigate = useNavigate({ from: Route.fullPath });
+  const navigate = Route.useNavigate();
   const queryClient = useQueryClient();
 
   useEffect(() => {
