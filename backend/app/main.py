@@ -62,6 +62,13 @@ def _validate_transition(user_role, current_status, target_status):
     return None
 
 
+def _write_audit(conn, event_id, action, user, detail, now, scan_record_id=None, version_before=None, version_after=None, before_status=None, after_status=None, batch_id=None):
+    conn.execute(
+        "INSERT INTO audit_log (event_id, action, actor_id, actor_role, actor_name, detail, created_at, scan_record_id, version_before, version_after, before_status, after_status, batch_id, filter_role, filter_status, filter_event_type) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (event_id, action, user["id"], user["role"], user.get("name", ""), detail, now, scan_record_id, version_before, version_after, before_status, after_status, batch_id, None, None, None),
+    )
+
+
 def _sync_db(func):
     async def wrapper(*args, **kwargs):
         return await run_in_threadpool(func, *args, **kwargs)
@@ -82,7 +89,7 @@ async def login(request):
         user = row_to_dict(row)
         if not verify_password(password, user["password_hash"]):
             return _json({"error": "用户名或密码错误"}, 401)
-        token = create_token(user["id"], user["username"], user["role"])
+        token = create_token(user["id"], user["username"], user["role"], user.get("name", ""))
         return _json({"user": {"id": user["id"], "username": user["username"], "name": user["name"], "role": user["role"]}, "token": token})
     finally:
         conn.close()
@@ -198,10 +205,7 @@ async def create_event(request):
                 "INSERT INTO materials (event_id, name, material_type, content, step, uploaded_at) VALUES (?,?,?,?,?,?)",
                 (event_id, mat.get("name", ""), mat.get("material_type", "document"), mat.get("content", ""), "draft", now),
             )
-        c.execute(
-            "INSERT INTO audit_log (event_id, action, actor_id, actor_role, detail, created_at, scan_record_id, version_before, version_after) VALUES (?,?,?,?,?,?,?,?,?)",
-            (event_id, "create", user["id"], user["role"], f"登记员创建医疗事件：{title}", now, None, None, 1),
-        )
+        _write_audit(conn, event_id, "create", user, f"登记员创建医疗事件：{title}", now, None, None, 1, None, "draft")
         conn.execute("COMMIT")
         row = conn.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
         event = row_to_dict(row)
@@ -271,10 +275,7 @@ async def submit_event(request):
             "INSERT INTO actions (event_id, action_type, opinion, result, actor_id, actor_role, created_at) VALUES (?,?,?,?,?,?,?)",
             (event_id, "submit", "", "", user["id"], user["role"], now),
         )
-        conn.execute(
-            "INSERT INTO audit_log (event_id, action, actor_id, actor_role, detail, created_at, scan_record_id, version_before, version_after) VALUES (?,?,?,?,?,?,?,?,?)",
-            (event_id, "submit", user["id"], user["role"], f"登记员{action_label}医疗事件（已消费扫码凭证#{cred['scan_record_id']}）", now, cred["scan_record_id"], cred["old_version"], cred["new_version"]),
-        )
+        _write_audit(conn, event_id, "submit", user, f"登记员{action_label}医疗事件（已消费扫码凭证#{cred['scan_record_id']}）", now, cred["scan_record_id"], cred["old_version"], cred["new_version"], event["status"], "submitted")
         conn.execute("COMMIT")
         row = conn.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
         return _json({"event": row_to_dict(row)})
@@ -346,10 +347,7 @@ async def supplement_event(request):
             "INSERT INTO actions (event_id, action_type, opinion, result, actor_id, actor_role, created_at) VALUES (?,?,?,?,?,?,?)",
             (event_id, "supplement", opinion, "", user["id"], user["role"], now),
         )
-        conn.execute(
-            "INSERT INTO audit_log (event_id, action, actor_id, actor_role, detail, created_at, scan_record_id, version_before, version_after) VALUES (?,?,?,?,?,?,?,?,?)",
-            (event_id, "supplement", user["id"], user["role"], f"登记员补正并重新提交：{opinion}（已消费扫码凭证#{cred['scan_record_id']}）", now, cred["scan_record_id"], cred["old_version"], cred["new_version"]),
-        )
+        _write_audit(conn, event_id, "supplement", user, f"登记员补正并重新提交：{opinion}（已消费扫码凭证#{cred['scan_record_id']}）", now, cred["scan_record_id"], cred["old_version"], cred["new_version"], event["status"], "submitted")
         conn.execute("COMMIT")
         row = conn.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
         return _json({"event": row_to_dict(row)})
@@ -426,10 +424,7 @@ async def review_event(request):
             "INSERT INTO actions (event_id, action_type, opinion, result, actor_id, actor_role, created_at) VALUES (?,?,?,?,?,?,?)",
             (event_id, "review", opinion, result, user["id"], user["role"], now),
         )
-        conn.execute(
-            "INSERT INTO audit_log (event_id, action, actor_id, actor_role, detail, created_at, scan_record_id, version_before, version_after) VALUES (?,?,?,?,?,?,?,?,?)",
-            (event_id, f"review_{result}", user["id"], user["role"], audit_detail, now, cred["scan_record_id"], cred["old_version"], cred["new_version"]),
-        )
+        _write_audit(conn, event_id, f"review_{result}", user, audit_detail, now, cred["scan_record_id"], cred["old_version"], cred["new_version"], event["status"], new_status)
         conn.execute("COMMIT")
         row = conn.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
         return _json({"event": row_to_dict(row)})
@@ -502,10 +497,7 @@ async def archive_review_event(request):
             "INSERT INTO actions (event_id, action_type, opinion, result, actor_id, actor_role, created_at) VALUES (?,?,?,?,?,?,?)",
             (event_id, "archive_review", opinion, result, user["id"], user["role"], now),
         )
-        conn.execute(
-            "INSERT INTO audit_log (event_id, action, actor_id, actor_role, detail, created_at, scan_record_id, version_before, version_after) VALUES (?,?,?,?,?,?,?,?,?)",
-            (event_id, f"archive_{result}", user["id"], user["role"], audit_detail, now, cred["scan_record_id"], cred["old_version"], cred["new_version"]),
-        )
+        _write_audit(conn, event_id, f"archive_{result}", user, audit_detail, now, cred["scan_record_id"], cred["old_version"], cred["new_version"], event["status"], new_status)
         conn.execute("COMMIT")
         row = conn.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
         return _json({"event": row_to_dict(row)})
@@ -571,10 +563,7 @@ async def scan_code(request):
                 (code, event["id"], user["id"], user["role"], 0, msg, now, event["scan_token"], None, "", None, None, None),
             )
             scan_record_id = cur.lastrowid
-            conn.execute(
-                "INSERT INTO audit_log (event_id, action, actor_id, actor_role, detail, created_at, scan_record_id, version_before, version_after) VALUES (?,?,?,?,?,?,?,?,?)",
-                (event["id"], "scan_reject", user["id"], user["role"], msg, now, scan_record_id, event["version"], event["version"]),
-            )
+            _write_audit(conn, event["id"], "scan_reject", user, msg, now, scan_record_id, event["version"], event["version"], event["status"], event["status"])
             conn.execute("COMMIT")
             return _json({"success": False, "message": msg, "scan_record_id": scan_record_id}, 403)
         # 4. 核验通过
@@ -583,10 +572,7 @@ async def scan_code(request):
             (code, event["id"], user["id"], user["role"], 1, "核验通过", now, event["scan_token"], None, "", None, event["version"], event["version"]),
         )
         scan_record_id = cur.lastrowid
-        conn.execute(
-            "INSERT INTO audit_log (event_id, action, actor_id, actor_role, detail, created_at, scan_record_id, version_before, version_after) VALUES (?,?,?,?,?,?,?,?,?)",
-            (event["id"], "scan", user["id"], user["role"], f"{ROLE_LABELS.get(user['role'], user['role'])}扫码核验通过，生成凭证#{scan_record_id}", now, scan_record_id, event["version"], event["version"]),
-        )
+        _write_audit(conn, event["id"], "scan", user, f"{ROLE_LABELS.get(user['role'], user['role'])}扫码核验通过，生成凭证#{scan_record_id}", now, scan_record_id, event["version"], event["version"], event["status"], event["status"])
         conn.execute("COMMIT")
         mats = conn.execute("SELECT * FROM materials WHERE event_id = ? ORDER BY uploaded_at", (event["id"],)).fetchall()
         event["materials"] = [row_to_dict(m) for m in mats]
@@ -649,6 +635,8 @@ async def batch_process(request):
     results = []
     conn = get_db()
     try:
+        import uuid
+        batch_id = f"BATCH-{datetime.now().strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:6].upper()}"
         for it in items:
             eid = int(it.get("event_id"))
             sr_id = it.get("scan_record_id")
@@ -713,10 +701,7 @@ async def batch_process(request):
                         "INSERT INTO actions (event_id, action_type, opinion, result, actor_id, actor_role, created_at) VALUES (?,?,?,?,?,?,?)",
                         (eid, "batch_review", opinion, result, user["id"], user["role"], now),
                     )
-                    conn.execute(
-                        "INSERT INTO audit_log (event_id, action, actor_id, actor_role, detail, created_at, scan_record_id, version_before, version_after) VALUES (?,?,?,?,?,?,?,?,?)",
-                        (eid, f"batch_review_{result}", user["id"], user["role"], f"批量审核{'通过' if result == 'pass' else '退回'}：{opinion}（已消费扫码凭证#{cred['scan_record_id']}）", now, cred["scan_record_id"], cred["old_version"], cred["new_version"]),
-                    )
+                    _write_audit(conn, eid, f"batch_review_{result}", user, f"批量审核{'通过' if result == 'pass' else '退回'}：{opinion}（批次{batch_id}，已消费扫码凭证#{cred['scan_record_id']}）", now, cred["scan_record_id"], cred["old_version"], cred["new_version"], event["status"], new_status, batch_id)
                     conn.execute("COMMIT")
                     results.append({"id": eid, "success": True, "message": f"审核{'通过' if result == 'pass' else '退回'}成功"})
 
@@ -757,10 +742,7 @@ async def batch_process(request):
                         "INSERT INTO actions (event_id, action_type, opinion, result, actor_id, actor_role, created_at) VALUES (?,?,?,?,?,?,?)",
                         (eid, "batch_archive_review", opinion, result, user["id"], user["role"], now),
                     )
-                    conn.execute(
-                        "INSERT INTO audit_log (event_id, action, actor_id, actor_role, detail, created_at, scan_record_id, version_before, version_after) VALUES (?,?,?,?,?,?,?,?,?)",
-                        (eid, f"batch_archive_{result}", user["id"], user["role"], f"批量复核{'归档' if result == 'archive' else '退回'}：{opinion}（已消费扫码凭证#{cred['scan_record_id']}）", now, cred["scan_record_id"], cred["old_version"], cred["new_version"]),
-                    )
+                    _write_audit(conn, eid, f"batch_archive_{result}", user, f"批量复核{'归档' if result == 'archive' else '退回'}：{opinion}（批次{batch_id}，已消费扫码凭证#{cred['scan_record_id']}）", now, cred["scan_record_id"], cred["old_version"], cred["new_version"], event["status"], new_status, batch_id)
                     conn.execute("COMMIT")
                     results.append({"id": eid, "success": True, "message": f"复核{'归档' if result == 'archive' else '退回'}成功"})
                 else:
@@ -815,6 +797,148 @@ async def get_statistics(request):
         conn.close()
 
 
+async def queue_summary(request):
+    user = await require_auth(request)
+    if isinstance(user, JSONResponse):
+        return user
+    conn = get_db()
+    try:
+        role = user["role"]
+        def _events(query, params):
+            rows = conn.execute(query, params).fetchall()
+            return [row_to_dict(r) for r in rows]
+
+        base = "SELECT e.*, u.name as creator_name FROM events e LEFT JOIN users u ON e.created_by = u.id"
+
+        actionable = []
+        supplement_pending = []
+        review_pending = []
+        not_actionable = []
+
+        all_rows = _events(f"{base} ORDER BY e.updated_at DESC", ())
+
+        for ev in all_rows:
+            if ev["status"] == "archived":
+                not_actionable.append({
+                    "event_id": ev["id"],
+                    "event_code": ev["code"],
+                    "event_title": ev["title"],
+                    "reason": "事件已归档，不可处理",
+                })
+                continue
+
+            if ev["current_handler_role"] != role:
+                handler_label = ROLE_LABELS.get(ev["current_handler_role"], ev["current_handler_role"]) if ev["current_handler_role"] else "归档处理中"
+                not_actionable.append({
+                    "event_id": ev["id"],
+                    "event_code": ev["code"],
+                    "event_title": ev["title"],
+                    "reason": f"当前处理人为{handler_label}，非你的岗位",
+                })
+                continue
+
+            if role == "registrar":
+                if ev["status"] == "draft":
+                    actionable.append({
+                        "event_id": ev["id"], "event_code": ev["code"],
+                        "event_title": ev["title"], "status": ev["status"],
+                        "event_type": ev["event_type"], "version": ev["version"],
+                        "updated_at": ev["updated_at"], "creator_name": ev.get("creator_name"),
+                    })
+                elif ev["status"] == "review_rejected":
+                    supplement_pending.append({
+                        "event_id": ev["id"], "event_code": ev["code"],
+                        "event_title": ev["title"], "status": ev["status"],
+                        "event_type": ev["event_type"], "version": ev["version"],
+                        "updated_at": ev["updated_at"], "creator_name": ev.get("creator_name"),
+                    })
+                else:
+                    not_actionable.append({
+                        "event_id": ev["id"],
+                        "event_code": ev["code"],
+                        "event_title": ev["title"],
+                        "reason": f"登记员在状态「{STATUS_LABELS.get(ev['status'], ev['status'])}」下不可操作",
+                    })
+            elif role == "supervisor":
+                if ev["status"] in ("submitted", "archive_rejected"):
+                    review_pending.append({
+                        "event_id": ev["id"], "event_code": ev["code"],
+                        "event_title": ev["title"], "status": ev["status"],
+                        "event_type": ev["event_type"], "version": ev["version"],
+                        "updated_at": ev["updated_at"], "creator_name": ev.get("creator_name"),
+                    })
+                else:
+                    not_actionable.append({
+                        "event_id": ev["id"],
+                        "event_code": ev["code"],
+                        "event_title": ev["title"],
+                        "reason": f"审核主管在状态「{STATUS_LABELS.get(ev['status'], ev['status'])}」下不可操作",
+                    })
+            elif role == "reviewer":
+                if ev["status"] == "review_passed":
+                    actionable.append({
+                        "event_id": ev["id"], "event_code": ev["code"],
+                        "event_title": ev["title"], "status": ev["status"],
+                        "event_type": ev["event_type"], "version": ev["version"],
+                        "updated_at": ev["updated_at"], "creator_name": ev.get("creator_name"),
+                    })
+                else:
+                    not_actionable.append({
+                        "event_id": ev["id"],
+                        "event_code": ev["code"],
+                        "event_title": ev["title"],
+                        "reason": f"复核负责人在状态「{STATUS_LABELS.get(ev['status'], ev['status'])}」下不可操作",
+                    })
+            else:
+                not_actionable.append({
+                    "event_id": ev["id"],
+                    "event_code": ev["code"],
+                    "event_title": ev["title"],
+                    "reason": f"未知岗位 {role}",
+                })
+
+        return _json({
+            "role": role,
+            "role_label": ROLE_LABELS.get(role, role),
+            "actionable": actionable,
+            "actionable_count": len(actionable),
+            "supplement_pending": supplement_pending,
+            "supplement_pending_count": len(supplement_pending),
+            "review_pending": review_pending,
+            "review_pending_count": len(review_pending),
+            "not_actionable": not_actionable,
+            "not_actionable_count": len(not_actionable),
+            "total": len(all_rows),
+        })
+    finally:
+        conn.close()
+
+
+async def log_filter_change(request):
+    user = await require_auth(request)
+    if isinstance(user, JSONResponse):
+        return user
+    body = await _body(request)
+    role = body.get("filter_role", "") or ""
+    status = body.get("filter_status", "") or ""
+    event_type = body.get("filter_event_type", "") or ""
+    now = datetime.now().isoformat()
+    detail_parts = []
+    if role: detail_parts.append(f"岗位={ROLE_LABELS.get(role, role)}")
+    if status: detail_parts.append(f"状态={STATUS_LABELS.get(status, status)}")
+    if event_type: detail_parts.append(f"类型={EVENT_TYPE_LABELS.get(event_type, event_type)}")
+    detail = "；".join(detail_parts) if detail_parts else "清除所有筛选"
+    conn = get_db()
+    try:
+        conn.execute(
+            "INSERT INTO audit_log (event_id, action, actor_id, actor_role, actor_name, detail, created_at, filter_role, filter_status, filter_event_type) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (None, "filter_change", user["id"], user["role"], user.get("name", ""), f"筛选变更：{detail}", now, role or None, status or None, event_type or None),
+        )
+        return _json({"ok": True})
+    finally:
+        conn.close()
+
+
 async def get_audit_log(request):
     user = await require_auth(request)
     if isinstance(user, JSONResponse):
@@ -859,7 +983,9 @@ routes = [
     Route("/api/events/{id:int}/archive-review", archive_review_event, methods=["POST"]),
     Route("/api/scan", scan_code, methods=["POST"]),
     Route("/api/statistics", get_statistics, methods=["GET"]),
+    Route("/api/queue-summary", queue_summary, methods=["GET"]),
     Route("/api/audit-log", get_audit_log, methods=["GET"]),
+    Route("/api/audit-log/filter-change", log_filter_change, methods=["POST"]),
     Route("/api/config", get_config, methods=["GET"]),
 ]
 

@@ -1,4 +1,4 @@
-import type { User, Event, Statistics, AuditLog, AppConfig } from './types';
+import type { User, Event, Statistics, AuditLog, AppConfig, QueueSummary, EventFilters, ScanCredential } from './types';
 
 const DEFAULT_API_URL = 'http://localhost:8004';
 const API_BASE = (import.meta.env.VITE_API_URL || process.env.API_URL || DEFAULT_API_URL) + '/api';
@@ -29,16 +29,27 @@ function clearStoredUser() {
 }
 
 const SCAN_KEY_PREFIX = 'scan_credential_';
+const FILTER_KEY = 'event_filters';
 
-export interface ScanCredential {
-  scan_record_id: number;
-  scan_token: string;
-  event_id: number;
-  scanner_id: number;
-  scanner_role: string;
-  scanned_at: string;
-  event_code: string;
-  event_version: number;
+function getStoredFilters(): EventFilters {
+  try {
+    const raw = localStorage.getItem(FILTER_KEY);
+    return raw ? JSON.parse(raw) : { role: '', status: '', event_type: '' };
+  } catch (e) {
+    return { role: '', status: '', event_type: '' };
+  }
+}
+
+function setStoredFilters(filters: EventFilters) {
+  try {
+    localStorage.setItem(FILTER_KEY, JSON.stringify(filters));
+  } catch (e) {}
+}
+
+function clearStoredFilters() {
+  try {
+    localStorage.removeItem(FILTER_KEY);
+  } catch (e) {}
 }
 
 function saveScanCredential(eventId: number, cred: ScanCredential) {
@@ -214,6 +225,10 @@ async function getStatistics() {
   return request<Statistics>('/statistics');
 }
 
+async function getQueueSummary() {
+  return request<QueueSummary>('/queue-summary');
+}
+
 async function getAuditLog(eventId?: number) {
   const qs = eventId ? `?event_id=${eventId}` : '';
   return request<{ logs: AuditLog[] }>(`/audit-log${qs}`);
@@ -223,11 +238,21 @@ async function getConfig() {
   return request<AppConfig>('/config');
 }
 
+async function logFilterChange(filters: EventFilters) {
+  return request<{ ok: boolean }>('/audit-log/filter-change', {
+    method: 'POST',
+    body: JSON.stringify(filters),
+  });
+}
+
 export const api = {
   login,
   logout,
   getMe,
   getStoredUser,
+  getStoredFilters,
+  setStoredFilters,
+  clearStoredFilters,
   listEvents,
   getEvent,
   createEvent,
@@ -238,12 +263,12 @@ export const api = {
   scanCode,
   batchProcess,
   getStatistics,
+  getQueueSummary,
   getAuditLog,
   getConfig,
+  logFilterChange,
   saveScanCredential,
   getScanCredential,
   clearScanCredential,
   clearAllScanCredentials,
 };
-
-export type { ScanCredential };

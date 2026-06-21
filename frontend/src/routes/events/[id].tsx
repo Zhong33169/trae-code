@@ -30,17 +30,19 @@ export default function EventDetailPage() {
     setLoading(true);
     setError('');
     try {
-      const data = await api.getEvent(parseInt(params.id));
+      if (!params.id) return;
+      const eid = parseInt(params.id);
+      const data = await api.getEvent(eid);
       setEvent(data.event);
-      const cred = api.getScanCredential(parseInt(params.id));
+      const cred = api.getScanCredential(eid);
       if (cred) {
-        const fresh = await api.getEvent(parseInt(params.id));
+        const fresh = await api.getEvent(eid);
         if (fresh.event.scan_token === cred.scan_token && fresh.event.version === cred.event_version) {
           setCredential(cred);
           setScanVerified(true);
           setScanResult({ success: true, message: '已核验（凭证有效）', scan_record_id: cred.scan_record_id });
         } else {
-          api.clearScanCredential(parseInt(params.id));
+          api.clearScanCredential(eid);
         }
       }
     } catch (err: any) {

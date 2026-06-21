@@ -51,6 +51,20 @@ def _migrate_audit_log(conn):
         conn.execute("ALTER TABLE audit_log ADD COLUMN version_before INTEGER")
     if "version_after" not in cols:
         conn.execute("ALTER TABLE audit_log ADD COLUMN version_after INTEGER")
+    if "before_status" not in cols:
+        conn.execute("ALTER TABLE audit_log ADD COLUMN before_status TEXT")
+    if "after_status" not in cols:
+        conn.execute("ALTER TABLE audit_log ADD COLUMN after_status TEXT")
+    if "batch_id" not in cols:
+        conn.execute("ALTER TABLE audit_log ADD COLUMN batch_id TEXT")
+    if "filter_role" not in cols:
+        conn.execute("ALTER TABLE audit_log ADD COLUMN filter_role TEXT")
+    if "filter_status" not in cols:
+        conn.execute("ALTER TABLE audit_log ADD COLUMN filter_status TEXT")
+    if "filter_event_type" not in cols:
+        conn.execute("ALTER TABLE audit_log ADD COLUMN filter_event_type TEXT")
+    if "actor_name" not in cols:
+        conn.execute("ALTER TABLE audit_log ADD COLUMN actor_name TEXT")
 
 
 def init_db():

@@ -9,7 +9,7 @@ export default function BatchPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [events, setEvents] = createSignal<Event[]>([]);
-  const [selectedIds, setSelectedIds] = createSignal<Set<number>>(new Set());
+  const [selectedIds, setSelectedIds] = createSignal<Set<number>>(new Set<number>());
   const [credentials, setCredentials] = createSignal<Record<number, ScanCredential>>({});
   const [scanCode, setScanCode] = createSignal('');
   const [scanTargetId, setScanTargetId] = createSignal<number | null>(null);
@@ -42,6 +42,15 @@ export default function BatchPage() {
         }
       });
       setCredentials(restored);
+      try {
+        const raw = sessionStorage.getItem('batch_selected_ids');
+        if (raw) {
+          const ids: number[] = JSON.parse(raw);
+          const validIds = ids.filter((id) => actionable.some((e) => e.id === id));
+          if (validIds.length > 0) setSelectedIds(new Set(validIds));
+          sessionStorage.removeItem('batch_selected_ids');
+        }
+      } catch (e) {}
     } catch (err: any) {
       setError(err?.error || '加载失败');
     } finally {
@@ -73,7 +82,7 @@ export default function BatchPage() {
 
   const toggleAll = () => {
     if (selectedIds().size === events().length) {
-      setSelectedIds(new Set());
+      setSelectedIds(new Set<number>());
     } else {
       setSelectedIds(new Set(events().map((e) => e.id)));
     }
@@ -215,7 +224,7 @@ export default function BatchPage() {
       const next = { ...creds };
       ids.forEach((id) => delete next[id]);
       setCredentials(next);
-      setSelectedIds(new Set());
+      setSelectedIds(new Set<number>());
       setOpinion('');
       setResult('');
       loadEvents();

@@ -61,6 +61,12 @@ export interface AuditLog {
   scan_record_id?: number | null;
   version_before?: number | null;
   version_after?: number | null;
+  before_status?: string | null;
+  after_status?: string | null;
+  batch_id?: string | null;
+  filter_role?: string | null;
+  filter_status?: string | null;
+  filter_event_type?: string | null;
 }
 
 export interface ScanCredential {
@@ -96,6 +102,33 @@ export interface AppConfig {
   severities: ConfigItem[];
   status_handler: Record<string, string | null>;
   valid_transitions: Record<string, string[]>;
+}
+
+export interface NotActionableItem {
+  event_id: number;
+  event_code: string;
+  event_title: string;
+  reason: string;
+}
+
+export interface EventFilters {
+  role: string;
+  status: string;
+  event_type: string;
+}
+
+export interface QueueSummary {
+  role: string;
+  role_label: string;
+  actionable: Event[];
+  actionable_count: number;
+  supplement_pending: Event[];
+  supplement_pending_count: number;
+  review_pending: Event[];
+  review_pending_count: number;
+  not_actionable: NotActionableItem[];
+  not_actionable_count: number;
+  total: number;
 }
 
 export const ROLE_LABELS: Record<string, string> = {
