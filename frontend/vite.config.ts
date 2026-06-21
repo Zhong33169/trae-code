@@ -1,15 +1,14 @@
 import { defineConfig } from 'vite'
-import { TanStackRouterVite } from '@tanstack/router-plugin/vite'
-import react from '@vitejs/plugin-react'
+import { tanstackStart } from '@tanstack/react-start/plugin/vite'
+import { nitro } from 'nitro/vite'
 import path from 'path'
 
 export default defineConfig({
   plugins: [
-    TanStackRouterVite({
-      routesDirectory: 'app/routes',
-      generatedRouteTree: 'app/routeTree.gen.ts',
+    tanstackStart({
+      srcDirectory: 'app',
     }),
-    react(),
+    nitro(),
   ],
   resolve: {
     alias: {
@@ -24,5 +23,9 @@ export default defineConfig({
         changeOrigin: true,
       },
     },
+  },
+  nitro: {
+    preset: 'node-server',
+    ssr: false,
   },
 })

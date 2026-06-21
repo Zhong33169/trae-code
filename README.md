@@ -51,10 +51,12 @@
 
 | 层 | 技术 | 端口 |
 |----|------|------|
-| 前端 | TanStack Router 文件路由 (React 18 + TS + Vite 6 + Tailwind + React Query) | **3003** |
+| 前端 | **TanStack Start**（React 18 + TS + Vite 7 + TanStack Router 文件路由 + Nitro SSR + React Query + Tailwind） | **3003** |
 | 后端 | Rust Rocket 0.5 + r2d2 连接池 | **8003** |
 | 数据库 | SQLite 本地文件 `backend/scf_platform.db` | — |
 | 认证 | JWT (jsonwebtoken) + bcrypt 密码哈希 | — |
+
+> 💡 **关于 Start 架构**：前端使用真实的 TanStack Start 全栈元框架，完整支持 SSR + 文件路由 + 客户端水合。`@tanstack/router-plugin`（SPA-only 插件）、`index.html` 直挂、`entry-client.tsx` 等 SPA 残留已经全部清理，统一使用 Start 的 `client.tsx` + SSR 启动链路。
 
 ---
 
@@ -62,7 +64,7 @@
 
 ### 前置要求
 - Rust 1.75+（建议 1.78+）
-- Node.js 18+（建议 20 LTS）
+- **Node.js >= 22.12**（TanStack Start 要求；当前验证：v22.22.3 ✅）
 - Python 3（可选，仅用于跑 `test_api.sh`）
 
 ### 1️⃣ 启动后端（Rust）
@@ -89,19 +91,21 @@ cd frontend
 # 安装依赖（首次）
 npm install
 
-# 启动开发服务器（热更新）
+# 启动开发服务器（Nitro + SSR + 热更新）
 npm run dev
 ```
 
 启动成功：
 ```
-VITE v6.x  ready in xxx ms
+  VITE v7.x  ready in xxx ms
+
   ➜  Local:   http://localhost:3003/
 ```
 
 ### 3️⃣ 浏览器访问
 
 打开 **http://localhost:3003** 即可进入登录页。
+路由入口由 TanStack Start 自动生成，包括：登录、看板、确权列表/详情、核销表单、日志等。
 
 ---
 
@@ -112,6 +116,8 @@ VITE v6.x  ready in xxx ms
 | `registrar01` | 应收确权登记员 | 张登记 | 创建确权单 → 提交 → 退回补正 → 重提交 |
 | `auditor01` | 应收确权审核主管 | 李审核 | 审核通过 / 退回（需说明原因） |
 | `reviewer01` | 平台复核负责人 | 王复核 | 复核 → 归档 / 退回；登记回款核销 |
+
+> 💡 **SQLite 样例入口说明**：后端启动时 `db.rs` 中的 `init_db()` 自动建表并灌入：3 个角色、3 个演示账号、6 条应收账款、4 条确权单（覆盖草稿/待审核/待复核/已归档 4 种状态）、1 条已核销记录、若干操作日志。删除 `backend/scf_platform.db` 并重启后端即可重置所有样例数据。
 
 ---
 
@@ -175,7 +181,7 @@ VITE v6.x  ready in xxx ms
 ### 回款核销
 | 方法 | 路径 | 权限 | 校验 |
 |------|------|------|------|
-| GET | `/verifications?page=&page_size=&ar_id=` | 登录 |
+| GET | `/verifications?page=&page_size=&ar_id=&order_id=` | 登录 |
 | POST | `/verifications` | reviewer | 确权单=已归档 且 累计≤确权金额 |
 
 ### 统计与日志
@@ -212,39 +218,38 @@ trae-code-3/
 │   ├── src/
 │   │   ├── main.rs                   # 启动入口、挂载路由
 │   │   ├── db.rs                     # 连接池、建库、初始化演示数据
-│   │   ├── models.rs                 # 实体、DTO、状态/权限映射
+│   │   ├── models.rs                 # 实体、DTO、状态/权限映射（含 status_name 字段）
 │   │   ├── auth.rs                   # JWT 签发/校验 + 请求守卫
 │   │   └── handlers.rs               # 业务处理（事务/校验/日志/联动更新）
 │   └── test_api.sh                   # 后端接口自检脚本
 │
-├── frontend/                         # TanStack Router 前端
-│   ├── vite.config.ts                # TanStack Router 插件 + 端口 3003 + /api 代理
-│   ├── package.json
+├── frontend/                         # TanStack Start 前端（SSR + 文件路由）
+│   ├── vite.config.ts                # Start 插件 + Nitro + 端口 3003 + /api 代理
+│   ├── package.json                  # @tanstack/react-start + nitro + vite 7
 │   ├── tsconfig.json
 │   ├── tailwind.config.js
-│   ├── index.html                    # SPA 入口
 │   └── app/
-│       ├── entry-client.tsx          # React 挂载入口
+│       ├── client.tsx                # TanStack Start 客户端水合入口（hydrateStart）
+│       ├── router.tsx                # createRouter 配置（路由树 + React Query Provider）
 │       ├── index.css                 # Tailwind 样式
-│       ├── router.tsx                # TanStack Router 配置 + React Query
 │       ├── env.d.ts                  # 类型声明
-│       ├── routeTree.gen.ts          # 自动生成的路由树
+│       ├── routeTree.gen.ts          # 自动生成的路由树（Start 文件路由产物）
 │       ├── api/client.ts             # fetch 封装（token/401跳转/统一错误）
 │       ├── store/auth.ts             # Zustand 登录态
 │       ├── lib/constants.ts          # 状态/动作/角色常量
 │       ├── components/
 │       │   ├── StatusBadge.tsx       # 状态标签
 │       │   └── HandoverModal.tsx     # 交接信息弹窗（必填校验）
-│       └── routes/
-│           ├── __root.tsx            # 根路由
+│       └── routes/                   # Start 文件路由（与 URL 一一对应）
+│           ├── __root.tsx            # 根路由：HTML 文档结构 + createRootRouteWithContext
 │           ├── index.tsx             # / → 重定向到 /dashboard
-│           ├── login.tsx             # /login（公开）
+│           ├── login.tsx             # /login（公开路由，SSR 预渲染）
 │           ├── _auth.tsx             # 受保护布局（路由守卫+侧边栏）
 │           ├── _auth.dashboard.tsx           # 统计看板
 │           ├── _auth.accounts-receivable.index.tsx  # AR 列表
 │           ├── _auth.accounts-receivable.$id.tsx    # AR 详情
 │           ├── _auth.confirmation-orders.index.tsx   # 确权单列表
-│           ├── _auth.confirmation-orders.$id.tsx     # 确权单详情（含核销）
+│           ├── _auth.confirmation-orders.$id.tsx     # 确权单详情（含核销表单）
 │           ├── _auth.payment-verifications.index.tsx # 核销列表
 │           └── _auth.operation-logs.index.tsx        # 操作日志
 │
@@ -272,6 +277,12 @@ bash test_api.sh
 3. **SQLite**：高并发场景建议换 PostgreSQL，切换只需改 `Cargo.toml` 与连接串
 4. **密码哈希轮次**：bcrypt cost 已用 12，生产可升至 14
 5. **HTTPS**：生产环境务必启用
+6. **TanStack Start 构建**：
+   ```bash
+   cd frontend
+   npm run build        # 产出 .output/（Nitro SSR 部署产物）
+   npm run start        # 启动 Node SSR 服务器
+   ```
 
 ---
 

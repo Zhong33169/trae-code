@@ -77,19 +77,17 @@ const AuthAccountsReceivableIdRoute =
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '': typeof AuthRouteWithChildren
   '/login': typeof LoginRoute
   '/dashboard': typeof AuthDashboardRoute
   '/accounts-receivable/$id': typeof AuthAccountsReceivableIdRoute
   '/confirmation-orders/$id': typeof AuthConfirmationOrdersIdRoute
-  '/accounts-receivable': typeof AuthAccountsReceivableIndexRoute
-  '/confirmation-orders': typeof AuthConfirmationOrdersIndexRoute
-  '/operation-logs': typeof AuthOperationLogsIndexRoute
-  '/payment-verifications': typeof AuthPaymentVerificationsIndexRoute
+  '/accounts-receivable/': typeof AuthAccountsReceivableIndexRoute
+  '/confirmation-orders/': typeof AuthConfirmationOrdersIndexRoute
+  '/operation-logs/': typeof AuthOperationLogsIndexRoute
+  '/payment-verifications/': typeof AuthPaymentVerificationsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '': typeof AuthRouteWithChildren
   '/login': typeof LoginRoute
   '/dashboard': typeof AuthDashboardRoute
   '/accounts-receivable/$id': typeof AuthAccountsReceivableIdRoute
@@ -116,19 +114,17 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
-    | ''
     | '/login'
     | '/dashboard'
     | '/accounts-receivable/$id'
     | '/confirmation-orders/$id'
-    | '/accounts-receivable'
-    | '/confirmation-orders'
-    | '/operation-logs'
-    | '/payment-verifications'
+    | '/accounts-receivable/'
+    | '/confirmation-orders/'
+    | '/operation-logs/'
+    | '/payment-verifications/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
-    | ''
     | '/login'
     | '/dashboard'
     | '/accounts-receivable/$id'
@@ -159,25 +155,25 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/_auth': {
-      id: '/_auth'
-      path: ''
-      fullPath: ''
-      preLoaderRoute: typeof AuthRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/login': {
       id: '/login'
       path: '/login'
       fullPath: '/login'
       preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/_auth': {
+      id: '/_auth'
+      path: ''
+      fullPath: '/'
+      preLoaderRoute: typeof AuthRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_auth/dashboard': {
@@ -187,11 +183,32 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthDashboardRouteImport
       parentRoute: typeof AuthRoute
     }
-    '/_auth/accounts-receivable/$id': {
-      id: '/_auth/accounts-receivable/$id'
-      path: '/accounts-receivable/$id'
-      fullPath: '/accounts-receivable/$id'
-      preLoaderRoute: typeof AuthAccountsReceivableIdRouteImport
+    '/_auth/payment-verifications/': {
+      id: '/_auth/payment-verifications/'
+      path: '/payment-verifications'
+      fullPath: '/payment-verifications/'
+      preLoaderRoute: typeof AuthPaymentVerificationsIndexRouteImport
+      parentRoute: typeof AuthRoute
+    }
+    '/_auth/operation-logs/': {
+      id: '/_auth/operation-logs/'
+      path: '/operation-logs'
+      fullPath: '/operation-logs/'
+      preLoaderRoute: typeof AuthOperationLogsIndexRouteImport
+      parentRoute: typeof AuthRoute
+    }
+    '/_auth/confirmation-orders/': {
+      id: '/_auth/confirmation-orders/'
+      path: '/confirmation-orders'
+      fullPath: '/confirmation-orders/'
+      preLoaderRoute: typeof AuthConfirmationOrdersIndexRouteImport
+      parentRoute: typeof AuthRoute
+    }
+    '/_auth/accounts-receivable/': {
+      id: '/_auth/accounts-receivable/'
+      path: '/accounts-receivable'
+      fullPath: '/accounts-receivable/'
+      preLoaderRoute: typeof AuthAccountsReceivableIndexRouteImport
       parentRoute: typeof AuthRoute
     }
     '/_auth/confirmation-orders/$id': {
@@ -201,32 +218,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthConfirmationOrdersIdRouteImport
       parentRoute: typeof AuthRoute
     }
-    '/_auth/accounts-receivable/': {
-      id: '/_auth/accounts-receivable/'
-      path: '/accounts-receivable'
-      fullPath: '/accounts-receivable'
-      preLoaderRoute: typeof AuthAccountsReceivableIndexRouteImport
-      parentRoute: typeof AuthRoute
-    }
-    '/_auth/confirmation-orders/': {
-      id: '/_auth/confirmation-orders/'
-      path: '/confirmation-orders'
-      fullPath: '/confirmation-orders'
-      preLoaderRoute: typeof AuthConfirmationOrdersIndexRouteImport
-      parentRoute: typeof AuthRoute
-    }
-    '/_auth/operation-logs/': {
-      id: '/_auth/operation-logs/'
-      path: '/operation-logs'
-      fullPath: '/operation-logs'
-      preLoaderRoute: typeof AuthOperationLogsIndexRouteImport
-      parentRoute: typeof AuthRoute
-    }
-    '/_auth/payment-verifications/': {
-      id: '/_auth/payment-verifications/'
-      path: '/payment-verifications'
-      fullPath: '/payment-verifications'
-      preLoaderRoute: typeof AuthPaymentVerificationsIndexRouteImport
+    '/_auth/accounts-receivable/$id': {
+      id: '/_auth/accounts-receivable/$id'
+      path: '/accounts-receivable/$id'
+      fullPath: '/accounts-receivable/$id'
+      preLoaderRoute: typeof AuthAccountsReceivableIdRouteImport
       parentRoute: typeof AuthRoute
     }
   }
@@ -262,3 +258,12 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { createStart } from '@tanstack/react-start'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+  }
+}

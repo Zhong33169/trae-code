@@ -4,20 +4,20 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "vite --port 3003",
+    "dev": "vite dev --port 3003",
     "build": "tsc && vite build",
-    "preview": "vite preview --port 3003"
+    "start": "node .output/server/index.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.101.0",
-    "@tanstack/react-router": "^1.121.0",
-    "@tanstack/router-generator": "^1.121.0",
+    "@tanstack/react-router": "latest",
+    "@tanstack/react-start": "latest",
+    "nitro": "latest",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "zustand": "^4.5.4"
   },
   "devDependencies": {
-    "@tanstack/router-plugin": "^1.121.0",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.7.0",
@@ -25,6 +25,6 @@
     "postcss": "^8.4.39",
     "tailwindcss": "^3.4.4",
     "typescript": "^5.5.3",
-    "vite": "^6.4.3"
+    "vite": "latest"
   }
 }
