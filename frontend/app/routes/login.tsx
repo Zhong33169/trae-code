@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { createFileRoute, redirect } from '@tanstack/react-router';
+import { createFileRoute } from '@tanstack/react-router';
 import { useAuthStore } from '~/store/auth';
 
 export const Route = createFileRoute('/login')({

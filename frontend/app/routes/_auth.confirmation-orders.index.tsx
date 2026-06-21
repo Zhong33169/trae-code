@@ -8,14 +8,18 @@ import {
   CONFIRMATION_ORDER_STATUS_LABELS,
   type ConfirmationOrderStatus,
   type ActionType,
-  ACTION_LABELS,
 } from '~/lib/constants';
+
+type ConfirmationOrdersSearch = {
+  status: string;
+  keyword: string;
+};
 
 export const Route = createFileRoute('/_auth/confirmation-orders/')({
   component: ConfirmationOrdersList,
-  validateSearch: (search: Record<string, unknown>) => ({
-    status: (search.status as string) || '',
-    keyword: (search.keyword as string) || '',
+  validateSearch: (search: Record<string, unknown>): ConfirmationOrdersSearch => ({
+    status: typeof search.status === 'string' ? search.status : '',
+    keyword: typeof search.keyword === 'string' ? search.keyword : '',
   }),
 });
 
@@ -44,8 +48,8 @@ function ConfirmationOrdersList() {
   const search = Route.useSearch();
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(10);
-  const [keyword, setKeyword] = useState('');
-  const [searchTerm, setSearchTerm] = useState('');
+  const [keyword, setKeyword] = useState(search.keyword || '');
+  const [searchTerm, setSearchTerm] = useState(search.keyword || '');
   const [statusFilter, setStatusFilter] = useState<string>(search.status || '');
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
@@ -54,11 +58,14 @@ function ConfirmationOrdersList() {
   const queryClient = useQueryClient();
 
   useEffect(() => {
-    const statusFromUrl = search.status;
-    if (statusFromUrl) {
-      setStatusFilter(statusFromUrl);
+    if (search.status) {
+      setStatusFilter(search.status);
     }
-  }, [search]);
+    if (search.keyword) {
+      setKeyword(search.keyword);
+      setSearchTerm(search.keyword);
+    }
+  }, [search.status, search.keyword]);
 
   const listQuery = useQuery<PaginatedData<ConfirmationOrder>>({
     queryKey: ['co-list', page, perPage, searchTerm, statusFilter],
@@ -101,6 +108,9 @@ function ConfirmationOrdersList() {
     e.preventDefault();
     setSearchTerm(keyword);
     setPage(1);
+    navigate({
+      search: (prev) => ({ ...prev, keyword: keyword, status: statusFilter }),
+    });
   };
 
   const toggleSelectAll = () => {
@@ -168,12 +178,9 @@ function ConfirmationOrdersList() {
             onChange={(e) => {
               setStatusFilter(e.target.value);
               setPage(1);
-              if (e.target.value) {
-                navigate({ search: { ...search, status: e.target.value } });
-              } else {
-                const { status, ...rest } = search;
-                navigate({ search: rest as Record<string, unknown> });
-              }
+              navigate({
+                search: (prev) => ({ ...prev, status: e.target.value }),
+              });
             }}
             className="px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
@@ -203,8 +210,7 @@ function ConfirmationOrdersList() {
               setSearchTerm('');
               setStatusFilter('');
               setPage(1);
-              const { status, ...rest } = search;
-              navigate({ search: rest as Record<string, unknown> });
+              navigate({ search: { status: '', keyword: '' } });
               listQuery.refetch();
             }}
             className="px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 transition-colors"

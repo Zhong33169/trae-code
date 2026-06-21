@@ -56,7 +56,12 @@
 | 数据库 | SQLite 本地文件 `backend/scf_platform.db` | — |
 | 认证 | JWT (jsonwebtoken) + bcrypt 密码哈希 | — |
 
-> 💡 **关于 Start 架构**：前端使用真实的 TanStack Start 全栈元框架，完整支持 SSR + 文件路由 + 客户端水合。`@tanstack/router-plugin`（SPA-only 插件）、`index.html` 直挂、`entry-client.tsx` 等 SPA 残留已经全部清理，统一使用 Start 的 `client.tsx` + SSR 启动链路。
+> 💡 **关于 Start 架构 & SSR 配置**：前端使用真实的 TanStack Start 全栈元框架，完整支持 SSR + 文件路由 + 客户端水合。`@tanstack/router-plugin`（SPA-only 插件）、`index.html` 直挂、`entry-client.tsx` 等 SPA 残留已经全部清理，统一使用 Start 的 `client.tsx` + SSR 启动链路。
+>
+> **SSR 模式切换（`vite.config.ts` 中 `nitro.ssr` 配置）**：
+> - `ssr: false`（**当前默认**）：SPA 模式 + Nitro 构建，纯客户端水合，保留 Start 完整工程化能力
+> - `ssr: true`：开启服务端渲染，HTML 在 Nitro Node 服务器首屏直出，后续路由走客户端导航
+> - 无论哪种模式，前端开发服务器均运行在 **3003 端口**，`/api` 自动代理到 8003 后端
 
 ---
 
@@ -117,7 +122,32 @@ npm run dev
 | `auditor01` | 应收确权审核主管 | 李审核 | 审核通过 / 退回（需说明原因） |
 | `reviewer01` | 平台复核负责人 | 王复核 | 复核 → 归档 / 退回；登记回款核销 |
 
-> 💡 **SQLite 样例入口说明**：后端启动时 `db.rs` 中的 `init_db()` 自动建表并灌入：3 个角色、3 个演示账号、6 条应收账款、4 条确权单（覆盖草稿/待审核/待复核/已归档 4 种状态）、1 条已核销记录、若干操作日志。删除 `backend/scf_platform.db` 并重启后端即可重置所有样例数据。
+> 💡 **SQLite 样例入口说明**：后端启动时 `backend/src/db.rs` 中的 `init_db()` → `seed_data()` 自动建表并灌入以下样例数据（仅在空表首次执行）：
+>
+> **角色 3 条**：`registrar`（应收确权登记员）、`auditor`（审核主管）、`reviewer`（复核负责人）
+>
+> **用户 3 条**（密码均为 bcrypt 哈希 `123456`）：
+> | username | 姓名 | 角色 | 用途 |
+> |----------|------|------|------|
+> | `registrar01` | 张登记 | 登记员 | 发起 & 补正确权单 |
+> | `auditor01` | 李审核 | 审核主管 | 审核通过 / 退回 |
+> | `reviewer01` | 王复核 | 复核负责人 | 复核 / 归档 / 核销 |
+>
+> **应收账款 5 条**（AR2025060001 ~ 0005，覆盖待确权/已确权 2 种状态）：2 条 `confirmed`（AR0001 上海贸易 50 万、AR0004 南京物流 35 万） + 3 条 `pending`（AR0002 北京科技 120 万、AR0003 杭州电商 80 万、AR0005 成都食品 92 万）
+>
+> **应收确权单 4 条**（覆盖 4 种核心状态，验证权限矩阵 & 交接信息完整链路）：
+> | 编号 | AR | 状态 | 当前处理人 | 交接信息 | 测试用途 |
+> |------|----|------|----------|----------|----------|
+> | CO2025060001 | AR0001 50 万 | `archived` 已归档 | reviewer | ✅ | 已核销、只读权限验证 |
+> | CO2025060002 | AR0002 120 万 | `pending_audit` 待审核 | auditor | ✅ 中班交接 | 审核岗通过/退回 |
+> | CO2025060003 | AR0004 35 万 | `pending_review` 待复核 | reviewer | ✅ 晚班交接 | 复核岗归档/退回；后续核销测试基准 |
+> | CO2025060004 | AR0003 80 万 | `returned` 已退回 | registrar | 退回原因已写 | 补正后重新提交 |
+>
+> **回款核销 1 条**：PV2025060001（CO0001 已全额核销 50 万），验证金额联动 & 超额拦截基准
+>
+> **操作日志 4 条**：CO0001 完整链路（创建 → 审核 → 归档），供审计追踪
+>
+> 删除 `backend/scf_platform.db` 并重启后端即可重置所有样例数据。
 
 ---
 

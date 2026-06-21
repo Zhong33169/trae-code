@@ -365,7 +365,7 @@ function ConfirmationOrdersDetail() {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <button
-            onClick={() => navigate({ to: '/confirmation-orders' })}
+            onClick={() => navigate({ to: '/confirmation-orders', search: { status: '', keyword: '' } })}
             className="p-2 rounded-md hover:bg-gray-100 text-gray-600"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
