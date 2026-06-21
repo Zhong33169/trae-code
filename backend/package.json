@@ -1,0 +1,16 @@
+{
+  "name": "contract-service-backend",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch src/index.js",
+    "start": "node src/index.js",
+    "init-db": "node src/db/init.js",
+    "seed": "node src/db/seed.js"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.13.0",
+    "better-sqlite3": "^11.3.0",
+    "hono": "^4.6.0"
+  }
+}

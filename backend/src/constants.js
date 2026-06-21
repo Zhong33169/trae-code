@@ -1,0 +1,101 @@
+export const ROLES = {
+  REGISTER: 'REGISTER',
+  AUDITOR: 'AUDITOR',
+  REVIEWER: 'REVIEWER'
+};
+
+export const ROLE_NAMES = {
+  [ROLES.REGISTER]: '签约服务登记员',
+  [ROLES.AUDITOR]: '签约服务审核主管',
+  [ROLES.REVIEWER]: '社区卫生服务中心复核负责人'
+};
+
+export const STAGES = {
+  SIGN: 'SIGN',
+  PLAN: 'PLAN',
+  PERFORM: 'PERFORM'
+};
+
+export const STAGE_NAMES = {
+  [STAGES.SIGN]: '家庭医生签约',
+  [STAGES.PLAN]: '服务计划',
+  [STAGES.PERFORM]: '履约确认'
+};
+
+export const STATUSES = {
+  DRAFT: 'DRAFT',
+  PENDING: 'PENDING',
+  APPROVED: 'APPROVED',
+  REJECTED: 'REJECTED',
+  NEEDS_CORRECTION: 'NEEDS_CORRECTION',
+  OVERDUE: 'OVERDUE',
+  ARCHIVED: 'ARCHIVED',
+  STATUS_CONFLICT: 'STATUS_CONFLICT'
+};
+
+export const STATUS_NAMES = {
+  [STATUSES.DRAFT]: '草稿',
+  [STATUSES.PENDING]: '待办理',
+  [STATUSES.APPROVED]: '审核通过',
+  [STATUSES.REJECTED]: '不予通过',
+  [STATUSES.NEEDS_CORRECTION]: '退回补正',
+  [STATUSES.OVERDUE]: '逾期',
+  [STATUSES.ARCHIVED]: '已归档',
+  [STATUSES.STATUS_CONFLICT]: '状态冲突'
+};
+
+export const RISK_LEVELS = {
+  HIGH: 'HIGH',
+  MEDIUM: 'MEDIUM',
+  LOW: 'LOW'
+};
+
+export const RISK_NAMES = {
+  [RISK_LEVELS.HIGH]: '高风险',
+  [RISK_LEVELS.MEDIUM]: '中风险',
+  [RISK_LEVELS.LOW]: '低风险'
+};
+
+export const RISK_COLORS = {
+  [RISK_LEVELS.HIGH]: '#dc2626',
+  [RISK_LEVELS.MEDIUM]: '#f59e0b',
+  [RISK_LEVELS.LOW]: '#16a34a'
+};
+
+export const RISK_PRIORITY = {
+  [RISK_LEVELS.HIGH]: 100,
+  [RISK_LEVELS.MEDIUM]: 50,
+  [RISK_LEVELS.LOW]: 10
+};
+
+export const ACTIONS = {
+  CREATE: 'CREATE',
+  SUBMIT: 'SUBMIT',
+  APPROVE: 'APPROVE',
+  REJECT: 'REJECT',
+  RETURN_CORRECTION: 'RETURN_CORRECTION',
+  CORRECT: 'CORRECT',
+  ARCHIVE: 'ARCHIVE',
+  ADD_EVIDENCE: 'ADD_EVIDENCE',
+  REMOVE_EVIDENCE: 'REMOVE_EVIDENCE',
+  MARK_OVERDUE: 'MARK_OVERDUE'
+};
+
+export const ACTION_NAMES = {
+  [ACTIONS.CREATE]: '创建',
+  [ACTIONS.SUBMIT]: '提交',
+  [ACTIONS.APPROVE]: '审核通过',
+  [ACTIONS.REJECT]: '不予通过',
+  [ACTIONS.RETURN_CORRECTION]: '退回补正',
+  [ACTIONS.CORRECT]: '补正提交',
+  [ACTIONS.ARCHIVE]: '归档',
+  [ACTIONS.ADD_EVIDENCE]: '添加证据',
+  [ACTIONS.REMOVE_EVIDENCE]: '移除证据',
+  [ACTIONS.MARK_OVERDUE]: '标记逾期'
+};
+
+export const REQUIRED_EVIDENCES_BY_STAGE = {
+  [STAGES.SIGN]: ['签约协议书', '身份证复印件'],
+  [STAGES.PLAN]: ['服务计划书', '健康评估报告'],
+  [STAGES.PERFORM]: ['履约记录表', '服务确认单']
+};
