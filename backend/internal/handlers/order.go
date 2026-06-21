@@ -64,6 +64,84 @@ func GetOrder(c *gin.Context) {
 	c.JSON(http.StatusOK, order)
 }
 
+func GetRequiredMaterials(c *gin.Context) {
+	serviceType := c.Query("service_type")
+	materials := models.GetRequiredMaterials(serviceType)
+	c.JSON(http.StatusOK, materials)
+}
+
+func GetAttachmentStatus(c *gin.Context) {
+	id := c.Param("id")
+
+	var order models.MemberServiceOrder
+	if err := database.DB.Preload("Attachments").First(&order, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Order not found"})
+		return
+	}
+
+	requiredMaterials := models.GetRequiredMaterials(order.ServiceType)
+	result := make([]map[string]interface{}, 0)
+
+	for _, mat := range requiredMaterials {
+		item := map[string]interface{}{
+			"type":          mat.Type,
+			"name":          mat.Name,
+			"required":      mat.Required,
+			"status":        "missing",
+			"file":          nil,
+			"reject_reason": "",
+		}
+
+		for _, att := range order.Attachments {
+			if att.MaterialType == mat.Type {
+				item["status"] = att.Status
+				item["file"] = att
+				if att.RejectReason != "" {
+					item["reject_reason"] = att.RejectReason
+				}
+				break
+			}
+		}
+
+		result = append(result, item)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"service_type": order.ServiceType,
+		"materials":    result,
+		"all_complete": checkAllRequiredComplete(order.Attachments, order.ServiceType),
+	})
+}
+
+func checkAllRequiredComplete(attachments []models.Attachment, serviceType string) bool {
+	requiredMaterials := models.GetRequiredMaterials(serviceType)
+	for _, mat := range requiredMaterials {
+		if !mat.Required {
+			continue
+		}
+		found := false
+		for _, att := range attachments {
+			if att.MaterialType == mat.Type && att.Status == "approved" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+
+func checkHasRejectedAttachment(attachments []models.Attachment) bool {
+	for _, att := range attachments {
+		if att.Status == "rejected" {
+			return true
+		}
+	}
+	return false
+}
+
 func CreateOrder(c *gin.Context) {
 	var req models.CreateOrderRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -116,148 +194,217 @@ func ProcessOrder(c *gin.Context) {
 	}
 
 	var order models.MemberServiceOrder
-	if err := database.DB.First(&order, id).Error; err != nil {
+	if err := database.DB.Preload("Attachments").First(&order, id).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Order not found"})
 		return
 	}
 
+	result := processSingleOrder(&order, req.Action, req.Remark, req.Result, req.Reason, userID, userName, userRole)
+
+	if !result.Success {
+		c.JSON(http.StatusBadRequest, gin.H{"error": result.Message})
+		return
+	}
+
+	c.JSON(http.StatusOK, order)
+}
+
+func BatchProcessOrders(c *gin.Context) {
+	userID, userName, userRole := middleware.GetCurrentUser(c)
+
+	var req models.BatchProcessRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	results := make([]models.BatchProcessResult, 0)
+	successCount := 0
+	failedCount := 0
+
+	for _, orderID := range req.OrderIDs {
+		var order models.MemberServiceOrder
+		if err := database.DB.Preload("Attachments").First(&order, orderID).Error; err != nil {
+			results = append(results, models.BatchProcessResult{
+				OrderID: orderID,
+				OrderNo: "",
+				Success: false,
+				Message: "工单不存在",
+			})
+			failedCount++
+			continue
+		}
+
+		result := processSingleOrder(&order, req.Action, req.Remark, req.Result, req.Reason, userID, userName, userRole)
+
+		batchResult := models.BatchProcessResult{
+			OrderID: order.ID,
+			OrderNo: order.OrderNo,
+			Success: result.Success,
+			Message: result.Message,
+			Status:  string(order.Status),
+		}
+		results = append(results, batchResult)
+
+		if result.Success {
+			successCount++
+		} else {
+			failedCount++
+		}
+	}
+
+	addBatchAuditLog(req.Action, userID, userName, userRole, results)
+
+	response := models.BatchProcessResponse{
+		Total:   len(req.OrderIDs),
+		Success: successCount,
+		Failed:  failedCount,
+		Results: results,
+	}
+
+	c.JSON(http.StatusOK, response)
+}
+
+type processResult struct {
+	Success bool
+	Message string
+}
+
+func processSingleOrder(order *models.MemberServiceOrder, action, remark, result, reason string, userID int64, userName, userRole string) processResult {
 	fromStatus := string(order.Status)
-	action := req.Action
 
 	switch action {
 	case "submit":
 		if userRole != "registrar" {
-			c.JSON(http.StatusForbidden, gin.H{"error": "无权限操作"})
-			return
+			return processResult{Success: false, Message: "无权限操作"}
 		}
 		if order.Status != models.StatusDraft && order.Status != models.StatusSupplement && order.Status != models.StatusReturned {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "当前状态不可提交"})
-			return
+			return processResult{Success: false, Message: "当前状态不可提交"}
 		}
 
-		var pendingAttachments int64
-		database.DB.Model(&models.Attachment{}).Where("order_id = ? AND status = ?", order.ID, "pending").Count(&pendingAttachments)
-
-		var totalAttachments int64
-		database.DB.Model(&models.Attachment{}).Where("order_id = ?", order.ID).Count(&totalAttachments)
-
-		if totalAttachments == 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "请先上传附件后再提交"})
-			return
+		if len(order.Attachments) == 0 {
+			return processResult{Success: false, Message: "请先上传附件后再提交"}
 		}
 
-		var rejectedAttachments int64
-		database.DB.Model(&models.Attachment{}).Where("order_id = ? AND status = ?", order.ID, "rejected").Count(&rejectedAttachments)
-		if rejectedAttachments > 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "存在被驳回的附件，请修正后再提交"})
-			return
+		if checkHasRejectedAttachment(order.Attachments) {
+			return processResult{Success: false, Message: "存在被驳回的附件，请修正后再提交"}
+		}
+
+		if !checkAllRequiredComplete(order.Attachments, order.ServiceType) {
+			return processResult{Success: false, Message: "必需材料不齐全，请补齐所有必需材料后再提交"}
 		}
 
 		order.Status = models.StatusPending
 		order.CurrentHandler = 2
 		order.HandlerName = "王审核"
-		addAuditLog(order.ID, "提交审核", userID, userName, userRole, req.Remark, fromStatus, string(models.StatusPending))
+		addAuditLog(order.ID, "提交审核", userID, userName, userRole, remark, fromStatus, string(models.StatusPending))
 
 	case "start_process":
 		if userRole != "auditor" {
-			c.JSON(http.StatusForbidden, gin.H{"error": "无权限操作"})
-			return
+			return processResult{Success: false, Message: "无权限操作"}
 		}
 		if order.Status != models.StatusPending {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "当前状态不可处理"})
-			return
+			return processResult{Success: false, Message: "当前状态不可处理"}
 		}
 		order.Status = models.StatusProcessing
 		order.CurrentHandler = userID
 		order.HandlerName = userName
-		addAuditLog(order.ID, "开始审核", userID, userName, userRole, req.Remark, fromStatus, string(models.StatusProcessing))
+		addAuditLog(order.ID, "开始审核", userID, userName, userRole, remark, fromStatus, string(models.StatusProcessing))
 
 	case "approve":
 		if userRole != "auditor" {
-			c.JSON(http.StatusForbidden, gin.H{"error": "无权限操作"})
-			return
+			return processResult{Success: false, Message: "无权限操作"}
 		}
 		if order.Status != models.StatusProcessing {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "当前状态不可审核通过"})
-			return
+			return processResult{Success: false, Message: "当前状态不可审核通过"}
 		}
+
+		if !checkAllRequiredComplete(order.Attachments, order.ServiceType) {
+			return processResult{Success: false, Message: "必需材料不齐全，无法审核通过"}
+		}
+
 		order.Status = models.StatusReview
-		order.Result = req.Result
+		order.Result = result
 		order.CurrentHandler = 3
 		order.HandlerName = "张复核"
-		addAuditLog(order.ID, "审核通过", userID, userName, userRole, req.Remark, fromStatus, string(models.StatusReview))
+		addAuditLog(order.ID, "审核通过", userID, userName, userRole, remark, fromStatus, string(models.StatusReview))
 
 	case "reject":
 		if userRole != "auditor" {
-			c.JSON(http.StatusForbidden, gin.H{"error": "无权限操作"})
-			return
+			return processResult{Success: false, Message: "无权限操作"}
 		}
 		if order.Status != models.StatusProcessing && order.Status != models.StatusPending {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "当前状态不可驳回"})
-			return
+			return processResult{Success: false, Message: "当前状态不可驳回"}
+		}
+		if reason == "" {
+			return processResult{Success: false, Message: "请填写驳回原因"}
 		}
 		order.Status = models.StatusRejected
-		order.RejectReason = req.Reason
+		order.RejectReason = reason
 		order.CurrentHandler = 0
 		order.HandlerName = ""
-		addAuditLog(order.ID, "审核驳回", userID, userName, userRole, req.Reason, fromStatus, string(models.StatusRejected))
+		addAuditLog(order.ID, "审核驳回", userID, userName, userRole, reason, fromStatus, string(models.StatusRejected))
 
 	case "return_supplement":
 		if userRole != "auditor" {
-			c.JSON(http.StatusForbidden, gin.H{"error": "无权限操作"})
-			return
+			return processResult{Success: false, Message: "无权限操作"}
 		}
 		if order.Status != models.StatusProcessing && order.Status != models.StatusPending {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "当前状态不可退回补正"})
-			return
+			return processResult{Success: false, Message: "当前状态不可退回补正"}
+		}
+		if reason == "" {
+			return processResult{Success: false, Message: "请填写退回原因"}
 		}
 		order.Status = models.StatusSupplement
-		order.RejectReason = req.Reason
+		order.RejectReason = reason
 		order.CurrentHandler = order.CreatedBy
 		order.HandlerName = order.CreatedByName
-		addAuditLog(order.ID, "退回补正", userID, userName, userRole, req.Reason, fromStatus, string(models.StatusSupplement))
+		addAuditLog(order.ID, "退回补正", userID, userName, userRole, reason, fromStatus, string(models.StatusSupplement))
 
 	case "review_approve":
 		if userRole != "reviewer" {
-			c.JSON(http.StatusForbidden, gin.H{"error": "无权限操作"})
-			return
+			return processResult{Success: false, Message: "无权限操作"}
 		}
 		if order.Status != models.StatusReview {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "当前状态不可复核"})
-			return
+			return processResult{Success: false, Message: "当前状态不可复核"}
 		}
+
+		if !checkAllRequiredComplete(order.Attachments, order.ServiceType) {
+			return processResult{Success: false, Message: "必需材料不齐全，无法复核归档"}
+		}
+
 		now := time.Now()
 		order.Status = models.StatusCompleted
-		order.AuditRemark = req.Remark
+		order.AuditRemark = remark
 		order.CompletedAt = &now
 		order.CurrentHandler = 0
 		order.HandlerName = ""
-		addAuditLog(order.ID, "复核归档", userID, userName, userRole, req.Remark, fromStatus, string(models.StatusCompleted))
+		addAuditLog(order.ID, "复核归档", userID, userName, userRole, remark, fromStatus, string(models.StatusCompleted))
 
 	case "review_return":
 		if userRole != "reviewer" {
-			c.JSON(http.StatusForbidden, gin.H{"error": "无权限操作"})
-			return
+			return processResult{Success: false, Message: "无权限操作"}
 		}
 		if order.Status != models.StatusReview {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "当前状态不可退回"})
-			return
+			return processResult{Success: false, Message: "当前状态不可退回"}
+		}
+		if reason == "" {
+			return processResult{Success: false, Message: "请填写退回原因"}
 		}
 		order.Status = models.StatusReturned
-		order.ReturnReason = req.Reason
+		order.ReturnReason = reason
 		order.CurrentHandler = order.CreatedBy
 		order.HandlerName = order.CreatedByName
-		addAuditLog(order.ID, "复核退回", userID, userName, userRole, req.Reason, fromStatus, string(models.StatusReturned))
+		addAuditLog(order.ID, "复核退回", userID, userName, userRole, reason, fromStatus, string(models.StatusReturned))
 
 	default:
-		c.JSON(http.StatusBadRequest, gin.H{"error": "未知操作"})
-		return
+		return processResult{Success: false, Message: "未知操作"}
 	}
 
 	order.UpdatedAt = time.Now()
-	database.DB.Save(&order)
+	database.DB.Save(order)
 
-	c.JSON(http.StatusOK, order)
+	return processResult{Success: true, Message: "操作成功"}
 }
 
 func addAuditLog(orderID int64, action string, operatorID int64, operator string, role string, remark string, fromStatus string, toStatus string) {
@@ -273,4 +420,53 @@ func addAuditLog(orderID int64, action string, operatorID int64, operator string
 		CreatedAt:  time.Now(),
 	}
 	database.DB.Create(&log)
+}
+
+func addBatchAuditLog(action string, operatorID int64, operator string, role string, results []models.BatchProcessResult) {
+	successCount := 0
+	failedCount := 0
+	failedDetails := ""
+	for _, r := range results {
+		if r.Success {
+			successCount++
+		} else {
+			failedCount++
+			if failedDetails != "" {
+				failedDetails += "; "
+			}
+			failedDetails += fmt.Sprintf("%s: %s", r.OrderNo, r.Message)
+		}
+	}
+
+	remark := fmt.Sprintf("批量处理 %d 单，成功 %d 单，失败 %d 单", len(results), successCount, failedCount)
+	if failedCount > 0 {
+		remark += "。失败详情: " + failedDetails
+	}
+
+	log := models.AuditLog{
+		OrderID:    0,
+		Action:     "批量" + getActionName(action),
+		OperatorID: operatorID,
+		Operator:   operator,
+		Role:       role,
+		Remark:     remark,
+		CreatedAt:  time.Now(),
+	}
+	database.DB.Create(&log)
+}
+
+func getActionName(action string) string {
+	names := map[string]string{
+		"submit":            "提交",
+		"start_process":     "开始审核",
+		"approve":           "审核通过",
+		"reject":            "驳回",
+		"return_supplement": "退回补正",
+		"review_approve":    "复核归档",
+		"review_return":     "复核退回",
+	}
+	if name, ok := names[action]; ok {
+		return name
+	}
+	return action
 }

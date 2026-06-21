@@ -61,6 +61,7 @@ type Attachment struct {
 	FileName     string    `json:"file_name"`
 	FileType     string    `json:"file_type"`
 	FileSize     int64     `json:"file_size"`
+	MaterialType string    `json:"material_type"`
 	UploadedBy   int64     `json:"uploaded_by"`
 	UploadedByName string  `json:"uploaded_by_name"`
 	Status       string    `json:"status"`
@@ -107,4 +108,85 @@ type ProcessOrderRequest struct {
 	Remark string `json:"remark"`
 	Result string `json:"result"`
 	Reason string `json:"reason"`
+}
+
+type BatchProcessRequest struct {
+	Action  string  `json:"action" binding:"required"`
+	OrderIDs []int64 `json:"order_ids" binding:"required,min=1"`
+	Remark  string  `json:"remark"`
+	Result  string  `json:"result"`
+	Reason  string  `json:"reason"`
+}
+
+type BatchProcessResult struct {
+	OrderID  int64  `json:"order_id"`
+	OrderNo  string `json:"order_no"`
+	Success  bool   `json:"success"`
+	Message  string `json:"message"`
+	Status   string `json:"status,omitempty"`
+}
+
+type BatchProcessResponse struct {
+	Total   int                 `json:"total"`
+	Success int                 `json:"success"`
+	Failed  int                 `json:"failed"`
+	Results []BatchProcessResult `json:"results"`
+}
+
+type RequiredMaterial struct {
+	Type     string `json:"type"`
+	Name     string `json:"name"`
+	Required bool   `json:"required"`
+}
+
+func GetRequiredMaterials(serviceType string) []RequiredMaterial {
+	materials := map[string][]RequiredMaterial{
+		"洁牙服务": {
+			{Type: "member_card", Name: "会员卡", Required: true},
+			{Type: "id_card", Name: "身份证", Required: true},
+			{Type: "health_declaration", Name: "健康声明", Required: false},
+		},
+		"正畸咨询": {
+			{Type: "member_card", Name: "会员卡", Required: true},
+			{Type: "id_card", Name: "身份证", Required: true},
+			{Type: "oral_report", Name: "口腔检查报告", Required: true},
+			{Type: "x_ray", Name: "X光片", Required: false},
+		},
+		"种植牙服务": {
+			{Type: "member_card", Name: "会员卡", Required: true},
+			{Type: "id_card", Name: "身份证", Required: true},
+			{Type: "oral_report", Name: "口腔检查报告", Required: true},
+			{Type: "x_ray", Name: "全景X光片", Required: true},
+			{Type: "blood_test", Name: "血液检查报告", Required: false},
+		},
+		"儿童涂氟": {
+			{Type: "member_card", Name: "会员卡", Required: true},
+			{Type: "guardian_id", Name: "监护人身份证", Required: true},
+			{Type: "birth_cert", Name: "出生证明", Required: false},
+		},
+		"根管治疗": {
+			{Type: "member_card", Name: "会员卡", Required: true},
+			{Type: "id_card", Name: "身份证", Required: true},
+			{Type: "oral_report", Name: "口腔检查报告", Required: true},
+			{Type: "x_ray", Name: "牙根尖片", Required: true},
+		},
+		"美白牙齿": {
+			{Type: "member_card", Name: "会员卡", Required: true},
+			{Type: "id_card", Name: "身份证", Required: true},
+			{Type: "oral_report", Name: "口腔检查报告", Required: true},
+		},
+		"镶牙服务": {
+			{Type: "member_card", Name: "会员卡", Required: true},
+			{Type: "id_card", Name: "身份证", Required: true},
+			{Type: "oral_report", Name: "口腔检查报告", Required: true},
+			{Type: "mold_record", Name: "取模记录", Required: false},
+		},
+	}
+	if mats, ok := materials[serviceType]; ok {
+		return mats
+	}
+	return []RequiredMaterial{
+		{Type: "member_card", Name: "会员卡", Required: true},
+		{Type: "id_card", Name: "身份证", Required: true},
+	}
 }
