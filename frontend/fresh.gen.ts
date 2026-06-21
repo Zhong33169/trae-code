@@ -4,8 +4,14 @@
 
 import * as $_app from "./routes/_app.tsx";
 import * as $contract_id_ from "./routes/contract/[id].tsx";
+import * as $contract_new from "./routes/contract/new.tsx";
 import * as $index from "./routes/index.tsx";
 import * as $test from "./routes/test.tsx";
+
+import * as $$ActionPanel from "./islands/ActionPanel.tsx";
+import * as $$ContentEditor from "./islands/ContentEditor.tsx";
+import * as $$ContractFormEditor from "./islands/ContractFormEditor.tsx";
+import * as $$EvidenceManager from "./islands/EvidenceManager.tsx";
 
 import type { Manifest } from "$fresh/server.ts";
 
@@ -13,10 +19,16 @@ const manifest = {
   routes: {
     "./routes/_app.tsx": $_app,
     "./routes/contract/[id].tsx": $contract_id_,
+    "./routes/contract/new.tsx": $contract_new,
     "./routes/index.tsx": $index,
     "./routes/test.tsx": $test,
   },
-  islands: {},
+  islands: {
+    "./islands/ActionPanel.tsx": $$ActionPanel,
+    "./islands/ContentEditor.tsx": $$ContentEditor,
+    "./islands/ContractFormEditor.tsx": $$ContractFormEditor,
+    "./islands/EvidenceManager.tsx": $$EvidenceManager,
+  },
   baseUrl: import.meta.url,
 } satisfies Manifest;
 

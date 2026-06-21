@@ -23,6 +23,7 @@ import type {
 } from "../../lib/api.ts";
 import ContentEditor from "../../islands/ContentEditor.tsx";
 import EvidenceManager from "../../islands/EvidenceManager.tsx";
+import ActionPanel from "../../islands/ActionPanel.tsx";
 
 interface Data {
   user: { id: number; name: string; role: string };
@@ -65,17 +66,6 @@ export default function ContractDetail(props: PageProps<Data>) {
   const currentStageIdx = STAGE_ORDER.indexOf(form.stage as typeof STAGES[keyof typeof STAGES]);
 
   const canAct = form.current_handler_id === user.id && form.current_role === user.role;
-  const isRegister = user.role === "REGISTER";
-  const isAuditor = user.role === "AUDITOR";
-  const isReviewer = user.role === "REVIEWER";
-
-  const showSubmit = canAct && isRegister &&
-    (form.status === STATUSES.DRAFT || form.status === STATUSES.NEEDS_CORRECTION);
-  const showApprove = canAct && (isAuditor || isReviewer) && form.status === STATUSES.PENDING;
-  const showReturn = canAct && (isAuditor || isReviewer) && form.status === STATUSES.PENDING;
-  const showReject = canAct && isAuditor && form.status === STATUSES.PENDING;
-  const showArchive = canAct && isReviewer && form.status === STATUSES.PENDING &&
-    form.stage === STAGES.PERFORM;
 
   const evidencesByStage: Record<string, Evidence[]> = {};
   if (form.evidences) {
@@ -286,72 +276,7 @@ export default function ContractDetail(props: PageProps<Data>) {
           </div>
 
           <div class="w-80 space-y-6 flex-shrink-0">
-            {canAct && (
-              <div class="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
-                <h3 class="text-sm font-semibold text-gray-900 mb-4">办理操作</h3>
-
-                <div class="space-y-3">
-                  {showSubmit && (
-                    <ActionButton
-                      primary
-                      label="提交审核"
-                      description="提交给下一环节处理"
-                      formId={form.id}
-                      action="submit"
-                      version={form.version}
-                    />
-                  )}
-                  {showApprove && (
-                    <ActionButton
-                      primary
-                      label="审核通过"
-                      description={isReviewer && form.stage === STAGES.PERFORM
-                        ? "复核通过并归档"
-                        : "通过审核，进入下一阶段"}
-                      formId={form.id}
-                      action="approve"
-                      version={form.version}
-                    />
-                  )}
-                  {showReturn && (
-                    <ActionButton
-                      warning
-                      label="退回补正"
-                      description="退回给登记员补充材料"
-                      formId={form.id}
-                      action="return-correction"
-                      version={form.version}
-                    />
-                  )}
-                  {showReject && (
-                    <ActionButton
-                      danger
-                      label="不予通过"
-                      description="驳回申请，终止流程"
-                      formId={form.id}
-                      action="reject"
-                      version={form.version}
-                    />
-                  )}
-                  {showArchive && (
-                    <ActionButton
-                      success
-                      label="复核归档"
-                      description="完成履约确认，归档结案"
-                      formId={form.id}
-                      action="archive"
-                      version={form.version}
-                    />
-                  )}
-                  {!canAct ||
-                    (!showSubmit && !showApprove && !showReturn && !showReject && !showArchive && (
-                      <p class="text-sm text-gray-400 text-center py-4">
-                        当前状态无可用操作
-                      </p>
-                    ))}
-                </div>
-              </div>
-            )}
+            <ActionPanel form={form} userId={user.id} userRole={user.role} />
 
             <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
               <div class="px-5 py-4 border-b border-gray-100">
@@ -450,90 +375,6 @@ function StageTimeline({ currentStage, currentStatus }: {
         })}
       </div>
     </div>
-  );
-}
-
-function ActionButton(
-  { primary, warning, danger, success, label, description, formId, action, version }: {
-    primary?: boolean;
-    warning?: boolean;
-    danger?: boolean;
-    success?: boolean;
-    label: string;
-    description: string;
-    formId: number;
-    action: string;
-    version: number;
-  },
-) {
-  const colorClasses = {
-    primary: "bg-blue-600 hover:bg-blue-700 text-white",
-    warning: "bg-orange-500 hover:bg-orange-600 text-white",
-    danger: "bg-red-600 hover:bg-red-700 text-white",
-    success: "bg-green-600 hover:bg-green-700 text-white",
-  };
-
-  const color = primary
-    ? "primary"
-    : warning
-    ? "warning"
-    : danger
-    ? "danger"
-    : success
-    ? "success"
-    : "primary";
-
-  const handleClick = () => {
-    const opinion = window.prompt("请输入办理意见：");
-    if (opinion === null) return;
-
-    const urlParams = new URLSearchParams(window.location.search);
-    const userId = urlParams.get("userId") || "2";
-    const user = {
-      id: parseInt(userId),
-      role: "",
-    };
-
-    const actionMap: Record<string, string> = {
-      "submit": "submit",
-      "approve": "approve",
-      "return-correction": "return-correction",
-      "reject": "reject",
-      "archive": "archive",
-    };
-
-    const endpoint = actionMap[action];
-    if (!endpoint) return;
-
-    const apiBase = window.API_BASE_URL || "http://localhost:8005/api";
-    fetch(`${apiBase}/contracts/${formId}/${endpoint}`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-User-Id": String(userId),
-      },
-      body: JSON.stringify({ opinion, version }),
-    })
-      .then((res) => {
-        if (!res.ok) return res.json().then((e) => Promise.reject(e));
-        return res.json();
-      })
-      .then(() => {
-        window.location.reload();
-      })
-      .catch((err) => {
-        alert("操作失败：" + (err.error || err.message || "未知错误"));
-      });
-  };
-
-  return (
-    <button
-      onclick={handleClick}
-      class={`w-full px-4 py-3 rounded-lg text-left transition-colors ${colorClasses[color]}`}
-    >
-      <p class="font-medium">{label}</p>
-      <p class="text-sm opacity-80">{description}</p>
-    </button>
   );
 }
 

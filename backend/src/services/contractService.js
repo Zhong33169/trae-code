@@ -254,10 +254,30 @@ export function submitForm(user, formId, data) {
   }
 
   if (form.current_handler_id !== user.id || form.current_role !== user.role) {
+    addOperationLog(formId, user, ACTIONS.SUBMIT, {
+      fromStatus: form.status,
+      toStatus: form.status,
+      fromStage: form.stage,
+      toStage: form.stage,
+      opinion: data.opinion || '',
+      result: '提交失败：当前处理人不匹配',
+      versionBefore: form.version,
+      versionAfter: form.version
+    });
     return { success: false, error: '当前处理人不匹配，无权操作' };
   }
 
   if (user.role !== ROLES.REGISTER) {
+    addOperationLog(formId, user, ACTIONS.SUBMIT, {
+      fromStatus: form.status,
+      toStatus: form.status,
+      fromStage: form.stage,
+      toStage: form.stage,
+      opinion: data.opinion || '',
+      result: `提交失败：角色 ${user.role} 无权提交`,
+      versionBefore: form.version,
+      versionAfter: form.version
+    });
     return { success: false, error: '只有签约服务登记员可以提交' };
   }
 
@@ -277,6 +297,16 @@ export function submitForm(user, formId, data) {
 
   const validStatuses = [STATUSES.DRAFT, STATUSES.NEEDS_CORRECTION];
   if (!validStatuses.includes(form.status)) {
+    addOperationLog(formId, user, ACTIONS.SUBMIT, {
+      fromStatus: form.status,
+      toStatus: form.status,
+      fromStage: form.stage,
+      toStage: form.stage,
+      opinion: data.opinion || '',
+      result: `提交失败：当前状态 ${STATUS_NAMES[form.status]} 不可提交`,
+      versionBefore: form.version,
+      versionAfter: form.version
+    });
     return { success: false, error: `当前状态 ${STATUS_NAMES[form.status]} 不可提交` };
   }
 
@@ -384,14 +414,44 @@ export function approveForm(user, formId, data) {
   }
 
   if (form.current_handler_id !== user.id || form.current_role !== user.role) {
+    addOperationLog(formId, user, ACTIONS.APPROVE, {
+      fromStatus: form.status,
+      toStatus: form.status,
+      fromStage: form.stage,
+      toStage: form.stage,
+      opinion: data.opinion || '',
+      result: '审核失败：当前处理人不匹配',
+      versionBefore: form.version,
+      versionAfter: form.version
+    });
     return { success: false, error: '当前处理人不匹配，无权操作' };
   }
 
   if (data.version !== form.version) {
+    addOperationLog(formId, user, ACTIONS.APPROVE, {
+      fromStatus: form.status,
+      toStatus: STATUSES.STATUS_CONFLICT,
+      fromStage: form.stage,
+      toStage: form.stage,
+      opinion: `版本冲突：提交版本 v${data.version}，当前版本 v${form.version}`,
+      result: '审核失败：版本冲突',
+      versionBefore: form.version,
+      versionAfter: form.version
+    });
     return { success: false, error: '版本冲突，请刷新后重试' };
   }
 
   if (form.status !== STATUSES.PENDING) {
+    addOperationLog(formId, user, ACTIONS.APPROVE, {
+      fromStatus: form.status,
+      toStatus: form.status,
+      fromStage: form.stage,
+      toStage: form.stage,
+      opinion: data.opinion || '',
+      result: `审核失败：当前状态 ${STATUS_NAMES[form.status]} 不可审核`,
+      versionBefore: form.version,
+      versionAfter: form.version
+    });
     return { success: false, error: '当前状态不可审核通过' };
   }
 
@@ -461,14 +521,44 @@ export function returnCorrection(user, formId, data) {
   }
 
   if (form.current_handler_id !== user.id || form.current_role !== user.role) {
+    addOperationLog(formId, user, ACTIONS.RETURN_CORRECTION, {
+      fromStatus: form.status,
+      toStatus: form.status,
+      fromStage: form.stage,
+      toStage: form.stage,
+      opinion: data.opinion || '',
+      result: '退回失败：当前处理人不匹配',
+      versionBefore: form.version,
+      versionAfter: form.version
+    });
     return { success: false, error: '当前处理人不匹配，无权操作' };
   }
 
   if (data.version !== form.version) {
+    addOperationLog(formId, user, ACTIONS.RETURN_CORRECTION, {
+      fromStatus: form.status,
+      toStatus: STATUSES.STATUS_CONFLICT,
+      fromStage: form.stage,
+      toStage: form.stage,
+      opinion: `版本冲突：提交版本 v${data.version}，当前版本 v${form.version}`,
+      result: '退回失败：版本冲突',
+      versionBefore: form.version,
+      versionAfter: form.version
+    });
     return { success: false, error: '版本冲突，请刷新后重试' };
   }
 
   if (form.status !== STATUSES.PENDING) {
+    addOperationLog(formId, user, ACTIONS.RETURN_CORRECTION, {
+      fromStatus: form.status,
+      toStatus: form.status,
+      fromStage: form.stage,
+      toStage: form.stage,
+      opinion: data.opinion || '',
+      result: `退回失败：当前状态 ${STATUS_NAMES[form.status]} 不可退回`,
+      versionBefore: form.version,
+      versionAfter: form.version
+    });
     return { success: false, error: '当前状态不可退回补正' };
   }
 
@@ -516,14 +606,44 @@ export function rejectForm(user, formId, data) {
   }
 
   if (form.current_handler_id !== user.id || form.current_role !== user.role) {
+    addOperationLog(formId, user, ACTIONS.REJECT, {
+      fromStatus: form.status,
+      toStatus: form.status,
+      fromStage: form.stage,
+      toStage: form.stage,
+      opinion: data.opinion || '',
+      result: '驳回失败：当前处理人不匹配',
+      versionBefore: form.version,
+      versionAfter: form.version
+    });
     return { success: false, error: '当前处理人不匹配，无权操作' };
   }
 
   if (data.version !== form.version) {
+    addOperationLog(formId, user, ACTIONS.REJECT, {
+      fromStatus: form.status,
+      toStatus: STATUSES.STATUS_CONFLICT,
+      fromStage: form.stage,
+      toStage: form.stage,
+      opinion: `版本冲突：提交版本 v${data.version}，当前版本 v${form.version}`,
+      result: '驳回失败：版本冲突',
+      versionBefore: form.version,
+      versionAfter: form.version
+    });
     return { success: false, error: '版本冲突，请刷新后重试' };
   }
 
   if (form.status !== STATUSES.PENDING) {
+    addOperationLog(formId, user, ACTIONS.REJECT, {
+      fromStatus: form.status,
+      toStatus: form.status,
+      fromStage: form.stage,
+      toStage: form.stage,
+      opinion: data.opinion || '',
+      result: `驳回失败：当前状态 ${STATUS_NAMES[form.status]} 不可驳回`,
+      versionBefore: form.version,
+      versionAfter: form.version
+    });
     return { success: false, error: '当前状态不可不予通过' };
   }
 
@@ -571,14 +691,44 @@ export function archiveForm(user, formId, data) {
   }
 
   if (form.current_handler_id !== user.id || form.current_role !== user.role) {
+    addOperationLog(formId, user, ACTIONS.ARCHIVE, {
+      fromStatus: form.status,
+      toStatus: form.status,
+      fromStage: form.stage,
+      toStage: form.stage,
+      opinion: data.opinion || '',
+      result: '归档失败：当前处理人不匹配',
+      versionBefore: form.version,
+      versionAfter: form.version
+    });
     return { success: false, error: '当前处理人不匹配，无权操作' };
   }
 
   if (data.version !== form.version) {
+    addOperationLog(formId, user, ACTIONS.ARCHIVE, {
+      fromStatus: form.status,
+      toStatus: STATUSES.STATUS_CONFLICT,
+      fromStage: form.stage,
+      toStage: form.stage,
+      opinion: `版本冲突：提交版本 v${data.version}，当前版本 v${form.version}`,
+      result: '归档失败：版本冲突',
+      versionBefore: form.version,
+      versionAfter: form.version
+    });
     return { success: false, error: '版本冲突，请刷新后重试' };
   }
 
   if (form.status !== STATUSES.PENDING || form.stage !== STAGES.PERFORM) {
+    addOperationLog(formId, user, ACTIONS.ARCHIVE, {
+      fromStatus: form.status,
+      toStatus: form.status,
+      fromStage: form.stage,
+      toStage: form.stage,
+      opinion: data.opinion || '',
+      result: `归档失败：当前状态 ${STATUS_NAMES[form.status]}/${STAGE_NAMES[form.stage]} 不可归档`,
+      versionBefore: form.version,
+      versionAfter: form.version
+    });
     return { success: false, error: '当前状态不可归档' };
   }
 
@@ -626,24 +776,74 @@ export function addEvidence(user, formId, evidence) {
   }
 
   if (form.current_handler_id !== user.id || form.current_role !== user.role) {
+    addOperationLog(formId, user, ACTIONS.ADD_EVIDENCE, {
+      fromStatus: form.status,
+      toStatus: form.status,
+      fromStage: form.stage,
+      toStage: form.stage,
+      opinion: evidence.name || '',
+      result: '添加证据失败：当前处理人不匹配',
+      versionBefore: form.version,
+      versionAfter: form.version
+    });
     return { success: false, error: '当前处理人不匹配，无权添加证据' };
   }
 
   if (user.role !== ROLES.REGISTER) {
+    addOperationLog(formId, user, ACTIONS.ADD_EVIDENCE, {
+      fromStatus: form.status,
+      toStatus: form.status,
+      fromStage: form.stage,
+      toStage: form.stage,
+      opinion: evidence.name || '',
+      result: `添加证据失败：角色 ${user.role} 无权添加`,
+      versionBefore: form.version,
+      versionAfter: form.version
+    });
     return { success: false, error: '只有签约服务登记员可以添加证据' };
   }
 
   const editableStatuses = [STATUSES.DRAFT, STATUSES.NEEDS_CORRECTION];
   if (!editableStatuses.includes(form.status)) {
+    addOperationLog(formId, user, ACTIONS.ADD_EVIDENCE, {
+      fromStatus: form.status,
+      toStatus: form.status,
+      fromStage: form.stage,
+      toStage: form.stage,
+      opinion: evidence.name || '',
+      result: `添加证据失败：当前状态 ${STATUS_NAMES[form.status]} 不允许添加`,
+      versionBefore: form.version,
+      versionAfter: form.version
+    });
     return { success: false, error: `当前状态 ${STATUS_NAMES[form.status]} 不允许添加证据` };
   }
 
   if (!evidence.name || !evidence.name.trim()) {
+    addOperationLog(formId, user, ACTIONS.ADD_EVIDENCE, {
+      fromStatus: form.status,
+      toStatus: form.status,
+      fromStage: form.stage,
+      toStage: form.stage,
+      opinion: '',
+      result: '添加证据失败：证据名称为空',
+      versionBefore: form.version,
+      versionAfter: form.version
+    });
     return { success: false, error: '证据名称不能为空' };
   }
 
   const targetStage = evidence.stage || form.stage;
   if (targetStage !== form.stage) {
+    addOperationLog(formId, user, ACTIONS.ADD_EVIDENCE, {
+      fromStatus: form.status,
+      toStatus: form.status,
+      fromStage: form.stage,
+      toStage: form.stage,
+      opinion: evidence.name || '',
+      result: `添加证据失败：只能添加当前阶段 ${STAGE_NAMES[form.stage]} 的证据`,
+      versionBefore: form.version,
+      versionAfter: form.version
+    });
     return { success: false, error: `只能添加当前阶段 ${STAGE_NAMES[form.stage]} 的证据` };
   }
 
@@ -655,6 +855,16 @@ export function addEvidence(user, formId, evidence) {
   ).get(formId, form.stage, evidence.name.trim());
 
   if (existing) {
+    addOperationLog(formId, user, ACTIONS.ADD_EVIDENCE, {
+      fromStatus: form.status,
+      toStatus: form.status,
+      fromStage: form.stage,
+      toStage: form.stage,
+      opinion: evidence.name || '',
+      result: '添加证据失败：证据已存在',
+      versionBefore: form.version,
+      versionAfter: form.version
+    });
     return { success: false, error: '该证据已存在' };
   }
 
@@ -727,19 +937,59 @@ export function removeEvidence(user, evidenceId) {
   }
 
   if (form.current_handler_id !== user.id || form.current_role !== user.role) {
+    addOperationLog(form.id, user, ACTIONS.REMOVE_EVIDENCE, {
+      fromStatus: form.status,
+      toStatus: form.status,
+      fromStage: form.stage,
+      toStage: form.stage,
+      opinion: evidence.name,
+      result: '删除证据失败：当前处理人不匹配',
+      versionBefore: form.version,
+      versionAfter: form.version
+    });
     return { success: false, error: '当前处理人不匹配，无权删除证据' };
   }
 
   if (user.role !== ROLES.REGISTER) {
+    addOperationLog(form.id, user, ACTIONS.REMOVE_EVIDENCE, {
+      fromStatus: form.status,
+      toStatus: form.status,
+      fromStage: form.stage,
+      toStage: form.stage,
+      opinion: evidence.name,
+      result: `删除证据失败：角色 ${user.role} 无权删除`,
+      versionBefore: form.version,
+      versionAfter: form.version
+    });
     return { success: false, error: '只有签约服务登记员可以删除证据' };
   }
 
   const editableStatuses = [STATUSES.DRAFT, STATUSES.NEEDS_CORRECTION];
   if (!editableStatuses.includes(form.status)) {
+    addOperationLog(form.id, user, ACTIONS.REMOVE_EVIDENCE, {
+      fromStatus: form.status,
+      toStatus: form.status,
+      fromStage: form.stage,
+      toStage: form.stage,
+      opinion: evidence.name,
+      result: `删除证据失败：当前状态 ${STATUS_NAMES[form.status]} 不允许删除`,
+      versionBefore: form.version,
+      versionAfter: form.version
+    });
     return { success: false, error: `当前状态 ${STATUS_NAMES[form.status]} 不允许删除证据` };
   }
 
   if (evidence.stage !== form.stage) {
+    addOperationLog(form.id, user, ACTIONS.REMOVE_EVIDENCE, {
+      fromStatus: form.status,
+      toStatus: form.status,
+      fromStage: form.stage,
+      toStage: form.stage,
+      opinion: evidence.name,
+      result: `删除证据失败：只能删除当前阶段 ${STAGE_NAMES[form.stage]} 的证据`,
+      versionBefore: form.version,
+      versionAfter: form.version
+    });
     return { success: false, error: `只能删除当前阶段 ${STAGE_NAMES[form.stage]} 的证据` };
   }
 
@@ -795,15 +1045,45 @@ export function updateFormContent(user, formId, data) {
   }
 
   if (form.current_handler_id !== user.id || form.current_role !== user.role) {
+    addOperationLog(formId, user, ACTIONS.CORRECT, {
+      fromStatus: form.status,
+      toStatus: form.status,
+      fromStage: form.stage,
+      toStage: form.stage,
+      opinion: '',
+      result: '编辑失败：当前处理人不匹配',
+      versionBefore: form.version,
+      versionAfter: form.version
+    });
     return { success: false, error: '当前处理人不匹配，无权操作' };
   }
 
   if (user.role !== ROLES.REGISTER) {
+    addOperationLog(formId, user, ACTIONS.CORRECT, {
+      fromStatus: form.status,
+      toStatus: form.status,
+      fromStage: form.stage,
+      toStage: form.stage,
+      opinion: '',
+      result: `编辑失败：角色 ${user.role} 无权编辑`,
+      versionBefore: form.version,
+      versionAfter: form.version
+    });
     return { success: false, error: '只有签约服务登记员可以编辑内容' };
   }
 
   const editableStatuses = [STATUSES.DRAFT, STATUSES.NEEDS_CORRECTION];
   if (!editableStatuses.includes(form.status)) {
+    addOperationLog(formId, user, ACTIONS.CORRECT, {
+      fromStatus: form.status,
+      toStatus: form.status,
+      fromStage: form.stage,
+      toStage: form.stage,
+      opinion: '',
+      result: `编辑失败：当前状态 ${STATUS_NAMES[form.status]} 不允许编辑`,
+      versionBefore: form.version,
+      versionAfter: form.version
+    });
     return { success: false, error: `当前状态 ${STATUS_NAMES[form.status]} 不允许编辑` };
   }
 
