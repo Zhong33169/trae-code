@@ -305,15 +305,19 @@ export default function OrderDetail(props) {
               <div style={{ display: 'grid', gap: '12px' }}>
                 {requiredMaterials.map(mat => {
                   const statusInfo = attachmentStatus?.materials?.[mat.type] || {}
-                  const status = statusInfo.status || 'missing'
+                  const hasApproved = statusInfo.has_approved || false
+                  const latestStatus = statusInfo.status || 'missing'
+                  const effectiveStatus = hasApproved ? 'approved' : latestStatus
                   const statusConfig = {
-                    approved: { label: '已通过', color: '#52c41a', icon: '✓' },
+                    approved: { label: hasApproved && latestStatus !== 'approved' ? '已通过（含历史驳回）' : '已通过', color: '#52c41a', icon: '✓' },
                     pending: { label: '待审核', color: '#faad14', icon: '⏳' },
                     rejected: { label: '已驳回', color: '#f5222d', icon: '✗' },
                     missing: { label: '缺失', color: '#ff4d4f', icon: '!' }
                   }
-                  const config = statusConfig[status] || statusConfig.missing
-                  const canClick = canUpload && (status === 'missing' || status === 'rejected')
+                  const config = statusConfig[effectiveStatus] || statusConfig.missing
+                  const canClick = canUpload && !hasApproved && (latestStatus === 'missing' || latestStatus === 'rejected')
+                  const history = statusInfo.history || []
+                  const rejectedHistory = history.filter(h => h.status === 'rejected')
 
                   return (
                     <div
@@ -322,11 +326,11 @@ export default function OrderDetail(props) {
                       onClick={() => canClick && openUploadModal(mat.type)}
                       style={{
                         display: 'flex',
-                        alignItems: 'center',
+                        alignItems: 'flex-start',
                         padding: '12px 16px',
                         background: '#fafafa',
                         borderRadius: '6px',
-                        border: `1px solid ${status === 'missing' || status === 'rejected' ? '#ffa39e' : '#d9d9d9'}`,
+                        border: `1px solid ${!hasApproved && (latestStatus === 'missing' || latestStatus === 'rejected') ? '#ffa39e' : '#d9d9d9'}`,
                         cursor: canClick ? 'pointer' : 'default'
                       }}
                     >
@@ -341,7 +345,8 @@ export default function OrderDetail(props) {
                         color: config.color,
                         fontWeight: 'bold',
                         marginRight: '12px',
-                        fontSize: '14px'
+                        fontSize: '14px',
+                        marginTop: '2px'
                       }}>
                         {config.icon}
                       </span>
@@ -353,14 +358,31 @@ export default function OrderDetail(props) {
                         <div style={{ fontSize: '12px', color: '#888', marginTop: '2px' }}>
                           材料类型: {mat.type}
                         </div>
-                        {statusInfo.reject_reason && (
+                        {statusInfo.file && statusInfo.file?.status !== 'rejected' && (
+                          <div style={{ fontSize: '13px', color: '#52c41a', marginTop: '6px' }}>
+                            当前有效: {statusInfo.file.file_name}（{formatDate(statusInfo.file.created_at)}）
+                          </div>
+                        )}
+                        {!hasApproved && statusInfo.reject_reason && (
                           <div style={{ fontSize: '12px', color: '#f5222d', marginTop: '4px' }}>
                             驳回原因: {statusInfo.reject_reason}
                           </div>
                         )}
-                        {status === 'missing' && mat.required && (
+                        {latestStatus === 'missing' && mat.required && !hasApproved && (
                           <div style={{ fontSize: '12px', color: '#ff4d4f', marginTop: '4px' }}>
                             缺少必需材料
+                          </div>
+                        )}
+                        {rejectedHistory.length > 0 && (
+                          <div style={{ marginTop: '8px', padding: '8px 12px', background: '#fff1f0', borderRadius: '4px', border: '1px solid #ffa39e' }}>
+                            <div style={{ fontSize: '12px', fontWeight: '500', color: '#cf1322', marginBottom: '4px' }}>
+                              历史驳回记录（{rejectedHistory.length}条）:
+                            </div>
+                            {rejectedHistory.map((rh, idx) => (
+                              <div key={idx} style={{ fontSize: '12px', color: '#888', lineHeight: '1.8' }}>
+                                · {rh.file_name} - {rh.reject_reason || '未说明原因'}（{formatDate(rh.updated_at)}）
+                              </div>
+                            ))}
                           </div>
                         )}
                       </div>
@@ -384,9 +406,9 @@ export default function OrderDetail(props) {
                       缺失材料: {attachmentStatus.missing_required.map(m => m.name).join('、')}
                     </div>
                   )}
-                  {attachmentStatus.has_rejected && (
+                  {attachmentStatus.has_unresolved && (
                     <div style={{ fontSize: '13px', marginTop: '4px', color: '#cf1322' }}>
-                      存在被驳回的附件，请修正后重新上传
+                      存在未修正的驳回附件，需要重新上传对应材料
                     </div>
                   )}
                 </div>

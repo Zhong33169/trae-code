@@ -579,9 +579,28 @@ export default function OrderList(props) {
                         状态: {STATUS_MAP[res.status]?.label || res.status}
                       </div>
                     )}
-                    <div style={{ fontSize: '13px', marginTop: '4px', color: res.success ? '#389e0d' : '#cf1322' }}>
-                      {res.message}
-                    </div>
+                    {!res.success && (
+                      <div style={{ fontSize: '13px', marginTop: '4px', color: '#cf1322', fontWeight: '500' }}>
+                        失败原因: {res.message}
+                      </div>
+                    )}
+                    {res.success && (
+                      <div style={{ fontSize: '13px', marginTop: '4px', color: '#389e0d' }}>
+                        {res.message}
+                      </div>
+                    )}
+                    {(res.operator || res.processed_at) && (
+                      <div style={{ fontSize: '12px', color: '#888', marginTop: '6px', paddingTop: '6px', borderTop: '1px dashed ' + (res.success ? '#b7eb8f' : '#ffa39e') }}>
+                        {res.operator && (
+                          <span style={{ marginRight: '12px' }}>
+                            操作者: {res.operator}（{ROLE_MAP[res.role]?.label || res.role}）
+                          </span>
+                        )}
+                        {res.processed_at && (
+                          <span>处理时间: {formatDate(res.processed_at)}</span>
+                        )}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>

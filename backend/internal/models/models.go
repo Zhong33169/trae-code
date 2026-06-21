@@ -119,11 +119,16 @@ type BatchProcessRequest struct {
 }
 
 type BatchProcessResult struct {
-	OrderID  int64  `json:"order_id"`
-	OrderNo  string `json:"order_no"`
-	Success  bool   `json:"success"`
-	Message  string `json:"message"`
-	Status   string `json:"status,omitempty"`
+	OrderID    int64  `json:"order_id"`
+	OrderNo    string `json:"order_no"`
+	Success    bool   `json:"success"`
+	Message    string `json:"message"`
+	Status     string `json:"status,omitempty"`
+	OperatorID int64  `json:"operator_id,omitempty"`
+	Operator   string `json:"operator,omitempty"`
+	Role       string `json:"role,omitempty"`
+	Action     string `json:"action,omitempty"`
+	ProcessedAt string `json:"processed_at,omitempty"`
 }
 
 type BatchProcessResponse struct {

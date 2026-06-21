@@ -6,6 +6,7 @@ import (
 	"member-service/internal/middleware"
 	"member-service/internal/models"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -82,37 +83,58 @@ func GetAttachmentStatus(c *gin.Context) {
 	requiredMaterials := models.GetRequiredMaterials(order.ServiceType)
 	materialsMap := make(map[string]map[string]interface{})
 	missingRequired := make([]map[string]interface{}, 0)
-	hasRejected := false
+	hasUnresolved := false
 
 	for _, mat := range requiredMaterials {
-		item := map[string]interface{}{
-			"type":          mat.Type,
-			"name":          mat.Name,
-			"required":      mat.Required,
-			"status":        "missing",
-			"file":          nil,
-			"reject_reason": "",
+		latestAtt := getLatestAttachmentByType(order.Attachments, mat.Type)
+		history := make([]models.Attachment, 0)
+		for _, att := range order.Attachments {
+			if att.MaterialType == mat.Type {
+				history = append(history, att)
+			}
+		}
+
+		status := "missing"
+		var file *models.Attachment
+		rejectReason := ""
+		hasApproved := false
+
+		if latestAtt != nil {
+			status = latestAtt.Status
+			file = latestAtt
+			rejectReason = latestAtt.RejectReason
 		}
 
 		for _, att := range order.Attachments {
-			if att.MaterialType == mat.Type {
-				item["status"] = att.Status
-				item["file"] = att
-				if att.RejectReason != "" {
-					item["reject_reason"] = att.RejectReason
-					hasRejected = true
-				}
+			if att.MaterialType == mat.Type && att.Status == "approved" {
+				hasApproved = true
 				break
 			}
 		}
 
-		if mat.Required && item["status"] == "missing" {
+		if mat.Required && !hasApproved {
 			missingRequired = append(missingRequired, map[string]interface{}{
 				"type": mat.Type,
 				"name": mat.Name,
 			})
+			for _, att := range order.Attachments {
+				if att.MaterialType == mat.Type && att.Status == "rejected" {
+					hasUnresolved = true
+					break
+				}
+			}
 		}
 
+		item := map[string]interface{}{
+			"type":          mat.Type,
+			"name":          mat.Name,
+			"required":      mat.Required,
+			"status":        status,
+			"file":          file,
+			"reject_reason": rejectReason,
+			"history":       history,
+			"has_approved":  hasApproved,
+		}
 		materialsMap[mat.Type] = item
 	}
 
@@ -123,7 +145,7 @@ func GetAttachmentStatus(c *gin.Context) {
 		"materials":        materialsMap,
 		"all_approved":     allApproved,
 		"missing_required": missingRequired,
-		"has_rejected":     hasRejected,
+		"has_unresolved":   hasUnresolved,
 	})
 }
 
@@ -147,9 +169,58 @@ func checkAllRequiredComplete(attachments []models.Attachment, serviceType strin
 	return true
 }
 
-func checkHasRejectedAttachment(attachments []models.Attachment) bool {
-	for _, att := range attachments {
-		if att.Status == "rejected" {
+func getMissingRequiredMaterials(attachments []models.Attachment, serviceType string) []models.RequiredMaterial {
+	requiredMaterials := models.GetRequiredMaterials(serviceType)
+	missing := make([]models.RequiredMaterial, 0)
+	for _, mat := range requiredMaterials {
+		if !mat.Required {
+			continue
+		}
+		found := false
+		for _, att := range attachments {
+			if att.MaterialType == mat.Type && att.Status == "approved" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			missing = append(missing, mat)
+		}
+	}
+	return missing
+}
+
+func getLatestAttachmentByType(attachments []models.Attachment, materialType string) *models.Attachment {
+	var latest *models.Attachment
+	for i := range attachments {
+		if attachments[i].MaterialType == materialType {
+			if latest == nil || attachments[i].CreatedAt.After(latest.CreatedAt) {
+				latest = &attachments[i]
+			}
+		}
+	}
+	return latest
+}
+
+func hasUnresolvedRejection(attachments []models.Attachment, serviceType string) bool {
+	requiredMaterials := models.GetRequiredMaterials(serviceType)
+	for _, mat := range requiredMaterials {
+		if !mat.Required {
+			continue
+		}
+		hasApproved := false
+		hasRejected := false
+		for _, att := range attachments {
+			if att.MaterialType == mat.Type {
+				if att.Status == "approved" {
+					hasApproved = true
+				}
+				if att.Status == "rejected" {
+					hasRejected = true
+				}
+			}
+		}
+		if hasRejected && !hasApproved {
 			return true
 		}
 	}
@@ -238,25 +309,38 @@ func BatchProcessOrders(c *gin.Context) {
 
 	for _, orderID := range req.OrderIDs {
 		var order models.MemberServiceOrder
+		processedAt := time.Now()
 		if err := database.DB.Preload("Attachments").First(&order, orderID).Error; err != nil {
-			results = append(results, models.BatchProcessResult{
-				OrderID: orderID,
-				OrderNo: "",
-				Success: false,
-				Message: "工单不存在",
-			})
+			batchResult := models.BatchProcessResult{
+				OrderID:     orderID,
+				OrderNo:     "",
+				Success:     false,
+				Message:     "工单不存在",
+				OperatorID:  userID,
+				Operator:    userName,
+				Role:        userRole,
+				Action:      req.Action,
+				ProcessedAt: processedAt.Format(time.RFC3339),
+			}
+			results = append(results, batchResult)
 			failedCount++
 			continue
 		}
 
+		fromStatus := string(order.Status)
 		result := processSingleOrder(&order, req.Action, req.Remark, req.Result, req.Reason, userID, userName, userRole)
 
 		batchResult := models.BatchProcessResult{
-			OrderID: order.ID,
-			OrderNo: order.OrderNo,
-			Success: result.Success,
-			Message: result.Message,
-			Status:  string(order.Status),
+			OrderID:     order.ID,
+			OrderNo:     order.OrderNo,
+			Success:     result.Success,
+			Message:     result.Message,
+			Status:      string(order.Status),
+			OperatorID:  userID,
+			Operator:    userName,
+			Role:        userRole,
+			Action:      req.Action,
+			ProcessedAt: processedAt.Format(time.RFC3339),
 		}
 		results = append(results, batchResult)
 
@@ -264,6 +348,9 @@ func BatchProcessOrders(c *gin.Context) {
 			successCount++
 		} else {
 			failedCount++
+			actionName := getActionName(req.Action)
+			remark := fmt.Sprintf("批量%s失败: %s", actionName, result.Message)
+			addAuditLog(order.ID, "批量"+actionName+"失败", userID, userName, userRole, remark, fromStatus, fromStatus)
 		}
 	}
 
@@ -300,12 +387,24 @@ func processSingleOrder(order *models.MemberServiceOrder, action, remark, result
 			return processResult{Success: false, Message: "请先上传附件后再提交"}
 		}
 
-		if checkHasRejectedAttachment(order.Attachments) {
-			return processResult{Success: false, Message: "存在被驳回的附件，请修正后再提交"}
+		if hasUnresolvedRejection(order.Attachments, order.ServiceType) {
+			missing := getMissingRequiredMaterials(order.Attachments, order.ServiceType)
+			if len(missing) > 0 {
+				names := make([]string, 0)
+				for _, m := range missing {
+					names = append(names, m.Name)
+				}
+				return processResult{Success: false, Message: "必需材料不齐全或存在未修正的驳回附件：" + strings.Join(names, "、")}
+			}
 		}
 
 		if !checkAllRequiredComplete(order.Attachments, order.ServiceType) {
-			return processResult{Success: false, Message: "必需材料不齐全，请补齐所有必需材料后再提交"}
+			missing := getMissingRequiredMaterials(order.Attachments, order.ServiceType)
+			names := make([]string, 0)
+			for _, m := range missing {
+				names = append(names, m.Name)
+			}
+			return processResult{Success: false, Message: "必需材料不齐全，请补齐：" + strings.Join(names, "、")}
 		}
 
 		order.Status = models.StatusPending
