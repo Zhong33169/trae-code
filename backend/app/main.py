@@ -919,9 +919,9 @@ async def log_filter_change(request):
     if isinstance(user, JSONResponse):
         return user
     body = await _body(request)
-    role = body.get("filter_role", "") or ""
-    status = body.get("filter_status", "") or ""
-    event_type = body.get("filter_event_type", "") or ""
+    role = body.get("filter_role", "") or body.get("role", "") or ""
+    status = body.get("filter_status", "") or body.get("status", "") or ""
+    event_type = body.get("filter_event_type", "") or body.get("event_type", "") or ""
     now = datetime.now().isoformat()
     detail_parts = []
     if role: detail_parts.append(f"岗位={ROLE_LABELS.get(role, role)}")

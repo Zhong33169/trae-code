@@ -241,7 +241,14 @@ async function getConfig() {
 async function logFilterChange(filters: EventFilters) {
   return request<{ ok: boolean }>('/audit-log/filter-change', {
     method: 'POST',
-    body: JSON.stringify(filters),
+    body: JSON.stringify({
+      role: filters.role,
+      status: filters.status,
+      event_type: filters.event_type,
+      filter_role: filters.role,
+      filter_status: filters.status,
+      filter_event_type: filters.event_type,
+    }),
   });
 }
 

@@ -1,4 +1,4 @@
-import { createSignal, Show, For, onMount, createEffect } from 'solid-js';
+import { createSignal, Show, For, onMount } from 'solid-js';
 import { useNavigate, A } from '@solidjs/router';
 import { useAuth } from '../auth';
 import { api } from '../api';
@@ -28,16 +28,8 @@ export default function EventsPage() {
     }
     if (stored.status) setFilterStatus(stored.status);
     if (stored.event_type) setFilterType(stored.event_type);
-    loadQueueSummary();
-  });
-
-  createEffect(() => {
-    const u = user();
-    if (!u) return;
-    if (!filterRole()) {
-      setFilterRole(u.role);
-    }
     loadEvents();
+    loadQueueSummary();
   });
 
   const loadEvents = async () => {
@@ -79,7 +71,9 @@ export default function EventsPage() {
 
   const handleRoleChange = (v: string) => {
     setFilterRole(v);
-    persistAndLoad({ role: v, status: filterStatus(), event_type: filterType() });
+    setFilterStatus('');
+    setFilterType('');
+    persistAndLoad({ role: v, status: '', event_type: '' });
   };
 
   const handleStatusChange = (v: string) => {
