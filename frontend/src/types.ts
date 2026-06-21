@@ -58,6 +58,20 @@ export interface AuditLog {
   actor_name?: string;
   detail: string;
   created_at: string;
+  scan_record_id?: number | null;
+  version_before?: number | null;
+  version_after?: number | null;
+}
+
+export interface ScanCredential {
+  scan_record_id: number;
+  scan_token: string;
+  event_id: number;
+  scanner_id: number;
+  scanner_role: string;
+  scanned_at: string;
+  event_code: string;
+  event_version: number;
 }
 
 export interface Statistics {

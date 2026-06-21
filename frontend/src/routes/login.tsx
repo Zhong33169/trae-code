@@ -1,8 +1,8 @@
 import { createSignal, Show } from 'solid-js';
-import { useAuth } from '../App';
+import { useAuth } from '../auth';
 
-export function LoginPage() {
-  const { doLogin, isLoggedIn } = useAuth();
+export default function LoginPage() {
+  const { doLogin } = useAuth();
   const [username, setUsername] = createSignal('');
   const [password, setPassword] = createSignal('');
   const [error, setError] = createSignal('');

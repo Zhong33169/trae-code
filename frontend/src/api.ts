@@ -1,6 +1,7 @@
 import type { User, Event, Statistics, AuditLog, AppConfig } from './types';
 
-const API_BASE = '/api';
+const DEFAULT_API_URL = 'http://localhost:8004';
+const API_BASE = (import.meta.env.VITE_API_URL || process.env.API_URL || DEFAULT_API_URL) + '/api';
 
 function getToken(): string | null {
   return localStorage.getItem('token');
@@ -25,6 +26,51 @@ function setStoredUser(user: User) {
 
 function clearStoredUser() {
   localStorage.removeItem('user');
+}
+
+const SCAN_KEY_PREFIX = 'scan_credential_';
+
+export interface ScanCredential {
+  scan_record_id: number;
+  scan_token: string;
+  event_id: number;
+  scanner_id: number;
+  scanner_role: string;
+  scanned_at: string;
+  event_code: string;
+  event_version: number;
+}
+
+function saveScanCredential(eventId: number, cred: ScanCredential) {
+  try {
+    sessionStorage.setItem(`${SCAN_KEY_PREFIX}${eventId}`, JSON.stringify(cred));
+  } catch (e) {}
+}
+
+function getScanCredential(eventId: number): ScanCredential | null {
+  try {
+    const raw = sessionStorage.getItem(`${SCAN_KEY_PREFIX}${eventId}`);
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function clearScanCredential(eventId: number) {
+  try {
+    sessionStorage.removeItem(`${SCAN_KEY_PREFIX}${eventId}`);
+  } catch (e) {}
+}
+
+function clearAllScanCredentials() {
+  try {
+    const keys = [];
+    for (let i = 0; i < sessionStorage.length; i++) {
+      const k = sessionStorage.key(i);
+      if (k && k.startsWith(SCAN_KEY_PREFIX)) keys.push(k);
+    }
+    keys.forEach((k) => sessionStorage.removeItem(k));
+  } catch (e) {}
 }
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -57,6 +103,7 @@ async function login(username: string, password: string) {
 function logout() {
   clearToken();
   clearStoredUser();
+  clearAllScanCredentials();
 }
 
 async function getMe() {
@@ -90,36 +137,61 @@ async function createEvent(data: {
   });
 }
 
-async function submitEvent(id: number, version: number) {
+async function submitEvent(id: number, version: number, scan_record_id: number) {
   return request<{ event: Event }>(`/events/${id}/submit`, {
     method: 'POST',
-    body: JSON.stringify({ version }),
+    body: JSON.stringify({ version, scan_record_id }),
   });
 }
 
-async function supplementEvent(id: number, version: number, opinion: string, materials: { name: string; material_type: string; content: string }[]) {
+async function supplementEvent(
+  id: number,
+  version: number,
+  scan_record_id: number,
+  opinion: string,
+  materials: { name: string; material_type: string; content: string }[],
+) {
   return request<{ event: Event }>(`/events/${id}/supplement`, {
     method: 'POST',
-    body: JSON.stringify({ version, opinion, materials }),
+    body: JSON.stringify({ version, scan_record_id, opinion, materials }),
   });
 }
 
-async function reviewEvent(id: number, version: number, opinion: string, result: 'pass' | 'reject') {
+async function reviewEvent(
+  id: number,
+  version: number,
+  scan_record_id: number,
+  opinion: string,
+  result: 'pass' | 'reject',
+) {
   return request<{ event: Event }>(`/events/${id}/review`, {
     method: 'POST',
-    body: JSON.stringify({ version, opinion, result }),
+    body: JSON.stringify({ version, scan_record_id, opinion, result }),
   });
 }
 
-async function archiveReviewEvent(id: number, version: number, opinion: string, result: 'archive' | 'reject') {
+async function archiveReviewEvent(
+  id: number,
+  version: number,
+  scan_record_id: number,
+  opinion: string,
+  result: 'archive' | 'reject',
+) {
   return request<{ event: Event }>(`/events/${id}/archive-review`, {
     method: 'POST',
-    body: JSON.stringify({ version, opinion, result }),
+    body: JSON.stringify({ version, scan_record_id, opinion, result }),
   });
 }
 
 async function scanCode(code: string) {
-  return request<{ success: boolean; message: string; event?: Event }>('/scan', {
+  return request<{
+    success: boolean;
+    message: string;
+    event?: Event;
+    scan_record_id?: number;
+    scan_token?: string;
+    scanner?: { id: number; name: string; role: string };
+  }>('/scan', {
     method: 'POST',
     body: JSON.stringify({ code }),
   });
@@ -127,6 +199,7 @@ async function scanCode(code: string) {
 
 async function batchProcess(data: {
   event_ids: number[];
+  scan_record_ids: number[];
   action: string;
   result: string;
   opinion: string;
@@ -167,4 +240,10 @@ export const api = {
   getStatistics,
   getAuditLog,
   getConfig,
+  saveScanCredential,
+  getScanCredential,
+  clearScanCredential,
+  clearAllScanCredentials,
 };
+
+export type { ScanCredential };

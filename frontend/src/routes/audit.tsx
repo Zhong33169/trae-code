@@ -3,7 +3,7 @@ import { api } from '../api';
 import type { AuditLog } from '../types';
 import { ROLE_LABELS } from '../types';
 
-export function AuditPage() {
+export default function AuditPage() {
   const [logs, setLogs] = createSignal<AuditLog[]>([]);
   const [loading, setLoading] = createSignal(true);
   const [error, setError] = createSignal('');
@@ -95,6 +95,8 @@ export function AuditPage() {
                   <th>操作</th>
                   <th>操作人</th>
                   <th>角色</th>
+                  <th>凭证ID</th>
+                  <th>版本变化</th>
                   <th>详情</th>
                 </tr>
               </thead>
@@ -112,6 +114,14 @@ export function AuditPage() {
                       </td>
                       <td>{log.actor_name || '—'}</td>
                       <td style="font-size: 13px;">{ROLE_LABELS[log.actor_role] || log.actor_role}</td>
+                      <td style="font-size: 12px;">
+                        {log.scan_record_id ? `#${log.scan_record_id}` : '—'}
+                      </td>
+                      <td style="font-size: 12px;">
+                        {log.version_before != null && log.version_after != null
+                          ? `v${log.version_before} → v${log.version_after}`
+                          : '—'}
+                      </td>
                       <td style="font-size: 13px; max-width: 300px; word-break: break-all;">{log.detail}</td>
                     </tr>
                   )}

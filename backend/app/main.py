@@ -14,7 +14,7 @@ from .config import (
 )
 from .database import (
     get_db, init_db, seed_data, generate_code, generate_scan_token, row_to_dict,
-    verify_password,
+    verify_password, consume_scan_credential,
 )
 from .auth import create_token, require_auth, require_role
 
@@ -186,6 +186,7 @@ async def create_event(request):
     scan_token = generate_scan_token()
     conn = get_db()
     try:
+        conn.execute("BEGIN IMMEDIATE")
         c = conn.cursor()
         c.execute(
             "INSERT INTO events (code, scan_token, title, description, event_type, severity, status, current_handler_role, created_by, created_at, updated_at, deadline, version) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -198,13 +199,16 @@ async def create_event(request):
                 (event_id, mat.get("name", ""), mat.get("material_type", "document"), mat.get("content", ""), "draft", now),
             )
         c.execute(
-            "INSERT INTO audit_log (event_id, action, actor_id, actor_role, detail, created_at) VALUES (?,?,?,?,?,?)",
-            (event_id, "create", user["id"], user["role"], f"登记员创建医疗事件：{title}", now),
+            "INSERT INTO audit_log (event_id, action, actor_id, actor_role, detail, created_at, scan_record_id, version_before, version_after) VALUES (?,?,?,?,?,?,?,?,?)",
+            (event_id, "create", user["id"], user["role"], f"登记员创建医疗事件：{title}", now, None, None, 1),
         )
-        conn.commit()
+        conn.execute("COMMIT")
         row = conn.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
         event = row_to_dict(row)
         return _json({"event": event}, 201)
+    except Exception as e:
+        conn.execute("ROLLBACK")
+        raise
     finally:
         conn.close()
 
@@ -216,31 +220,51 @@ async def submit_event(request):
     event_id = int(request.path_params["id"])
     body = await _body(request)
     version = body.get("version")
+    scan_record_id = body.get("scan_record_id")
+    if scan_record_id is None:
+        return _json({"error": "必须携带核验凭证（scan_record_id），请先完成现场扫码核验"}, 400)
     if version is None:
         return _json({"error": "必须提供当前版本号（version字段）用于并发检查"}, 400)
     conn = get_db()
     try:
-        row = conn.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
-        if not row:
+        conn.execute("BEGIN IMMEDIATE")
+        # 0. 原子消费扫码凭证（更新凭证为已消费，锁定scan_record行，并生成新token/新版本号）
+        cred = consume_scan_credential(conn, event_id, int(scan_record_id), user, "submit")
+        if not cred["ok"]:
+            conn.execute("ROLLBACK")
+            return _json({"error": cred["error"]}, 400)
+        # 1. 版本与事件校验
+        ev = conn.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
+        if not ev:
+            conn.execute("ROLLBACK")
             return _json({"error": "医疗事件单不存在"}, 404)
-        event = row_to_dict(row)
+        event = row_to_dict(ev)
         if event["version"] != version:
-            return _json({"error": f"版本冲突：该医疗事件单已被其他操作修改（当前版本{event['version']}，提交版本{version}），请刷新后重试"}, 409)
+            conn.execute("ROLLBACK")
+            return _json({"error": f"版本冲突：该医疗事件单已被其他操作修改（当前版本{event['version']}，提交版本{version}），请刷新后重新扫码"}, 409)
+        if cred["new_version"] != version + 1:
+            conn.execute("ROLLBACK")
+            return _json({"error": "凭证计算错误，请重新扫码"}, 400)
+        # 2. 角色/状态/处理人
         if user["role"] != "registrar":
+            conn.execute("ROLLBACK")
             return _json({"error": f"越权操作：仅医疗事件登记员可提交事件，当前角色为{ROLE_LABELS.get(user['role'], user['role'])}"}, 403)
         if event["status"] not in ("draft", "review_rejected"):
+            conn.execute("ROLLBACK")
             return _json({"error": f"当前状态「{STATUS_LABELS.get(event['status'], event['status'])}」无法执行提交操作"}, 400)
         if event["current_handler_role"] != user["role"]:
+            conn.execute("ROLLBACK")
             return _json({"error": f"非当前处理人：当前应由{ROLE_LABELS.get(event['current_handler_role'], event['current_handler_role'])}处理"}, 403)
+        # 3. 材料完整性
         mats = conn.execute("SELECT COUNT(*) FROM materials WHERE event_id = ?", (event_id,)).fetchone()[0]
         if mats < 1:
+            conn.execute("ROLLBACK")
             return _json({"error": "证据缺失：提交前必须至少上传1份材料"}, 400)
+        # 4. 流转
         now = datetime.now().isoformat()
-        new_token = generate_scan_token()
-        new_version = event["version"] + 1
         conn.execute(
-            "UPDATE events SET status='submitted', current_handler_role='supervisor', updated_at=?, scan_token=?, version=? WHERE id=?",
-            (now, new_token, new_version, event_id),
+            "UPDATE events SET status='submitted', current_handler_role='supervisor', updated_at=?, scan_token=?, version=? WHERE id=? AND version=?",
+            (now, cred["new_token"], cred["new_version"], event_id, version),
         )
         action_label = "补正后重新提交" if event["status"] == "review_rejected" else "提交"
         conn.execute(
@@ -248,12 +272,18 @@ async def submit_event(request):
             (event_id, "submit", "", "", user["id"], user["role"], now),
         )
         conn.execute(
-            "INSERT INTO audit_log (event_id, action, actor_id, actor_role, detail, created_at) VALUES (?,?,?,?,?,?)",
-            (event_id, "submit", user["id"], user["role"], f"登记员{action_label}医疗事件", now),
+            "INSERT INTO audit_log (event_id, action, actor_id, actor_role, detail, created_at, scan_record_id, version_before, version_after) VALUES (?,?,?,?,?,?,?,?,?)",
+            (event_id, "submit", user["id"], user["role"], f"登记员{action_label}医疗事件（已消费扫码凭证#{cred['scan_record_id']}）", now, cred["scan_record_id"], cred["old_version"], cred["new_version"]),
         )
-        conn.commit()
+        conn.execute("COMMIT")
         row = conn.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
         return _json({"event": row_to_dict(row)})
+    except Exception as e:
+        try:
+            conn.execute("ROLLBACK")
+        except Exception:
+            pass
+        raise
     finally:
         conn.close()
 
@@ -267,32 +297,45 @@ async def supplement_event(request):
     opinion = body.get("opinion", "").strip()
     materials = body.get("materials", [])
     version = body.get("version")
+    scan_record_id = body.get("scan_record_id")
+    if scan_record_id is None:
+        return _json({"error": "必须携带核验凭证（scan_record_id），请先完成现场扫码核验"}, 400)
     if version is None:
         return _json({"error": "必须提供当前版本号（version字段）用于并发检查"}, 400)
     conn = get_db()
     try:
-        row = conn.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
-        if not row:
+        conn.execute("BEGIN IMMEDIATE")
+        cred = consume_scan_credential(conn, event_id, int(scan_record_id), user, "supplement")
+        if not cred["ok"]:
+            conn.execute("ROLLBACK")
+            return _json({"error": cred["error"]}, 400)
+        ev = conn.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
+        if not ev:
+            conn.execute("ROLLBACK")
             return _json({"error": "医疗事件单不存在"}, 404)
-        event = row_to_dict(row)
+        event = row_to_dict(ev)
         if event["version"] != version:
-            return _json({"error": f"版本冲突：该医疗事件单已被其他操作修改（当前版本{event['version']}，提交版本{version}），请刷新后重试"}, 409)
+            conn.execute("ROLLBACK")
+            return _json({"error": f"版本冲突：该医疗事件单已被其他操作修改（当前版本{event['version']}，提交版本{version}），请刷新后重新扫码"}, 409)
         if user["role"] != "registrar":
+            conn.execute("ROLLBACK")
             return _json({"error": f"越权操作：仅医疗事件登记员可补正事件，当前角色为{ROLE_LABELS.get(user['role'], user['role'])}"}, 403)
         if event["status"] != "review_rejected":
+            conn.execute("ROLLBACK")
             return _json({"error": f"当前状态「{STATUS_LABELS.get(event['status'], event['status'])}」无法执行补正操作，仅「审核退回」状态可补正"}, 400)
         if event["current_handler_role"] != user["role"]:
+            conn.execute("ROLLBACK")
             return _json({"error": f"非当前处理人：当前应由{ROLE_LABELS.get(event['current_handler_role'], event['current_handler_role'])}处理"}, 403)
         if not opinion:
+            conn.execute("ROLLBACK")
             return _json({"error": "补正意见不能为空"}, 400)
         if len(materials) < 1:
+            conn.execute("ROLLBACK")
             return _json({"error": "证据缺失：补正时必须至少上传1份补充材料"}, 400)
         now = datetime.now().isoformat()
-        new_version = event["version"] + 1
-        new_token = generate_scan_token()
         conn.execute(
-            "UPDATE events SET status='submitted', current_handler_role='supervisor', updated_at=?, scan_token=?, version=? WHERE id=?",
-            (now, new_token, new_version, event_id),
+            "UPDATE events SET status='submitted', current_handler_role='supervisor', updated_at=?, scan_token=?, version=? WHERE id=? AND version=?",
+            (now, cred["new_token"], cred["new_version"], event_id, version),
         )
         for mat in materials:
             conn.execute(
@@ -304,12 +347,18 @@ async def supplement_event(request):
             (event_id, "supplement", opinion, "", user["id"], user["role"], now),
         )
         conn.execute(
-            "INSERT INTO audit_log (event_id, action, actor_id, actor_role, detail, created_at) VALUES (?,?,?,?,?,?)",
-            (event_id, "supplement", user["id"], user["role"], f"登记员补正并重新提交：{opinion}", now),
+            "INSERT INTO audit_log (event_id, action, actor_id, actor_role, detail, created_at, scan_record_id, version_before, version_after) VALUES (?,?,?,?,?,?,?,?,?)",
+            (event_id, "supplement", user["id"], user["role"], f"登记员补正并重新提交：{opinion}（已消费扫码凭证#{cred['scan_record_id']}）", now, cred["scan_record_id"], cred["old_version"], cred["new_version"]),
         )
-        conn.commit()
+        conn.execute("COMMIT")
         row = conn.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
         return _json({"event": row_to_dict(row)})
+    except Exception as e:
+        try:
+            conn.execute("ROLLBACK")
+        except Exception:
+            pass
+        raise
     finally:
         conn.close()
 
@@ -323,6 +372,9 @@ async def review_event(request):
     opinion = body.get("opinion", "").strip()
     result = body.get("result", "")
     version = body.get("version")
+    scan_record_id = body.get("scan_record_id")
+    if scan_record_id is None:
+        return _json({"error": "必须携带核验凭证（scan_record_id），请先完成现场扫码核验"}, 400)
     if version is None:
         return _json({"error": "必须提供当前版本号（version字段）用于并发检查"}, 400)
     if result not in ("pass", "reject"):
@@ -331,52 +383,62 @@ async def review_event(request):
         return _json({"error": "处理意见不能为空"}, 400)
     conn = get_db()
     try:
-        row = conn.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
-        if not row:
+        conn.execute("BEGIN IMMEDIATE")
+        cred = consume_scan_credential(conn, event_id, int(scan_record_id), user, "review")
+        if not cred["ok"]:
+            conn.execute("ROLLBACK")
+            return _json({"error": cred["error"]}, 400)
+        ev = conn.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
+        if not ev:
+            conn.execute("ROLLBACK")
             return _json({"error": "医疗事件单不存在"}, 404)
-        event = row_to_dict(row)
+        event = row_to_dict(ev)
         if event["version"] != version:
-            return _json({"error": f"版本冲突：该医疗事件单已被其他操作修改（当前版本{event['version']}，提交版本{version}），请刷新后重试"}, 409)
+            conn.execute("ROLLBACK")
+            return _json({"error": f"版本冲突：该医疗事件单已被其他操作修改（当前版本{event['version']}，提交版本{version}），请刷新后重新扫码"}, 409)
         if user["role"] != "supervisor":
+            conn.execute("ROLLBACK")
             return _json({"error": f"越权操作：仅医疗事件审核主管可审核事件，当前角色为{ROLE_LABELS.get(user['role'], user['role'])}"}, 403)
-        expected_status = "submitted"
-        if event["status"] == "archive_rejected":
-            expected_status = "archive_rejected"
-        elif event["status"] != "submitted":
+        if event["status"] not in ("submitted", "archive_rejected"):
+            conn.execute("ROLLBACK")
             return _json({"error": f"当前状态「{STATUS_LABELS.get(event['status'], event['status'])}」无法执行审核操作"}, 400)
         if event["current_handler_role"] != user["role"]:
+            conn.execute("ROLLBACK")
             return _json({"error": f"非当前处理人：当前应由{ROLE_LABELS.get(event['current_handler_role'], event['current_handler_role'])}处理"}, 403)
         mats = conn.execute("SELECT COUNT(*) FROM materials WHERE event_id = ?", (event_id,)).fetchone()[0]
         if mats < 1:
+            conn.execute("ROLLBACK")
             return _json({"error": "证据缺失：无法审核没有材料的医疗事件单"}, 400)
         now = datetime.now().isoformat()
-        new_version = event["version"] + 1
-        new_token = generate_scan_token()
         if result == "pass":
             new_status = "review_passed"
             new_handler = "reviewer"
-            action_label = "审核通过"
-            audit_detail = f"审核主管通过审核：{opinion}"
+            audit_detail = f"审核主管通过审核：{opinion}（已消费扫码凭证#{cred['scan_record_id']}）"
         else:
             new_status = "review_rejected"
             new_handler = "registrar"
-            action_label = "审核退回"
-            audit_detail = f"审核主管退回：{opinion}"
+            audit_detail = f"审核主管退回：{opinion}（已消费扫码凭证#{cred['scan_record_id']}）"
         conn.execute(
-            "UPDATE events SET status=?, current_handler_role=?, updated_at=?, scan_token=?, version=? WHERE id=?",
-            (new_status, new_handler, now, new_token, new_version, event_id),
+            "UPDATE events SET status=?, current_handler_role=?, updated_at=?, scan_token=?, version=? WHERE id=? AND version=?",
+            (new_status, new_handler, now, cred["new_token"], cred["new_version"], event_id, version),
         )
         conn.execute(
             "INSERT INTO actions (event_id, action_type, opinion, result, actor_id, actor_role, created_at) VALUES (?,?,?,?,?,?,?)",
             (event_id, "review", opinion, result, user["id"], user["role"], now),
         )
         conn.execute(
-            "INSERT INTO audit_log (event_id, action, actor_id, actor_role, detail, created_at) VALUES (?,?,?,?,?,?)",
-            (event_id, f"review_{result}", user["id"], user["role"], audit_detail, now),
+            "INSERT INTO audit_log (event_id, action, actor_id, actor_role, detail, created_at, scan_record_id, version_before, version_after) VALUES (?,?,?,?,?,?,?,?,?)",
+            (event_id, f"review_{result}", user["id"], user["role"], audit_detail, now, cred["scan_record_id"], cred["old_version"], cred["new_version"]),
         )
-        conn.commit()
+        conn.execute("COMMIT")
         row = conn.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
         return _json({"event": row_to_dict(row)})
+    except Exception as e:
+        try:
+            conn.execute("ROLLBACK")
+        except Exception:
+            pass
+        raise
     finally:
         conn.close()
 
@@ -390,6 +452,9 @@ async def archive_review_event(request):
     opinion = body.get("opinion", "").strip()
     result = body.get("result", "")
     version = body.get("version")
+    scan_record_id = body.get("scan_record_id")
+    if scan_record_id is None:
+        return _json({"error": "必须携带核验凭证（scan_record_id），请先完成现场扫码核验"}, 400)
     if version is None:
         return _json({"error": "必须提供当前版本号（version字段）用于并发检查"}, 400)
     if result not in ("archive", "reject"):
@@ -398,46 +463,58 @@ async def archive_review_event(request):
         return _json({"error": "处理意见不能为空"}, 400)
     conn = get_db()
     try:
-        row = conn.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
-        if not row:
+        conn.execute("BEGIN IMMEDIATE")
+        cred = consume_scan_credential(conn, event_id, int(scan_record_id), user, "archive_review")
+        if not cred["ok"]:
+            conn.execute("ROLLBACK")
+            return _json({"error": cred["error"]}, 400)
+        ev = conn.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
+        if not ev:
+            conn.execute("ROLLBACK")
             return _json({"error": "医疗事件单不存在"}, 404)
-        event = row_to_dict(row)
+        event = row_to_dict(ev)
         if event["version"] != version:
-            return _json({"error": f"版本冲突：该医疗事件单已被其他操作修改（当前版本{event['version']}，提交版本{version}），请刷新后重试"}, 409)
+            conn.execute("ROLLBACK")
+            return _json({"error": f"版本冲突：该医疗事件单已被其他操作修改（当前版本{event['version']}，提交版本{version}），请刷新后重新扫码"}, 409)
         if user["role"] != "reviewer":
+            conn.execute("ROLLBACK")
             return _json({"error": f"越权操作：仅复核负责人可执行复核归档，当前角色为{ROLE_LABELS.get(user['role'], user['role'])}"}, 403)
         if event["status"] != "review_passed":
+            conn.execute("ROLLBACK")
             return _json({"error": f"当前状态「{STATUS_LABELS.get(event['status'], event['status'])}」无法执行复核归档操作，仅「审核通过」状态可复核"}, 400)
         if event["current_handler_role"] != user["role"]:
+            conn.execute("ROLLBACK")
             return _json({"error": f"非当前处理人：当前应由{ROLE_LABELS.get(event['current_handler_role'], event['current_handler_role'])}处理"}, 403)
         now = datetime.now().isoformat()
-        new_version = event["version"] + 1
-        new_token = generate_scan_token()
         if result == "archive":
             new_status = "archived"
             new_handler = None
-            action_label = "复核归档"
-            audit_detail = f"复核负责人归档：{opinion}"
+            audit_detail = f"复核负责人归档：{opinion}（已消费扫码凭证#{cred['scan_record_id']}）"
         else:
             new_status = "archive_rejected"
             new_handler = "supervisor"
-            action_label = "复核退回"
-            audit_detail = f"复核负责人退回：{opinion}"
+            audit_detail = f"复核负责人退回：{opinion}（已消费扫码凭证#{cred['scan_record_id']}）"
         conn.execute(
-            "UPDATE events SET status=?, current_handler_role=?, updated_at=?, scan_token=?, version=? WHERE id=?",
-            (new_status, new_handler, now, new_token, new_version, event_id),
+            "UPDATE events SET status=?, current_handler_role=?, updated_at=?, scan_token=?, version=? WHERE id=? AND version=?",
+            (new_status, new_handler, now, cred["new_token"], cred["new_version"], event_id, version),
         )
         conn.execute(
             "INSERT INTO actions (event_id, action_type, opinion, result, actor_id, actor_role, created_at) VALUES (?,?,?,?,?,?,?)",
             (event_id, "archive_review", opinion, result, user["id"], user["role"], now),
         )
         conn.execute(
-            "INSERT INTO audit_log (event_id, action, actor_id, actor_role, detail, created_at) VALUES (?,?,?,?,?,?)",
-            (event_id, f"archive_{result}", user["id"], user["role"], audit_detail, now),
+            "INSERT INTO audit_log (event_id, action, actor_id, actor_role, detail, created_at, scan_record_id, version_before, version_after) VALUES (?,?,?,?,?,?,?,?,?)",
+            (event_id, f"archive_{result}", user["id"], user["role"], audit_detail, now, cred["scan_record_id"], cred["old_version"], cred["new_version"]),
         )
-        conn.commit()
+        conn.execute("COMMIT")
         row = conn.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
         return _json({"event": row_to_dict(row)})
+    except Exception as e:
+        try:
+            conn.execute("ROLLBACK")
+        except Exception:
+            pass
+        raise
     finally:
         conn.close()
 
@@ -452,57 +529,83 @@ async def scan_code(request):
         return _json({"error": "扫码内容不能为空"}, 400)
     conn = get_db()
     try:
+        conn.execute("BEGIN IMMEDIATE")
         parts = code.split(":")
         event_code = parts[0] if len(parts) >= 1 else code
         scan_token = parts[1] if len(parts) >= 2 else ""
         row = conn.execute("SELECT * FROM events WHERE code = ?", (event_code,)).fetchone()
         now = datetime.now().isoformat()
         if not row:
-            conn.execute(
-                "INSERT INTO scan_records (code, event_id, scanner_id, scanner_role, success, message, scanned_at) VALUES (?,?,?,?,?,?,?)",
-                (code, None, user["id"], user["role"], 0, "无效码：该编码不存在于系统中", now),
+            cur = conn.execute(
+                "INSERT INTO scan_records (code, event_id, scanner_id, scanner_role, success, message, scanned_at, scan_token, consumed_at, consumed_by, consumed_by_user_id, event_version_before, event_version_after) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (code, None, user["id"], user["role"], 0, "无效码：该编码不存在于系统中", now, "", None, "", None, None, None),
             )
-            conn.commit()
-            return _json({"success": False, "message": "无效码：该编码不存在于系统中"}, 400)
+            scan_record_id = cur.lastrowid
+            conn.execute("COMMIT")
+            return _json({"success": False, "message": "无效码：该编码不存在于系统中", "scan_record_id": scan_record_id}, 400)
         event = row_to_dict(row)
+        # 2. 重复码检测：scan_token != 当前事件scan_token
         if scan_token and scan_token != event["scan_token"]:
-            conn.execute(
-                "INSERT INTO scan_records (code, event_id, scanner_id, scanner_role, success, message, scanned_at) VALUES (?,?,?,?,?,?,?)",
-                (code, event["id"], user["id"], user["role"], 0, "重复码：该核验码已过期或已被使用，当前步骤可能已被处理", now),
+            cur = conn.execute(
+                "INSERT INTO scan_records (code, event_id, scanner_id, scanner_role, success, message, scanned_at, scan_token, consumed_at, consumed_by, consumed_by_user_id, event_version_before, event_version_after) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (code, event["id"], user["id"], user["role"], 0, "重复码：该核验码已过期或已被使用，当前步骤可能已被处理", now, scan_token, None, "", None, None, None),
             )
-            conn.commit()
-            return _json({"success": False, "message": "重复码：该核验码已过期或已被使用，当前步骤可能已被处理"}, 400)
+            scan_record_id = cur.lastrowid
+            conn.execute("COMMIT")
+            return _json({"success": False, "message": "重复码：该核验码已过期或已被使用，当前步骤可能已被处理", "scan_record_id": scan_record_id}, 400)
         if event["status"] == "archived":
-            conn.execute(
-                "INSERT INTO scan_records (code, event_id, scanner_id, scanner_role, success, message, scanned_at) VALUES (?,?,?,?,?,?,?)",
-                (code, event["id"], user["id"], user["role"], 0, "该医疗事件单已归档，无法操作", now),
+            cur = conn.execute(
+                "INSERT INTO scan_records (code, event_id, scanner_id, scanner_role, success, message, scanned_at, scan_token, consumed_at, consumed_by, consumed_by_user_id, event_version_before, event_version_after) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (code, event["id"], user["id"], user["role"], 0, "该医疗事件单已归档，无法操作", now, event["scan_token"], None, "", None, None, None),
             )
-            conn.commit()
-            return _json({"success": False, "message": "该医疗事件单已归档，无法操作"}, 400)
+            scan_record_id = cur.lastrowid
+            conn.execute("COMMIT")
+            return _json({"success": False, "message": "该医疗事件单已归档，无法操作", "scan_record_id": scan_record_id}, 400)
+        # 3. 非当前处理人检测
         if event["current_handler_role"] and event["current_handler_role"] != user["role"]:
             handler_label = ROLE_LABELS.get(event["current_handler_role"], event["current_handler_role"])
             scanner_label = ROLE_LABELS.get(user["role"], user["role"])
             msg = f"非当前处理人：当前应由{handler_label}处理，您是{scanner_label}"
-            conn.execute(
-                "INSERT INTO scan_records (code, event_id, scanner_id, scanner_role, success, message, scanned_at) VALUES (?,?,?,?,?,?,?)",
-                (code, event["id"], user["id"], user["role"], 0, msg, now),
+            cur = conn.execute(
+                "INSERT INTO scan_records (code, event_id, scanner_id, scanner_role, success, message, scanned_at, scan_token, consumed_at, consumed_by, consumed_by_user_id, event_version_before, event_version_after) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (code, event["id"], user["id"], user["role"], 0, msg, now, event["scan_token"], None, "", None, None, None),
             )
-            conn.commit()
-            return _json({"success": False, "message": msg}, 403)
-        conn.execute(
-            "INSERT INTO scan_records (code, event_id, scanner_id, scanner_role, success, message, scanned_at) VALUES (?,?,?,?,?,?,?)",
-            (code, event["id"], user["id"], user["role"], 1, "核验通过", now),
+            scan_record_id = cur.lastrowid
+            conn.execute(
+                "INSERT INTO audit_log (event_id, action, actor_id, actor_role, detail, created_at, scan_record_id, version_before, version_after) VALUES (?,?,?,?,?,?,?,?,?)",
+                (event["id"], "scan_reject", user["id"], user["role"], msg, now, scan_record_id, event["version"], event["version"]),
+            )
+            conn.execute("COMMIT")
+            return _json({"success": False, "message": msg, "scan_record_id": scan_record_id}, 403)
+        # 4. 核验通过
+        cur = conn.execute(
+            "INSERT INTO scan_records (code, event_id, scanner_id, scanner_role, success, message, scanned_at, scan_token, consumed_at, consumed_by, consumed_by_user_id, event_version_before, event_version_after) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (code, event["id"], user["id"], user["role"], 1, "核验通过", now, event["scan_token"], None, "", None, event["version"], event["version"]),
         )
+        scan_record_id = cur.lastrowid
         conn.execute(
-            "INSERT INTO audit_log (event_id, action, actor_id, actor_role, detail, created_at) VALUES (?,?,?,?,?,?)",
-            (event["id"], "scan", user["id"], user["role"], f"{ROLE_LABELS.get(user['role'], user['role'])}扫码核验通过", now),
+            "INSERT INTO audit_log (event_id, action, actor_id, actor_role, detail, created_at, scan_record_id, version_before, version_after) VALUES (?,?,?,?,?,?,?,?,?)",
+            (event["id"], "scan", user["id"], user["role"], f"{ROLE_LABELS.get(user['role'], user['role'])}扫码核验通过，生成凭证#{scan_record_id}", now, scan_record_id, event["version"], event["version"]),
         )
-        conn.commit()
+        conn.execute("COMMIT")
         mats = conn.execute("SELECT * FROM materials WHERE event_id = ? ORDER BY uploaded_at", (event["id"],)).fetchall()
         event["materials"] = [row_to_dict(m) for m in mats]
         acts = conn.execute("SELECT a.*, u.name as actor_name FROM actions a LEFT JOIN users u ON a.actor_id = u.id WHERE a.event_id = ? ORDER BY a.created_at", (event["id"],)).fetchall()
         event["actions"] = [row_to_dict(a) for a in acts]
-        return _json({"success": True, "message": "核验通过", "event": event})
+        return _json({
+            "success": True,
+            "message": "核验通过",
+            "event": event,
+            "scan_record_id": scan_record_id,
+            "scan_token": event["scan_token"],
+            "scanner": {"id": user["id"], "name": user.get("name", ""), "role": user["role"]},
+        })
+    except Exception as e:
+        try:
+            conn.execute("ROLLBACK")
+        except Exception:
+            pass
+        raise
     finally:
         conn.close()
 
@@ -512,99 +615,164 @@ async def batch_process(request):
     if isinstance(user, JSONResponse):
         return user
     body = await _body(request)
-    event_ids = body.get("event_ids", [])
-    action = body.get("action", "")
-    result = body.get("result", "")
-    opinion = body.get("opinion", "").strip()
-    if not event_ids:
-        return _json({"error": "事件ID列表不能为空"}, 400)
-    if not action:
-        return _json({"error": "操作类型不能为空"}, 400)
+    # 支持两种格式：[{event_id, scan_record_id, opinion}] 或 {event_ids:[], scan_record_ids:[], action, result, opinion}
+    items = body.get("items") or []
+    if not items:
+        # 兼容旧格式
+        event_ids = body.get("event_ids", [])
+        scan_record_ids = body.get("scan_record_ids", [])
+        action = body.get("action", "")
+        result = body.get("result", "")
+        opinion = body.get("opinion", "").strip()
+        if not event_ids:
+            return _json({"error": "事件ID列表不能为空"}, 400)
+        if not action:
+            return _json({"error": "操作类型不能为空"}, 400)
+        if len(scan_record_ids) != len(event_ids):
+            return _json({"error": "批量处理要求每个事件必须有独立的核验凭证（scan_record_ids 与 event_ids 数量不一致）"}, 400)
+        for i, eid in enumerate(event_ids):
+            items.append({
+                "event_id": eid,
+                "scan_record_id": scan_record_ids[i],
+                "opinion": opinion,
+                "result": result,
+                "action": action,
+            })
+    else:
+        if len({(it.get("action"), it.get("result")) for it in items}) > 1:
+            return _json({"error": "批量处理同一批次操作与结果必须一致"}, 400)
+        items = list(items)
+
+    action = items[0].get("action", "")
+    result = items[0].get("result", "")
+
     results = []
-    now = datetime.now().isoformat()
     conn = get_db()
     try:
-        for eid in event_ids:
-            row = conn.execute("SELECT * FROM events WHERE id = ?", (eid,)).fetchone()
-            if not row:
-                results.append({"id": eid, "success": False, "message": "医疗事件单不存在"})
+        for it in items:
+            eid = int(it.get("event_id"))
+            sr_id = it.get("scan_record_id")
+            opinion = (it.get("opinion") or "").strip()
+            if sr_id is None:
+                results.append({"id": eid, "success": False, "message": "必须携带核验凭证（scan_record_id），请先完成现场扫码核验"})
                 continue
-            event = row_to_dict(row)
-            if event["current_handler_role"] != user["role"]:
-                handler_label = ROLE_LABELS.get(event["current_handler_role"], event["current_handler_role"])
-                results.append({"id": eid, "success": False, "message": f"非当前处理人：应由{handler_label}处理"})
-                continue
-            if action == "review":
-                if user["role"] != "supervisor":
-                    results.append({"id": eid, "success": False, "message": "越权操作：仅审核主管可批量审核"})
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                # 消费凭证
+                cred = consume_scan_credential(conn, eid, int(sr_id), user, f"batch_{action}")
+                if not cred["ok"]:
+                    conn.execute("ROLLBACK")
+                    results.append({"id": eid, "success": False, "message": cred["error"]})
                     continue
-                if event["status"] not in ("submitted", "archive_rejected"):
-                    results.append({"id": eid, "success": False, "message": f"状态「{STATUS_LABELS.get(event['status'], event['status'])}」不可审核"})
+                ev = conn.execute("SELECT * FROM events WHERE id = ?", (eid,)).fetchone()
+                if not ev:
+                    conn.execute("ROLLBACK")
+                    results.append({"id": eid, "success": False, "message": "医疗事件单不存在"})
                     continue
-                if not opinion:
-                    results.append({"id": eid, "success": False, "message": "处理意见不能为空"})
-                    continue
-                if result == "pass":
-                    new_status = "review_passed"
-                    new_handler = "reviewer"
-                elif result == "reject":
-                    new_status = "review_rejected"
-                    new_handler = "registrar"
+                event = row_to_dict(ev)
+
+                if action == "review":
+                    if user["role"] != "supervisor":
+                        conn.execute("ROLLBACK")
+                        results.append({"id": eid, "success": False, "message": "越权操作：仅审核主管可批量审核"})
+                        continue
+                    if event["status"] not in ("submitted", "archive_rejected"):
+                        conn.execute("ROLLBACK")
+                        results.append({"id": eid, "success": False, "message": f"状态「{STATUS_LABELS.get(event['status'], event['status'])}」不可审核"})
+                        continue
+                    if event["current_handler_role"] != user["role"]:
+                        conn.execute("ROLLBACK")
+                        handler_label = ROLE_LABELS.get(event["current_handler_role"], event["current_handler_role"])
+                        results.append({"id": eid, "success": False, "message": f"非当前处理人：应由{handler_label}处理"})
+                        continue
+                    if not opinion:
+                        conn.execute("ROLLBACK")
+                        results.append({"id": eid, "success": False, "message": "处理意见不能为空"})
+                        continue
+                    if result == "pass":
+                        new_status = "review_passed"
+                        new_handler = "reviewer"
+                    elif result == "reject":
+                        new_status = "review_rejected"
+                        new_handler = "registrar"
+                    else:
+                        conn.execute("ROLLBACK")
+                        results.append({"id": eid, "success": False, "message": "审核结果必须为 pass 或 reject"})
+                        continue
+                    mats = conn.execute("SELECT COUNT(*) FROM materials WHERE event_id = ?", (eid,)).fetchone()[0]
+                    if mats < 1:
+                        conn.execute("ROLLBACK")
+                        results.append({"id": eid, "success": False, "message": "证据缺失：无法审核没有材料的医疗事件单"})
+                        continue
+                    now = datetime.now().isoformat()
+                    conn.execute(
+                        "UPDATE events SET status=?, current_handler_role=?, updated_at=?, scan_token=?, version=? WHERE id=? AND version=?",
+                        (new_status, new_handler, now, cred["new_token"], cred["new_version"], eid, event["version"]),
+                    )
+                    conn.execute(
+                        "INSERT INTO actions (event_id, action_type, opinion, result, actor_id, actor_role, created_at) VALUES (?,?,?,?,?,?,?)",
+                        (eid, "batch_review", opinion, result, user["id"], user["role"], now),
+                    )
+                    conn.execute(
+                        "INSERT INTO audit_log (event_id, action, actor_id, actor_role, detail, created_at, scan_record_id, version_before, version_after) VALUES (?,?,?,?,?,?,?,?,?)",
+                        (eid, f"batch_review_{result}", user["id"], user["role"], f"批量审核{'通过' if result == 'pass' else '退回'}：{opinion}（已消费扫码凭证#{cred['scan_record_id']}）", now, cred["scan_record_id"], cred["old_version"], cred["new_version"]),
+                    )
+                    conn.execute("COMMIT")
+                    results.append({"id": eid, "success": True, "message": f"审核{'通过' if result == 'pass' else '退回'}成功"})
+
+                elif action == "archive_review":
+                    if user["role"] != "reviewer":
+                        conn.execute("ROLLBACK")
+                        results.append({"id": eid, "success": False, "message": "越权操作：仅复核负责人可批量复核"})
+                        continue
+                    if event["status"] != "review_passed":
+                        conn.execute("ROLLBACK")
+                        results.append({"id": eid, "success": False, "message": f"状态「{STATUS_LABELS.get(event['status'], event['status'])}」不可复核归档"})
+                        continue
+                    if event["current_handler_role"] != user["role"]:
+                        conn.execute("ROLLBACK")
+                        handler_label = ROLE_LABELS.get(event["current_handler_role"], event["current_handler_role"])
+                        results.append({"id": eid, "success": False, "message": f"非当前处理人：应由{handler_label}处理"})
+                        continue
+                    if not opinion:
+                        conn.execute("ROLLBACK")
+                        results.append({"id": eid, "success": False, "message": "处理意见不能为空"})
+                        continue
+                    if result == "archive":
+                        new_status = "archived"
+                        new_handler = None
+                    elif result == "reject":
+                        new_status = "archive_rejected"
+                        new_handler = "supervisor"
+                    else:
+                        conn.execute("ROLLBACK")
+                        results.append({"id": eid, "success": False, "message": "复核结果必须为 archive 或 reject"})
+                        continue
+                    now = datetime.now().isoformat()
+                    conn.execute(
+                        "UPDATE events SET status=?, current_handler_role=?, updated_at=?, scan_token=?, version=? WHERE id=? AND version=?",
+                        (new_status, new_handler, now, cred["new_token"], cred["new_version"], eid, event["version"]),
+                    )
+                    conn.execute(
+                        "INSERT INTO actions (event_id, action_type, opinion, result, actor_id, actor_role, created_at) VALUES (?,?,?,?,?,?,?)",
+                        (eid, "batch_archive_review", opinion, result, user["id"], user["role"], now),
+                    )
+                    conn.execute(
+                        "INSERT INTO audit_log (event_id, action, actor_id, actor_role, detail, created_at, scan_record_id, version_before, version_after) VALUES (?,?,?,?,?,?,?,?,?)",
+                        (eid, f"batch_archive_{result}", user["id"], user["role"], f"批量复核{'归档' if result == 'archive' else '退回'}：{opinion}（已消费扫码凭证#{cred['scan_record_id']}）", now, cred["scan_record_id"], cred["old_version"], cred["new_version"]),
+                    )
+                    conn.execute("COMMIT")
+                    results.append({"id": eid, "success": True, "message": f"复核{'归档' if result == 'archive' else '退回'}成功"})
                 else:
-                    results.append({"id": eid, "success": False, "message": "审核结果必须为 pass 或 reject"})
-                    continue
-                new_version = event["version"] + 1
-                new_token = generate_scan_token()
-                conn.execute(
-                    "UPDATE events SET status=?, current_handler_role=?, updated_at=?, scan_token=?, version=? WHERE id=?",
-                    (new_status, new_handler, now, new_token, new_version, eid),
-                )
-                conn.execute(
-                    "INSERT INTO actions (event_id, action_type, opinion, result, actor_id, actor_role, created_at) VALUES (?,?,?,?,?,?,?)",
-                    (eid, "batch_review", opinion, result, user["id"], user["role"], now),
-                )
-                conn.execute(
-                    "INSERT INTO audit_log (event_id, action, actor_id, actor_role, detail, created_at) VALUES (?,?,?,?,?,?)",
-                    (eid, f"batch_review_{result}", user["id"], user["role"], f"批量审核{'通过' if result == 'pass' else '退回'}：{opinion}", now),
-                )
-                results.append({"id": eid, "success": True, "message": f"审核{'通过' if result == 'pass' else '退回'}成功"})
-            elif action == "archive_review":
-                if user["role"] != "reviewer":
-                    results.append({"id": eid, "success": False, "message": "越权操作：仅复核负责人可批量复核"})
-                    continue
-                if event["status"] != "review_passed":
-                    results.append({"id": eid, "success": False, "message": f"状态「{STATUS_LABELS.get(event['status'], event['status'])}」不可复核归档"})
-                    continue
-                if not opinion:
-                    results.append({"id": eid, "success": False, "message": "处理意见不能为空"})
-                    continue
-                if result == "archive":
-                    new_status = "archived"
-                    new_handler = None
-                elif result == "reject":
-                    new_status = "archive_rejected"
-                    new_handler = "supervisor"
-                else:
-                    results.append({"id": eid, "success": False, "message": "复核结果必须为 archive 或 reject"})
-                    continue
-                new_version = event["version"] + 1
-                new_token = generate_scan_token()
-                conn.execute(
-                    "UPDATE events SET status=?, current_handler_role=?, updated_at=?, scan_token=?, version=? WHERE id=?",
-                    (new_status, new_handler, now, new_token, new_version, eid),
-                )
-                conn.execute(
-                    "INSERT INTO actions (event_id, action_type, opinion, result, actor_id, actor_role, created_at) VALUES (?,?,?,?,?,?,?)",
-                    (eid, "batch_archive_review", opinion, result, user["id"], user["role"], now),
-                )
-                conn.execute(
-                    "INSERT INTO audit_log (event_id, action, actor_id, actor_role, detail, created_at) VALUES (?,?,?,?,?,?)",
-                    (eid, f"batch_archive_{result}", user["id"], user["role"], f"批量复核{'归档' if result == 'archive' else '退回'}：{opinion}", now),
-                )
-                results.append({"id": eid, "success": True, "message": f"复核{'归档' if result == 'archive' else '退回'}成功"})
-            else:
-                results.append({"id": eid, "success": False, "message": f"不支持的操作类型：{action}"})
-        conn.commit()
+                    conn.execute("ROLLBACK")
+                    results.append({"id": eid, "success": False, "message": f"不支持的操作类型：{action}"})
+            except Exception as e:
+                try:
+                    conn.execute("ROLLBACK")
+                except Exception:
+                    pass
+                results.append({"id": eid, "success": False, "message": f"内部错误：{str(e)}"})
+
         return _json({"results": results})
     finally:
         conn.close()

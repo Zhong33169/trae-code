@@ -1,11 +1,11 @@
 import { createSignal, Show, For, onMount } from 'solid-js';
-import { useNavigate, useParams } from '@solidjs/router';
-import { useAuth } from '../App';
-import { api } from '../api';
-import type { Event } from '../types';
-import { STATUS_LABELS, EVENT_TYPE_LABELS, SEVERITY_LABELS, ROLE_LABELS } from '../types';
+import { useNavigate, useParams, A } from '@solidjs/router';
+import { useAuth } from '../../auth';
+import { api } from '../../api';
+import type { Event, ScanCredential } from '../../types';
+import { STATUS_LABELS, EVENT_TYPE_LABELS, SEVERITY_LABELS, ROLE_LABELS } from '../../types';
 
-export function EventDetailPage() {
+export default function EventDetailPage() {
   const params = useParams();
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -16,8 +16,9 @@ export function EventDetailPage() {
   const [actionSuccess, setActionSuccess] = createSignal('');
 
   const [scanCode, setScanCode] = createSignal('');
-  const [scanResult, setScanResult] = createSignal<{ success: boolean; message: string } | null>(null);
+  const [scanResult, setScanResult] = createSignal<{ success: boolean; message: string; scan_record_id?: number } | null>(null);
   const [scanVerified, setScanVerified] = createSignal(false);
+  const [credential, setCredential] = createSignal<ScanCredential | null>(null);
 
   const [opinion, setOpinion] = createSignal('');
   const [reviewResult, setReviewResult] = createSignal('');
@@ -31,6 +32,17 @@ export function EventDetailPage() {
     try {
       const data = await api.getEvent(parseInt(params.id));
       setEvent(data.event);
+      const cred = api.getScanCredential(parseInt(params.id));
+      if (cred) {
+        const fresh = await api.getEvent(parseInt(params.id));
+        if (fresh.event.scan_token === cred.scan_token && fresh.event.version === cred.event_version) {
+          setCredential(cred);
+          setScanVerified(true);
+          setScanResult({ success: true, message: '已核验（凭证有效）', scan_record_id: cred.scan_record_id });
+        } else {
+          api.clearScanCredential(parseInt(params.id));
+        }
+      }
     } catch (err: any) {
       setError(err?.error || '加载失败');
     } finally {
@@ -76,34 +88,59 @@ export function EventDetailPage() {
     if (!scanCode().trim()) return;
     try {
       const result = await api.scanCode(scanCode().trim());
-      setScanResult({ success: result.success, message: result.message });
-      if (result.success) {
+      setScanResult({ success: result.success, message: result.message, scan_record_id: result.scan_record_id });
+      if (result.success && result.event && result.scan_record_id && result.scan_token) {
+        const cred: ScanCredential = {
+          scan_record_id: result.scan_record_id,
+          scan_token: result.scan_token,
+          event_id: result.event.id,
+          scanner_id: result.scanner?.id || user()!.id,
+          scanner_role: result.scanner?.role || user()!.role,
+          scanned_at: new Date().toISOString(),
+          event_code: result.event.code,
+          event_version: result.event.version,
+        };
+        api.saveScanCredential(result.event.id, cred);
+        setCredential(cred);
         setScanVerified(true);
+      } else {
+        setScanVerified(false);
+        setCredential(null);
       }
     } catch (err: any) {
       setScanResult({ success: false, message: err?.error || err?.message || '扫码失败' });
       setScanVerified(false);
+      setCredential(null);
     }
+  };
+
+  const clearCredentialAndUI = () => {
+    const e = ev();
+    if (e) api.clearScanCredential(e.id);
+    setCredential(null);
+    setScanVerified(false);
+    setScanCode('');
+    setScanResult(null);
   };
 
   const handleSubmit = async () => {
     const e = ev();
     if (!e) return;
-    if (!scanVerified()) {
+    const cred = credential();
+    if (!cred) {
       setActionError('请先完成扫码核验');
       return;
     }
     setActionError('');
     setActionSuccess('');
     try {
-      const data = await api.submitEvent(e.id, e.version);
+      const data = await api.submitEvent(e.id, e.version, cred.scan_record_id);
       setEvent(data.event);
       setActionSuccess('提交成功，已转审核主管');
-      setScanVerified(false);
-      setScanCode('');
-      setScanResult(null);
+      clearCredentialAndUI();
     } catch (err: any) {
       setActionError(err?.error || '操作失败');
+      clearCredentialAndUI();
     }
   };
 
@@ -119,23 +156,23 @@ export function EventDetailPage() {
       setActionError('补正时必须至少上传1份补充材料');
       return;
     }
-    if (!scanVerified()) {
+    const cred = credential();
+    if (!cred) {
       setActionError('请先完成扫码核验');
       return;
     }
     setActionError('');
     setActionSuccess('');
     try {
-      const data = await api.supplementEvent(e.id, e.version, opinion(), mats);
+      const data = await api.supplementEvent(e.id, e.version, cred.scan_record_id, opinion(), mats);
       setEvent(data.event);
       setActionSuccess('补正提交成功，已转审核主管');
-      setScanVerified(false);
-      setScanCode('');
-      setScanResult(null);
+      clearCredentialAndUI();
       setOpinion('');
       setSuppMaterials([{ name: '', material_type: 'document', content: '' }]);
     } catch (err: any) {
       setActionError(err?.error || '操作失败');
+      clearCredentialAndUI();
     }
   };
 
@@ -146,22 +183,22 @@ export function EventDetailPage() {
       setActionError('处理意见不能为空');
       return;
     }
-    if (!scanVerified()) {
+    const cred = credential();
+    if (!cred) {
       setActionError('请先完成扫码核验');
       return;
     }
     setActionError('');
     setActionSuccess('');
     try {
-      const data = await api.reviewEvent(e.id, e.version, opinion(), result);
+      const data = await api.reviewEvent(e.id, e.version, cred.scan_record_id, opinion(), result);
       setEvent(data.event);
       setActionSuccess(result === 'pass' ? '审核通过，已转复核负责人' : '已退回登记员补正');
-      setScanVerified(false);
-      setScanCode('');
-      setScanResult(null);
+      clearCredentialAndUI();
       setOpinion('');
     } catch (err: any) {
       setActionError(err?.error || '操作失败');
+      clearCredentialAndUI();
     }
   };
 
@@ -172,22 +209,22 @@ export function EventDetailPage() {
       setActionError('处理意见不能为空');
       return;
     }
-    if (!scanVerified()) {
+    const cred = credential();
+    if (!cred) {
       setActionError('请先完成扫码核验');
       return;
     }
     setActionError('');
     setActionSuccess('');
     try {
-      const data = await api.archiveReviewEvent(e.id, e.version, opinion(), result);
+      const data = await api.archiveReviewEvent(e.id, e.version, cred.scan_record_id, opinion(), result);
       setEvent(data.event);
       setActionSuccess(result === 'archive' ? '已归档' : '已退回审核主管');
-      setScanVerified(false);
-      setScanCode('');
-      setScanResult(null);
+      clearCredentialAndUI();
       setOpinion('');
     } catch (err: any) {
       setActionError(err?.error || '操作失败');
+      clearCredentialAndUI();
     }
   };
 
@@ -236,7 +273,7 @@ export function EventDetailPage() {
                     </Show>
                   </div>
                 </div>
-                <button class="btn btn-outline" onClick={() => navigate('/events')}>返回列表</button>
+                <A href="/events" class="btn btn-outline" style="text-decoration: none;">返回列表</A>
               </div>
 
               <Show when={actionSuccess()}>
@@ -251,6 +288,11 @@ export function EventDetailPage() {
                   <h4>现场扫码核验（必须步骤）</h4>
                   <p style="font-size: 13px; color: var(--gray-500); margin-bottom: 8px;">
                     当前事件核验码：<span class="qr-display" style="display: inline;">{e().code}:{e().scan_token}</span>
+                    <Show when={credential()}>
+                      <span class="badge badge-green" style="margin-left: 10px;">
+                        凭证 #{credential()!.scan_record_id} 已生效
+                      </span>
+                    </Show>
                   </p>
                   <div class="scan-input-row">
                     <input
@@ -265,10 +307,15 @@ export function EventDetailPage() {
                   <Show when={scanResult()}>
                     <div class={`alert ${scanResult()!.success ? 'alert-success' : 'alert-error'}`} style="margin-top: 8px;">
                       {scanResult()!.message}
+                      <Show when={!scanResult()!.success && scanResult()!.scan_record_id}>
+                        <span style="color: var(--gray-400); font-size: 12px; margin-left: 8px;">(失败凭证#{scanResult()!.scan_record_id})</span>
+                      </Show>
                     </div>
                   </Show>
                   <Show when={scanVerified()}>
-                    <div class="alert alert-success" style="margin-top: 8px;">核验通过，可以执行操作</div>
+                    <div class="alert alert-success" style="margin-top: 8px;">
+                      核验通过，凭证 #{credential()?.scan_record_id}，可以执行操作
+                    </div>
                   </Show>
                 </div>
               </Show>

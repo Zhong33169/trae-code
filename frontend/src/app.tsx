@@ -1,103 +1,170 @@
-import type { JSX, ParentProps } from 'solid-js';
-import { createContext, useContext, createSignal, Show, onMount } from 'solid-js';
-import { useNavigate, useLocation } from '@solidjs/router';
+// @refresh reload
+import { createSignal, onMount, Suspense, Show, ParentProps, ErrorBoundary, onCleanup } from 'solid-js';
+import { MetaProvider, Title, Meta, Link } from '@solidjs/meta';
+import { Router } from '@solidjs/router';
+import { FileRoutes } from '@solidjs/start/router';
+import { AuthProvider, useAuth } from './auth';
 import { api } from './api';
-import type { User } from './types';
 import { ROLE_LABELS } from './types';
+import './index.css';
 
-interface AuthCtx {
-  user: () => User | null;
-  setUser: (u: User | null) => void;
-  isLoggedIn: () => boolean;
-  doLogin: (username: string, password: string) => Promise<void>;
-  doLogout: () => void;
-}
+function NavBar() {
+  const { user, setUser } = useAuth();
+  const [currentPath, setCurrentPath] = createSignal(window.location.pathname);
 
-const AuthContext = createContext<AuthCtx>();
-
-export function useAuth() {
-  return useContext(AuthContext)!;
-}
-
-export function App(props: ParentProps) {
-  const [user, setUser] = createSignal<User | null>(null);
-  const navigate = useNavigate();
-  const location = useLocation();
-
-  const isLoggedIn = () => !!user();
-
-  onMount(() => {
-    const stored = api.getStoredUser();
-    if (stored) {
-      setUser(stored);
-    }
-  });
-
-  onMount(() => {
-    if (!isLoggedIn() && location.pathname !== '/login') {
-      navigate('/login', { replace: true });
-    }
-  });
-
-  const doLogin = async (username: string, password: string) => {
-    const data = await api.login(username, password);
-    setUser(data.user);
-    navigate('/events', { replace: true });
-  };
-
-  const doLogout = () => {
+  const handleLogout = () => {
     api.logout();
     setUser(null);
-    navigate('/login', { replace: true });
+    window.location.href = '/login';
   };
 
-  const ctx: AuthCtx = { user, setUser, isLoggedIn, doLogin, doLogout };
+  let popHandler: (() => void) | null = null;
 
-  const navLinks = [
-    { path: '/events', label: '医疗事件' },
-    { path: '/scan', label: '扫码核验' },
-    { path: '/batch', label: '批量处理' },
-    { path: '/statistics', label: '统计分析' },
-    { path: '/audit', label: '审计日志' },
-  ];
+  onMount(() => {
+    popHandler = () => setCurrentPath(window.location.pathname);
+    window.addEventListener('popstate', popHandler);
+    const origPush = history.pushState.bind(history);
+    history.pushState = function (...args) {
+      origPush(...args);
+      setTimeout(() => setCurrentPath(window.location.pathname), 0);
+    };
+  });
 
-  const isActive = (path: string) => {
-    const p = location.pathname;
-    if (path === '/events') return p === '/events' || p.startsWith('/events/');
-    return p === path;
+  onCleanup(() => {
+    if (popHandler) window.removeEventListener('popstate', popHandler);
+  });
+
+  const linkClass = (href: string) => {
+    const path = currentPath();
+    const active = href === '/events' ? (path === '/events' || path.startsWith('/events/')) : path === href;
+    return active ? 'active' : '';
   };
 
   return (
-    <AuthContext.Provider value={ctx}>
-      <Show
-        when={isLoggedIn()}
-        fallback={<>{props.children}</>}
-      >
-        <nav class="nav-bar">
-          <div class="nav-brand">医疗事件管理系统</div>
-          <div class="nav-links">
-            {navLinks.map((l) => (
-              <a
-                href={l.path}
-                class={isActive(l.path) ? 'active' : ''}
-                onClick={(e) => {
-                  e.preventDefault();
-                  navigate(l.path);
-                }}
-              >
-                {l.label}
-              </a>
-            ))}
-          </div>
-          <div class="nav-user">
-            <span>{user()?.name} ({ROLE_LABELS[user()?.role || '']})</span>
-            <button class="btn btn-outline btn-sm" onClick={doLogout}>退出</button>
-          </div>
-        </nav>
+    <nav class="nav-bar">
+      <div class="nav-brand">
+        <a href="/events">医疗事件管理系统</a>
+      </div>
+      <div class="nav-links">
+        <a href="/events" class={linkClass('/events')}>医疗事件</a>
+        <a href="/scan" class={linkClass('/scan')}>扫码核验</a>
+        <a href="/batch" class={linkClass('/batch')}>批量处理</a>
+        <a href="/statistics" class={linkClass('/statistics')}>统计</a>
+        <a href="/audit" class={linkClass('/audit')}>审计</a>
+      </div>
+      <div class="nav-user">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 13px; color: var(--gray-500);">
+            {user()?.name}
+          </span>
+          <span class="badge badge-blue">
+            {ROLE_LABELS[user()?.role || ''] || user()?.role}
+          </span>
+          <button class="btn btn-outline btn-sm" onClick={handleLogout}>退出</button>
+        </div>
+      </div>
+    </nav>
+  );
+}
+
+function AuthGuard(props: ParentProps) {
+  const { user, setUser } = useAuth();
+  const [initialized, setInitialized] = createSignal(false);
+
+  onMount(async () => {
+    const stored = api.getStoredUser();
+    if (stored) {
+      try {
+        const data = await api.getMe();
+        setUser(data.user);
+      } catch (err) {
+        api.logout();
+        setUser(null);
+      }
+    }
+    const pathname = window.location.pathname;
+    const isLogin = pathname === '/login' || pathname === '/';
+    if (!api.getStoredUser() && !isLogin) {
+      window.location.href = '/login';
+    } else if (api.getStoredUser() && isLogin) {
+      window.location.href = '/events';
+    }
+    setInitialized(true);
+  });
+
+  const needsLoginRoute = () => {
+    const p = window.location.pathname;
+    return p !== '/login';
+  };
+
+  return (
+    <Show when={initialized()} fallback={
+      <div class="loading">加载中...</div>
+    }>
+      <Show when={user() && needsLoginRoute()}>
+        <NavBar />
+        <div class="page-container">
+          <ErrorBoundary fallback={(err, reset) => (
+            <div class="alert alert-error">
+              <strong>页面错误</strong>：{String(err)}
+              <button class="btn btn-outline btn-sm" onClick={() => reset()} style="margin-left: 10px;">重试</button>
+            </div>
+          )}>
+            <Suspense fallback={<div class="loading">加载中...</div>}>
+              {props.children}
+            </Suspense>
+          </ErrorBoundary>
+        </div>
+      </Show>
+      <Show when={!user() || !needsLoginRoute()}>
         <div class="page-container">
           {props.children}
         </div>
       </Show>
-    </AuthContext.Provider>
+    </Show>
+  );
+}
+
+interface DocumentProps {
+  assets?: any;
+  scripts?: any;
+}
+
+export default function App(props: DocumentProps) {
+  return (
+    <MetaProvider>
+      <html lang="zh-CN">
+        <head>
+          <Meta charset="utf-8" />
+          <Meta name="viewport" content="width=device-width, initial-scale=1" />
+          <Meta name="description" content="医疗事件管理系统" />
+          <Title>医疗事件管理系统</Title>
+          <Link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%8F%A5%3C/text%3E%3C/svg%3E" />
+          {props.assets}
+        </head>
+        <body>
+          <AuthProvider>
+            <ErrorBoundary fallback={(err) => (
+              <div class="alert alert-error">
+                <strong>应用错误</strong>：{String(err)}
+              </div>
+            )}>
+              <Router>
+                <AuthGuard>
+                  <ErrorBoundary fallback={(err) => (
+                    <div class="alert alert-error">
+                      <strong>路由错误</strong>：{String(err)}
+                    </div>
+                  )}>
+                    <FileRoutes />
+                  </ErrorBoundary>
+                </AuthGuard>
+              </Router>
+            </ErrorBoundary>
+          </AuthProvider>
+          {props.scripts}
+        </body>
+      </html>
+    </MetaProvider>
   );
 }

@@ -1,17 +1,17 @@
 import { createSignal, Show, For, onMount } from 'solid-js';
-import { useNavigate } from '@solidjs/router';
-import { useAuth } from '../App';
+import { useNavigate, A } from '@solidjs/router';
+import { useAuth } from '../auth';
 import { api } from '../api';
 import type { Event } from '../types';
 import { STATUS_LABELS, EVENT_TYPE_LABELS, SEVERITY_LABELS, ROLE_LABELS } from '../types';
 
-export function EventsPage() {
+export default function EventsPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [events, setEvents] = createSignal<Event[]>([]);
   const [loading, setLoading] = createSignal(true);
   const [error, setError] = createSignal('');
-  const [filterRole, setFilterRole] = createSignal(user()?.role || '');
+  const [filterRole, setFilterRole] = createSignal('');
   const [filterStatus, setFilterStatus] = createSignal('');
   const [filterType, setFilterType] = createSignal('');
   const [selectedIds, setSelectedIds] = createSignal<Set<number>>(new Set());
@@ -92,9 +92,9 @@ export function EventsPage() {
       <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px;">
         <h2 style="font-size: 20px; font-weight: 600;">医疗事件列表</h2>
         <Show when={user()?.role === 'registrar'}>
-          <button class="btn btn-primary" onClick={() => navigate('/events/new')}>
+          <A href="/events/new" class="btn btn-primary" style="text-decoration: none;">
             + 新建事件
-          </button>
+          </A>
         </Show>
       </div>
 
@@ -197,9 +197,9 @@ export function EventsPage() {
                       <td>{ROLE_LABELS[ev.current_handler_role || ''] || '—'}</td>
                       <td style="font-size: 13px;">{ev.deadline ? new Date(ev.deadline).toLocaleDateString() : '—'}</td>
                       <td>
-                        <button class="btn btn-outline btn-sm" onClick={() => navigate(`/events/${ev.id}`)}>
+                        <A href={`/events/${ev.id}`} class="btn btn-outline btn-sm" style="text-decoration: none;">
                           详情
-                        </button>
+                        </A>
                       </td>
                     </tr>
                   )}

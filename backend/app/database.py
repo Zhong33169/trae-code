@@ -8,19 +8,50 @@ from .config import DB_PATH
 
 HASH_SALT = "medical-events-demo-salt"
 
+
 def hash_password(password: str) -> str:
     return hashlib.sha256((password + HASH_SALT).encode()).hexdigest()
+
 
 def verify_password(password: str, password_hash: str) -> bool:
     return hmac.compare_digest(hash_password(password), password_hash)
 
+
 def get_db():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, isolation_level=None)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
+    conn.execute("PRAGMA busy_timeout=5000")
     return conn
+
+
+def _migrate_scan_records(conn):
+    cols = [r["name"] for r in conn.execute("PRAGMA table_info(scan_records)").fetchall()]
+    if "scan_token" not in cols:
+        conn.execute("ALTER TABLE scan_records ADD COLUMN scan_token TEXT DEFAULT ''")
+    if "consumed_at" not in cols:
+        conn.execute("ALTER TABLE scan_records ADD COLUMN consumed_at TEXT")
+    if "consumed_by" not in cols:
+        conn.execute("ALTER TABLE scan_records ADD COLUMN consumed_by TEXT DEFAULT ''")
+    if "consumed_by_user_id" not in cols:
+        conn.execute("ALTER TABLE scan_records ADD COLUMN consumed_by_user_id INTEGER")
+    if "event_version_before" not in cols:
+        conn.execute("ALTER TABLE scan_records ADD COLUMN event_version_before INTEGER")
+    if "event_version_after" not in cols:
+        conn.execute("ALTER TABLE scan_records ADD COLUMN event_version_after INTEGER")
+
+
+def _migrate_audit_log(conn):
+    cols = [r["name"] for r in conn.execute("PRAGMA table_info(audit_log)").fetchall()]
+    if "scan_record_id" not in cols:
+        conn.execute("ALTER TABLE audit_log ADD COLUMN scan_record_id INTEGER")
+    if "version_before" not in cols:
+        conn.execute("ALTER TABLE audit_log ADD COLUMN version_before INTEGER")
+    if "version_after" not in cols:
+        conn.execute("ALTER TABLE audit_log ADD COLUMN version_after INTEGER")
+
 
 def init_db():
     conn = get_db()
@@ -76,7 +107,13 @@ def init_db():
             scanner_role TEXT NOT NULL,
             success INTEGER NOT NULL DEFAULT 0,
             message TEXT DEFAULT '',
-            scanned_at TEXT NOT NULL
+            scanned_at TEXT NOT NULL,
+            scan_token TEXT DEFAULT '',
+            consumed_at TEXT,
+            consumed_by TEXT DEFAULT '',
+            consumed_by_user_id INTEGER,
+            event_version_before INTEGER,
+            event_version_after INTEGER
         );
         CREATE TABLE IF NOT EXISTS audit_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -85,24 +122,89 @@ def init_db():
             actor_id INTEGER REFERENCES users(id),
             actor_role TEXT NOT NULL,
             detail TEXT DEFAULT '',
-            created_at TEXT NOT NULL
+            created_at TEXT NOT NULL,
+            scan_record_id INTEGER,
+            version_before INTEGER,
+            version_after INTEGER
         );
+        CREATE INDEX IF NOT EXISTS idx_scan_event ON scan_records(event_id, success, consumed_at);
+        CREATE INDEX IF NOT EXISTS idx_audit_event ON audit_log(event_id);
     """)
+    _migrate_scan_records(conn)
+    _migrate_audit_log(conn)
     conn.commit()
     conn.close()
+
 
 def generate_code(prefix="INC"):
     now = datetime.now()
     short_uuid = uuid.uuid4().hex[:6].upper()
     return f"{prefix}-{now.strftime('%Y%m%d')}-{short_uuid}"
 
+
 def generate_scan_token():
     return uuid.uuid4().hex[:12]
+
 
 def row_to_dict(row):
     if row is None:
         return None
     return dict(row)
+
+
+def consume_scan_credential(
+    conn,
+    event_id: int,
+    scan_record_id: int,
+    current_user: dict,
+    action_name: str,
+):
+    now = datetime.now().isoformat()
+    event = conn.execute(
+        "SELECT * FROM events WHERE id = ?", (event_id,)
+    ).fetchone()
+    if not event:
+        return {"ok": False, "error": "医疗事件单不存在", "event": None}
+    ev = row_to_dict(event)
+
+    sr = conn.execute(
+        "SELECT * FROM scan_records WHERE id = ?", (scan_record_id,)
+    ).fetchone()
+    if not sr:
+        return {"ok": False, "error": "核验凭证不存在，请先扫码核验", "event": ev}
+    srd = row_to_dict(sr)
+
+    if not srd["success"]:
+        return {"ok": False, "error": "核验凭证未通过", "event": ev}
+    if srd["event_id"] != event_id:
+        return {"ok": False, "error": "核验凭证与当前事件不符", "event": ev}
+    if srd["scanner_id"] != current_user["id"]:
+        return {"ok": False, "error": "核验凭证非当前操作人，请本人重新扫码", "event": ev}
+    if srd["scanner_role"] != current_user["role"]:
+        return {"ok": False, "error": "核验凭证与当前岗位不符，请切换岗位后重新扫码", "event": ev}
+    if srd["scan_token"] != ev["scan_token"]:
+        return {"ok": False, "error": "核验凭证已过期（当前步骤令牌已变更），请重新扫码", "event": ev}
+    if srd["consumed_at"] is not None:
+        return {"ok": False, "error": "核验凭证已被消费，请重新扫码核验", "event": ev}
+
+    new_token = generate_scan_token()
+    new_version = ev["version"] + 1
+
+    cur = conn.execute(
+        "UPDATE scan_records SET consumed_at=?, consumed_by=?, consumed_by_user_id=?, event_version_before=?, event_version_after=? WHERE id=? AND consumed_at IS NULL",
+        (now, action_name, current_user["id"], ev["version"], new_version, scan_record_id),
+    )
+    if cur.rowcount != 1:
+        return {"ok": False, "error": "核验凭证并发冲突，请重新扫码", "event": ev}
+
+    return {
+        "ok": True,
+        "new_token": new_token,
+        "new_version": new_version,
+        "old_version": ev["version"],
+        "scan_record_id": scan_record_id,
+    }
+
 
 def seed_data():
     conn = get_db()
@@ -183,23 +285,23 @@ def seed_data():
     )
 
     audit_data = [
-        (2, "submit", 1, "registrar", "登记员提交事件", now),
-        (3, "submit", 1, "registrar", "登记员提交事件", now),
-        (3, "review_pass", 2, "supervisor", "审核主管通过审核", now),
-        (4, "submit", 1, "registrar", "登记员提交事件", now),
-        (4, "review_reject", 2, "supervisor", "审核主管退回：材料不完整", now),
-        (5, "submit", 1, "registrar", "登记员提交事件", now),
-        (5, "review_pass", 2, "supervisor", "审核主管通过审核", now),
-        (5, "archive_reject", 3, "reviewer", "复核负责人退回：防控措施不到位", now),
-        (6, "submit", 1, "registrar", "登记员提交事件", now),
-        (6, "review_pass", 2, "supervisor", "审核主管通过审核", now),
-        (6, "archive", 3, "reviewer", "复核负责人归档", now),
-        (7, "submit", 1, "registrar", "登记员提交事件", now),
-        (8, "submit", 1, "registrar", "登记员提交事件", now),
-        (8, "review_pass", 2, "supervisor", "审核主管通过审核", now),
+        (2, "submit", 1, "registrar", "登记员提交事件", now, None, None, None),
+        (3, "submit", 1, "registrar", "登记员提交事件", now, None, None, None),
+        (3, "review_pass", 2, "supervisor", "审核主管通过审核", now, None, None, None),
+        (4, "submit", 1, "registrar", "登记员提交事件", now, None, None, None),
+        (4, "review_reject", 2, "supervisor", "审核主管退回：材料不完整", now, None, None, None),
+        (5, "submit", 1, "registrar", "登记员提交事件", now, None, None, None),
+        (5, "review_pass", 2, "supervisor", "审核主管通过审核", now, None, None, None),
+        (5, "archive_reject", 3, "reviewer", "复核负责人退回：防控措施不到位", now, None, None, None),
+        (6, "submit", 1, "registrar", "登记员提交事件", now, None, None, None),
+        (6, "review_pass", 2, "supervisor", "审核主管通过审核", now, None, None, None),
+        (6, "archive", 3, "reviewer", "复核负责人归档", now, None, None, None),
+        (7, "submit", 1, "registrar", "登记员提交事件", now, None, None, None),
+        (8, "submit", 1, "registrar", "登记员提交事件", now, None, None, None),
+        (8, "review_pass", 2, "supervisor", "审核主管通过审核", now, None, None, None),
     ]
     c.executemany(
-        "INSERT INTO audit_log (event_id, action, actor_id, actor_role, detail, created_at) VALUES (?,?,?,?,?,?)",
+        "INSERT INTO audit_log (event_id, action, actor_id, actor_role, detail, created_at, scan_record_id, version_before, version_after) VALUES (?,?,?,?,?,?,?,?,?)",
         audit_data,
     )
 

@@ -3,7 +3,7 @@ import { api } from '../api';
 import type { Statistics } from '../types';
 import { STATUS_LABELS, EVENT_TYPE_LABELS, SEVERITY_LABELS, ROLE_LABELS } from '../types';
 
-export function StatisticsPage() {
+export default function StatisticsPage() {
   const [stats, setStats] = createSignal<Statistics | null>(null);
   const [loading, setLoading] = createSignal(true);
   const [error, setError] = createSignal('');

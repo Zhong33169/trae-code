@@ -1,10 +1,10 @@
 import { createSignal, Show, For } from 'solid-js';
-import { useNavigate } from '@solidjs/router';
-import { useAuth } from '../App';
-import { api } from '../api';
-import { EVENT_TYPE_LABELS, SEVERITY_LABELS } from '../types';
+import { useNavigate, A } from '@solidjs/router';
+import { useAuth } from '../../auth';
+import { api } from '../../api';
+import { EVENT_TYPE_LABELS, SEVERITY_LABELS } from '../../types';
 
-export function CreateEventPage() {
+export default function CreateEventPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [title, setTitle] = createSignal('');
@@ -64,7 +64,7 @@ export function CreateEventPage() {
   return (
     <div>
       <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
-        <button class="btn btn-outline" onClick={() => navigate('/events')}>← 返回</button>
+        <A href="/events" class="btn btn-outline" style="text-decoration: none;">← 返回</A>
         <h2 style="font-size: 20px; font-weight: 600;">新建医疗事件</h2>
       </div>
 
