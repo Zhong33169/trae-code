@@ -176,16 +176,16 @@ func seedData() {
 	}
 
 	attachments := []models.Attachment{
-		{OrderID: 1, FileName: "会员卡正面.jpg", FileType: "image/jpeg", FileSize: 1024000, UploadedBy: users[0].ID, UploadedByName: users[0].Name, Status: "approved", CreatedAt: now.Add(-30 * time.Minute), UpdatedAt: now.Add(-30 * time.Minute)},
-		{OrderID: 1, FileName: "身份证正面.jpg", FileType: "image/jpeg", FileSize: 850000, UploadedBy: users[0].ID, UploadedByName: users[0].Name, Status: "approved", CreatedAt: now.Add(-30 * time.Minute), UpdatedAt: now.Add(-30 * time.Minute)},
-		{OrderID: 2, FileName: "会员卡照片.jpg", FileType: "image/jpeg", FileSize: 920000, UploadedBy: users[0].ID, UploadedByName: users[0].Name, Status: "rejected", RejectReason: "照片模糊，无法识别会员信息", CreatedAt: now.Add(-3 * time.Hour), UpdatedAt: now.Add(-1 * time.Hour)},
-		{OrderID: 3, FileName: "会员证明.pdf", FileType: "application/pdf", FileSize: 2048000, UploadedBy: users[0].ID, UploadedByName: users[0].Name, Status: "approved", CreatedAt: now.Add(-5 * time.Hour), UpdatedAt: now.Add(-5 * time.Hour)},
-		{OrderID: 3, FileName: "口腔检查报告.pdf", FileType: "application/pdf", FileSize: 1536000, UploadedBy: users[0].ID, UploadedByName: users[0].Name, Status: "pending", CreatedAt: now.Add(-2 * time.Hour), UpdatedAt: now.Add(-2 * time.Hour)},
-		{OrderID: 4, FileName: "会员卡.jpg", FileType: "image/jpeg", FileSize: 768000, UploadedBy: users[0].ID, UploadedByName: users[0].Name, Status: "approved", CreatedAt: now.Add(-8 * time.Hour), UpdatedAt: now.Add(-8 * time.Hour)},
-		{OrderID: 4, FileName: "诊疗方案.pdf", FileType: "application/pdf", FileSize: 1280000, UploadedBy: users[0].ID, UploadedByName: users[0].Name, Status: "approved", CreatedAt: now.Add(-8 * time.Hour), UpdatedAt: now.Add(-8 * time.Hour)},
-		{OrderID: 5, FileName: "服务确认单.pdf", FileType: "application/pdf", FileSize: 512000, UploadedBy: users[0].ID, UploadedByName: users[0].Name, Status: "approved", CreatedAt: now.Add(-48 * time.Hour), UpdatedAt: now.Add(-48 * time.Hour)},
-		{OrderID: 6, FileName: "口腔检查报告.pdf", FileType: "application/pdf", FileSize: 1024000, UploadedBy: users[0].ID, UploadedByName: users[0].Name, Status: "rejected", RejectReason: "报告缺少全景片，不完整", CreatedAt: now.Add(-24 * time.Hour), UpdatedAt: now.Add(-6 * time.Hour)},
-		{OrderID: 7, FileName: "过期会员卡.jpg", FileType: "image/jpeg", FileSize: 640000, UploadedBy: users[0].ID, UploadedByName: users[0].Name, Status: "approved", CreatedAt: now.Add(-72 * time.Hour), UpdatedAt: now.Add(-72 * time.Hour)},
+		{OrderID: 1, FileName: "会员卡正面.jpg", FileType: "image/jpeg", FileSize: 1024000, MaterialType: "member_card", UploadedBy: users[0].ID, UploadedByName: users[0].Name, Status: "approved", CreatedAt: now.Add(-30 * time.Minute), UpdatedAt: now.Add(-30 * time.Minute)},
+		{OrderID: 1, FileName: "身份证正面.jpg", FileType: "image/jpeg", FileSize: 850000, MaterialType: "id_card", UploadedBy: users[0].ID, UploadedByName: users[0].Name, Status: "approved", CreatedAt: now.Add(-30 * time.Minute), UpdatedAt: now.Add(-30 * time.Minute)},
+		{OrderID: 2, FileName: "会员卡照片.jpg", FileType: "image/jpeg", FileSize: 920000, MaterialType: "member_card", UploadedBy: users[0].ID, UploadedByName: users[0].Name, Status: "rejected", RejectReason: "照片模糊，无法识别会员信息", CreatedAt: now.Add(-3 * time.Hour), UpdatedAt: now.Add(-1 * time.Hour)},
+		{OrderID: 3, FileName: "会员证明.pdf", FileType: "application/pdf", FileSize: 2048000, MaterialType: "member_card", UploadedBy: users[0].ID, UploadedByName: users[0].Name, Status: "approved", CreatedAt: now.Add(-5 * time.Hour), UpdatedAt: now.Add(-5 * time.Hour)},
+		{OrderID: 3, FileName: "口腔检查报告.pdf", FileType: "application/pdf", FileSize: 1536000, MaterialType: "oral_report", UploadedBy: users[0].ID, UploadedByName: users[0].Name, Status: "pending", CreatedAt: now.Add(-2 * time.Hour), UpdatedAt: now.Add(-2 * time.Hour)},
+		{OrderID: 4, FileName: "会员卡.jpg", FileType: "image/jpeg", FileSize: 768000, MaterialType: "member_card", UploadedBy: users[0].ID, UploadedByName: users[0].Name, Status: "approved", CreatedAt: now.Add(-8 * time.Hour), UpdatedAt: now.Add(-8 * time.Hour)},
+		{OrderID: 4, FileName: "诊疗方案.pdf", FileType: "application/pdf", FileSize: 1280000, MaterialType: "other", UploadedBy: users[0].ID, UploadedByName: users[0].Name, Status: "approved", CreatedAt: now.Add(-8 * time.Hour), UpdatedAt: now.Add(-8 * time.Hour)},
+		{OrderID: 5, FileName: "服务确认单.pdf", FileType: "application/pdf", FileSize: 512000, MaterialType: "other", UploadedBy: users[0].ID, UploadedByName: users[0].Name, Status: "approved", CreatedAt: now.Add(-48 * time.Hour), UpdatedAt: now.Add(-48 * time.Hour)},
+		{OrderID: 6, FileName: "口腔检查报告.pdf", FileType: "application/pdf", FileSize: 1024000, MaterialType: "oral_report", UploadedBy: users[0].ID, UploadedByName: users[0].Name, Status: "rejected", RejectReason: "报告缺少全景片，不完整", CreatedAt: now.Add(-24 * time.Hour), UpdatedAt: now.Add(-6 * time.Hour)},
+		{OrderID: 7, FileName: "过期会员卡.jpg", FileType: "image/jpeg", FileSize: 640000, MaterialType: "member_card", UploadedBy: users[0].ID, UploadedByName: users[0].Name, Status: "approved", CreatedAt: now.Add(-72 * time.Hour), UpdatedAt: now.Add(-72 * time.Hour)},
 	}
 
 	for i := range attachments {
@@ -208,6 +208,9 @@ func seedData() {
 		{OrderID: 6, Action: "退回补正", OperatorID: users[2].ID, Operator: users[2].Name, Role: string(users[2].Role), Remark: "口腔检查报告不完整，需补充全景片", FromStatus: string(models.StatusReview), ToStatus: string(models.StatusReturned), CreatedAt: now.Add(-6 * time.Hour)},
 		{OrderID: 7, Action: "创建工单", OperatorID: users[0].ID, Operator: users[0].Name, Role: string(users[0].Role), Remark: "提交镶牙服务申请", ToStatus: string(models.StatusPending), CreatedAt: now.Add(-72 * time.Hour)},
 		{OrderID: 7, Action: "审核驳回", OperatorID: users[1].ID, Operator: users[1].Name, Role: string(users[1].Role), Remark: "会员已过期，无法享受服务", FromStatus: string(models.StatusProcessing), ToStatus: string(models.StatusRejected), CreatedAt: now.Add(-48 * time.Hour)},
+		{OrderID: 2, Action: "批量处理失败", OperatorID: users[1].ID, Operator: users[1].Name, Role: string(users[1].Role), Remark: "批量审核失败：缺少必需材料[身份证]，且会员卡被驳回", ToStatus: string(models.StatusSupplement), CreatedAt: now.Add(-45 * time.Minute)},
+		{OrderID: 6, Action: "批量处理失败", OperatorID: users[2].ID, Operator: users[2].Name, Role: string(users[2].Role), Remark: "批量复核失败：口腔检查报告被驳回，需重新上传完整报告", ToStatus: string(models.StatusReturned), CreatedAt: now.Add(-30 * time.Minute)},
+		{OrderID: 0, Action: "批量处理汇总", OperatorID: users[1].ID, Operator: users[1].Name, Role: string(users[1].Role), Remark: "批量处理共3单，成功1单，失败2单。失败订单：MSO20250601002(缺材料)、MSO20250601006(材料被驳回)", CreatedAt: now.Add(-30 * time.Minute)},
 	}
 
 	for i := range logs {

@@ -36,6 +36,11 @@ func UploadAttachment(c *gin.Context) {
 		return
 	}
 
+	materialType := c.PostForm("material_type")
+	if materialType == "" {
+		materialType = "other"
+	}
+
 	attachment := models.Attachment{
 		OrderID:        orderID,
 		FileName:       file.Filename,
@@ -43,6 +48,7 @@ func UploadAttachment(c *gin.Context) {
 		FileSize:       file.Size,
 		UploadedBy:     userID,
 		UploadedByName: userName,
+		MaterialType:   materialType,
 		Status:         "pending",
 		CreatedAt:      time.Now(),
 		UpdatedAt:      time.Now(),
@@ -58,7 +64,7 @@ func UploadAttachment(c *gin.Context) {
 	order.UpdatedAt = time.Now()
 	database.DB.Save(&order)
 
-	addAuditLog(orderID, "上传附件", userID, userName, "registrar", "上传附件: "+file.Filename, "", "")
+	addAuditLog(orderID, "上传附件", userID, userName, "registrar", "上传附件: "+file.Filename+" 材料类型: "+materialType, "", "")
 
 	c.JSON(http.StatusOK, attachment)
 }

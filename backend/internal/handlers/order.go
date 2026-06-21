@@ -80,7 +80,9 @@ func GetAttachmentStatus(c *gin.Context) {
 	}
 
 	requiredMaterials := models.GetRequiredMaterials(order.ServiceType)
-	result := make([]map[string]interface{}, 0)
+	materialsMap := make(map[string]map[string]interface{})
+	missingRequired := make([]map[string]interface{}, 0)
+	hasRejected := false
 
 	for _, mat := range requiredMaterials {
 		item := map[string]interface{}{
@@ -98,18 +100,30 @@ func GetAttachmentStatus(c *gin.Context) {
 				item["file"] = att
 				if att.RejectReason != "" {
 					item["reject_reason"] = att.RejectReason
+					hasRejected = true
 				}
 				break
 			}
 		}
 
-		result = append(result, item)
+		if mat.Required && item["status"] == "missing" {
+			missingRequired = append(missingRequired, map[string]interface{}{
+				"type": mat.Type,
+				"name": mat.Name,
+			})
+		}
+
+		materialsMap[mat.Type] = item
 	}
 
+	allApproved := checkAllRequiredComplete(order.Attachments, order.ServiceType)
+
 	c.JSON(http.StatusOK, gin.H{
-		"service_type": order.ServiceType,
-		"materials":    result,
-		"all_complete": checkAllRequiredComplete(order.Attachments, order.ServiceType),
+		"service_type":     order.ServiceType,
+		"materials":        materialsMap,
+		"all_approved":     allApproved,
+		"missing_required": missingRequired,
+		"has_rejected":     hasRejected,
 	})
 }
 

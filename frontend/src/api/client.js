@@ -51,6 +51,30 @@ export async function processOrder(id, data) {
   return res.json()
 }
 
+export async function batchProcessOrders(data) {
+  const res = await fetch(`${API_BASE}/orders/batch/process`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify(data)
+  })
+  return res.json()
+}
+
+export async function getRequiredMaterials(serviceType) {
+  const query = new URLSearchParams({ service_type: serviceType }).toString()
+  const res = await fetch(`${API_BASE}/orders/required-materials?${query}`, {
+    headers: getHeaders()
+  })
+  return res.json()
+}
+
+export async function getAttachmentStatus(orderId) {
+  const res = await fetch(`${API_BASE}/orders/${orderId}/attachment-status`, {
+    headers: getHeaders()
+  })
+  return res.json()
+}
+
 export async function getAttachments(orderId) {
   const res = await fetch(`${API_BASE}/attachments/order/${orderId}`, {
     headers: getHeaders()
@@ -58,9 +82,12 @@ export async function getAttachments(orderId) {
   return res.json()
 }
 
-export async function uploadAttachment(orderId, file) {
+export async function uploadAttachment(orderId, file, materialType) {
   const formData = new FormData()
   formData.append('file', file)
+  if (materialType) {
+    formData.append('material_type', materialType)
+  }
   
   const user = getStoredUser()
   const headers = {

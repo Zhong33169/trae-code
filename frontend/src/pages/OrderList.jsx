@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'preact/hooks'
-import { getOrders, createOrder } from '../api/client.js'
+import { getOrders, createOrder, batchProcessOrders } from '../api/client.js'
 import { STATUS_MAP, PRIORITY_MAP, formatDate, isOverdue, ROLE_MAP } from '../utils/constants.js'
 
 export default function OrderList(props) {
@@ -14,6 +14,13 @@ export default function OrderList(props) {
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [stats, setStats] = useState({ pending: 0, processing: 0, completed: 0, overdue: 0 })
   const [currentUser, setCurrentUser] = useState(null)
+  const [selectedIds, setSelectedIds] = useState([])
+  const [showBatchModal, setShowBatchModal] = useState(false)
+  const [batchAction, setBatchAction] = useState('')
+  const [batchForm, setBatchForm] = useState({ reason: '', remark: '', result: '' })
+  const [batchProcessing, setBatchProcessing] = useState(false)
+  const [batchResult, setBatchResult] = useState(null)
+  const [showBatchResult, setShowBatchResult] = useState(false)
 
   useEffect(() => {
     try {
@@ -122,6 +129,80 @@ export default function OrderList(props) {
   ]
 
   const canCreate = currentUser?.role === 'registrar'
+  const canBatch = currentUser?.role === 'auditor' || currentUser?.role === 'reviewer'
+
+  function toggleSelect(id) {
+    setSelectedIds(prev => {
+      if (prev.includes(id)) {
+        return prev.filter(i => i !== id)
+      } else {
+        return [...prev, id]
+      }
+    })
+  }
+
+  function toggleSelectAll() {
+    if (selectedIds.length === orders.length) {
+      setSelectedIds([])
+    } else {
+      setSelectedIds(orders.map(o => o.id))
+    }
+  }
+
+  function openBatchModal(action) {
+    if (selectedIds.length === 0) {
+      alert('请先选择要处理的工单')
+      return
+    }
+    setBatchAction(action)
+    setBatchForm({ reason: '', remark: '', result: '' })
+    setShowBatchModal(true)
+  }
+
+  async function submitBatch() {
+    if (!batchAction) return
+    setBatchProcessing(true)
+
+    const data = {
+      action: batchAction,
+      order_ids: selectedIds,
+      reason: batchForm.reason,
+      remark: batchForm.remark,
+      result: batchForm.result
+    }
+
+    try {
+      const res = await batchProcessOrders(data)
+      setBatchResult(res)
+      setShowBatchResult(true)
+      setShowBatchModal(false)
+      setSelectedIds([])
+      loadOrders()
+      loadStats()
+    } catch (e) {
+      alert('批量处理失败')
+    } finally {
+      setBatchProcessing(false)
+    }
+  }
+
+  function getBatchActions() {
+    if (currentUser?.role === 'auditor') {
+      return [
+        { key: 'start_process', label: '批量开始审核', type: 'primary' },
+        { key: 'approve', label: '批量审核通过', type: 'primary' },
+        { key: 'return_supplement', label: '批量退回补正', type: 'default' },
+        { key: 'reject', label: '批量驳回', type: 'danger' }
+      ]
+    }
+    if (currentUser?.role === 'reviewer') {
+      return [
+        { key: 'review_approve', label: '批量复核归档', type: 'primary' },
+        { key: 'review_return', label: '批量退回补正', type: 'danger' }
+      ]
+    }
+    return []
+  }
 
   function handleCreateSubmit(e) {
     e.preventDefault()
@@ -182,11 +263,35 @@ export default function OrderList(props) {
         </div>
       )}
 
+      {canBatch && selectedIds.length > 0 && (
+        <div className="section-card" style={{ marginBottom: '16px', padding: '12px 16px', background: '#e6f7ff', border: '1px solid #91d5ff' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span style={{ color: '#1890ff', fontWeight: '500' }}>
+              已选择 {selectedIds.length} 个工单
+            </span>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              {getBatchActions().map(action => (
+                <button
+                  key={action.key}
+                  className={`btn btn-sm ${action.type === 'danger' ? 'btn-danger' : action.type === 'default' ? 'btn-default' : 'btn-primary'}`}
+                  onClick={() => openBatchModal(action.key)}
+                >
+                  {action.label}
+                </button>
+              ))}
+              <button className="btn btn-default btn-sm" onClick={() => setSelectedIds([])}>
+                取消选择
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="section-card">
         <div className="filter-bar">
           <div className="filter-item">
             <span className="filter-label">状态:</span>
-            <select className="select" value={status} onChange={e => { setStatus(e.target.value); setPage(1) }}>
+            <select className="select" value={status} onChange={e => { setStatus(e.target.value); setPage(1); setSelectedIds([]) }}>
               {statusOptions.map(opt => (
                 <option key={opt.value} value={opt.value}>{opt.label}</option>
               ))}
@@ -199,10 +304,10 @@ export default function OrderList(props) {
               placeholder="输入单号/姓名/手机号"
               value={keyword}
               onChange={e => setKeyword(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') { setPage(1); loadOrders() } }}
+              onKeyDown={e => { if (e.key === 'Enter') { setPage(1); setSelectedIds([]); loadOrders() } }}
             />
           </div>
-          <button className="btn btn-default btn-sm" onClick={() => { setPage(1); loadOrders() }}>
+          <button className="btn btn-default btn-sm" onClick={() => { setPage(1); setSelectedIds([]); loadOrders() }}>
             查询
           </button>
         </div>
@@ -210,6 +315,15 @@ export default function OrderList(props) {
         <table className="table">
           <thead>
             <tr>
+              {canBatch && (
+                <th style={{ width: '50px' }}>
+                  <input
+                    type="checkbox"
+                    checked={orders.length > 0 && selectedIds.length === orders.length}
+                    onChange={toggleSelectAll}
+                  />
+                </th>
+              )}
               <th>服务单号</th>
               <th>会员姓名</th>
               <th>服务类型</th>
@@ -224,6 +338,16 @@ export default function OrderList(props) {
           <tbody>
             {orders.map(order => (
               <tr key={order.id}>
+                {canBatch && (
+                  <td>
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.includes(order.id)}
+                      onChange={() => toggleSelect(order.id)}
+                      onClick={e => e.stopPropagation()}
+                    />
+                  </td>
+                )}
                 <td className="link" onClick={() => onNavigate(`/order/${order.id}`)}>
                   {order.order_no}
                 </td>
@@ -342,6 +466,156 @@ export default function OrderList(props) {
           </div>
         </div>
       )}
+
+      {showBatchModal && (
+        <div className="modal-overlay" onClick={() => setShowBatchModal(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <span className="modal-title">{getBatchModalTitle(batchAction)}</span>
+              <span className="modal-close" onClick={() => setShowBatchModal(false)}>&times;</span>
+            </div>
+            <div className="modal-body">
+              <div style={{ marginBottom: '16px', padding: '12px', background: '#f0f5ff', borderRadius: '6px', fontSize: '13px' }}>
+                <span style={{ fontWeight: '500' }}>将批量处理 {selectedIds.length} 个工单</span>
+              </div>
+              {['return_supplement', 'reject', 'review_return'].includes(batchAction) && (
+                <div className="form-item">
+                  <label className="form-label required">{getBatchReasonLabel(batchAction)}</label>
+                  <textarea
+                    className="form-textarea"
+                    value={batchForm.reason}
+                    onInput={e => setBatchForm(f => ({ ...f, reason: e.target.value }))}
+                    placeholder="请输入原因"
+                  />
+                </div>
+              )}
+              {batchAction === 'approve' && (
+                <div className="form-item">
+                  <label className="form-label">处理结果</label>
+                  <textarea
+                    className="form-textarea"
+                    value={batchForm.result}
+                    onInput={e => setBatchForm(f => ({ ...f, result: e.target.value }))}
+                    placeholder="请输入处理结果"
+                  />
+                </div>
+              )}
+              {['review_approve', 'submit', 'start_process'].includes(batchAction) && (
+                <div className="form-item">
+                  <label className="form-label">备注</label>
+                  <textarea
+                    className="form-textarea"
+                    value={batchForm.remark}
+                    onInput={e => setBatchForm(f => ({ ...f, remark: e.target.value }))}
+                    placeholder="请输入备注（选填）"
+                  />
+                </div>
+              )}
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-default" onClick={() => setShowBatchModal(false)}>
+                取消
+              </button>
+              <button
+                className="btn btn-primary"
+                onClick={submitBatch}
+                disabled={batchProcessing}
+              >
+                {batchProcessing ? '处理中...' : '确认批量处理'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showBatchResult && batchResult && (
+        <div className="modal-overlay" onClick={() => setShowBatchResult(false)}>
+          <div className="modal" style={{ width: '600px', maxHeight: '80vh' }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <span className="modal-title">批量处理结果</span>
+              <span className="modal-close" onClick={() => setShowBatchResult(false)}>&times;</span>
+            </div>
+            <div className="modal-body" style={{ overflowY: 'auto' }}>
+              <div style={{ display: 'flex', gap: '16px', marginBottom: '16px', padding: '16px', borderRadius: '6px', background: '#fafafa' }}>
+                <div style={{ textAlign: 'center', flex: 1 }}>
+                  <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#1890ff' }}>{batchResult.total}</div>
+                  <div style={{ fontSize: '12px', color: '#888' }}>总数</div>
+                </div>
+                <div style={{ textAlign: 'center', flex: 1 }}>
+                  <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#52c41a' }}>{batchResult.success}</div>
+                  <div style={{ fontSize: '12px', color: '#888' }}>成功</div>
+                </div>
+                <div style={{ textAlign: 'center', flex: 1 }}>
+                  <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#f5222d' }}>{batchResult.failed}</div>
+                  <div style={{ fontSize: '12px', color: '#888' }}>失败</div>
+                </div>
+              </div>
+
+              <div className="detail-title" style={{ marginBottom: '12px', borderLeft: 'none', paddingLeft: 0 }}>
+                处理详情
+              </div>
+              <div style={{ display: 'grid', gap: '8px' }}>
+                {batchResult.results?.map(res => (
+                  <div
+                    key={res.order_id}
+                    style={{
+                      padding: '12px',
+                      borderRadius: '6px',
+                      border: `1px solid ${res.success ? '#b7eb8f' : '#ffa39e'}`,
+                      background: res.success ? '#f6ffed' : '#fff1f0'
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontWeight: '500' }}>{res.order_no}</span>
+                      <span className="status-tag" style={{
+                        background: res.success ? '#52c41a20' : '#f5222d20',
+                        color: res.success ? '#52c41a' : '#f5222d'
+                      }}>
+                        {res.success ? '成功' : '失败'}
+                      </span>
+                    </div>
+                    {res.status && (
+                      <div style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
+                        状态: {STATUS_MAP[res.status]?.label || res.status}
+                      </div>
+                    )}
+                    <div style={{ fontSize: '13px', marginTop: '4px', color: res.success ? '#389e0d' : '#cf1322' }}>
+                      {res.message}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-primary" onClick={() => setShowBatchResult(false)}>
+                确定
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
+}
+
+function getBatchModalTitle(action) {
+  const titles = {
+    submit: '批量提交审核',
+    start_process: '批量开始审核',
+    approve: '批量审核通过',
+    reject: '批量驳回',
+    return_supplement: '批量退回补正',
+    review_approve: '批量复核归档',
+    review_return: '批量复核退回'
+  }
+  return titles[action] || '批量处理'
+}
+
+function getBatchReasonLabel(action) {
+  const labels = {
+    reject: '驳回原因',
+    return_supplement: '退补原因',
+    review_return: '退回原因'
+  }
+  return labels[action] || '原因'
 }

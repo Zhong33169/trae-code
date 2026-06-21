@@ -29,6 +29,9 @@ func main() {
 			orders.GET("/:id", handlers.GetOrder)
 			orders.POST("", handlers.CreateOrder)
 			orders.POST("/:id/process", handlers.ProcessOrder)
+			orders.POST("/batch/process", handlers.BatchProcessOrders)
+			orders.GET("/:id/attachment-status", handlers.GetAttachmentStatus)
+			orders.GET("/required-materials", handlers.GetRequiredMaterials)
 		}
 
 		attachments := api.Group("/attachments")
