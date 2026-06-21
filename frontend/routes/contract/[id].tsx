@@ -21,6 +21,8 @@ import type {
   Evidence,
   OperationLog,
 } from "../../lib/api.ts";
+import ContentEditor from "../../islands/ContentEditor.tsx";
+import EvidenceManager from "../../islands/EvidenceManager.tsx";
 
 interface Data {
   user: { id: number; name: string; role: string };
@@ -218,39 +220,52 @@ export default function ContractDetail(props: PageProps<Data>) {
                 <h2 class="text-base font-semibold text-gray-900">服务内容</h2>
               </div>
               <div class="divide-y divide-gray-100">
-                <StageContentBlock
-                  stage={STAGES.SIGN}
-                  isActive={form.stage === STAGES.SIGN}
-                  isPast={currentStageIdx > 0}
-                  title="家庭医生签约"
-                  content={form.sign_content}
-                  required={REQUIRED_EVIDENCES_BY_STAGE.SIGN}
-                  evidences={evidencesByStage.SIGN || []}
-                  canAdd={isRegister && form.stage === STAGES.SIGN && canAct}
-                  formId={form.id}
-                />
-                <StageContentBlock
-                  stage={STAGES.PLAN}
-                  isActive={form.stage === STAGES.PLAN}
-                  isPast={currentStageIdx > 1}
-                  title="服务计划"
-                  content={form.plan_content}
-                  required={REQUIRED_EVIDENCES_BY_STAGE.PLAN}
-                  evidences={evidencesByStage.PLAN || []}
-                  canAdd={isRegister && form.stage === STAGES.PLAN && canAct}
-                  formId={form.id}
-                />
-                <StageContentBlock
-                  stage={STAGES.PERFORM}
-                  isActive={form.stage === STAGES.PERFORM}
-                  isPast={false}
-                  title="履约确认"
-                  content={form.perform_content}
-                  required={REQUIRED_EVIDENCES_BY_STAGE.PERFORM}
-                  evidences={evidencesByStage.PERFORM || []}
-                  canAdd={isRegister && form.stage === STAGES.PERFORM && canAct}
-                  formId={form.id}
-                />
+                {STAGE_ORDER.map((stage, idx) => {
+                  const isActive = form.stage === stage;
+                  const isPast = idx < currentStageIdx;
+                  const title = STAGE_NAMES[stage as keyof typeof STAGE_NAMES];
+                  const required = REQUIRED_EVIDENCES_BY_STAGE[stage as keyof typeof REQUIRED_EVIDENCES_BY_STAGE];
+                  const evidences = evidencesByStage[stage] || [];
+
+                  return (
+                    <div
+                      key={stage}
+                      class={`px-6 py-4 ${isActive ? "bg-blue-50/30" : ""}`}
+                    >
+                      <div class="flex items-center justify-between mb-3">
+                        <div class="flex items-center gap-2">
+                          <div
+                            class={`w-2 h-2 rounded-full ${
+                              isActive ? "bg-blue-500" : isPast ? "bg-green-500" : "bg-gray-300"
+                            }`}
+                          />
+                          <h3 class="font-medium text-gray-900">{title}</h3>
+                          {isActive && (
+                            <span class="text-xs text-blue-600 bg-blue-100 px-2 py-0.5 rounded">
+                              当前阶段
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div class="pl-4 space-y-3">
+                        <ContentEditor
+                          form={form}
+                          stage={stage}
+                          userId={user.id}
+                          userRole={user.role}
+                        />
+                        <EvidenceManager
+                          form={form}
+                          stage={stage}
+                          evidences={evidences}
+                          userId={user.id}
+                          userRole={user.role}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
 
@@ -433,90 +448,6 @@ function StageTimeline({ currentStage, currentStatus }: {
             </div>
           );
         })}
-      </div>
-    </div>
-  );
-}
-
-function StageContentBlock(
-  { stage, isActive, isPast, title, content, required, evidences, canAdd, formId }: {
-    stage: string;
-    isActive: boolean;
-    isPast: boolean;
-    title: string;
-    content: string | null;
-    required: string[];
-    evidences: Evidence[];
-    canAdd: boolean;
-    formId: number;
-  },
-) {
-  return (
-    <div
-      class={`px-6 py-4 ${isActive ? "bg-blue-50/30" : ""}`}
-    >
-      <div class="flex items-center justify-between mb-3">
-        <div class="flex items-center gap-2">
-          <div
-            class={`w-2 h-2 rounded-full ${
-              isActive ? "bg-blue-500" : isPast ? "bg-green-500" : "bg-gray-300"
-            }`}
-          />
-          <h3 class="font-medium text-gray-900">{title}</h3>
-          {isActive && (
-            <span class="text-xs text-blue-600 bg-blue-100 px-2 py-0.5 rounded">
-              当前阶段
-            </span>
-          )}
-        </div>
-      </div>
-
-      <div class="pl-4 space-y-3">
-        <div>
-          <p class="text-xs text-gray-500 mb-1">内容描述</p>
-          <p class="text-sm text-gray-700 whitespace-pre-wrap">
-            {content || "（暂无内容）"}
-          </p>
-        </div>
-
-        <div>
-          <div class="flex items-center justify-between mb-2">
-            <p class="text-xs text-gray-500">
-              证据材料
-              <span class="text-gray-400 ml-1">
-                ({evidences.filter((e) => e.is_required).length}/{required.length} 必需)
-              </span>
-            </p>
-          </div>
-          {evidences.length === 0
-            ? (
-              <p class="text-sm text-gray-400">暂无证据材料</p>
-            )
-            : (
-              <div class="space-y-1.5">
-                {evidences.map((ev) => (
-                  <div
-                    key={ev.id}
-                    class="flex items-center gap-2 text-sm bg-white border border-gray-100 rounded-lg px-3 py-2"
-                  >
-                    <span class="text-gray-400">📄</span>
-                    <span class="text-gray-700 flex-1">{ev.name}</span>
-                    {ev.is_required
-                      ? (
-                        <span class="text-xs text-red-500 bg-red-50 px-1.5 py-0.5 rounded">
-                          必需
-                        </span>
-                      )
-                      : (
-                        <span class="text-xs text-gray-400 bg-gray-50 px-1.5 py-0.5 rounded">
-                          补充
-                        </span>
-                      )}
-                  </div>
-                ))}
-              </div>
-            )}
-        </div>
       </div>
     </div>
   );

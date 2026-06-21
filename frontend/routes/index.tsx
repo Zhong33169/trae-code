@@ -161,12 +161,12 @@ export default function Home(props: PageProps<Data>) {
               <div class="flex items-center gap-2">
                 <h2 class="text-lg font-semibold text-gray-900">签约服务单队列</h2>
                 {user.role === "REGISTER" && (
-                  <button
+                  <a
+                    href={`/contract/new?userId=${user.id}`}
                     class="ml-2 px-4 py-1.5 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition-colors"
-                    onclick="alert('创建功能请在详情页操作')"
                   >
                     + 新建签约单
-                  </button>
+                  </a>
                 )}
               </div>
 

@@ -78,8 +78,11 @@ app.post('/api/contracts', async (c) => {
     return c.json({ error: '未登录' }, 401);
   }
   const data = await c.req.json();
-  const form = createForm(user, data);
-  return c.json(form, 201);
+  const result = createForm(user, data);
+  if (!result.success) {
+    return c.json({ error: result.error }, 400);
+  }
+  return c.json(result.form, 201);
 });
 
 app.put('/api/contracts/:id', async (c) => {
@@ -177,7 +180,7 @@ app.post('/api/contracts/:id/evidences', async (c) => {
   if (!result.success) {
     return c.json({ error: result.error }, 400);
   }
-  return c.json({ id: result.evidenceId }, 201);
+  return c.json({ id: result.evidenceId, form: result.form }, 201);
 });
 
 app.delete('/api/evidences/:id', (c) => {
@@ -190,7 +193,7 @@ app.delete('/api/evidences/:id', (c) => {
   if (!result.success) {
     return c.json({ error: result.error }, 400);
   }
-  return c.json({ success: true });
+  return c.json({ success: true, form: result.form });
 });
 
 app.post('/api/maintenance/mark-overdue', (c) => {

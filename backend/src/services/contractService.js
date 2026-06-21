@@ -155,39 +155,68 @@ export function getStatsByRole(role) {
 }
 
 export function createForm(user, data) {
+  if (user.role !== ROLES.REGISTER) {
+    return { success: false, error: '只有签约服务登记员可以创建签约服务单' };
+  }
+
+  if (!data.residentName || !data.residentName.trim()) {
+    return { success: false, error: '居民姓名不能为空' };
+  }
+
   const formNo = data.formNo || generateFormNo();
   const riskLevel = data.riskLevel || RISK_LEVELS.MEDIUM;
-  
-  const deadline = data.deadline || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+
+  let deadlineDays = 7;
+  if (riskLevel === RISK_LEVELS.HIGH) {
+    deadlineDays = 3;
+  } else if (riskLevel === RISK_LEVELS.MEDIUM) {
+    deadlineDays = 5;
+  }
+
+  const deadline = data.deadline || new Date(Date.now() + deadlineDays * 24 * 60 * 60 * 1000).toISOString();
   const priorityScore = calcPriorityScore(riskLevel, deadline, STATUSES.DRAFT);
+
+  let signContent = data.signContent || '';
+  if (riskLevel === RISK_LEVELS.HIGH && !data.signContent) {
+    signContent = '高风险居民签约，需重点关注，处理时限缩短。';
+  }
 
   const stmt = db.prepare(`
     INSERT INTO contract_forms
     (form_no, resident_name, id_card, phone, address, doctor_name, team_name,
      risk_level, stage, status, current_handler_id, current_role, version,
-     deadline, sign_content, created_by, priority_score, evidence_required)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'SIGN', 'DRAFT', ?, 'REGISTER', 1, ?, ?, ?, ?, ?)
+     deadline, sign_content, plan_content, perform_content,
+     created_by, priority_score, evidence_required, evidence_submitted,
+     last_opinion, last_result, last_handler_name)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'SIGN', 'DRAFT', ?, 'REGISTER', 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const result = stmt.run(
     formNo,
-    data.residentName,
-    data.idCard || null,
-    data.phone || null,
-    data.address || null,
-    data.doctorName || null,
-    data.teamName || null,
+    data.residentName.trim(),
+    data.idCard?.trim() || null,
+    data.phone?.trim() || null,
+    data.address?.trim() || null,
+    data.doctorName?.trim() || null,
+    data.teamName?.trim() || null,
     riskLevel,
     user.id,
     deadline,
-    data.signContent || null,
+    signContent || null,
+    null,
+    null,
     user.id,
     priorityScore,
-    REQUIRED_EVIDENCES_BY_STAGE.SIGN.length
+    REQUIRED_EVIDENCES_BY_STAGE.SIGN.length,
+    0,
+    null,
+    '创建完成',
+    user.name
   );
 
   const formId = result.lastInsertRowid;
 
+  const evidenceSubmitted = 0;
   if (data.evidences && data.evidences.length > 0) {
     const evStmt = db.prepare(`
       INSERT INTO evidences (contract_form_id, stage, name, description, is_required, uploaded_by)
@@ -196,6 +225,12 @@ export function createForm(user, data) {
     for (const ev of data.evidences) {
       evStmt.run(formId, ev.name, ev.description || '', ev.isRequired ? 1 : 0, user.id);
     }
+
+    const count = db.prepare(
+      "SELECT COUNT(*) as cnt FROM evidences WHERE contract_form_id = ? AND stage = 'SIGN' AND is_required = 1"
+    ).get(formId).cnt;
+
+    db.prepare('UPDATE contract_forms SET evidence_submitted = ? WHERE id = ?').run(count, formId);
   }
 
   addOperationLog(formId, user, ACTIONS.CREATE, {
@@ -205,10 +240,11 @@ export function createForm(user, data) {
     toStatus: STATUSES.DRAFT,
     versionBefore: null,
     versionAfter: 1,
-    result: '创建成功'
+    opinion: `风险等级：${riskLevel === RISK_LEVELS.HIGH ? '高风险' : riskLevel === RISK_LEVELS.MEDIUM ? '中风险' : '低风险'}`,
+    result: `创建成功，处理时限 ${deadlineDays} 天`
   });
 
-  return getFormById(formId);
+  return { success: true, form: getFormById(formId) };
 }
 
 export function submitForm(user, formId, data) {
@@ -221,8 +257,27 @@ export function submitForm(user, formId, data) {
     return { success: false, error: '当前处理人不匹配，无权操作' };
   }
 
+  if (user.role !== ROLES.REGISTER) {
+    return { success: false, error: '只有签约服务登记员可以提交' };
+  }
+
   if (data.version !== form.version) {
+    addOperationLog(formId, user, ACTIONS.SUBMIT, {
+      fromStatus: form.status,
+      toStatus: STATUSES.STATUS_CONFLICT,
+      fromStage: form.stage,
+      toStage: form.stage,
+      opinion: `版本冲突：提交版本 v${data.version}，当前版本 v${form.version}`,
+      result: '提交失败：版本冲突',
+      versionBefore: form.version,
+      versionAfter: form.version
+    });
     return { success: false, error: '版本冲突，请刷新后重试' };
+  }
+
+  const validStatuses = [STATUSES.DRAFT, STATUSES.NEEDS_CORRECTION];
+  if (!validStatuses.includes(form.status)) {
+    return { success: false, error: `当前状态 ${STATUS_NAMES[form.status]} 不可提交` };
   }
 
   const evidences = db.prepare(
@@ -246,16 +301,11 @@ export function submitForm(user, formId, data) {
     return { success: false, error: `缺少必填证据，需 ${requiredCount} 件，实有 ${submittedRequired} 件` };
   }
 
-  const validStatuses = [STATUSES.DRAFT, STATUSES.NEEDS_CORRECTION];
-  if (!validStatuses.includes(form.status)) {
-    return { success: false, error: `当前状态 ${STATUS_NAMES[form.status]} 不可提交` };
-  }
-
   const oldStatus = form.status;
   const newStatus = STATUSES.PENDING;
   let newRole = ROLES.AUDITOR;
   let newHandlerId = 2;
-  let newStage = form.stage;
+  const newStage = form.stage;
 
   if (form.stage === STAGES.PERFORM && form.status === STATUSES.NEEDS_CORRECTION) {
     newRole = ROLES.REVIEWER;
@@ -263,12 +313,34 @@ export function submitForm(user, formId, data) {
   }
 
   const newVersion = form.version + 1;
-  const priorityScore = calcPriorityScore(form.risk_level, form.deadline, newStatus);
+  let deadline = form.deadline;
+
+  let actionResult = '';
+  let submitType = '';
+
+  if (oldStatus === STATUSES.NEEDS_CORRECTION) {
+    submitType = '补正提交';
+    actionResult = '补正材料已提交，请重新审核';
+
+    if (form.risk_level === RISK_LEVELS.HIGH) {
+      const newDeadline = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000);
+      if (form.deadline && newDeadline < new Date(form.deadline)) {
+        deadline = newDeadline.toISOString();
+        actionResult += '（高风险补正，审核时限2天）';
+      }
+    }
+  } else {
+    submitType = '提交审核';
+    actionResult = '提交成功，等待审核';
+  }
+
+  const priorityScore = calcPriorityScore(form.risk_level, deadline, newStatus);
 
   db.prepare(`
     UPDATE contract_forms SET
       status = ?, current_role = ?, current_handler_id = ?,
       version = ?, updated_at = CURRENT_TIMESTAMP,
+      deadline = ?,
       sign_content = COALESCE(?, sign_content),
       plan_content = COALESCE(?, plan_content),
       perform_content = COALESCE(?, perform_content),
@@ -279,12 +351,13 @@ export function submitForm(user, formId, data) {
   `).run(
     newStatus, newRole, newHandlerId,
     newVersion,
+    deadline,
     data.signContent || null,
     data.planContent || null,
     data.performContent || null,
     submittedRequired,
     data.opinion || '',
-    '提交审核',
+    actionResult,
     user.name,
     priorityScore,
     formId
@@ -296,12 +369,12 @@ export function submitForm(user, formId, data) {
     fromStage: form.stage,
     toStage: newStage,
     opinion: data.opinion || '',
-    result: '提交成功',
+    result: actionResult,
     versionBefore: form.version,
     versionAfter: newVersion
   });
 
-  return { success: true, form: getFormById(formId) };
+  return { success: true, form: getFormById(formId), submitType };
 }
 
 export function approveForm(user, formId, data) {
@@ -552,6 +625,41 @@ export function addEvidence(user, formId, evidence) {
     return { success: false, error: '签约服务单不存在' };
   }
 
+  if (form.current_handler_id !== user.id || form.current_role !== user.role) {
+    return { success: false, error: '当前处理人不匹配，无权添加证据' };
+  }
+
+  if (user.role !== ROLES.REGISTER) {
+    return { success: false, error: '只有签约服务登记员可以添加证据' };
+  }
+
+  const editableStatuses = [STATUSES.DRAFT, STATUSES.NEEDS_CORRECTION];
+  if (!editableStatuses.includes(form.status)) {
+    return { success: false, error: `当前状态 ${STATUS_NAMES[form.status]} 不允许添加证据` };
+  }
+
+  if (!evidence.name || !evidence.name.trim()) {
+    return { success: false, error: '证据名称不能为空' };
+  }
+
+  const targetStage = evidence.stage || form.stage;
+  if (targetStage !== form.stage) {
+    return { success: false, error: `只能添加当前阶段 ${STAGE_NAMES[form.stage]} 的证据` };
+  }
+
+  const requiredList = REQUIRED_EVIDENCES_BY_STAGE[form.stage] || [];
+  const isRequired = requiredList.includes(evidence.name.trim()) ? 1 : (evidence.isRequired ? 1 : 0);
+
+  const existing = db.prepare(
+    'SELECT * FROM evidences WHERE contract_form_id = ? AND stage = ? AND name = ?'
+  ).get(formId, form.stage, evidence.name.trim());
+
+  if (existing) {
+    return { success: false, error: '该证据已存在' };
+  }
+
+  const newVersion = form.version + 1;
+
   const stmt = db.prepare(`
     INSERT INTO evidences (contract_form_id, stage, name, description, is_required, uploaded_by)
     VALUES (?, ?, ?, ?, ?, ?)
@@ -559,10 +667,10 @@ export function addEvidence(user, formId, evidence) {
 
   const result = stmt.run(
     formId,
-    evidence.stage || form.stage,
-    evidence.name,
-    evidence.description || '',
-    evidence.isRequired ? 1 : 0,
+    form.stage,
+    evidence.name.trim(),
+    evidence.description?.trim() || '',
+    isRequired,
     user.id
   );
 
@@ -570,21 +678,41 @@ export function addEvidence(user, formId, evidence) {
     'SELECT COUNT(*) as cnt FROM evidences WHERE contract_form_id = ? AND stage = ? AND is_required = 1'
   ).get(formId, form.stage).cnt;
 
-  db.prepare('UPDATE contract_forms SET evidence_submitted = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
-    .run(submittedCount, formId);
+  const requiredCount = REQUIRED_EVIDENCES_BY_STAGE[form.stage]?.length || 0;
+  const priorityScore = calcPriorityScore(form.risk_level, form.deadline, form.status);
+
+  let lastResult = '添加证据';
+  let lastOpinion = `添加证据：${evidence.name.trim()}${isRequired ? '（必需）' : '（补充）'}`;
+
+  if (submittedCount >= requiredCount) {
+    lastResult += '，必填证据已齐全';
+    lastOpinion += '，必填证据已齐全';
+  }
+
+  db.prepare(`
+    UPDATE contract_forms SET
+      evidence_submitted = ?,
+      version = ?,
+      updated_at = CURRENT_TIMESTAMP,
+      priority_score = ?,
+      last_opinion = ?,
+      last_result = ?,
+      last_handler_name = ?
+    WHERE id = ?
+  `).run(submittedCount, newVersion, priorityScore, lastOpinion, lastResult, user.name, formId);
 
   addOperationLog(formId, user, ACTIONS.ADD_EVIDENCE, {
     fromStatus: form.status,
     toStatus: form.status,
     fromStage: form.stage,
     toStage: form.stage,
-    opinion: `添加证据：${evidence.name}`,
-    result: '证据已添加',
+    opinion: lastOpinion,
+    result: lastResult,
     versionBefore: form.version,
-    versionAfter: form.version
+    versionAfter: newVersion
   });
 
-  return { success: true, evidenceId: result.lastInsertRowid };
+  return { success: true, evidenceId: result.lastInsertRowid, form: getFormById(formId) };
 }
 
 export function removeEvidence(user, evidenceId) {
@@ -593,28 +721,71 @@ export function removeEvidence(user, evidenceId) {
     return { success: false, error: '证据不存在' };
   }
 
+  const form = db.prepare('SELECT * FROM contract_forms WHERE id = ?').get(evidence.contract_form_id);
+  if (!form) {
+    return { success: false, error: '签约服务单不存在' };
+  }
+
+  if (form.current_handler_id !== user.id || form.current_role !== user.role) {
+    return { success: false, error: '当前处理人不匹配，无权删除证据' };
+  }
+
+  if (user.role !== ROLES.REGISTER) {
+    return { success: false, error: '只有签约服务登记员可以删除证据' };
+  }
+
+  const editableStatuses = [STATUSES.DRAFT, STATUSES.NEEDS_CORRECTION];
+  if (!editableStatuses.includes(form.status)) {
+    return { success: false, error: `当前状态 ${STATUS_NAMES[form.status]} 不允许删除证据` };
+  }
+
+  if (evidence.stage !== form.stage) {
+    return { success: false, error: `只能删除当前阶段 ${STAGE_NAMES[form.stage]} 的证据` };
+  }
+
+  const newVersion = form.version + 1;
+
   db.prepare('DELETE FROM evidences WHERE id = ?').run(evidenceId);
 
-  const form = db.prepare('SELECT * FROM contract_forms WHERE id = ?').get(evidence.contract_form_id);
   const submittedCount = db.prepare(
     'SELECT COUNT(*) as cnt FROM evidences WHERE contract_form_id = ? AND stage = ? AND is_required = 1'
   ).get(evidence.contract_form_id, evidence.stage).cnt;
 
-  db.prepare('UPDATE contract_forms SET evidence_submitted = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
-    .run(submittedCount, evidence.contract_form_id);
+  const requiredCount = REQUIRED_EVIDENCES_BY_STAGE[form.stage]?.length || 0;
+  const priorityScore = calcPriorityScore(form.risk_level, form.deadline, form.status);
 
-  addOperationLog(evidence.contract_form_id, user, ACTIONS.REMOVE_EVIDENCE, {
+  let lastResult = '移除证据';
+  let lastOpinion = `移除证据：${evidence.name}${evidence.is_required ? '（必需）' : '（补充）'}`;
+
+  if (evidence.is_required && submittedCount < requiredCount) {
+    lastResult += '，必填证据不完整';
+    lastOpinion += '，必填证据不完整';
+  }
+
+  db.prepare(`
+    UPDATE contract_forms SET
+      evidence_submitted = ?,
+      version = ?,
+      updated_at = CURRENT_TIMESTAMP,
+      priority_score = ?,
+      last_opinion = ?,
+      last_result = ?,
+      last_handler_name = ?
+    WHERE id = ?
+  `).run(submittedCount, newVersion, priorityScore, lastOpinion, lastResult, user.name, form.id);
+
+  addOperationLog(form.id, user, ACTIONS.REMOVE_EVIDENCE, {
     fromStatus: form.status,
     toStatus: form.status,
     fromStage: form.stage,
     toStage: form.stage,
-    opinion: `移除证据：${evidence.name}`,
-    result: '证据已移除',
+    opinion: lastOpinion,
+    result: lastResult,
     versionBefore: form.version,
-    versionAfter: form.version
+    versionAfter: newVersion
   });
 
-  return { success: true };
+  return { success: true, form: getFormById(form.id) };
 }
 
 export function updateFormContent(user, formId, data) {
@@ -627,9 +798,67 @@ export function updateFormContent(user, formId, data) {
     return { success: false, error: '当前处理人不匹配，无权操作' };
   }
 
-  if (data.version !== undefined && data.version !== form.version) {
-    return { success: false, error: '版本冲突' };
+  if (user.role !== ROLES.REGISTER) {
+    return { success: false, error: '只有签约服务登记员可以编辑内容' };
   }
+
+  const editableStatuses = [STATUSES.DRAFT, STATUSES.NEEDS_CORRECTION];
+  if (!editableStatuses.includes(form.status)) {
+    return { success: false, error: `当前状态 ${STATUS_NAMES[form.status]} 不允许编辑` };
+  }
+
+  if (data.version !== undefined && data.version !== form.version) {
+    addOperationLog(formId, user, ACTIONS.CORRECT, {
+      fromStatus: form.status,
+      toStatus: STATUSES.STATUS_CONFLICT,
+      fromStage: form.stage,
+      toStage: form.stage,
+      opinion: `版本冲突：提交版本 v${data.version}，当前版本 v${form.version}`,
+      result: '编辑失败：版本冲突',
+      versionBefore: form.version,
+      versionAfter: form.version
+    });
+    return { success: false, error: '版本冲突，请刷新后重试' };
+  }
+
+  const changes = [];
+  const newRiskLevel = data.riskLevel || form.risk_level;
+  const newDeadline = data.deadline || form.deadline;
+
+  if (data.residentName !== undefined && data.residentName !== form.resident_name) {
+    changes.push(`居民姓名: ${form.resident_name} → ${data.residentName}`);
+  }
+  if (data.riskLevel && data.riskLevel !== form.risk_level) {
+    const oldRisk = form.risk_level === RISK_LEVELS.HIGH ? '高风险' : form.risk_level === RISK_LEVELS.MEDIUM ? '中风险' : '低风险';
+    const newRisk = data.riskLevel === RISK_LEVELS.HIGH ? '高风险' : data.riskLevel === RISK_LEVELS.MEDIUM ? '中风险' : '低风险';
+    changes.push(`风险等级: ${oldRisk} → ${newRisk}`);
+
+    if (data.riskLevel === RISK_LEVELS.HIGH && form.risk_level !== RISK_LEVELS.HIGH) {
+      changes.push('⚠️ 升级为高风险，处理时限缩短');
+    }
+  }
+
+  const contentField = form.stage === STAGES.SIGN ? 'sign_content' :
+                       form.stage === STAGES.PLAN ? 'plan_content' : 'perform_content';
+  const contentDataKey = form.stage === STAGES.SIGN ? 'signContent' :
+                         form.stage === STAGES.PLAN ? 'planContent' : 'performContent';
+  if (data[contentDataKey] !== undefined && data[contentDataKey] !== form[contentField]) {
+    changes.push(`${STAGE_NAMES[form.stage]}内容已更新`);
+  }
+
+  let deadline = newDeadline;
+  if (newRiskLevel === RISK_LEVELS.HIGH && !data.deadline) {
+    const currentDeadline = form.deadline ? new Date(form.deadline) : new Date();
+    const newDeadlineHighRisk = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
+    if (newDeadlineHighRisk < currentDeadline) {
+      deadline = newDeadlineHighRisk.toISOString();
+      changes.push('高风险自动缩短处理时限至3天');
+    }
+  }
+
+  const newVersion = form.version + 1;
+  const priorityScore = calcPriorityScore(newRiskLevel, deadline, form.status);
+  const lastResult = form.status === STATUSES.NEEDS_CORRECTION ? '补正更新' : '编辑更新';
 
   db.prepare(`
     UPDATE contract_forms SET
@@ -640,28 +869,49 @@ export function updateFormContent(user, formId, data) {
       doctor_name = COALESCE(?, doctor_name),
       team_name = COALESCE(?, team_name),
       risk_level = COALESCE(?, risk_level),
-      deadline = COALESCE(?, deadline),
+      deadline = ?,
       sign_content = COALESCE(?, sign_content),
       plan_content = COALESCE(?, plan_content),
       perform_content = COALESCE(?, perform_content),
+      version = ?,
       updated_at = CURRENT_TIMESTAMP,
-      priority_score = ?
+      priority_score = ?,
+      last_opinion = ?,
+      last_result = ?,
+      last_handler_name = ?,
+      evidence_required = ?
     WHERE id = ?
   `).run(
-    data.residentName ?? null,
-    data.idCard ?? null,
-    data.phone ?? null,
-    data.address ?? null,
-    data.doctorName ?? null,
-    data.teamName ?? null,
-    data.riskLevel ?? null,
-    data.deadline ?? null,
+    data.residentName?.trim() ?? null,
+    data.idCard?.trim() ?? null,
+    data.phone?.trim() ?? null,
+    data.address?.trim() ?? null,
+    data.doctorName?.trim() ?? null,
+    data.teamName?.trim() ?? null,
+    newRiskLevel,
+    deadline,
     data.signContent ?? null,
     data.planContent ?? null,
     data.performContent ?? null,
-    calcPriorityScore(data.riskLevel || form.risk_level, data.deadline || form.deadline, form.status),
+    newVersion,
+    priorityScore,
+    changes.length > 0 ? changes.join('；') : '内容无变化',
+    lastResult,
+    user.name,
+    REQUIRED_EVIDENCES_BY_STAGE[form.stage]?.length || form.evidence_required,
     formId
   );
+
+  addOperationLog(formId, user, ACTIONS.CORRECT, {
+    fromStatus: form.status,
+    toStatus: form.status,
+    fromStage: form.stage,
+    toStage: form.stage,
+    opinion: changes.length > 0 ? changes.join('；') : '内容无变化',
+    result: lastResult,
+    versionBefore: form.version,
+    versionAfter: newVersion
+  });
 
   return { success: true, form: getFormById(formId) };
 }
