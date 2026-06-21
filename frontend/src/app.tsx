@@ -1,8 +1,9 @@
 // @refresh reload
-import { createSignal, onMount, Suspense, Show, ParentProps, ErrorBoundary, onCleanup } from 'solid-js';
+import { createSignal, onMount, Suspense, Show, ParentProps, ErrorBoundary, createEffect } from 'solid-js';
 import { MetaProvider, Title, Meta, Link } from '@solidjs/meta';
-import { Router } from '@solidjs/router';
+import { Router, useNavigate, useLocation } from '@solidjs/router';
 import { FileRoutes } from '@solidjs/start/router';
+import { isServer } from 'solid-js/web';
 import { AuthProvider, useAuth } from './auth';
 import { api } from './api';
 import { ROLE_LABELS } from './types';
@@ -10,32 +11,17 @@ import './index.css';
 
 function NavBar() {
   const { user, setUser } = useAuth();
-  const [currentPath, setCurrentPath] = createSignal(window.location.pathname);
+  const navigate = useNavigate();
+  const location = useLocation();
 
   const handleLogout = () => {
     api.logout();
     setUser(null);
-    window.location.href = '/login';
+    navigate('/login', { replace: true });
   };
 
-  let popHandler: (() => void) | null = null;
-
-  onMount(() => {
-    popHandler = () => setCurrentPath(window.location.pathname);
-    window.addEventListener('popstate', popHandler);
-    const origPush = history.pushState.bind(history);
-    history.pushState = function (...args) {
-      origPush(...args);
-      setTimeout(() => setCurrentPath(window.location.pathname), 0);
-    };
-  });
-
-  onCleanup(() => {
-    if (popHandler) window.removeEventListener('popstate', popHandler);
-  });
-
   const linkClass = (href: string) => {
-    const path = currentPath();
+    const path = location.pathname;
     const active = href === '/events' ? (path === '/events' || path.startsWith('/events/')) : path === href;
     return active ? 'active' : '';
   };
@@ -69,6 +55,8 @@ function NavBar() {
 
 function AuthGuard(props: ParentProps) {
   const { user, setUser } = useAuth();
+  const navigate = useNavigate();
+  const location = useLocation();
   const [initialized, setInitialized] = createSignal(false);
 
   onMount(async () => {
@@ -82,26 +70,30 @@ function AuthGuard(props: ParentProps) {
         setUser(null);
       }
     }
-    const pathname = window.location.pathname;
-    const isLogin = pathname === '/login' || pathname === '/';
-    if (!api.getStoredUser() && !isLogin) {
-      window.location.href = '/login';
-    } else if (api.getStoredUser() && isLogin) {
-      window.location.href = '/events';
-    }
     setInitialized(true);
   });
 
-  const needsLoginRoute = () => {
-    const p = window.location.pathname;
-    return p !== '/login';
-  };
+  createEffect(() => {
+    if (!initialized()) return;
+    const u = user();
+    const path = location.pathname;
+    const isPublic = path === '/login' || path === '/';
+    if (!u && !isPublic) {
+      navigate('/login', { replace: true });
+    } else if (u && isPublic) {
+      navigate('/events', { replace: true });
+    }
+  });
 
   return (
     <Show when={initialized()} fallback={
       <div class="loading">加载中...</div>
     }>
-      <Show when={user() && needsLoginRoute()}>
+      <Show when={user()} fallback={
+        <div class="page-container">
+          {props.children}
+        </div>
+      }>
         <NavBar />
         <div class="page-container">
           <ErrorBoundary fallback={(err, reset) => (
@@ -114,11 +106,6 @@ function AuthGuard(props: ParentProps) {
               {props.children}
             </Suspense>
           </ErrorBoundary>
-        </div>
-      </Show>
-      <Show when={!user() || !needsLoginRoute()}>
-        <div class="page-container">
-          {props.children}
         </div>
       </Show>
     </Show>
@@ -143,25 +130,27 @@ export default function App(props: DocumentProps) {
           {props.assets}
         </head>
         <body>
-          <AuthProvider>
-            <ErrorBoundary fallback={(err) => (
-              <div class="alert alert-error">
-                <strong>应用错误</strong>：{String(err)}
-              </div>
-            )}>
-              <Router>
-                <AuthGuard>
-                  <ErrorBoundary fallback={(err) => (
-                    <div class="alert alert-error">
-                      <strong>路由错误</strong>：{String(err)}
-                    </div>
-                  )}>
-                    <FileRoutes />
-                  </ErrorBoundary>
-                </AuthGuard>
-              </Router>
-            </ErrorBoundary>
-          </AuthProvider>
+          <Show when={!isServer} fallback={null}>
+            <AuthProvider>
+              <ErrorBoundary fallback={(err) => (
+                <div class="alert alert-error">
+                  <strong>应用错误</strong>：{String(err)}
+                </div>
+              )}>
+                <Router>
+                  <AuthGuard>
+                    <ErrorBoundary fallback={(err) => (
+                      <div class="alert alert-error">
+                        <strong>路由错误</strong>：{String(err)}
+                      </div>
+                    )}>
+                      <FileRoutes />
+                    </ErrorBoundary>
+                  </AuthGuard>
+                </Router>
+              </ErrorBoundary>
+            </AuthProvider>
+          </Show>
           {props.scripts}
         </body>
       </html>

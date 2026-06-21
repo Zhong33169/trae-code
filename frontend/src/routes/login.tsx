@@ -1,24 +1,31 @@
 import { createSignal, Show } from 'solid-js';
+import { useNavigate } from '@solidjs/router';
 import { useAuth } from '../auth';
 
 export default function LoginPage() {
   const { doLogin } = useAuth();
+  const navigate = useNavigate();
   const [username, setUsername] = createSignal('');
   const [password, setPassword] = createSignal('');
   const [error, setError] = createSignal('');
   const [loading, setLoading] = createSignal(false);
 
-  const handleLogin = async (e: Event) => {
-    e.preventDefault();
+  const performLogin = async (u: string, p: string) => {
     setError('');
     setLoading(true);
     try {
-      await doLogin(username(), password());
+      await doLogin(u, p);
+      navigate('/events', { replace: true });
     } catch (err: any) {
       setError(err?.error || '登录失败');
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleLogin = async (e: Event) => {
+    e.preventDefault();
+    await performLogin(username(), password());
   };
 
   const demoAccounts = [
@@ -69,19 +76,8 @@ export default function LoginPage() {
             <button
               class="btn btn-outline btn-sm"
               style="margin-right: 6px; margin-bottom: 6px;"
-              onClick={async () => {
-                setUsername(acc.username);
-                setPassword(acc.password);
-                setError('');
-                setLoading(true);
-                try {
-                  await doLogin(acc.username, acc.password);
-                } catch (err: any) {
-                  setError(err?.error || '登录失败');
-                } finally {
-                  setLoading(false);
-                }
-              }}
+              disabled={loading()}
+              onClick={() => performLogin(acc.username, acc.password)}
             >
               {acc.label}
             </button>

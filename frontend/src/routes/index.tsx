@@ -10,9 +10,9 @@ export default function IndexPage() {
   createEffect(() => {
     const stored = api.getStoredUser();
     if (stored || user()) {
-      navigate('/events');
+      navigate('/events', { replace: true });
     } else {
-      navigate('/login');
+      navigate('/login', { replace: true });
     }
   });
 

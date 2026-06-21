@@ -5,21 +5,22 @@ import { api } from './api';
 interface AuthContextType {
   user: () => User | null;
   setUser: (u: User | null) => void;
-  doLogin: (username: string, password: string) => Promise<void>;
+  doLogin: (username: string, password: string) => Promise<User>;
 }
 
 const AuthContext: Context<AuthContextType> = createContext<AuthContextType>({
   user: () => null,
   setUser: () => {},
-  doLogin: async () => {},
+  doLogin: async () => null as any,
 });
 
 export function AuthProvider(props: ParentProps) {
   const [user, setUser] = createSignal<User | null>(null);
 
-  const doLogin = async (username: string, password: string) => {
+  const doLogin = async (username: string, password: string): Promise<User> => {
     const data = await api.login(username, password);
     setUser(data.user);
+    return data.user;
   };
 
   return (
